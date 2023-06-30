@@ -250,22 +250,31 @@ u_device_setup_split_side_by_side(struct xrt_device *xdev, const struct u_device
 		xdev->hmd->views[i].rot = u_device_rotation_ident;
 	}
 
-	{
-		/* right eye */
-		if (!math_compute_fovs(w_meters, lens_center_x_meters[view_count - 1], info->fov[view_count - 1],
-		                       h_meters, lens_center_y_meters[view_count - 1], 0,
-		                       &xdev->hmd->distortion.fov[view_count - 1])) {
-			return false;
-		}
-	}
-	if (view_count == 2) {
-		/* left eye - mirroring right eye */
-		xdev->hmd->distortion.fov[0].angle_up = xdev->hmd->distortion.fov[1].angle_up;
-		xdev->hmd->distortion.fov[0].angle_down = xdev->hmd->distortion.fov[1].angle_down;
+	// Override distorsion fov with our fov.
+	// {
+	// 	/* right eye */
+	// 	if (!math_compute_fovs(w_meters, lens_center_x_meters[view_count - 1], info->fov[view_count - 1],
+	// 	                       h_meters, lens_center_y_meters[view_count - 1], 0,
+	// 	                       &xdev->hmd->distortion.fov[view_count - 1])) {
+	// 		return false;
+	// 	}
+	// }
+	// if (view_count == 2) {
+	// 	/* left eye - mirroring right eye */
+	// 	xdev->hmd->distortion.fov[0].angle_up = xdev->hmd->distortion.fov[1].angle_up;
+	// 	xdev->hmd->distortion.fov[0].angle_down = xdev->hmd->distortion.fov[1].angle_down;
 
-		xdev->hmd->distortion.fov[0].angle_left = -xdev->hmd->distortion.fov[1].angle_right;
-		xdev->hmd->distortion.fov[0].angle_right = -xdev->hmd->distortion.fov[1].angle_left;
-	}
+	// 	xdev->hmd->distortion.fov[0].angle_left = -xdev->hmd->distortion.fov[1].angle_right;
+	// 	xdev->hmd->distortion.fov[0].angle_right = -xdev->hmd->distortion.fov[1].angle_left;
+	// }
+
+	for (int i = 0; i < view_count; ++i) {
+		const float halfAngle = info->fov[i] / 2.0f;
+		xdev->hmd->distortion.fov[i].angle_up = halfAngle;
+		xdev->hmd->distortion.fov[i].angle_down = -halfAngle;
+		xdev->hmd->distortion.fov[i].angle_left = -halfAngle;
+		xdev->hmd->distortion.fov[i].angle_right = halfAngle;
+ 	}
 
 	return true;
 }
@@ -446,6 +455,20 @@ u_device_get_view_pose(const struct xrt_vec3 *eye_relation, uint32_t view_index,
 	if (pose.position.z > 0.0f && adjust) {
 		pose.position.z = -pose.position.z;
 	}
+
+	/*
+	float baselineScaling = 10.0f; // emulate default CNSDK LWETest values. In OpenVR, we used the IPD (eye_relation here) to change the effective baseline scaling
+	if (view_index == 0) {
+		pose.position.x = -5.0f;
+		pose.position.y = 0.0f;
+		pose.position.z = 0.0f;
+	}
+	else {
+		pose.position.x = 5.0f;
+		pose.position.y = 0.0f;
+		pose.position.z = 0.0f;
+	}
+	*/
 
 	*out_pose = pose;
 }

@@ -37,6 +37,10 @@
 #include "main/comp_frame.h"
 #include "main/comp_mirror_to_debug_gui.h"
 
+#ifdef XRT_OS_ANDROID
+#include "android/android_globals.h"
+#endif
+
 #ifdef XRT_FEATURE_WINDOW_PEEK
 #include "main/comp_window_peek.h"
 #endif
@@ -44,6 +48,12 @@
 #include "vk/vk_helpers.h"
 #include "vk/vk_cmd.h"
 #include "vk/vk_image_readback_to_xf_pool.h"
+
+#ifdef XRT_HAVE_CNSDK
+#include <leia/sdk/core.h>
+#include <leia/sdk/core.interlacer.vulkan.h>
+#include <leia/common/version.h>
+#endif
 
 #include <string.h>
 #include <stdlib.h>
@@ -72,6 +82,9 @@ DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL
  * Private struct(s).
  *
  */
+
+struct leia_core;
+struct leia_interlacer;
 
 /*!
  * What is the source of the FoV values used for the final image that the
@@ -144,6 +157,9 @@ struct comp_renderer
 	uint32_t buffer_count;
 
 	//! @}
+
+	struct leia_core* cnsdk;
+    struct leia_interlacer* interlacer;
 };
 
 
@@ -533,6 +549,24 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	// Try to early-allocate these, in case we can.
 	renderer_ensure_images_and_renderings(r, false);
 
+#ifdef XRT_HAVE_CNSDK
+	leia_platform_on_library_load();
+
+	struct leia_core_init_configuration* config = leia_core_init_configuration_alloc(CNSDK_VERSION);
+#ifdef XRT_OS_ANDROID
+	leia_core_init_configuration_set_platform_android_java_vm(config, (JavaVM*)android_globals_get_vm());
+	leia_core_init_configuration_set_platform_android_handle(config, LEIA_CORE_ANDROID_HANDLE_ACTIVITY, (jobject)android_globals_get_activity());
+#endif
+	leia_core_init_configuration_set_platform_log_level(config, kLeiaLogLevelTrace);
+	leia_core_init_configuration_set_enable_validation(config, true);
+	r->cnsdk = leia_core_init_async(config);
+	if (r->cnsdk)
+	{
+		leia_core_set_backlight(r->cnsdk, true);
+	}
+	leia_core_init_configuration_free(config);
+#endif
+
 	struct vk_bundle *vk = &r->c->base.vk;
 
 	VkResult ret = comp_mirror_init( //
@@ -825,6 +859,57 @@ renderer_fini(struct comp_renderer *r)
 
 	// Do this after the layer renderer.
 	chl_scratch_free_resources(&r->c->scratch, &r->c->nr);
+
+#ifdef XRT_HAVE_CNSDK
+	if (r->interlacer) {
+		leia_interlacer_release(r->interlacer);
+		r->interlacer = NULL;
+	}
+
+	if (r->cnsdk) {
+		leia_core_release(r->cnsdk);
+		r->cnsdk = NULL;
+	}
+
+	leia_platform_on_library_unload();
+#endif // XRT_HAVE_CNSDK
+}
+
+static void
+do_cnsdk_interlacing(struct comp_renderer *r,
+                     struct render_gfx_target_resources *rtr,
+                     const struct comp_layer *layer,
+                     const struct xrt_layer_projection_view_data *lvd,
+                     const struct xrt_layer_projection_view_data *rvd)
+{
+#ifdef XRT_HAVE_CNSDK
+	if (!r->interlacer && leia_core_is_initialized(r->cnsdk)) {
+		struct leia_interlacer_init_configuration *ic = leia_interlacer_init_configuration_alloc();
+		leia_interlacer_init_configuration_set_use_atlas_for_views(ic, false);
+		r->interlacer = leia_interlacer_vulkan_initialize(
+		    r->cnsdk, ic, r->c->base.vk.device, r->c->base.vk.physical_device, VK_FORMAT_B8G8R8A8_SRGB,
+		    r->c->target->format, VK_FORMAT_D32_SFLOAT, 3);
+		leia_interlacer_init_configuration_free(ic);
+	}
+	if (r->interlacer) {
+		// Get swapchain images.
+		const struct comp_swapchain_image *left = &layer->sc_array[0]->images[lvd->sub.image_index];
+		const struct comp_swapchain_image *right = &layer->sc_array[1]->images[rvd->sub.image_index];
+
+		// Get swapchain image views.
+		VkImageView imageViewLeft = get_image_view(left, layer->data.flags, lvd->sub.array_index);
+		VkImageView imageViewRight = get_image_view(right, layer->data.flags, rvd->sub.array_index);
+
+		// Perform interlacing.
+		leia_interlacer_set_flip_input_uv_vertical(r->interlacer, true);
+		leia_interlacer_vulkan_set_view_for_texture_array(r->interlacer, 0, imageViewLeft, 0);
+		leia_interlacer_vulkan_set_view_for_texture_array(r->interlacer, 1, imageViewRight, 0);
+		leia_interlacer_set_shader_debug_mode(r->interlacer, LEIA_SHADER_DEBUG_MODE_NONE);
+		leia_interlacer_vulkan_do_post_process(
+		    r->interlacer, rtr->data.width, rtr->data.height, false, rtr->framebuffer,
+		    r->c->target->images[r->acquired_buffer].handle, NULL, NULL, NULL, 0);
+	}
+#endif
 }
 
 
@@ -889,13 +974,16 @@ dispatch_graphics(struct comp_renderer *r,
 	    viewport_datas,                   //
 	    vertex_rots);                     //
 
+	// TODO: interlace here?
+	// TODO: find what do_gfx_mesh_and_proj was doing
+	// do_cnsdk_interlacing(r, rtr, layer, lvd, rvd);
+
 	// Everything is ready, submit to the queue.
 	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
 	VK_CHK_AND_RET(ret, "renderer_submit_queue");
 
 	return ret;
 }
-
 
 /*
  *
@@ -954,6 +1042,9 @@ dispatch_compute(struct comp_renderer *r,
 	    target_image,                    //
 	    target_storage_view,             //
 	    target_viewport_datas);          //
+
+	// TODO: interlace here?
+	// do_cnsdk_interlacing(r, rtr, layer, lvd, rvd);
 
 	// Everything is ready, submit to the queue.
 	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
