@@ -1,4 +1,5 @@
 # Copyright 2019-2024, Collabora, Ltd.
+# Copyright 2024-2025, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 
 ####
@@ -187,7 +188,9 @@ if(XRT_FEATURE_DEBUG_GUI)
 	endif()
 
 	if(XRT_HAVE_SDL2)
-		target_link_libraries(aux_util_debug_gui PRIVATE st_gui xrt-external-imgui-sdl2)
+		target_link_libraries(
+			aux_util_debug_gui PRIVATE st_gui_base xrt-external-imgui-sdl2
+			)
 
 		if(XRT_BUILD_DRIVER_QWERTY)
 			target_link_libraries(
