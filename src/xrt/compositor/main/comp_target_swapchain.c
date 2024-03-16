@@ -1,4 +1,5 @@
 // Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -285,7 +286,10 @@ find_surface_format(struct comp_target_swapchain *cts,
 		return false;
 	}
 
-	COMP_WARN(cts->base.c, "Returning known-wrong color space! Color shift may occur.");
+	COMP_WARN(cts->base.c,
+	          "Returning VkSurfaceFormat with known-wrong color space!\n"
+	          "\tVkSurfaceFormat::format matched one we wanted.\n"
+	          "\tBut color shift will probably be happening.");
 
 done:
 	COMP_DEBUG(cts->base.c,
