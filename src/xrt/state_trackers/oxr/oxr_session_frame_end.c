@@ -480,6 +480,7 @@ verify_quad_layer(struct oxr_session *sess,
 	return XR_SUCCESS;
 }
 
+#ifdef OXR_HAVE_KHR_composition_layer_depth
 static XrResult
 verify_depth_layer(struct xrt_compositor *xc,
                    struct oxr_logger *log,
@@ -572,6 +573,7 @@ verify_depth_layer(struct xrt_compositor *xc,
 
 	return XR_SUCCESS;
 }
+#endif // OXR_HAVE_KHR_composition_layer_depth
 
 static XrResult
 verify_projection_layer(struct oxr_session *sess,
@@ -632,8 +634,10 @@ verify_projection_layer(struct oxr_session *sess,
 		break;
 	}
 
+#ifdef OXR_HAVE_KHR_composition_layer_depth
 	// number of depth layers must be 0 or proj->viewCount
 	uint32_t depth_layer_count = 0;
+#endif
 
 	// Check for valid swapchain states.
 	for (uint32_t i = 0; i < proj->viewCount; i++) {
@@ -1297,7 +1301,9 @@ submit_projection_layer(struct oxr_session *sess,
 	struct xrt_pose *pose_ptr = NULL;
 	struct xrt_pose pose[XRT_MAX_VIEWS] = {0};
 	struct xrt_swapchain *swapchains[XRT_MAX_VIEWS] = {0};
+#ifdef OXR_HAVE_KHR_composition_layer_depth
 	struct xrt_swapchain *d_swapchains[XRT_MAX_VIEWS] = {0};
+#endif
 
 	enum xrt_layer_composition_flags flags = convert_layer_flags(proj->layerFlags);
 
