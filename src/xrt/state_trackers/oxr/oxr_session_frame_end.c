@@ -1,4 +1,5 @@
 // Copyright 2018-2021, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -1296,14 +1297,19 @@ submit_projection_layer(struct oxr_session *sess,
                         uint64_t xrt_timestamp)
 {
 	struct oxr_space *spc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_space *, proj->space);
-	struct oxr_swapchain *d_scs[XRT_MAX_VIEWS] = {0};
 	struct oxr_swapchain *scs[XRT_MAX_VIEWS] = {0};
 	struct xrt_pose *pose_ptr = NULL;
 	struct xrt_pose pose[XRT_MAX_VIEWS] = {0};
 	struct xrt_swapchain *swapchains[XRT_MAX_VIEWS] = {0};
+
 #ifdef OXR_HAVE_KHR_composition_layer_depth
+	// Number of depth layers must be 0 or proj->viewCount.
+	bool d_scs_valid = true;
+	struct oxr_swapchain *d_scs[XRT_MAX_VIEWS] = {0};
 	struct xrt_swapchain *d_swapchains[XRT_MAX_VIEWS] = {0};
-#endif
+#else
+	const bool d_scs_valid = false;
+#endif // OXR_HAVE_KHR_composition_layer_depth
 
 	enum xrt_layer_composition_flags flags = convert_layer_flags(proj->layerFlags);
 
@@ -1341,32 +1347,27 @@ submit_projection_layer(struct oxr_session *sess,
 	fill_in_layer_settings(sess, (XrCompositionLayerBaseHeader *)proj, &data);
 
 #ifdef OXR_HAVE_KHR_composition_layer_depth
-	// number of depth layers must be 0 or proj->viewCount
-	const XrCompositionLayerDepthInfoKHR *d_is[XRT_MAX_VIEWS];
 	for (uint32_t i = 0; i < proj->viewCount; ++i) {
-		d_scs[i] = NULL;
-		d_is[i] = OXR_GET_INPUT_FROM_CHAIN(&proj->views[i], XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR,
-		                                   XrCompositionLayerDepthInfoKHR);
-		if (d_is[i]) {
-			data.depth.d[i].far_z = d_is[i]->farZ;
-			data.depth.d[i].near_z = d_is[i]->nearZ;
-			data.depth.d[i].max_depth = d_is[i]->maxDepth;
-			data.depth.d[i].min_depth = d_is[i]->minDepth;
-			struct oxr_swapchain *sc =
-			    XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_swapchain *, d_is[i]->subImage.swapchain);
-			fill_in_sub_image(sc, &d_is[i]->subImage, &data.depth.d[i].sub);
-			d_scs[i] = sc;
-			d_swapchains[i] = sc->swapchain;
+		const XrCompositionLayerDepthInfoKHR *d_info = OXR_GET_INPUT_FROM_CHAIN(
+		    &proj->views[i], XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR, XrCompositionLayerDepthInfoKHR);
+
+		if (d_info == NULL) {
+			d_scs_valid = false;
+			break; // It's all or nothing.
 		}
+
+		data.depth.d[i].far_z = d_info->farZ;
+		data.depth.d[i].near_z = d_info->nearZ;
+		data.depth.d[i].max_depth = d_info->maxDepth;
+		data.depth.d[i].min_depth = d_info->minDepth;
+		struct oxr_swapchain *sc =
+		    XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_swapchain *, d_info->subImage.swapchain);
+		fill_in_sub_image(sc, &d_info->subImage, &data.depth.d[i].sub);
+		d_scs[i] = sc;
+		d_swapchains[i] = sc->swapchain;
 	}
 #endif // OXR_HAVE_KHR_composition_layer_depth
-	bool d_scs_valid = true;
-	for (uint32_t i = 0; i < proj->viewCount; i++) {
-		if (d_scs[i] == NULL) {
-			d_scs_valid = false;
-			break;
-		}
-	}
+
 	if (d_scs_valid) {
 #ifdef OXR_HAVE_KHR_composition_layer_depth
 		fill_in_depth_test(sess, (XrCompositionLayerBaseHeader *)proj, &data);
