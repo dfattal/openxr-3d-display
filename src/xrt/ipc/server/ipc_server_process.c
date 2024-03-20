@@ -1004,7 +1004,7 @@ ipc_server_get_system_properties(struct ipc_server *vs, struct xrt_system_proper
 
 #ifndef XRT_OS_ANDROID
 int
-ipc_server_main(int argc, char **argv)
+ipc_server_main(int argc, char **argv, const struct ipc_server_main_info *ismi)
 {
 	// Get log level first.
 	enum u_logging_level log_level = debug_get_log_option_ipc_log();
@@ -1019,17 +1019,12 @@ ipc_server_main(int argc, char **argv)
 	timeBeginPeriod(1);
 #endif
 
-	struct u_debug_gui_info udgci = {
-	    .window_title = "Monado! ✨⚡🔥",
-	    .open = U_DEBUG_GUI_OPEN_AUTO,
-	};
-
 	/*
 	 * Need to create early before any vars are added. Not created in
 	 * init_all since that function is shared with Android and the debug
 	 * GUI isn't supported on Android.
 	 */
-	u_debug_gui_create(&udgci, &s->debug_gui);
+	u_debug_gui_create(&ismi->udgci, &s->debug_gui);
 
 
 	int ret = init_all(s, log_level);

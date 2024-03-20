@@ -1,4 +1,5 @@
 // Copyright 2020-2023, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -12,6 +13,11 @@
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_config_os.h"
 
+#ifndef XRT_OS_ANDROID
+#include "util/u_debug_gui.h"
+#endif
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -20,12 +26,24 @@ extern "C" {
 #ifndef XRT_OS_ANDROID
 
 /*!
+ * Information passed into the IPC server main function, used for customization
+ * of the IPC server.
+ *
+ * @ingroup ipc_server
+ */
+struct ipc_server_main_info
+{
+	//! Information passed onto the debug gui.
+	struct u_debug_gui_create_info udgci;
+};
+
+/*!
  * Main entrypoint to the compositor process.
  *
  * @ingroup ipc_server
  */
 int
-ipc_server_main(int argc, char **argv);
+ipc_server_main(int argc, char **argv, const struct ipc_server_main_info *ismi);
 
 #endif
 
