@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -1000,6 +1001,7 @@ struct vk_device_features
 	bool timeline_semaphore;
 	bool synchronization_2;
 	bool ext_fmt_resolve;
+	bool storage_buffer_8bit_access;
 };
 
 /*!

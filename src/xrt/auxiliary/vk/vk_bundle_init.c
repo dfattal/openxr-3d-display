@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -1033,6 +1034,13 @@ filter_device_features(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_KHR_8bit_storage
+	VkPhysicalDevice8BitStorageFeaturesKHR storage_8bit = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES_KHR,
+	    .pNext = NULL,
+	};
+#endif
+
 #ifdef VK_KHR_timeline_semaphore
 	VkPhysicalDeviceTimelineSemaphoreFeaturesKHR timeline_semaphore_info = {
 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR,
@@ -1063,6 +1071,13 @@ filter_device_features(struct vk_bundle *vk,
 	if (vk->has_EXT_robustness2) {
 		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
 		                      (VkBaseInStructure *)&robust_info);
+	}
+#endif
+
+#ifdef VK_KHR_8bit_storage
+	if (vk->has_KHR_8bit_storage) {
+		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                      (VkBaseInStructure *)&storage_8bit);
 	}
 #endif
 
@@ -1102,6 +1117,10 @@ filter_device_features(struct vk_bundle *vk,
 	CHECK(null_descriptor, robust_info.nullDescriptor);
 #endif
 
+#ifdef VK_KHR_8bit_storage
+	CHECK(storage_buffer_8bit_access, storage_8bit.storageBuffer8BitAccess);
+#endif
+
 #ifdef VK_KHR_timeline_semaphore
 	CHECK(timeline_semaphore, timeline_semaphore_info.timelineSemaphore);
 #endif
@@ -1128,12 +1147,14 @@ filter_device_features(struct vk_bundle *vk,
 	         "\n\tnull_descriptor: %i"
 	         "\n\tshader_image_gather_extended: %i"
 	         "\n\tshader_storage_image_write_without_format: %i"
+	         "\n\tstorage_buffer_8bit_access: %i"
 	         "\n\tsynchronization_2: %i"
 	         "\n\ttimeline_semaphore: %i",                               //
 	         device_features->ext_fmt_resolve,                           //
 	         device_features->null_descriptor,                           //
 	         device_features->shader_image_gather_extended,              //
 	         device_features->shader_storage_image_write_without_format, //
+	         device_features->storage_buffer_8bit_access,                //
 	         device_features->synchronization_2,                         //
 	         device_features->timeline_semaphore);                       //
 }
@@ -1264,6 +1285,14 @@ vk_create_device(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_KHR_8bit_storage
+	VkPhysicalDevice8BitStorageFeaturesKHR storage_8bit = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES_KHR,
+	    .pNext = NULL,
+	    .storageBuffer8BitAccess = device_features.storage_buffer_8bit_access,
+	};
+#endif
+
 #ifdef VK_KHR_timeline_semaphore
 	VkPhysicalDeviceTimelineSemaphoreFeaturesKHR timeline_semaphore_info = {
 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR,
@@ -1305,6 +1334,12 @@ vk_create_device(struct vk_bundle *vk,
 #ifdef VK_EXT_robustness2
 	if (vk->has_EXT_robustness2) {
 		append_to_pnext_chain((VkBaseInStructure *)&device_create_info, (VkBaseInStructure *)&robust_info);
+	}
+#endif
+
+#ifdef VK_KHR_8bit_storage
+	if (vk->has_KHR_8bit_storage) {
+		append_to_pnext_chain((VkBaseInStructure *)&device_create_info, (VkBaseInStructure *)&storage_8bit);
 	}
 #endif
 
