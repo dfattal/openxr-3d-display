@@ -16,6 +16,10 @@
 #include "util/comp_base.h"
 #include "util/comp_render.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 
 /*
  *
@@ -185,3 +189,8 @@ cmd_barrier_view_images(struct vk_bundle *vk,
 		    first_color_level_subresource_range); // subresource_range
 	}
 }
+
+
+#ifdef __cplusplus
+}
+#endif
