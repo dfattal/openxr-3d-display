@@ -325,6 +325,9 @@ oxr_instance_create(struct oxr_logger *log,
 #ifdef OXR_HAVE_META_body_tracking_full_body
 	    .meta_body_tracking_full_body_enabled = extensions->META_body_tracking_full_body,
 #endif
+#ifdef OXR_HAVE_META_body_tracking_calibration
+	    .meta_body_tracking_calibration_enabled = extensions->META_body_tracking_calibration,
+#endif
 	};
 	snprintf(i_info.app_info.application_name, sizeof(i_info.app_info.application_name), "%s",
 	         createInfo->applicationInfo.applicationName);

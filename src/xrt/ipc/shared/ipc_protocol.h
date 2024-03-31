@@ -312,7 +312,7 @@ struct ipc_client_description
 	struct xrt_application_info info;
 };
 
-static_assert(sizeof(struct ipc_client_description) == 140,
+static_assert(sizeof(struct ipc_client_description) == 144,
               "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 struct ipc_client_list
@@ -345,7 +345,7 @@ struct ipc_app_state
 	struct xrt_application_info info;
 };
 
-static_assert(sizeof(struct ipc_app_state) == 156,
+static_assert(sizeof(struct ipc_app_state) == 160,
               "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 

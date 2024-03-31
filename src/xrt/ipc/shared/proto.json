@@ -596,6 +596,19 @@
 		]
 	},
 
+	"device_reset_body_tracking_calibration_meta": {
+		"in": [
+			{"name": "id", "type": "uint32_t"}
+		]
+	},
+
+	"device_set_body_tracking_calibration_override_meta": {
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "new_body_height", "type": "float"}
+		]
+	},
+
 	"device_get_battery_status": {
 		"in": [
 			{"name": "id", "type": "uint32_t"}

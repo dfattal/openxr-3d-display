@@ -19,6 +19,7 @@
 #include "oxr_api_funcs.h"
 #include "oxr_api_verify.h"
 #include "oxr_handle.h"
+#include "oxr_chain.h"
 
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateBodyTrackerFB(XrSession session, const XrBodyTrackerCreateInfoFB *createInfo, XrBodyTrackerFB *bodyTracker)
@@ -91,6 +92,67 @@ oxr_xrLocateBodyJointsFB(XrBodyTrackerFB bodyTracker,
 	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb->xdev);
 	OXR_VERIFY_ARG_NOT_NULL(&log, locations->jointLocations);
 	OXR_VERIFY_SPACE_NOT_NULL(&log, locateInfo->baseSpace, base_spc);
-
+#ifdef OXR_HAVE_META_body_tracking_calibration
+	XrBodyTrackingCalibrationStatusMETA *calibration_status = OXR_GET_OUTPUT_FROM_CHAIN(
+	    locations, XR_TYPE_BODY_TRACKING_CALIBRATION_STATUS_META, XrBodyTrackingCalibrationStatusMETA);
+	if (calibration_status != NULL) {
+		OXR_VERIFY_EXTENSION(&log, body_tracker_fb->sess->sys->inst, META_body_tracking_calibration);
+	}
+#endif
 	return oxr_locate_body_joints_fb(&log, body_tracker_fb, base_spc, locateInfo, locations);
 }
+
+#ifdef OXR_HAVE_META_body_tracking_calibration
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrResetBodyTrackingCalibrationMETA(XrBodyTrackerFB bodyTracker)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
+	OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(&log, bodyTracker, body_tracker_fb,
+	                                        "xrResetBodyTrackingCalibrationMETA");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, body_tracker_fb->sess);
+	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb->xdev);
+	OXR_VERIFY_EXTENSION(&log, body_tracker_fb->sess->sys->inst, META_body_tracking_calibration);
+
+	if (!body_tracker_fb->xdev->supported.body_tracking_calibration) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "Body tracking device does not support this operation");
+	}
+
+	const xrt_result_t result = xrt_device_reset_body_tracking_calibration_meta(body_tracker_fb->xdev);
+	if (result != XRT_SUCCESS) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "resetting body tracking calibration failed");
+	}
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSuggestBodyTrackingCalibrationOverrideMETA(XrBodyTrackerFB bodyTracker,
+                                                 const XrBodyTrackingCalibrationInfoMETA *calibrationInfo)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
+	OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(&log, bodyTracker, body_tracker_fb,
+	                                        "xrSuggestBodyTrackingCalibrationOverrideMETA");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, body_tracker_fb->sess);
+	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb->xdev);
+	OXR_VERIFY_EXTENSION(&log, body_tracker_fb->sess->sys->inst, META_body_tracking_calibration);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, calibrationInfo, XR_TYPE_BODY_TRACKING_CALIBRATION_INFO_META);
+
+	if (!body_tracker_fb->xdev->supported.body_tracking_calibration) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "Body tracking device does not support this operation");
+	}
+
+	const xrt_result_t result =
+	    xrt_device_set_body_tracking_calibration_override_meta(body_tracker_fb->xdev, calibrationInfo->bodyHeight);
+	if (result != XRT_SUCCESS) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "overriding body tracking calibration failed");
+	}
+	return XR_SUCCESS;
+}
+#endif

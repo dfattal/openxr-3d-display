@@ -128,6 +128,29 @@ ipc_client_xdev_get_body_joints(struct xrt_device *xdev,
 }
 
 static xrt_result_t
+ipc_client_xdev_reset_body_tracking_calibration_meta(struct xrt_device *xdev)
+{
+	struct ipc_client_xdev *icx = ipc_client_xdev(xdev);
+
+	xrt_result_t xret = ipc_call_device_reset_body_tracking_calibration_meta( //
+	    icx->ipc_c,                                                           //
+	    icx->device_id);                                                      //
+	IPC_CHK_ALWAYS_RET(icx->ipc_c, xret, "ipc_call_device_reset_body_tracking_calibration_meta");
+}
+
+static xrt_result_t
+ipc_client_xdev_set_body_tracking_calibration_override_meta(struct xrt_device *xdev, float new_body_height)
+{
+	struct ipc_client_xdev *icx = ipc_client_xdev(xdev);
+
+	xrt_result_t xret = ipc_call_device_set_body_tracking_calibration_override_meta( //
+	    icx->ipc_c,                                                                  //
+	    icx->device_id,                                                              //
+	    new_body_height);                                                            //
+	IPC_CHK_ALWAYS_RET(icx->ipc_c, xret, "ipc_call_device_set_body_tracking_calibration_override_meta");
+}
+
+static xrt_result_t
 ipc_client_xdev_get_presence(struct xrt_device *xdev, bool *presence)
 {
 	struct ipc_client_xdev *icx = ipc_client_xdev(xdev);
@@ -385,6 +408,9 @@ ipc_client_xdev_init(struct ipc_client_xdev *icx,
 	icx->base.get_face_tracking = ipc_client_xdev_get_face_tracking;
 	icx->base.get_body_skeleton = ipc_client_xdev_get_body_skeleton;
 	icx->base.get_body_joints = ipc_client_xdev_get_body_joints;
+	icx->base.reset_body_tracking_calibration_meta = ipc_client_xdev_reset_body_tracking_calibration_meta;
+	icx->base.set_body_tracking_calibration_override_meta =
+	    ipc_client_xdev_set_body_tracking_calibration_override_meta;
 	icx->base.get_presence = ipc_client_xdev_get_presence;
 	icx->base.set_output = ipc_client_xdev_set_output;
 	icx->base.get_output_limits = ipc_client_xdev_get_output_limits;
