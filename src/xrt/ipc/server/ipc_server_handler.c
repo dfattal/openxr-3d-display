@@ -326,6 +326,9 @@ ipc_handle_instance_describe_client(volatile struct ipc_client_state *ics,
 #ifdef OXR_HAVE_FB_body_tracking
 	EXT(fb_body_tracking_enabled);
 #endif
+#ifdef OXR_HAVE_META_body_tracking_full_body
+	EXT(meta_body_tracking_full_body_enabled);
+#endif
 #ifdef OXR_HAVE_FB_face_tracking2
 	EXT(fb_face_tracking2_enabled);
 #endif
@@ -423,6 +426,7 @@ ipc_handle_session_begin(volatile struct ipc_client_state *ics)
 	    .htc_facial_tracking_enabled = ics->client_state.info.htc_facial_tracking_enabled,
 	    .fb_body_tracking_enabled = ics->client_state.info.fb_body_tracking_enabled,
 	    .fb_face_tracking2_enabled = ics->client_state.info.fb_face_tracking2_enabled,
+	    .meta_body_tracking_full_body_enabled = ics->client_state.info.meta_body_tracking_full_body_enabled,
 	};
 
 	return xrt_comp_begin_session(ics->xc, &begin_session_info);

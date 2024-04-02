@@ -1101,6 +1101,9 @@ oxr_system_get_face_tracking2_fb_support(struct oxr_logger *log,
 bool
 oxr_system_get_body_tracking_fb_support(struct oxr_logger *log, struct oxr_instance *inst);
 
+bool
+oxr_system_get_full_body_tracking_meta_support(struct oxr_logger *log, struct oxr_instance *inst);
+
 /*
  *
  * oxr_event.cpp

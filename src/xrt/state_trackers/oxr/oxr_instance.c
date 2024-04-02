@@ -315,6 +315,9 @@ oxr_instance_create(struct oxr_logger *log,
 #ifdef OXR_HAVE_FB_face_tracking2
 	    .fb_face_tracking2_enabled = extensions->FB_face_tracking2,
 #endif
+#ifdef OXR_HAVE_META_body_tracking_full_body
+	    .meta_body_tracking_full_body_enabled = extensions->META_body_tracking_full_body,
+#endif
 	};
 	snprintf(i_info.app_info.application_name, sizeof(i_info.app_info.application_name), "%s",
 	         createInfo->applicationInfo.applicationName);

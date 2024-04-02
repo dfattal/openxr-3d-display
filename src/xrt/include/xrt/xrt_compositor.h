@@ -972,6 +972,7 @@ struct xrt_begin_session_info
 	bool htc_facial_tracking_enabled;
 	bool fb_body_tracking_enabled;
 	bool fb_face_tracking2_enabled;
+	bool meta_body_tracking_full_body_enabled;
 };
 
 /*!

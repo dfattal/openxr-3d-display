@@ -578,6 +578,18 @@
 
 
 /*
+ * XR_META_body_tracking_full_body
+ */
+#if defined(XR_META_body_tracking_full_body) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META)
+#define OXR_HAVE_META_body_tracking_full_body
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_full_body(_)                                                          \
+	_(META_body_tracking_full_body, META_BODY_TRACKING_FULL_BODY)
+#else
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_full_body(_)
+#endif
+
+
+/*
  * XR_META_touch_controller_plus
  */
 #if defined(XR_META_touch_controller_plus) && defined(XRT_FEATURE_OPENXR_INTERACTION_TOUCH_PLUS)
@@ -854,6 +866,7 @@
     OXR_EXTENSION_SUPPORT_FB_touch_controller_pro(_) \
     OXR_EXTENSION_SUPPORT_FB_touch_controller_proximity(_) \
     OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_) \
+    OXR_EXTENSION_SUPPORT_META_body_tracking_full_body(_) \
     OXR_EXTENSION_SUPPORT_META_touch_controller_plus(_) \
     OXR_EXTENSION_SUPPORT_ML_ml2_controller_interaction(_) \
     OXR_EXTENSION_SUPPORT_EXT_plane_detection(_) \

@@ -419,6 +419,7 @@ update_session_state_locked(struct multi_system_compositor *msc)
 	    .htc_facial_tracking_enabled = false,
 	    .fb_body_tracking_enabled = false,
 	    .fb_face_tracking2_enabled = false,
+	    .meta_body_tracking_full_body_enabled = false,
 	};
 
 	switch (msc->sessions.state) {
