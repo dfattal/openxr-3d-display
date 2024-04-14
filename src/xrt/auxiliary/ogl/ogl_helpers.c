@@ -133,7 +133,7 @@ ogl_import_from_native(struct xrt_image_native *natives,
 		    results->memories[i],            //
 		    natives[i].size,                 //
 		    GL_HANDLE_TYPE_OPAQUE_WIN32_EXT, //
-		    (GLint)handle);                  //
+		    (HANDLE)handle);                 //
 #else
 		glImportMemoryFdEXT(              //
 		    results->memories[i],         //
