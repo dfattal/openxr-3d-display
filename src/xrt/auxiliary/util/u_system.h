@@ -1,4 +1,5 @@
 // Copyright 2023, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -68,13 +69,38 @@ struct u_system
 };
 
 /*!
- * Create a @ref u_system.
+ * Create a @ref u_system, creates a fully working system. Objects wishing to
+ * use @ref u_system as a parent class should use @ref u_system_init.
  *
  * @public @memberof u_system
  * @ingroup aux_util
+ * @see u_system_init
  */
 struct u_system *
 u_system_create(void);
+
+/*!
+ * Inits a @ref u_system struct when used as a parent class, only to be used
+ * by base class. Not needed to be called if created by @ref u_system_create.
+ *
+ * @protected @memberof u_system
+ * @ingroup aux_util
+ */
+bool
+u_system_init(struct u_system *usys, void (*destroy_fn)(struct xrt_system *));
+
+/*!
+ * Finalizes a @ref u_system struct when used as a parent class, only to be used
+ * by base class. This will not free the @ref u_system pointer itself but will
+ * free any resources created by the default implementation functions. Not
+ * needed to be called if created by @ref u_system_create, instead use
+ * xrt_system::destroy.
+ *
+ * @protected @memberof u_system
+ * @ingroup aux_util
+ */
+void
+u_system_fini(struct u_system *usys);
 
 /*!
  * Add a @ref xrt_session to be tracked and to receive multiplexed events.
