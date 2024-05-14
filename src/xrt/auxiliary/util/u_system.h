@@ -7,6 +7,8 @@
  * @ingroup aux_util
  */
 
+#pragma once
+
 #include "xrt/xrt_system.h"
 #include "xrt/xrt_session.h"
 #include "os/os_threading.h"
