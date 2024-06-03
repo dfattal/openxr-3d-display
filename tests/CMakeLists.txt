@@ -1,4 +1,5 @@
 # Copyright 2018-2024, Collabora, Ltd.
+# Copyright 2024-2025, NVIDIA CORPORATION.
 #
 # SPDX-License-Identifier: BSL-1.0
 
@@ -8,7 +9,6 @@ set(tests
     tests_generic_callbacks
     tests_history_buf
     tests_id_ringbuffer
-    tests_input_transform
     tests_json
     tests_lowpass_float
     tests_lowpass_integer
@@ -31,6 +31,9 @@ if(XRT_HAVE_D3D12)
 endif()
 if(XRT_HAVE_VULKAN)
 	list(APPEND tests tests_comp_client_vulkan tests_uv_to_tangent)
+endif()
+if(XRT_FEATURE_OPENXR)
+	list(APPEND tests tests_input_transform)
 endif()
 if(XRT_HAVE_OPENGL
    AND XRT_HAVE_OPENGL_GLX
@@ -55,7 +58,6 @@ endforeach()
 
 target_link_libraries(tests_cxx_wrappers PRIVATE xrt-interfaces)
 target_link_libraries(tests_history_buf PRIVATE aux_math)
-target_link_libraries(tests_input_transform PRIVATE st_oxr xrt-interfaces xrt-external-openxr)
 target_link_libraries(tests_lowpass_float PRIVATE aux_math)
 target_link_libraries(tests_lowpass_integer PRIVATE aux_math)
 target_link_libraries(tests_quatexpmap PRIVATE aux_math)
@@ -97,6 +99,11 @@ if(XRT_HAVE_VULKAN)
 	target_link_libraries(tests_uv_to_tangent PRIVATE comp_render)
 endif()
 
+if(XRT_FEATURE_OPENXR)
+	target_link_libraries(
+		tests_input_transform PRIVATE st_oxr xrt-interfaces xrt-external-openxr
+		)
+endif()
 if(_have_opengl_test)
 	target_link_libraries(
 		tests_comp_client_opengl PRIVATE comp_client comp_mock aux_ogl SDL2::SDL2
