@@ -756,6 +756,7 @@ const struct comp_target_factory *ctfs[] = {
 #ifdef VK_USE_PLATFORM_DISPLAY_KHR
     &comp_target_factory_vk_display,
 #endif
+    &comp_target_factory_debug_image,
 };
 
 static void
