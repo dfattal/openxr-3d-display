@@ -23,6 +23,11 @@
 
 #include <xrt/xrt_config_android.h>
 
+// Workaround to avoid the inclusion of "android_native_app_glue.h.
+#ifndef LOOPER_ID_USER
+#define LOOPER_ID_USER 3
+#endif
+
 // 60 events per second (in us).
 #define POLL_RATE_USEC (1000L / 60) * 1000
 
@@ -37,48 +42,39 @@ android_device(struct xrt_device *xdev)
 
 // Callback for the Android sensor event queue
 static int
-android_sensor_callback(int fd, int events, void *data)
+android_sensor_callback(ASensorEvent *event, struct android_device *d)
 {
-	struct android_device *d = (struct android_device *)data;
-
-	if (d->accelerometer == NULL || d->gyroscope == NULL)
-		return 1;
-
-	ASensorEvent event;
 	struct xrt_vec3 gyro;
 	struct xrt_vec3 accel;
-	while (ASensorEventQueue_getEvents(d->event_queue, &event, 1) > 0) {
 
-		switch (event.type) {
-		case ASENSOR_TYPE_ACCELEROMETER: {
-			accel.x = event.acceleration.y;
-			accel.y = -event.acceleration.x;
-			accel.z = event.acceleration.z;
+	switch (event->type) {
+	case ASENSOR_TYPE_ACCELEROMETER: {
+		accel.x = event->acceleration.y;
+		accel.y = -event->acceleration.x;
+		accel.z = event->acceleration.z;
 
-			ANDROID_TRACE(d, "accel %" PRId64 " %.2f %.2f %.2f", event.timestamp, accel.x, accel.y,
-			              accel.z);
-			break;
-		}
-		case ASENSOR_TYPE_GYROSCOPE: {
-			gyro.x = -event.data[1];
-			gyro.y = event.data[0];
-			gyro.z = event.data[2];
+		ANDROID_TRACE(d, "accel %" PRId64 " %.2f %.2f %.2f", event->timestamp, accel.x, accel.y, accel.z);
+		break;
+	}
+	case ASENSOR_TYPE_GYROSCOPE: {
+		gyro.x = -event->data[1];
+		gyro.y = event->data[0];
+		gyro.z = event->data[2];
 
-			ANDROID_TRACE(d, "gyro %" PRId64 " %.2f %.2f %.2f", event.timestamp, gyro.x, gyro.y, gyro.z);
+		ANDROID_TRACE(d, "gyro %" PRId64 " %.2f %.2f %.2f", event->timestamp, gyro.x, gyro.y, gyro.z);
 
-			// TODO: Make filter handle accelerometer
-			struct xrt_vec3 null_accel;
+		// TODO: Make filter handle accelerometer
+		struct xrt_vec3 null_accel;
 
-			// Lock last and the fusion.
-			os_mutex_lock(&d->lock);
+		// Lock last and the fusion.
+		os_mutex_lock(&d->lock);
 
-			m_imu_3dof_update(&d->fusion, event.timestamp, &null_accel, &gyro);
+		m_imu_3dof_update(&d->fusion, event->timestamp, &null_accel, &gyro);
 
-			// Now done.
-			os_mutex_unlock(&d->lock);
-		}
-		default: ANDROID_TRACE(d, "Unhandled event type %d", event.type);
-		}
+		// Now done.
+		os_mutex_unlock(&d->lock);
+	}
+	default: ANDROID_TRACE(d, "Unhandled event type %d", event->type);
 	}
 
 	return 1;
@@ -97,20 +93,31 @@ android_run_thread(void *ptr)
 {
 	struct android_device *d = (struct android_device *)ptr;
 	const int32_t poll_rate_usec = android_get_sensor_poll_rate(d);
-
+	// Maximum waiting time for sensor events.
+	static const int max_wait_milliseconds = 100;
+	ASensorManager *sensor_manager = NULL;
+	const ASensor *accelerometer = NULL;
+	const ASensor *gyroscope = NULL;
+	ASensorEventQueue *event_queue = NULL;
 #if __ANDROID_API__ >= 26
-	d->sensor_manager = ASensorManager_getInstanceForPackage(XRT_ANDROID_PACKAGE);
+	sensor_manager = ASensorManager_getInstanceForPackage(XRT_ANDROID_PACKAGE);
 #else
-	d->sensor_manager = ASensorManager_getInstance();
+	sensor_manager = ASensorManager_getInstance();
 #endif
 
-	d->accelerometer = ASensorManager_getDefaultSensor(d->sensor_manager, ASENSOR_TYPE_ACCELEROMETER);
-	d->gyroscope = ASensorManager_getDefaultSensor(d->sensor_manager, ASENSOR_TYPE_GYROSCOPE);
+	accelerometer = ASensorManager_getDefaultSensor(sensor_manager, ASENSOR_TYPE_ACCELEROMETER);
+	gyroscope = ASensorManager_getDefaultSensor(sensor_manager, ASENSOR_TYPE_GYROSCOPE);
 
-	ALooper *looper = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
+	ALooper *event_looper = ALooper_forThread();
+	if (event_looper == NULL) {
+		event_looper = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
+		ANDROID_INFO(d,
+		             "Created new event event_looper for "
+		             "sensor capture thread.");
+	}
 
-	d->event_queue = ASensorManager_createEventQueue(d->sensor_manager, looper, ALOOPER_POLL_CALLBACK,
-	                                                 android_sensor_callback, (void *)d);
+	event_queue = ASensorManager_createEventQueue(sensor_manager, event_looper, LOOPER_ID_USER, NULL, (void *)d);
+
 
 	/*
 	 * Start sensors in case this was not done already.
@@ -121,26 +128,50 @@ android_run_thread(void *ptr)
 	 * the screen refresh rate, which could be smaller than the sensor's
 	 * minimum delay value. Make sure to set it to a valid value.
 	 */
-	if (d->accelerometer != NULL) {
-		int32_t accelerometer_min_delay = ASensor_getMinDelay(d->accelerometer);
+	if (accelerometer != NULL) {
+		int32_t accelerometer_min_delay = ASensor_getMinDelay(accelerometer);
 		int32_t accelerometer_poll_rate_usec = MAX(poll_rate_usec, accelerometer_min_delay);
 
-		ASensorEventQueue_enableSensor(d->event_queue, d->accelerometer);
-		ASensorEventQueue_setEventRate(d->event_queue, d->accelerometer, accelerometer_poll_rate_usec);
+		ASensorEventQueue_enableSensor(event_queue, accelerometer);
+		ASensorEventQueue_setEventRate(event_queue, accelerometer, accelerometer_poll_rate_usec);
 	}
-	if (d->gyroscope != NULL) {
-		int32_t gyroscope_min_delay = ASensor_getMinDelay(d->gyroscope);
+	if (gyroscope != NULL) {
+		int32_t gyroscope_min_delay = ASensor_getMinDelay(gyroscope);
 		int32_t gyroscope_poll_rate_usec = MAX(poll_rate_usec, gyroscope_min_delay);
 
-		ASensorEventQueue_enableSensor(d->event_queue, d->gyroscope);
-		ASensorEventQueue_setEventRate(d->event_queue, d->gyroscope, gyroscope_poll_rate_usec);
+		ASensorEventQueue_enableSensor(event_queue, gyroscope);
+		ASensorEventQueue_setEventRate(event_queue, gyroscope, gyroscope_poll_rate_usec);
 	}
 
-	int ret = 0;
-	while (d->oth.running && ret != ALOOPER_POLL_ERROR) {
-		ret = ALooper_pollAll(0, NULL, NULL, NULL);
+	while (d->oth.running) {
+		int num_events = 0;
+		const int looper_id = ALooper_pollAll(max_wait_milliseconds, NULL, &num_events, NULL);
+		// The device may have enabled a power-saving policy, causing the sensor to sleep and return
+		// ALOOPER_POLL_ERROR. However, we want to continue reading data when it wakes up.
+		if (looper_id != LOOPER_ID_USER) {
+			ANDROID_ERROR(d, "ALooper_pollAll failed with looper_id: %d", looper_id);
+			continue;
+		}
+		if (num_events <= 0) {
+			ANDROID_ERROR(d, "ALooper_pollAll returned zero events");
+			continue;
+		}
+		// read event
+		ASensorEvent event;
+		while (ASensorEventQueue_getEvents(event_queue, &event, 1) > 0) {
+			android_sensor_callback(&event, d);
+		}
 	}
-
+	// Disable sensors.
+	if (accelerometer != NULL) {
+		ASensorEventQueue_disableSensor(event_queue, accelerometer);
+	}
+	if (gyroscope != NULL) {
+		ASensorEventQueue_disableSensor(event_queue, gyroscope);
+	}
+	// Destroy the event queue.
+	ASensorManager_destroyEventQueue(sensor_manager, event_queue);
+	ANDROID_INFO(d, "android_run_thread exit");
 	return NULL;
 }
 

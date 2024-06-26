@@ -33,11 +33,6 @@ struct android_device
 {
 	struct xrt_device base;
 	struct os_thread_helper oth;
-
-	ASensorManager *sensor_manager;
-	const ASensor *accelerometer;
-	const ASensor *gyroscope;
-	ASensorEventQueue *event_queue;
 	struct u_cardboard_distortion cardboard;
 
 
