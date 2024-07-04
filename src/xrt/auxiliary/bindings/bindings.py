@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Copyright 2020-2023, Collabora, Ltd.
+# Copyright 2024-2025, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 """Generate code from a JSON file describing interaction profiles and
 bindings."""
@@ -901,6 +902,11 @@ def generate_bindings_h(file, b):
 
 #include "xrt/xrt_defines.h"
 
+
+#ifdef __cplusplus
+extern "C" {{
+#endif
+
 typedef uint64_t XrPath; // OpenXR typedef
 typedef uint64_t XrVersion; // OpenXR typedef
 
@@ -1010,6 +1016,12 @@ extern struct profile_template profile_templates[OXR_BINDINGS_PROFILE_TEMPLATE_C
     f.write('xrt_output_name_enum(const char *output);\n\n')
 
     f.write("\n// clang-format on\n")
+    f.write(f'''
+#ifdef __cplusplus
+}}
+#endif
+''')
+
     f.close()
 
 
