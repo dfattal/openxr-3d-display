@@ -40,7 +40,7 @@ oxr_face_tracker2_fb_create(struct oxr_logger *log,
 		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "No device found for face tracking role");
 	}
 
-	if (!xdev->face_tracking_supported || xdev->get_face_tracking == NULL) {
+	if (!xdev->supported.face_tracking || xdev->get_face_tracking == NULL) {
 		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "Device does not support FB2 face tracking");
 	}
 

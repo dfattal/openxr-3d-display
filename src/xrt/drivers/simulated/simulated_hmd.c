@@ -200,7 +200,7 @@ simulated_hmd_create(enum simulated_movement movement, const struct xrt_pose *ce
 	hmd->base.destroy = simulated_hmd_destroy;
 	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
 	hmd->base.device_type = XRT_DEVICE_TYPE_HMD;
-	hmd->base.ref_space_usage_supported = true;
+	hmd->base.supported.ref_space_usage = true;
 	hmd->pose.orientation.w = 1.0f; // All other values set to zero.
 	hmd->center = *center;
 	hmd->created_ns = os_monotonic_get_ns();

@@ -987,10 +987,10 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 	survive->base.compute_distortion = compute_distortion;
 	survive->base.get_battery_status = survive_device_get_battery_status;
 
-	survive->base.orientation_tracking_supported = true;
-	survive->base.position_tracking_supported = true;
+	survive->base.supported.orientation_tracking = true;
+	survive->base.supported.position_tracking = true;
+	survive->base.supported.battery_status = true;
 	survive->base.device_type = XRT_DEVICE_TYPE_HMD;
-	survive->base.battery_status_supported = true;
 
 	survive->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 
@@ -1141,7 +1141,7 @@ _create_controller_device(struct survive_system *sys,
 		survive->base.binding_profile_count = vive_binding_profiles_index_count;
 
 		survive->base.get_hand_tracking = survive_controller_get_hand_tracking;
-		survive->base.hand_tracking_supported = !debug_get_bool_option_survive_disable_hand_emulation();
+		survive->base.supported.hand_tracking = !debug_get_bool_option_survive_disable_hand_emulation();
 
 	} else if (survive->ctrl.config.variant == CONTROLLER_VIVE_WAND) {
 		survive->base.name = XRT_DEVICE_VIVE_WAND;
@@ -1188,9 +1188,9 @@ _create_controller_device(struct survive_system *sys,
 		survive->base.inputs[VIVE_TRACKER_POSE].name = XRT_INPUT_GENERIC_TRACKER_POSE;
 	}
 
-	survive->base.orientation_tracking_supported = true;
-	survive->base.position_tracking_supported = true;
-	survive->base.battery_status_supported = true;
+	survive->base.supported.orientation_tracking = true;
+	survive->base.supported.position_tracking = true;
+	survive->base.supported.battery_status = true;
 
 	survive->last_inputs = U_TYPED_ARRAY_CALLOC(struct xrt_input, survive->base.input_count);
 	survive->num_last_inputs = survive->base.input_count;

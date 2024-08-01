@@ -541,19 +541,9 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *
 	u_var_add_root(ich, ich->base.str, true);
 	u_var_add_ro_u32(ich, &ich->device_id, "device_id");
 
-	ich->base.orientation_tracking_supported = isdev->orientation_tracking_supported;
-	ich->base.position_tracking_supported = isdev->position_tracking_supported;
+	// Copy information.
 	ich->base.device_type = isdev->device_type;
-	ich->base.hand_tracking_supported = isdev->hand_tracking_supported;
-	ich->base.eye_gaze_supported = isdev->eye_gaze_supported;
-	ich->base.face_tracking_supported = isdev->face_tracking_supported;
-	ich->base.body_tracking_supported = isdev->body_tracking_supported;
-	ich->base.force_feedback_supported = isdev->force_feedback_supported;
-	ich->base.form_factor_check_supported = isdev->form_factor_check_supported;
-	ich->base.stage_supported = isdev->stage_supported;
-	ich->base.battery_status_supported = isdev->battery_status_supported;
-	ich->base.planes_supported = isdev->planes_supported;
-	ich->base.plane_capability_flags = isdev->plane_capability_flags;
+	ich->base.supported = isdev->supported;
 
 	return &ich->base;
 }

@@ -402,8 +402,8 @@ daydream_device_create(struct os_ble_device *ble)
 	u_var_add_ro_vec3_f32(dd, &dd->fusion.last.accel, "last.accel");
 	u_var_add_ro_vec3_f32(dd, &dd->fusion.last.gyro, "last.gyro");
 
-	dd->base.orientation_tracking_supported = true;
-	dd->base.position_tracking_supported = false;
+	dd->base.supported.orientation_tracking = true;
+	dd->base.supported.position_tracking = false;
 	dd->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 	DAYDREAM_DEBUG(dd, "Created device!");

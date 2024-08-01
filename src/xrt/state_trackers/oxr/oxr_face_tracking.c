@@ -64,7 +64,7 @@ oxr_facial_tracker_htc_create(struct oxr_logger *log,
 		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "No device found for face tracking role");
 	}
 
-	if (!xdev->face_tracking_supported) {
+	if (!xdev->supported.face_tracking) {
 		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "Device does not support HTC facial tracking");
 	}
 

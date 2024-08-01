@@ -1224,9 +1224,9 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 	}
 
 	VIVE_DEBUG(d, "Opened vive controller!\n");
-	d->base.orientation_tracking_supported = true;
-	d->base.position_tracking_supported = false;
-	d->base.hand_tracking_supported =
+	d->base.supported.orientation_tracking = true;
+	d->base.supported.position_tracking = false;
+	d->base.supported.hand_tracking =
 	    d->config.variant == CONTROLLER_INDEX_LEFT || d->config.variant == CONTROLLER_INDEX_RIGHT;
 
 	vive_controller_setup_ui(d);

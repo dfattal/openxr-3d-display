@@ -296,7 +296,7 @@ notify_ref_space_usage_device(struct u_space_overseer *uso, enum xrt_reference_s
 		xdev = uso->notify;
 	}
 
-	if (xdev == NULL || !xdev->ref_space_usage_supported) {
+	if (xdev == NULL || !xdev->supported.ref_space_usage) {
 		return;
 	}
 
@@ -1149,7 +1149,7 @@ u_space_overseer_legacy_setup(struct u_space_overseer *uso,
 	xrt_space_reference(&uso->base.semantic.local, NULL);
 	xrt_space_reference(&uso->base.semantic.unbounded, NULL);
 
-	if (head != NULL && head->stage_supported) {
+	if (head != NULL && head->supported.stage) {
 		// stage poses are polled from the driver
 		u_space_overseer_create_pose_space(uso, head, XRT_INPUT_GENERIC_STAGE_SPACE_POSE,
 		                                   &uso->base.semantic.stage);

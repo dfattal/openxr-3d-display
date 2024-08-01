@@ -895,8 +895,8 @@ pssense_found(struct xrt_prober *xp,
 	pssense->base.get_tracked_pose = pssense_get_tracked_pose;
 	pssense->base.get_battery_status = pssense_get_battery_status;
 	pssense->base.destroy = pssense_device_destroy;
-	pssense->base.orientation_tracking_supported = true;
-	pssense->base.battery_status_supported = true;
+	pssense->base.supported.orientation_tracking = true;
+	pssense->base.supported.battery_status = true;
 
 	pssense->base.binding_profiles = binding_profiles_pssense;
 	pssense->base.binding_profile_count = ARRAY_SIZE(binding_profiles_pssense);

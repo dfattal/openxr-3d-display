@@ -217,9 +217,9 @@ ht_device_create_common(struct t_stereo_camera_calibration *calib,
 	// Yes, you need all of these. Yes, I tried disabling them all one at a time. You need all of these.
 	htd->base.name = XRT_DEVICE_HAND_TRACKER;
 	htd->base.device_type = XRT_DEVICE_TYPE_HAND_TRACKER;
-	htd->base.orientation_tracking_supported = true;
-	htd->base.position_tracking_supported = true;
-	htd->base.hand_tracking_supported = true;
+	htd->base.supported.orientation_tracking = true;
+	htd->base.supported.position_tracking = true;
+	htd->base.supported.hand_tracking = true;
 
 	htd->sync = sync;
 

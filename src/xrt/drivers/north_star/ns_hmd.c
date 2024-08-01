@@ -482,8 +482,8 @@ ns_hmd_create(const cJSON *config_json)
 	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 	// Appeases the inner workings of Monado for when there's no head tracker and we're giving a fake pose through
 	// the debug gui
-	ns->base.orientation_tracking_supported = true;
-	ns->base.position_tracking_supported = true;
+	ns->base.supported.orientation_tracking = true;
+	ns->base.supported.position_tracking = true;
 	ns->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 
@@ -511,7 +511,7 @@ ns_hmd_create(const cJSON *config_json)
 	// Setup variable tracker.
 	u_var_add_root(ns, "North Star", true);
 	u_var_add_pose(ns, &ns->no_tracker_relation.pose, "pose");
-	ns->base.orientation_tracking_supported = true;
+	ns->base.supported.orientation_tracking = true;
 	ns->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	size_t idx = 0;

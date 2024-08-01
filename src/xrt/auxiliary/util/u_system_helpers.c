@@ -262,7 +262,7 @@ u_system_devices_get_ht_device(struct xrt_system_devices *xsysd, enum xrt_input_
 	for (uint32_t i = 0; i < xsysd->xdev_count; i++) {
 		struct xrt_device *xdev = xsysd->xdevs[i];
 
-		if (xdev == NULL || !xdev->hand_tracking_supported) {
+		if (xdev == NULL || !xdev->supported.hand_tracking) {
 			continue;
 		}
 

@@ -404,7 +404,7 @@ ulv2_create_device(struct xrt_device **out_xdev)
 	ulv2d->base.name = XRT_DEVICE_HAND_TRACKER;
 
 	ulv2d->base.device_type = XRT_DEVICE_TYPE_HAND_TRACKER;
-	ulv2d->base.hand_tracking_supported = true;
+	ulv2d->base.supported.hand_tracking = true;
 
 	u_var_add_root(ulv2d, "Leap Motion v2 driver", true);
 	u_var_add_ro_text(ulv2d, ulv2d->base.str, "Name");

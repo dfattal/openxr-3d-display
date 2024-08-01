@@ -548,9 +548,9 @@ wmr_controller_base_init(struct wmr_controller_base *wcb,
 
 	wcb->base.name = XRT_DEVICE_WMR_CONTROLLER;
 	wcb->base.device_type = controller_type;
-	wcb->base.orientation_tracking_supported = true;
-	wcb->base.position_tracking_supported = false;
-	wcb->base.hand_tracking_supported = false;
+	wcb->base.supported.orientation_tracking = true;
+	wcb->base.supported.position_tracking = false;
+	wcb->base.supported.hand_tracking = false;
 
 	m_imu_3dof_init(&wcb->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 

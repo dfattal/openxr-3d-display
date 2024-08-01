@@ -498,8 +498,8 @@ rs_ddev_create(int device_idx)
 		return NULL;
 	}
 
-	rs->base.orientation_tracking_supported = true;
-	rs->base.position_tracking_supported = true;
+	rs->base.supported.orientation_tracking = true;
+	rs->base.supported.position_tracking = true;
 	rs->base.device_type = XRT_DEVICE_TYPE_GENERIC_TRACKER;
 
 	return &rs->base;

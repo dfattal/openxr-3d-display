@@ -348,19 +348,9 @@ init_shm(struct ipc_server *s)
 		memcpy(isdev->str, xdev->str, sizeof(isdev->str));
 		memcpy(isdev->serial, xdev->serial, sizeof(isdev->serial));
 
-		isdev->orientation_tracking_supported = xdev->orientation_tracking_supported;
-		isdev->position_tracking_supported = xdev->position_tracking_supported;
+		// Copy information.
 		isdev->device_type = xdev->device_type;
-		isdev->hand_tracking_supported = xdev->hand_tracking_supported;
-		isdev->force_feedback_supported = xdev->force_feedback_supported;
-		isdev->form_factor_check_supported = xdev->form_factor_check_supported;
-		isdev->eye_gaze_supported = xdev->eye_gaze_supported;
-		isdev->face_tracking_supported = xdev->face_tracking_supported;
-		isdev->body_tracking_supported = xdev->body_tracking_supported;
-		isdev->stage_supported = xdev->stage_supported;
-		isdev->battery_status_supported = xdev->battery_status_supported;
-		isdev->planes_supported = xdev->planes_supported;
-		isdev->plane_capability_flags = xdev->plane_capability_flags;
+		isdev->supported = xdev->supported;
 
 		// Setup the tracking origin.
 		isdev->tracking_origin_index = (uint32_t)-1;

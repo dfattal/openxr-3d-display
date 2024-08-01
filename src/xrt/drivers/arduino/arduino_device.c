@@ -430,8 +430,8 @@ arduino_device_create(struct os_ble_device *ble)
 	u_var_add_ro_vec3_f32(ad, &ad->fusion.last.accel, "last.accel");
 	u_var_add_ro_vec3_f32(ad, &ad->fusion.last.gyro, "last.gyro");
 
-	ad->base.orientation_tracking_supported = true;
-	ad->base.position_tracking_supported = false;
+	ad->base.supported.orientation_tracking = true;
+	ad->base.supported.position_tracking = false;
 	ad->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 	ARDUINO_DEBUG(ad, "Created device!");

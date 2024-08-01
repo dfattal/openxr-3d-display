@@ -150,9 +150,9 @@ r_hmd_create(struct r_hub *r)
 	rh->base.set_output = r_hmd_set_output;
 	rh->base.destroy = r_hmd_destroy;
 	rh->base.tracking_origin = &r->origin;
-	rh->base.orientation_tracking_supported = true;
-	rh->base.position_tracking_supported = true;
-	rh->base.hand_tracking_supported = false;
+	rh->base.supported.orientation_tracking = true;
+	rh->base.supported.position_tracking = true;
+	rh->base.supported.hand_tracking = false;
 	rh->base.name = XRT_DEVICE_GENERIC_HMD;
 	rh->base.device_type = XRT_DEVICE_TYPE_HMD;
 	rh->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;

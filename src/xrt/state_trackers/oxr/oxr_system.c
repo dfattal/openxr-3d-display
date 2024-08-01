@@ -70,7 +70,7 @@ oxr_system_select(struct oxr_logger *log,
 	}
 
 	struct xrt_device *xdev = GET_XDEV_BY_ROLE(selected, head);
-	if (xdev->form_factor_check_supported &&
+	if (xdev->supported.form_factor_check &&
 	    !xrt_device_is_form_factor_available(xdev, convert_form_factor(form_factor))) {
 		return oxr_error(log, XR_ERROR_FORM_FACTOR_UNAVAILABLE, "request form factor %i is unavailable now",
 		                 form_factor);
@@ -259,8 +259,8 @@ oxr_system_get_hand_tracking_support(struct oxr_logger *log, struct oxr_instance
 	struct xrt_device *ht_left = GET_XDEV_BY_ROLE(sys, hand_tracking_left);
 	struct xrt_device *ht_right = GET_XDEV_BY_ROLE(sys, hand_tracking_right);
 
-	bool left_supported = ht_left && ht_left->hand_tracking_supported;
-	bool right_supported = ht_right && ht_right->hand_tracking_supported;
+	bool left_supported = ht_left && ht_left->supported.hand_tracking;
+	bool right_supported = ht_right && ht_right->supported.hand_tracking;
 
 	return left_supported || right_supported;
 }
@@ -271,7 +271,7 @@ oxr_system_get_eye_gaze_support(struct oxr_logger *log, struct oxr_instance *ins
 	struct oxr_system *sys = &inst->system;
 	struct xrt_device *eyes = GET_XDEV_BY_ROLE(sys, eyes);
 
-	return eyes && eyes->eye_gaze_supported;
+	return eyes && eyes->supported.eye_gaze;
 }
 
 bool
@@ -281,8 +281,8 @@ oxr_system_get_force_feedback_support(struct oxr_logger *log, struct oxr_instanc
 	struct xrt_device *ffb_left = GET_XDEV_BY_ROLE(sys, hand_tracking_left);
 	struct xrt_device *ffb_right = GET_XDEV_BY_ROLE(sys, hand_tracking_right);
 
-	bool left_supported = ffb_left && ffb_left->force_feedback_supported;
-	bool right_supported = ffb_right && ffb_right->force_feedback_supported;
+	bool left_supported = ffb_left && ffb_left->supported.force_feedback;
+	bool right_supported = ffb_right && ffb_right->supported.force_feedback;
 
 	return left_supported || right_supported;
 }
@@ -301,7 +301,7 @@ oxr_system_get_face_tracking_htc_support(struct oxr_logger *log,
 	if (supports_lip)
 		*supports_lip = false;
 
-	if (face_xdev == NULL || !face_xdev->face_tracking_supported || face_xdev->inputs == NULL) {
+	if (face_xdev == NULL || !face_xdev->supported.face_tracking || face_xdev->inputs == NULL) {
 		return;
 	}
 
@@ -331,7 +331,7 @@ oxr_system_get_face_tracking2_fb_support(struct oxr_logger *log,
 	struct oxr_system *sys = &inst->system;
 	struct xrt_device *face_xdev = GET_XDEV_BY_ROLE(sys, face);
 
-	if (face_xdev == NULL || !face_xdev->face_tracking_supported || face_xdev->inputs == NULL) {
+	if (face_xdev == NULL || !face_xdev->supported.face_tracking || face_xdev->inputs == NULL) {
 		return;
 	}
 
@@ -353,7 +353,7 @@ oxr_system_get_body_tracking_support(struct oxr_logger *log,
 {
 	struct oxr_system *sys = &inst->system;
 	const struct xrt_device *body = GET_XDEV_BY_ROLE(sys, body);
-	if (body == NULL || !body->body_tracking_supported || body->inputs == NULL) {
+	if (body == NULL || !body->supported.body_tracking || body->inputs == NULL) {
 		return false;
 	}
 
@@ -392,8 +392,8 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 	}
 	properties->graphicsProperties.maxSwapchainImageWidth = 1024 * 16;
 	properties->graphicsProperties.maxSwapchainImageHeight = 1024 * 16;
-	properties->trackingProperties.orientationTracking = xdev->orientation_tracking_supported;
-	properties->trackingProperties.positionTracking = xdev->position_tracking_supported;
+	properties->trackingProperties.orientationTracking = xdev->supported.orientation_tracking;
+	properties->trackingProperties.positionTracking = xdev->supported.position_tracking;
 
 #ifdef OXR_HAVE_EXT_hand_tracking
 	XrSystemHandTrackingPropertiesEXT *hand_tracking_props = NULL;
@@ -518,7 +518,7 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 	if (plane_detection_props) {
 		// for now these are mapped 1:1
 		plane_detection_props->supportedFeatures =
-		    (XrPlaneDetectionCapabilityFlagsEXT)xdev->plane_capability_flags;
+		    (XrPlaneDetectionCapabilityFlagsEXT)xdev->supported.plane_capability_flags;
 	}
 #endif // OXR_HAVE_EXT_plane_detection
 

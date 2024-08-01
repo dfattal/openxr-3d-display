@@ -1120,8 +1120,8 @@ xreal_air_hmd_create_device(struct os_hid_device *sensor_device,
 	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
 	hmd->base.device_type = XRT_DEVICE_TYPE_HMD;
 	hmd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
-	hmd->base.orientation_tracking_supported = true;
-	hmd->base.position_tracking_supported = false;
+	hmd->base.supported.orientation_tracking = true;
+	hmd->base.supported.position_tracking = false;
 
 	// Set up display details refresh rate
 	hmd->base.hmd->screens[0].nominal_frame_interval_ns = time_s_to_ns(1.0f / 60.0f);

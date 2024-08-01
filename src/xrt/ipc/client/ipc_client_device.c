@@ -322,17 +322,9 @@ ipc_client_device_create(struct ipc_connection *ipc_c, struct xrt_tracking_origi
 	u_var_add_root(icd, icd->base.str, true);
 	u_var_add_ro_u32(icd, &icd->device_id, "device_id");
 
-	icd->base.orientation_tracking_supported = isdev->orientation_tracking_supported;
-	icd->base.position_tracking_supported = isdev->position_tracking_supported;
-	icd->base.hand_tracking_supported = isdev->hand_tracking_supported;
-	icd->base.eye_gaze_supported = isdev->eye_gaze_supported;
-	icd->base.face_tracking_supported = isdev->face_tracking_supported;
-	icd->base.body_tracking_supported = isdev->body_tracking_supported;
-	icd->base.force_feedback_supported = isdev->force_feedback_supported;
-	icd->base.stage_supported = isdev->stage_supported;
-	icd->base.planes_supported = isdev->planes_supported;
-	icd->base.plane_capability_flags = isdev->plane_capability_flags;
-
+	// Copy information.
 	icd->base.device_type = isdev->device_type;
+	icd->base.supported = isdev->supported;
+
 	return &icd->base;
 }

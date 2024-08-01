@@ -490,8 +490,8 @@ rokid_hmd_create(struct xrt_prober_device *prober_device)
 	rokid->base.name = XRT_DEVICE_GENERIC_HMD;
 	rokid->base.device_type = XRT_DEVICE_TYPE_HMD;
 	rokid->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
-	rokid->base.orientation_tracking_supported = true;
-	rokid->base.position_tracking_supported = false;
+	rokid->base.supported.orientation_tracking = true;
+	rokid->base.supported.position_tracking = false;
 
 	// Set up display details
 	// refresh rate

@@ -1030,8 +1030,8 @@ create_hmd(ohmd_context *ctx, int device_idx, int device_flags)
 		u_device_dump_config(&ohd->base, __func__, prod);
 	}
 
-	ohd->base.orientation_tracking_supported = (device_flags & OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING) != 0;
-	ohd->base.position_tracking_supported = (device_flags & OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING) != 0;
+	ohd->base.supported.orientation_tracking = (device_flags & OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING) != 0;
+	ohd->base.supported.position_tracking = (device_flags & OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING) != 0;
 	ohd->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 
@@ -1157,8 +1157,8 @@ create_controller(ohmd_context *ctx, int device_idx, int device_flags, enum xrt_
 	snprintf(ohd->base.str, XRT_DEVICE_NAME_LEN, "%s (OpenHMD)", prod);
 	snprintf(ohd->base.serial, XRT_DEVICE_NAME_LEN, "%s (OpenHMD)", prod);
 
-	ohd->base.orientation_tracking_supported = (device_flags & OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING) != 0;
-	ohd->base.position_tracking_supported = (device_flags & OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING) != 0;
+	ohd->base.supported.orientation_tracking = (device_flags & OHMD_DEVICE_FLAGS_ROTATIONAL_TRACKING) != 0;
+	ohd->base.supported.position_tracking = (device_flags & OHMD_DEVICE_FLAGS_POSITIONAL_TRACKING) != 0;
 	ohd->base.device_type = device_type;
 
 	ohmd_device_geti(ohd->dev, OHMD_CONTROLS_HINTS, ohd->controls_fn);
@@ -1271,7 +1271,7 @@ oh_device_create(ohmd_context *ctx, bool no_hmds, struct xrt_device **out_xdevs)
 
 			sys->devices[OHMD_HMD_INDEX] = hmd;
 
-			if (hmd->base.position_tracking_supported) {
+			if (hmd->base.supported.position_tracking) {
 				sys->base.type = XRT_TRACKING_TYPE_OTHER;
 			}
 

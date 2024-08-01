@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -244,6 +245,32 @@ struct xrt_output_limits
 };
 
 /*!
+ * Static data of supported features of the @ref xrt_device this struct sits on.
+ *
+ * This struct needs to always be a piece of data as it sits inside of the
+ * shared memory area in the IPC layer, so no pointers please.
+ *
+ * @ingroup xrt_iface
+ */
+struct xrt_device_supported
+{
+	bool orientation_tracking;
+	bool position_tracking;
+	bool hand_tracking;
+	bool eye_gaze;
+	bool force_feedback;
+	bool ref_space_usage;
+	bool form_factor_check;
+	bool stage;
+	bool face_tracking;
+	bool body_tracking;
+	bool battery_status;
+
+	bool planes;
+	enum xrt_plane_detection_capability_flags_ext plane_capability_flags;
+};
+
+/*!
  * @interface xrt_device
  *
  * A single HMD or input device.
@@ -283,19 +310,9 @@ struct xrt_device
 	//! Array of output structs.
 	struct xrt_output *outputs;
 
-	bool orientation_tracking_supported;
-	bool position_tracking_supported;
-	bool hand_tracking_supported;
-	bool eye_gaze_supported;
-	bool force_feedback_supported;
-	bool ref_space_usage_supported;
-	bool form_factor_check_supported;
-	bool stage_supported;
-	bool face_tracking_supported;
-	bool body_tracking_supported;
-	bool battery_status_supported;
-	bool planes_supported;
-	enum xrt_plane_detection_capability_flags_ext plane_capability_flags;
+	//! What features/functions/things does this device supports?
+	struct xrt_device_supported supported;
+
 
 	/*
 	 *

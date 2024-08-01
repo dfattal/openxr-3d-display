@@ -825,8 +825,8 @@ hydra_found(struct xrt_prober *xp,
 
 		hd->base.tracking_origin = &hs->base;
 
-		hd->base.position_tracking_supported = true;
-		hd->base.orientation_tracking_supported = true;
+		hd->base.supported.position_tracking = true;
+		hd->base.supported.orientation_tracking = true;
 		hd->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 		out_xdevs[i] = &(hd->base);

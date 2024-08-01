@@ -997,9 +997,9 @@ vive_set_trackers_status(struct vive_device *d, struct vive_tracking_status stat
 	bool hand_supported = status.hand_supported;
 	bool hand_enabled = status.hand_enabled;
 
-	d->base.orientation_tracking_supported = dof3_enabled || slam_enabled;
-	d->base.position_tracking_supported = slam_enabled;
-	d->base.hand_tracking_supported = false; // this is handled by a separate hand device
+	d->base.supported.orientation_tracking = dof3_enabled || slam_enabled;
+	d->base.supported.position_tracking = slam_enabled;
+	d->base.supported.hand_tracking = false; // this is handled by a separate hand device
 	d->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	d->tracking.slam_enabled = slam_enabled;

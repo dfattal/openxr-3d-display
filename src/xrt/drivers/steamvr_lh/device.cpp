@@ -202,12 +202,12 @@ Device::Device(const DeviceBuilder &builder) : xrt_device({}), ctx(builder.ctx),
 	std::strncpy(this->serial, builder.serial, XRT_DEVICE_NAME_LEN - 1);
 	this->serial[XRT_DEVICE_NAME_LEN - 1] = 0;
 	this->tracking_origin = ctx.get();
-	this->orientation_tracking_supported = true;
-	this->position_tracking_supported = true;
-	this->hand_tracking_supported = true;
-	this->force_feedback_supported = false;
-	this->form_factor_check_supported = false;
-	this->battery_status_supported = true;
+	this->supported.orientation_tracking = true;
+	this->supported.position_tracking = true;
+	this->supported.hand_tracking = true;
+	this->supported.force_feedback = false;
+	this->supported.form_factor_check = false;
+	this->supported.battery_status = true;
 
 	this->xrt_device::update_inputs = &device_bouncer<Device, &Device::update_inputs, xrt_result_t>;
 #define SETUP_MEMBER_FUNC(name) this->xrt_device::name = &device_bouncer<Device, &Device::name>

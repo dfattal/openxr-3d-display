@@ -57,7 +57,7 @@ oxr_create_body_tracker_fb(struct oxr_logger *log,
 	}
 
 	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sess->sys, body);
-	if (xdev == NULL || !xdev->body_tracking_supported) {
+	if (xdev == NULL || !xdev->supported.body_tracking) {
 		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "No device found for body tracking role");
 	}
 
@@ -79,7 +79,7 @@ oxr_get_body_skeleton_fb(struct oxr_logger *log,
                          XrBodySkeletonFB *skeleton)
 {
 
-	if (body_tracker_fb->xdev == NULL || !body_tracker_fb->xdev->body_tracking_supported) {
+	if (body_tracker_fb->xdev == NULL || !body_tracker_fb->xdev->supported.body_tracking) {
 		return oxr_error(log, XR_ERROR_FUNCTION_UNSUPPORTED,
 		                 "Device not found or does not support body tracking.");
 	}
@@ -113,7 +113,7 @@ oxr_locate_body_joints_fb(struct oxr_logger *log,
                           const XrBodyJointsLocateInfoFB *locateInfo,
                           XrBodyJointLocationsFB *locations)
 {
-	if (body_tracker_fb->xdev == NULL || !body_tracker_fb->xdev->body_tracking_supported) {
+	if (body_tracker_fb->xdev == NULL || !body_tracker_fb->xdev->supported.body_tracking) {
 		return oxr_error(log, XR_ERROR_FUNCTION_UNSUPPORTED,
 		                 "Device not found or does not support body tracking.");
 	}

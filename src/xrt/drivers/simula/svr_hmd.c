@@ -234,8 +234,8 @@ svr_hmd_create(struct svr_two_displays_distortion *distortion)
 	svr->base.name = XRT_DEVICE_GENERIC_HMD;
 
 	// Sorta a lie, we have to do this to make the state tracker happy. (Should multi.c override these?)
-	svr->base.orientation_tracking_supported = true;
-	svr->base.position_tracking_supported = true;
+	svr->base.supported.orientation_tracking = true;
+	svr->base.supported.position_tracking = true;
 
 	svr->base.device_type = XRT_DEVICE_TYPE_HMD;
 
@@ -271,7 +271,7 @@ svr_hmd_create(struct svr_two_displays_distortion *distortion)
 
 	// Setup variable tracker.
 	u_var_add_root(svr, "Simula HMD", true);
-	svr->base.orientation_tracking_supported = true;
+	svr->base.supported.orientation_tracking = true;
 	svr->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	size_t idx = 0;

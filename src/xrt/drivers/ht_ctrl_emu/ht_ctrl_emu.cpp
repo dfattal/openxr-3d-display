@@ -443,9 +443,9 @@ cemu_devices_create(struct xrt_device *head, struct xrt_device *hands, struct xr
 		cemud[i]->base.tracking_origin = hands->tracking_origin;
 
 		cemud[i]->base.name = XRT_DEVICE_SIMPLE_CONTROLLER;
-		cemud[i]->base.hand_tracking_supported = true;
-		cemud[i]->base.orientation_tracking_supported = true;
-		cemud[i]->base.position_tracking_supported = true;
+		cemud[i]->base.supported.hand_tracking = true;
+		cemud[i]->base.supported.orientation_tracking = true;
+		cemud[i]->base.supported.position_tracking = true;
 
 
 		cemud[i]->base.inputs[CEMU_INDEX_HAND_TRACKING].name =

@@ -113,8 +113,8 @@ simulated_open_system_impl(struct xrt_builder *xb,
 
 	// Make the objects be tracked in space.
 	//! @todo Make these be a option to the hmd create function, or just make it be there from the start.
-	head->orientation_tracking_supported = true;
-	head->position_tracking_supported = true;
+	head->supported.orientation_tracking = true;
+	head->supported.position_tracking = true;
 	//! @todo Create a shared tracking origin on the system devices struct instead.
 	head->tracking_origin->type = XRT_TRACKING_TYPE_OTHER; // Just anything other then none.
 

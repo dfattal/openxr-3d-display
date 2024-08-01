@@ -440,7 +440,7 @@ oxr_hand_tracker_create(struct oxr_logger *log,
 	}
 
 	// Find the correct input on the device.
-	if (xdev != NULL && xdev->hand_tracking_supported) {
+	if (xdev != NULL && xdev->supported.hand_tracking) {
 		for (uint32_t j = 0; j < xdev->input_count; j++) {
 			struct xrt_input *input = &xdev->inputs[j];
 
@@ -826,7 +826,7 @@ oxr_xrCreatePlaneDetectorEXT(XrSession session,
 
 	//! @todo support planes on other devices
 	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sess->sys, head);
-	if (!xdev->planes_supported) {
+	if (!xdev->supported.planes) {
 		return XR_ERROR_FEATURE_UNSUPPORTED;
 	}
 
@@ -885,7 +885,7 @@ oxr_xrBeginPlaneDetectionEXT(XrPlaneDetectorEXT planeDetector, const XrPlaneDete
 		return oxr_error(&log, XR_ERROR_TIME_INVALID, "Time %" PRId64 " invalid", beginInfo->time);
 	}
 
-	if (!pd->xdev->planes_supported) {
+	if (!pd->xdev->supported.planes) {
 		return XR_ERROR_FEATURE_UNSUPPORTED;
 	}
 
@@ -1038,7 +1038,7 @@ oxr_xrGetPlaneDetectionsEXT(XrPlaneDetectorEXT planeDetector,
 		return oxr_error(&log, XR_ERROR_TIME_INVALID, "Time %" PRId64 " invalid", info->time);
 	}
 
-	if (!pd->xdev->planes_supported) {
+	if (!pd->xdev->supported.planes) {
 		return XR_ERROR_FEATURE_UNSUPPORTED;
 	}
 

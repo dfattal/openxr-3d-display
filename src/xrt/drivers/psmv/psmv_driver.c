@@ -1225,8 +1225,8 @@ psmv_device_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev, struc
 	u_var_add_log_level(psmv, &psmv->log_level, "Log level");
 	// clang-format on
 
-	psmv->base.orientation_tracking_supported = true;
-	psmv->base.position_tracking_supported = psmv->ball != NULL;
+	psmv->base.supported.orientation_tracking = true;
+	psmv->base.supported.position_tracking = psmv->ball != NULL;
 	psmv->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 	// And finally done

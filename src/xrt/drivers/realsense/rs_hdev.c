@@ -1007,8 +1007,8 @@ rs_hdev_create(struct xrt_prober *xp, int device_idx)
 
 	xd->inputs[0].name = XRT_INPUT_GENERIC_TRACKER_POSE;
 
-	xd->orientation_tracking_supported = true;
-	xd->position_tracking_supported = true;
+	xd->supported.orientation_tracking = true;
+	xd->supported.position_tracking = true;
 
 	xd->update_inputs = u_device_noop_update_inputs;
 	xd->get_tracked_pose = rs_hdev_get_tracked_pose;

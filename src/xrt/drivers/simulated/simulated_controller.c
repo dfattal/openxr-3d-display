@@ -383,9 +383,9 @@ simulated_create_controller(enum xrt_device_name name,
 	sd->base.set_output = simulated_device_set_output;
 	sd->base.destroy = simulated_device_destroy;
 	sd->base.tracking_origin = origin;
-	sd->base.orientation_tracking_supported = true;
-	sd->base.position_tracking_supported = true;
-	sd->base.hand_tracking_supported = false;
+	sd->base.supported.orientation_tracking = true;
+	sd->base.supported.position_tracking = true;
+	sd->base.supported.hand_tracking = false;
 	sd->base.name = name;
 	sd->base.device_type = type;
 	sd->base.binding_profiles = binding_profiles;

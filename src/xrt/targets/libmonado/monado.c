@@ -309,8 +309,8 @@ mnd_root_get_device_info_bool(mnd_root_t *root, uint32_t device_index, mnd_prope
 	const struct ipc_shared_device *shared_device = &root->ipc_c.ism->isdevs[device_index];
 
 	switch (prop) {
-	case MND_PROPERTY_SUPPORTS_POSITION_BOOL: *out_bool = shared_device->position_tracking_supported; break;
-	case MND_PROPERTY_SUPPORTS_ORIENTATION_BOOL: *out_bool = shared_device->orientation_tracking_supported; break;
+	case MND_PROPERTY_SUPPORTS_POSITION_BOOL: *out_bool = shared_device->supported.position_tracking; break;
+	case MND_PROPERTY_SUPPORTS_ORIENTATION_BOOL: *out_bool = shared_device->supported.orientation_tracking; break;
 	default: PE("Is not a valid boolean property (%u)", prop); return MND_ERROR_INVALID_PROPERTY;
 	}
 
@@ -574,7 +574,7 @@ mnd_root_get_device_battery_status(
 
 	const struct ipc_shared_device *shared_device = &root->ipc_c.ism->isdevs[device_index];
 
-	if (!shared_device->battery_status_supported) {
+	if (!shared_device->supported.battery_status) {
 		return MND_ERROR_OPERATION_FAILED;
 	}
 

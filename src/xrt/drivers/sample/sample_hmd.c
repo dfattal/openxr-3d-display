@@ -201,8 +201,8 @@ sample_hmd_create(void)
 	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
 	hmd->base.device_type = XRT_DEVICE_TYPE_HMD;
 	hmd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
-	hmd->base.orientation_tracking_supported = true;
-	hmd->base.position_tracking_supported = true;
+	hmd->base.supported.orientation_tracking = true;
+	hmd->base.supported.position_tracking = true;
 
 	// Set up display details
 	// refresh rate

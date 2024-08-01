@@ -562,7 +562,7 @@ public:
 
 			AddControl("/input/trackpad/y", XRT_INPUT_INDEX_TRACKPAD, &y);
 
-			if (m_xdev->hand_tracking_supported) {
+			if (m_xdev->supported.hand_tracking) {
 				ovrd_log("Enabling skeletal input as this device supports it");
 
 				// skeletal input compatibility with games is a bit funky with any controllers
@@ -763,7 +763,7 @@ public:
 		m_pose.poseIsValid = false;
 		m_pose.deviceIsConnected = true;
 		m_pose.result = vr::TrackingResult_Uninitialized;
-		m_pose.willDriftInYaw = !m_xdev->position_tracking_supported;
+		m_pose.willDriftInYaw = !m_xdev->supported.position_tracking;
 
 		if (m_emulate_index_controller) {
 			m_input_profile = std::string("{indexcontroller}/input/index_controller_profile.json");
@@ -965,7 +965,7 @@ public:
 			}
 		}
 
-		if (m_xdev->hand_tracking_supported && m_skeletal_input_control.control_handle) {
+		if (m_xdev->supported.hand_tracking && m_skeletal_input_control.control_handle) {
 			vr::VRBoneTransform_t bone_transforms[OPENVR_BONE_COUNT];
 
 			timepoint_ns now_ns = os_monotonic_get_ns();
@@ -1295,9 +1295,9 @@ CDeviceDriver_Monado::GetPose()
 
 	    .result = vr::TrackingResult_Running_OK,
 	    .poseIsValid = (rel.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0,
-	    .willDriftInYaw = !m_xdev->position_tracking_supported,
+	    .willDriftInYaw = !m_xdev->supported.position_tracking,
 	    //! @todo: Monado head model?
-	    .shouldApplyHeadModel = !m_xdev->position_tracking_supported,
+	    .shouldApplyHeadModel = !m_xdev->supported.position_tracking,
 	    .deviceIsConnected = true,
 	};
 	apply_pose(&rel, &t);

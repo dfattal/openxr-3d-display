@@ -217,9 +217,9 @@ r_device_create(struct r_hub *r, bool is_left)
 	rd->base.set_output = r_device_set_output;
 	rd->base.destroy = r_device_destroy;
 	rd->base.tracking_origin = &r->origin;
-	rd->base.orientation_tracking_supported = true;
-	rd->base.position_tracking_supported = true;
-	rd->base.hand_tracking_supported = true;
+	rd->base.supported.orientation_tracking = true;
+	rd->base.supported.position_tracking = true;
+	rd->base.supported.hand_tracking = true;
 	rd->base.name = XRT_DEVICE_INDEX_CONTROLLER;
 	rd->base.binding_profiles = vive_binding_profiles_index;
 	rd->base.binding_profile_count = vive_binding_profiles_index_count;
