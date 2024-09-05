@@ -40,7 +40,7 @@ from_host_ticks_to_host_ns(uint64_t ticks)
 		ns_per_qpc_tick = U_1_000_000_000 / freq.QuadPart;
 	}
 
-	return ticks / ns_per_qpc_tick;
+	return ticks * ns_per_qpc_tick;
 
 #else
 #error "Vulkan timestamp domain needs porting"
