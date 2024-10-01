@@ -1,4 +1,5 @@
 // Copyright 2018-2024, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -155,6 +156,39 @@ xr_ref_space_to_xrt(XrReferenceSpaceType space_type)
 
 	return XRT_SPACE_REFERENCE_TYPE_INVALID;
 }
+
+
+/*
+ *
+ * Form factor things.
+ *
+ */
+
+static inline enum xrt_form_factor
+xr_form_factor_to_xrt(XrFormFactor form_factor)
+{
+	switch (form_factor) {
+	case XR_FORM_FACTOR_HANDHELD_DISPLAY: return XRT_FORM_FACTOR_HANDHELD;
+	case XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY: return XRT_FORM_FACTOR_HMD;
+	case XR_FORM_FACTOR_MAX_ENUM: assert(false); return 0; // As good as any.
+	}
+
+	// Used as default, to get warnings.
+	return XRT_FORM_FACTOR_HMD;
+}
+
+static inline enum XrFormFactor
+xrt_form_factor_to_xr(enum xrt_form_factor form_factor)
+{
+	switch (form_factor) {
+	case XRT_FORM_FACTOR_HANDHELD: return XR_FORM_FACTOR_HANDHELD_DISPLAY;
+	case XRT_FORM_FACTOR_HMD: return XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+	}
+
+	// Used as default, to get warnings.
+	return XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+}
+
 
 /*
  *

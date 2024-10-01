@@ -1,5 +1,5 @@
 // Copyright 2020-2024, Collabora, Ltd.
-// Copyright 2023, NVIDIA CORPORATION.
+// Copyright 2023-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -43,6 +43,7 @@ struct xrt_system_properties
 {
 	uint32_t vendor_id;
 	char name[XRT_MAX_SYSTEM_NAME_SIZE];
+	enum xrt_form_factor form_factor;
 };
 
 /*!

@@ -1501,7 +1501,6 @@ struct oxr_system
 	//! Have the client application called the gfx api requirements func?
 	bool gotten_requirements;
 
-	XrFormFactor form_factor;
 	XrViewConfigurationType view_config_type;
 	XrViewConfigurationView views[2];
 	uint32_t blend_mode_count;

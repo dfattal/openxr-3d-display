@@ -1,4 +1,5 @@
 // Copyright 2018-2024, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -22,24 +23,17 @@
 #include "oxr_two_call.h"
 #include "oxr_chain.h"
 #include "oxr_api_verify.h"
+#include "oxr_conversions.h"
 
 
 DEBUG_GET_ONCE_NUM_OPTION(scale_percentage, "OXR_VIEWPORT_SCALE_PERCENTAGE", 100)
 
-static enum xrt_form_factor
-convert_form_factor(XrFormFactor form_factor)
-{
-	switch (form_factor) {
-	case XR_FORM_FACTOR_HANDHELD_DISPLAY: return XRT_FORM_FACTOR_HANDHELD;
-	case XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY: return XRT_FORM_FACTOR_HMD;
-	default: return XRT_FORM_FACTOR_HMD;
-	}
-}
+
 
 static bool
 oxr_system_matches(struct oxr_logger *log, struct oxr_system *sys, XrFormFactor form_factor)
 {
-	return form_factor == sys->form_factor;
+	return xr_form_factor_to_xrt(form_factor) == sys->xsys->properties.form_factor;
 }
 
 XrResult
@@ -66,12 +60,12 @@ oxr_system_select(struct oxr_logger *log,
 		return oxr_error(log, XR_ERROR_FORM_FACTOR_UNSUPPORTED,
 		                 "(getInfo->formFactor) no matching system "
 		                 "(given: %i, first: %i)",
-		                 form_factor, systems[0]->form_factor);
+		                 form_factor, xrt_form_factor_to_xr(systems[0]->xsys->properties.form_factor));
 	}
 
 	struct xrt_device *xdev = GET_XDEV_BY_ROLE(selected, head);
 	if (xdev->supported.form_factor_check &&
-	    !xrt_device_is_form_factor_available(xdev, convert_form_factor(form_factor))) {
+	    !xrt_device_is_form_factor_available(xdev, xr_form_factor_to_xrt(form_factor))) {
 		return oxr_error(log, XR_ERROR_FORM_FACTOR_UNAVAILABLE, "request form factor %i is unavailable now",
 		                 form_factor);
 	}
@@ -114,7 +108,6 @@ oxr_system_fill_in(
 
 	sys->inst = inst;
 	sys->systemId = systemId;
-	sys->form_factor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 	if (view_count == 1) {
 		sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO;
 	} else if (view_count == 2) {
