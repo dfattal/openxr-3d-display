@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -25,22 +26,24 @@
  */
 
 static inline void
-fill_info(VkExtent2D extent, struct xrt_swapchain_create_info *out_info)
+fill_info(VkExtent2D extent, VkFormat srgb_format, VkFormat unorm_format, struct xrt_swapchain_create_info *out_info)
 {
+	// Must be true.
+	assert(unorm_format != VK_FORMAT_UNDEFINED);
+
 	enum xrt_swapchain_create_flags create = 0;
 
-	enum xrt_swapchain_usage_bits bits =       //
-	    XRT_SWAPCHAIN_USAGE_COLOR |            //
-	    XRT_SWAPCHAIN_USAGE_SAMPLED |          //
-	    XRT_SWAPCHAIN_USAGE_TRANSFER_SRC |     //
-	    XRT_SWAPCHAIN_USAGE_TRANSFER_DST |     //
-	    XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS | //
-	    XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT;    //
+	enum xrt_swapchain_usage_bits bits =      //
+	    XRT_SWAPCHAIN_USAGE_COLOR |           //
+	    XRT_SWAPCHAIN_USAGE_SAMPLED |         //
+	    XRT_SWAPCHAIN_USAGE_TRANSFER_SRC |    //
+	    XRT_SWAPCHAIN_USAGE_TRANSFER_DST |    //
+	    XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS; //
 
 	struct xrt_swapchain_create_info info = {
 	    .create = create,
 	    .bits = bits,
-	    .format = VK_FORMAT_R8G8B8A8_UNORM,
+	    .format = unorm_format,
 	    .sample_count = 1,
 	    .width = extent.width,
 	    .height = extent.height,
@@ -49,9 +52,14 @@ fill_info(VkExtent2D extent, struct xrt_swapchain_create_info *out_info)
 	    .mip_count = 1,
 	};
 
-	// Use format list to get good performance everywhere.
-	info.formats[info.format_count++] = VK_FORMAT_R8G8B8A8_UNORM;
-	info.formats[info.format_count++] = VK_FORMAT_R8G8B8A8_SRGB;
+	if (srgb_format != VK_FORMAT_UNDEFINED) {
+		// Use format list to get good performance everywhere.
+		info.bits |= XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT;
+		info.formats[info.format_count++] = unorm_format;
+		info.formats[info.format_count++] = srgb_format;
+	} else {
+		assert(info.format_count == 0);
+	}
 
 	*out_info = info;
 }
@@ -126,7 +134,7 @@ struct tmp
 	//! Handles retrieved.
 	xrt_graphics_buffer_handle_t handles[COMP_SCRATCH_NUM_IMAGES];
 
-	//! For automatic conversion to linear.
+	//! For automatic conversion to linear, only populated on mutable.
 	VkImageView srgb_views[COMP_SCRATCH_NUM_IMAGES];
 
 	//! For storage operations in compute shaders.
@@ -134,7 +142,11 @@ struct tmp
 };
 
 static inline bool
-tmp_init_and_create(struct tmp *t, struct vk_bundle *vk, const struct xrt_swapchain_create_info *info)
+tmp_init_and_create(struct tmp *t,
+                    struct vk_bundle *vk,
+                    const struct xrt_swapchain_create_info *info,
+                    const VkFormat srgb_format,
+                    const VkFormat unorm_format)
 {
 	VkResult ret;
 
@@ -157,8 +169,6 @@ tmp_init_and_create(struct tmp *t, struct vk_bundle *vk, const struct xrt_swapch
 	 */
 
 	// Base info.
-	const VkFormat srgb_format = VK_FORMAT_R8G8B8A8_SRGB;
-	const VkFormat unorm_format = VK_FORMAT_R8G8B8A8_UNORM;
 	const VkImageViewType view_type = VK_IMAGE_VIEW_TYPE_2D;
 
 	// Both usages are common.
@@ -178,17 +188,19 @@ tmp_init_and_create(struct tmp *t, struct vk_bundle *vk, const struct xrt_swapch
 	for (uint32_t i = 0; i < COMP_SCRATCH_NUM_IMAGES; i++) {
 		VkImage image = t->vkic.images[i].handle;
 
-		ret = vk_create_view_usage( //
-		    vk,                     // vk_bundle
-		    image,                  // image
-		    view_type,              // type
-		    srgb_format,            // format
-		    srgb_usage,             // image_usage
-		    subresource_range,      // subresource_range
-		    &t->srgb_views[i]);     // out_image_view
-		VK_CHK_WITH_GOTO(ret, "vk_create_view_usage(srgb)", err_destroy_views);
+		if (srgb_format != VK_FORMAT_UNDEFINED) {
+			ret = vk_create_view_usage( //
+			    vk,                     // vk_bundle
+			    image,                  // image
+			    view_type,              // type
+			    srgb_format,            // format
+			    srgb_usage,             // image_usage
+			    subresource_range,      // subresource_range
+			    &t->srgb_views[i]);     // out_image_view
+			VK_CHK_WITH_GOTO(ret, "vk_create_view_usage(srgb)", err_destroy_views);
 
-		VK_NAME_IMAGE_VIEW(vk, t->srgb_views[i], "comp_scratch_image_view(srgb)");
+			VK_NAME_IMAGE_VIEW(vk, t->srgb_views[i], "comp_scratch_image_view(srgb)");
+		}
 
 		ret = vk_create_view_usage( //
 		    vk,                     // vk_bundle
@@ -255,6 +267,50 @@ tmp_destroy(struct tmp *t, struct vk_bundle *vk)
 
 /*
  *
+ * Helper single functions.
+ *
+ */
+
+bool
+ensure(struct comp_scratch_single_images *cssi,
+       struct vk_bundle *vk,
+       VkExtent2D extent,
+       const VkFormat srgb_format,
+       const VkFormat unorm_format)
+{
+	if (cssi->info.width == extent.width &&      //
+	    cssi->info.height == extent.height &&    //
+	    cssi->info.formats[0] == unorm_format && //
+	    cssi->info.formats[1] == srgb_format) {  //
+		// Our work here is done!
+		return true;
+	}
+
+	struct xrt_swapchain_create_info info = XRT_STRUCT_INIT;
+	fill_info(extent, srgb_format, unorm_format, &info);
+
+	struct tmp t; // Is initialized in function.
+	if (!tmp_init_and_create(&t, vk, &info, srgb_format, unorm_format)) {
+		VK_ERROR(vk, "Failed to allocate images");
+		return false;
+	}
+
+	// Clear old information, we haven't touched this struct yet.
+	comp_scratch_single_images_free(cssi, vk);
+
+	// Copy out images and information.
+	tmp_take(&t, cssi->native_images, cssi->images);
+
+	// Generate new unique id for caching and set info.
+	cssi->limited_unique_id = u_limited_unique_id_get();
+	cssi->info = info;
+
+	return true;
+}
+
+
+/*
+ *
  * 'Exported' single functions.
  *
  */
@@ -276,33 +332,27 @@ comp_scratch_single_images_init(struct comp_scratch_single_images *cssi)
 }
 
 bool
-comp_scratch_single_images_ensure(struct comp_scratch_single_images *cssi, struct vk_bundle *vk, VkExtent2D extent)
+comp_scratch_single_images_ensure(struct comp_scratch_single_images *cssi,
+                                  struct vk_bundle *vk,
+                                  VkExtent2D extent,
+                                  const VkFormat format)
 {
-	if (cssi->info.width == extent.width && cssi->info.height == extent.height) {
-		// Our work here is done!
-		return true;
-	}
+	return ensure(cssi, vk, extent, VK_FORMAT_UNDEFINED, format);
+}
 
-	struct xrt_swapchain_create_info info = XRT_STRUCT_INIT;
-	fill_info(extent, &info);
-
-	struct tmp t; // Is initialized in function.
-	if (!tmp_init_and_create(&t, vk, &info)) {
-		VK_ERROR(vk, "Failed to allocate images");
-		return false;
-	}
-
-	// Clear old information, we haven't touched this struct yet.
-	comp_scratch_single_images_free(cssi, vk);
-
-	// Copy out images and information.
-	tmp_take(&t, cssi->native_images, cssi->images);
-
-	// Generate new unique id for caching and set info.
-	cssi->limited_unique_id = u_limited_unique_id_get();
-	cssi->info = info;
-
-	return true;
+/*!
+ * Ensure that the scratch images are allocated and match @p extent size, and @p srgb_format @p unorm_format formats.
+ *
+ * @public @memberof comp_scratch_single_images
+ *
+ * @ingroup comp_util
+ */
+bool
+comp_scratch_single_images_ensure_mutable(struct comp_scratch_single_images *cssi,
+                                          struct vk_bundle *vk,
+                                          VkExtent2D extent)
+{
+	return ensure(cssi, vk, extent, VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_R8G8B8A8_UNORM);
 }
 
 void
@@ -402,6 +452,9 @@ comp_scratch_stereo_images_init(struct comp_scratch_stereo_images *cssi)
 bool
 comp_scratch_stereo_images_ensure(struct comp_scratch_stereo_images *cssi, struct vk_bundle *vk, VkExtent2D extent)
 {
+	const VkFormat srgb_format = VK_FORMAT_R8G8B8A8_SRGB;
+	const VkFormat unorm_format = VK_FORMAT_R8G8B8A8_UNORM;
+
 	if (cssi->info.width == extent.width && cssi->info.height == extent.height) {
 		// Our work here is done!
 		return true;
@@ -409,15 +462,15 @@ comp_scratch_stereo_images_ensure(struct comp_scratch_stereo_images *cssi, struc
 
 	// Get info we need to share with.
 	struct xrt_swapchain_create_info info = XRT_STRUCT_INIT;
-	fill_info(extent, &info);
+	fill_info(extent, srgb_format, unorm_format, &info);
 
 	struct tmp ts[2]; // Is initialized in function.
-	if (!tmp_init_and_create(&ts[0], vk, &info)) {
+	if (!tmp_init_and_create(&ts[0], vk, &info, srgb_format, unorm_format)) {
 		VK_ERROR(vk, "Failed to allocate images for view 0");
 		return false;
 	}
 
-	if (!tmp_init_and_create(&ts[1], vk, &info)) {
+	if (!tmp_init_and_create(&ts[1], vk, &info, srgb_format, unorm_format)) {
 		VK_ERROR(vk, "Failed to allocate images for view 1");
 		goto err_destroy;
 	}

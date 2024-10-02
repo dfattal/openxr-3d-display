@@ -582,7 +582,8 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL); // final_layout
 
 	for (uint32_t i = 0; i < c->nr.view_count; i++) {
-		bret = comp_scratch_single_images_ensure(&r->c->scratch.views[i], &r->c->base.vk, scratch_extent);
+		bret =
+		    comp_scratch_single_images_ensure_mutable(&r->c->scratch.views[i], &r->c->base.vk, scratch_extent);
 		if (!bret) {
 			COMP_ERROR(c, "comp_scratch_single_images_ensure: false");
 			assert(false && "Whelp, can't return an error. But should never really fail.");
@@ -937,6 +938,8 @@ dispatch_graphics(struct comp_renderer *r,
 		// Scratch image covers the whole image.
 		struct xrt_normalized_rect layer_norm_rect = {.x = 0.0f, .y = 0.0f, .w = 1.0f, .h = 1.0f};
 
+		VkImageView sample_view = comp_scratch_single_images_get_sample_view(scratch_view, scratch_index);
+
 		comp_render_gfx_add_view( //
 		    &data,                //
 		    &world_poses[i],      //
@@ -946,7 +949,7 @@ dispatch_graphics(struct comp_renderer *r,
 		    &layer_viewport_data, //
 		    &layer_norm_rect,     //
 		    rsci->image,          //
-		    rsci->srgb_view,      //
+		    sample_view,          //
 		    &vertex_rots[i],      //
 		    &viewport_datas[i]);  // target_viewport_data
 
@@ -1055,6 +1058,9 @@ dispatch_compute(struct comp_renderer *r,
 		// Scratch image covers the whole image.
 		struct xrt_normalized_rect layer_norm_rect = {.x = 0.0f, .y = 0.0f, .w = 1.0f, .h = 1.0f};
 
+		VkImageView sample_view = comp_scratch_single_images_get_sample_view(scratch_view, scratch_index);
+		VkImageView storage_view = comp_scratch_single_images_get_storage_view(scratch_view, scratch_index);
+
 		comp_render_cs_add_view(  //
 		    &data,                //
 		    &world_poses[i],      //
@@ -1063,8 +1069,8 @@ dispatch_compute(struct comp_renderer *r,
 		    &layer_viewport_data, //
 		    &layer_norm_rect,     //
 		    rsci->image,          //
-		    rsci->srgb_view,      //
-		    rsci->unorm_view,     //
+		    sample_view,          //
+		    storage_view,         //
 		    &views[i]);           // target_viewport_data
 
 		if (layer_count == 0) {

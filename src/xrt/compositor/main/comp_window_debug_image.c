@@ -136,7 +136,7 @@ target_create_images(struct comp_target *ct, const struct comp_target_create_ima
 	}
 
 	// Do the allocation.
-	comp_scratch_single_images_ensure(&dit->target, vk, create_info->extent);
+	comp_scratch_single_images_ensure_mutable(&dit->target, vk, create_info->extent);
 
 	// Share the Vulkan handles of images and image views.
 	for (uint32_t i = 0; i < COMP_SCRATCH_NUM_IMAGES; i++) {

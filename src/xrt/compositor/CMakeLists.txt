@@ -182,6 +182,7 @@ if(XRT_MODULE_COMPOSITOR_MAIN)
 		main/comp_compositor.c
 		main/comp_compositor.h
 		main/comp_documentation.h
+		main/comp_main_interface.h
 		main/comp_renderer.c
 		main/comp_renderer.h
 		main/comp_settings.c

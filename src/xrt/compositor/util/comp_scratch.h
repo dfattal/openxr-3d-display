@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -99,14 +100,31 @@ void
 comp_scratch_single_images_init(struct comp_scratch_single_images *cssi);
 
 /*!
- * Ensure that the scratch images are allocated and match @p extent size.
+ * Ensure that the scratch images are allocated and match @p extent size, and
+ * @p format.
  *
  * @public @memberof comp_scratch_single_images
  *
  * @ingroup comp_util
  */
 bool
-comp_scratch_single_images_ensure(struct comp_scratch_single_images *cssi, struct vk_bundle *vk, VkExtent2D extent);
+comp_scratch_single_images_ensure(struct comp_scratch_single_images *cssi,
+                                  struct vk_bundle *vk,
+                                  VkExtent2D extent,
+                                  const VkFormat format);
+
+/*!
+ * Ensure that the scratch images are allocated and match @p extent size,
+ * the formats it will get is 8bit SRGB formats.
+ *
+ * @public @memberof comp_scratch_single_images
+ *
+ * @ingroup comp_util
+ */
+bool
+comp_scratch_single_images_ensure_mutable(struct comp_scratch_single_images *cssi,
+                                          struct vk_bundle *vk,
+                                          VkExtent2D extent);
 
 /*!
  * Free all images allocated, @p init must be called before calling this
@@ -129,6 +147,58 @@ comp_scratch_single_images_free(struct comp_scratch_single_images *cssi, struct 
  */
 void
 comp_scratch_single_images_get(struct comp_scratch_single_images *cssi, uint32_t *out_index);
+
+/*!
+ * Get the image for the given index.
+ *
+ * @public @memberof comp_scratch_single_images
+ *
+ * @ingroup comp_util
+ */
+static inline VkImage
+comp_scratch_single_images_get_image(struct comp_scratch_single_images *cssi, uint32_t index)
+{
+	return cssi->images[index].image;
+}
+
+/*!
+ * Get the image view for sampling, it will apply any automatic linearization,
+ * aka sRGB gamma curve correction.
+ *
+ * @public @memberof comp_scratch_single_images
+ *
+ * @ingroup comp_util
+ */
+static inline VkImageView
+comp_scratch_single_images_get_sample_view(struct comp_scratch_single_images *cssi, uint32_t index)
+{
+	struct render_scratch_color_image *rsci = &cssi->images[index];
+
+	VkImageView view = rsci->srgb_view;
+	if (view != VK_NULL_HANDLE) {
+		return view;
+	}
+
+	// Fallback to unorm view.
+	return rsci->unorm_view;
+}
+
+/*!
+ * Get the image view for storage or direct value, no linearization will be
+ * done.
+ *
+ * @public @memberof comp_scratch_single_images
+ *
+ * @ingroup comp_util
+ */
+static inline VkImageView
+comp_scratch_single_images_get_storage_view(struct comp_scratch_single_images *cssi, uint32_t index)
+{
+	struct render_scratch_color_image *rsci = &cssi->images[index];
+
+	// Always the storage view.
+	return rsci->unorm_view;
+}
 
 /*!
  * After calling @p get and rendering to the image you call this function to
