@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -680,12 +681,22 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 		wait_sem_count = WAIT_SEMAPHORE_COUNT;
 	}
 
+#define SIGNAL_SEMAPHRE_COUNT 1
+	VkSemaphore signal_sems[SIGNAL_SEMAPHRE_COUNT] = {ct->semaphores.render_complete};
+
+	uint32_t signal_sem_count = 0;
+	VkSemaphore *signal_sems_ptr = NULL;
+	if (signal_sems[0] != VK_NULL_HANDLE) {
+		signal_sems_ptr = signal_sems;
+		signal_sem_count = SIGNAL_SEMAPHRE_COUNT;
+	}
+
 	// Next pointer for VkSubmitInfo
 	const void *next = NULL;
 
 #ifdef VK_KHR_timeline_semaphore
 	assert(!comp_frame_is_invalid_locked(&r->c->frame.rendering));
-	uint64_t render_complete_signal_values[WAIT_SEMAPHORE_COUNT] = {(uint64_t)frame_id};
+	uint64_t render_complete_signal_values[SIGNAL_SEMAPHRE_COUNT] = {(uint64_t)frame_id};
 
 	VkTimelineSemaphoreSubmitInfoKHR timeline_info = {
 	    .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO_KHR,
@@ -694,7 +705,7 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 	if (ct->semaphores.render_complete_is_timeline) {
 		timeline_info = (VkTimelineSemaphoreSubmitInfoKHR){
 		    .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO_KHR,
-		    .signalSemaphoreValueCount = WAIT_SEMAPHORE_COUNT,
+		    .signalSemaphoreValueCount = signal_sem_count,
 		    .pSignalSemaphoreValues = render_complete_signal_values,
 		};
 
@@ -711,8 +722,8 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 	    .waitSemaphoreCount = wait_sem_count,
 	    .commandBufferCount = 1,
 	    .pCommandBuffers = &cmd,
-	    .signalSemaphoreCount = 1,
-	    .pSignalSemaphores = &ct->semaphores.render_complete,
+	    .signalSemaphoreCount = signal_sem_count,
+	    .pSignalSemaphores = signal_sems_ptr,
 	};
 
 	// Everything prepared, now we are submitting.
