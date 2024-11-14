@@ -298,6 +298,11 @@ vk_get_device_functions(struct vk_bundle *vk)
 
 #endif // defined(VK_USE_PLATFORM_ANDROID_KHR)
 
+#if defined(VK_EXT_external_memory_host)
+	vk->vkGetMemoryHostPointerPropertiesEXT         = GET_DEV_PROC(vk, vkGetMemoryHostPointerPropertiesEXT);
+
+#endif // defined(VK_EXT_external_memory_host)
+
 #if defined(VK_EXT_calibrated_timestamps)
 	vk->vkGetCalibratedTimestampsEXT                = GET_DEV_PROC(vk, vkGetCalibratedTimestampsEXT);
 

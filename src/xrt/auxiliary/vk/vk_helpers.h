@@ -121,6 +121,7 @@ struct vk_bundle
 	} external;
 
 	// beginning of GENERATED instance extension code - do not modify - used by scripts
+	bool has_KHR_external_memory_capabilities;
 	bool has_EXT_display_surface_counter;
 	bool has_EXT_swapchain_colorspace;
 	bool has_EXT_debug_utils;
@@ -129,6 +130,7 @@ struct vk_bundle
 	// beginning of GENERATED device extension code - do not modify - used by scripts
 	bool has_KHR_8bit_storage;
 	bool has_KHR_external_fence_fd;
+	bool has_KHR_external_memory;
 	bool has_KHR_external_semaphore_fd;
 	bool has_KHR_format_feature_flags2;
 	bool has_KHR_global_priority;
@@ -142,6 +144,7 @@ struct vk_bundle
 	bool has_EXT_calibrated_timestamps;
 	bool has_EXT_display_control;
 	bool has_EXT_external_memory_dma_buf;
+	bool has_EXT_external_memory_host;
 	bool has_EXT_global_priority;
 	bool has_EXT_image_drm_format_modifier;
 	bool has_EXT_robustness2;
@@ -417,6 +420,11 @@ struct vk_bundle
 	PFN_vkGetAndroidHardwareBufferPropertiesANDROID vkGetAndroidHardwareBufferPropertiesANDROID;
 
 #endif // defined(VK_USE_PLATFORM_ANDROID_KHR)
+
+#if defined(VK_EXT_external_memory_host)
+	PFN_vkGetMemoryHostPointerPropertiesEXT vkGetMemoryHostPointerPropertiesEXT;
+
+#endif // defined(VK_EXT_external_memory_host)
 
 #if defined(VK_EXT_calibrated_timestamps)
 	PFN_vkGetCalibratedTimestampsEXT vkGetCalibratedTimestampsEXT;

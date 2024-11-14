@@ -165,6 +165,8 @@ def get_device_cmds():
             requires=("VK_USE_PLATFORM_ANDROID_KHR",),
         ),
         None,
+        Cmd('vkGetMemoryHostPointerPropertiesEXT', requires=("VK_EXT_external_memory_host",)),
+        None,
         Cmd("vkGetCalibratedTimestampsEXT", requires=("VK_EXT_calibrated_timestamps",)),
         None,
         Cmd("vkGetPastPresentationTimingGOOGLE"),
@@ -282,6 +284,7 @@ def get_instance_cmds():
 
 # Sorted KHR, EXT, Vendor, interally alphabetically
 INSTANCE_EXTENSIONS_TO_CHECK = [
+    "VK_KHR_external_memory_capabilities",
     "VK_EXT_display_surface_counter",
     "VK_EXT_swapchain_colorspace",
     "VK_EXT_debug_utils",
@@ -290,6 +293,7 @@ INSTANCE_EXTENSIONS_TO_CHECK = [
 DEVICE_EXTENSIONS_TO_CHECK = [
     "VK_KHR_8bit_storage",
     "VK_KHR_external_fence_fd",
+    "VK_KHR_external_memory",
     "VK_KHR_external_semaphore_fd",
     "VK_KHR_format_feature_flags2",
     "VK_KHR_global_priority",
@@ -303,6 +307,7 @@ DEVICE_EXTENSIONS_TO_CHECK = [
     "VK_EXT_calibrated_timestamps",
     "VK_EXT_display_control",
     "VK_EXT_external_memory_dma_buf",
+    "VK_EXT_external_memory_host",
     "VK_EXT_global_priority",
     "VK_EXT_image_drm_format_modifier",
     "VK_EXT_robustness2",

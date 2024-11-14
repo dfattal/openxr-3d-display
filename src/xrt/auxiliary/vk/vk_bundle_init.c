@@ -189,6 +189,7 @@ vk_fill_in_has_instance_extensions(struct vk_bundle *vk, struct u_string_list *e
 {
 	// beginning of GENERATED instance extension code - do not modify - used by scripts
 	// Reset before filling out.
+	vk->has_KHR_external_memory_capabilities = false;
 	vk->has_EXT_display_surface_counter = false;
 	vk->has_EXT_swapchain_colorspace = false;
 	vk->has_EXT_debug_utils = false;
@@ -198,6 +199,13 @@ vk_fill_in_has_instance_extensions(struct vk_bundle *vk, struct u_string_list *e
 
 	for (uint32_t i = 0; i < ext_count; i++) {
 		const char *ext = exts[i];
+
+#if defined(VK_KHR_external_memory_capabilities)
+		if (strcmp(ext, VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME) == 0) {
+			vk->has_KHR_external_memory_capabilities = true;
+			continue;
+		}
+#endif // defined(VK_KHR_external_memory_capabilities)
 
 #if defined(VK_EXT_display_surface_counter)
 		if (strcmp(ext, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME) == 0) {
@@ -743,6 +751,7 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 	// Reset before filling out.
 	vk->has_KHR_8bit_storage = false;
 	vk->has_KHR_external_fence_fd = false;
+	vk->has_KHR_external_memory = false;
 	vk->has_KHR_external_semaphore_fd = false;
 	vk->has_KHR_format_feature_flags2 = false;
 	vk->has_KHR_global_priority = false;
@@ -756,6 +765,7 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 	vk->has_EXT_calibrated_timestamps = false;
 	vk->has_EXT_display_control = false;
 	vk->has_EXT_external_memory_dma_buf = false;
+	vk->has_EXT_external_memory_host = false;
 	vk->has_EXT_global_priority = false;
 	vk->has_EXT_image_drm_format_modifier = false;
 	vk->has_EXT_robustness2 = false;
@@ -781,6 +791,13 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 			continue;
 		}
 #endif // defined(VK_KHR_external_fence_fd)
+
+#if defined(VK_KHR_external_memory)
+		if (strcmp(ext, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME) == 0) {
+			vk->has_KHR_external_memory = true;
+			continue;
+		}
+#endif // defined(VK_KHR_external_memory)
 
 #if defined(VK_KHR_external_semaphore_fd)
 		if (strcmp(ext, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME) == 0) {
@@ -872,6 +889,13 @@ fill_in_has_device_extensions(struct vk_bundle *vk, struct u_string_list *ext_li
 			continue;
 		}
 #endif // defined(VK_EXT_external_memory_dma_buf)
+
+#if defined(VK_EXT_external_memory_host)
+		if (strcmp(ext, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME) == 0) {
+			vk->has_EXT_external_memory_host = true;
+			continue;
+		}
+#endif // defined(VK_EXT_external_memory_host)
 
 #if defined(VK_EXT_global_priority)
 		if (strcmp(ext, VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME) == 0) {
