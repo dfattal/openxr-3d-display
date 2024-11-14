@@ -803,6 +803,7 @@ comp_target_swapchain_create_images(struct comp_target *ct, const struct comp_ta
 	cts->base.width = extent.width;
 	cts->base.height = extent.height;
 	cts->base.format = cts->surface.format.format;
+	cts->base.final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	cts->base.surface_transform = surface_caps.currentTransform;
 
 	create_image_views(cts);

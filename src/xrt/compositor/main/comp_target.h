@@ -1,4 +1,5 @@
 // Copyright 2020, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -141,6 +142,9 @@ struct comp_target
 
 	//! The format that the renderpass targeting this target should use.
 	VkFormat format;
+
+	//! The final layout that the renderpass should leave this target in.
+	VkImageLayout final_layout;
 
 	//! Number of images that this target has.
 	uint32_t image_count;

@@ -160,6 +160,7 @@ target_create_images(struct comp_target *ct, const struct comp_target_create_ima
 	if (use_srgb) {
 		dit->base.format = VK_FORMAT_R8G8B8A8_SRGB;
 	}
+	dit->base.final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 }
 
 static bool
@@ -313,6 +314,7 @@ target_destroy(struct comp_target *ct)
 		dit->base.width = 0;
 		dit->base.height = 0;
 		dit->base.format = VK_FORMAT_UNDEFINED;
+		dit->base.final_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 	}
 
 	// Always free non-Vulkan resources.

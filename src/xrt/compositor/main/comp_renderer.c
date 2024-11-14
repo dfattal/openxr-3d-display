@@ -403,12 +403,12 @@ renderer_create_renderings_and_fences(struct comp_renderer *r)
 	if (!use_compute) {
 		r->rtr_array = U_TYPED_ARRAY_CALLOC(struct render_gfx_target_resources, r->buffer_count);
 
-		render_gfx_render_pass_init(          //
-		    &r->target_render_pass,           // rgrp
-		    &r->c->nr,                        // struct render_resources
-		    r->c->target->format,             //
-		    VK_ATTACHMENT_LOAD_OP_CLEAR,      // load_op
-		    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR); // final_layout
+		render_gfx_render_pass_init(     //
+		    &r->target_render_pass,      // rgrp
+		    &r->c->nr,                   // struct render_resources
+		    r->c->target->format,        //
+		    VK_ATTACHMENT_LOAD_OP_CLEAR, // load_op
+		    r->c->target->final_layout); // final_layout
 
 		for (uint32_t i = 0; i < r->buffer_count; ++i) {
 			renderer_build_rendering_target_resources(r, &r->rtr_array[i], i);
