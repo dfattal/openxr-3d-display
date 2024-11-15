@@ -1,4 +1,4 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2025, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -12,6 +12,7 @@
 #include "xrt/xrt_config_build.h"
 
 #include "util/u_debug.h"
+#include "util/u_pretty_print.h"
 #include "u_json.h"
 #include "util/u_truncate_printf.h"
 
@@ -421,6 +422,37 @@ do_print(const char *file, int line, const char *func, enum u_logging_level leve
  * 'Exported' functions.
  *
  */
+
+void
+u_log_print_result(enum u_logging_level cond_level,
+                   const char *file,
+                   int line,
+                   const char *calling_fn,
+                   xrt_result_t xret,
+                   const char *called_fn)
+{
+	bool success = xret == XRT_SUCCESS;
+	enum u_logging_level level = success ? U_LOGGING_INFO : U_LOGGING_ERROR;
+
+	// Should we be logging?
+	if (level < cond_level) {
+		return;
+	}
+
+	struct u_pp_sink_stack_only sink;
+	u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+
+	if (success) {
+		u_pp(dg, "%s: ", called_fn);
+	} else {
+		u_pp(dg, "%s failed: ", called_fn);
+	}
+
+	u_pp_xrt_result(dg, xret);
+	u_pp(dg, " [%s:%i]", file, line);
+
+	u_log(file, line, calling_fn, level, "%s", sink.buffer);
+}
 
 void
 u_log(const char *file, int line, const char *func, enum u_logging_level level, const char *format, ...)
