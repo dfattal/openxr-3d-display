@@ -1460,7 +1460,10 @@ oxr_session_apply_force_feedback(struct oxr_logger *log,
 		result.force_feedback.force_feedback[i].value = locations->locations[i].value;
 	}
 
-	xrt_device_set_output(xdev, xr_hand_to_force_feedback_output(hand_tracker->hand), &result);
+	xrt_result_t xret = xrt_device_set_output(xdev, xr_hand_to_force_feedback_output(hand_tracker->hand), &result);
+	if (xret != XRT_SUCCESS) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "xr_device_set_output failed");
+	}
 
 	return XR_SUCCESS;
 }
