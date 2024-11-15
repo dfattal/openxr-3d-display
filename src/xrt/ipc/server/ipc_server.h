@@ -42,6 +42,12 @@ extern "C" {
 #define IPC_WARN(d, ...) U_LOG_IFL_W(d->log_level, __VA_ARGS__)
 #define IPC_ERROR(d, ...) U_LOG_IFL_E(d->log_level, __VA_ARGS__)
 
+#define IPC_CHK_AND_RET(S, ...) U_LOG_CHK_AND_RET((S)->log_level, __VA_ARGS__)
+#define IPC_CHK_WITH_GOTO(S, ...) U_LOG_CHK_WITH_GOTO((S)->log_level, __VA_ARGS__)
+#define IPC_CHK_WITH_RET(S, ...) U_LOG_CHK_WITH_RET((S)->log_level, __VA_ARGS__)
+#define IPC_CHK_ONLY_PRINT(S, ...) U_LOG_CHK_ONLY_PRINT((S)->log_level, __VA_ARGS__)
+#define IPC_CHK_ALWAYS_RET(S, ...) U_LOG_CHK_ALWAYS_RET((S)->log_level, __VA_ARGS__)
+
 
 /*
  *
