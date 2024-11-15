@@ -1,4 +1,5 @@
 // Copyright 2020-2023, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -214,4 +215,20 @@ typedef enum xrt_result
 	 * The requested operation failed, verify the log to know more.
 	 */
 	XRT_ERROR_OUTPUT_REQUEST_FAILURE = -35,
+
+	/*!
+	 * Failed to create a sync primitive like mutex.
+	 */
+	XRT_ERROR_SYNC_PRIMITIVE_CREATION_FAILED = -36,
+
+	/*!
+	 * The IPC server detected that a service was already running and
+	 * couldn't start because of that.
+	 */
+	XRT_ERROR_IPC_SERVICE_ALREADY_RUNNING = -37,
+
+	/*!
+	 * The IPC server couldn't starts it mainloop.
+	 */
+	XRT_ERROR_IPC_MAINLOOP_FAILED_TO_INIT = -38,
 } xrt_result_t;
