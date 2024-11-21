@@ -814,7 +814,7 @@ xrt_device_get_plane_detections_ext(struct xrt_device *xdev,
  * @copydoc xrt_device::get_view_poses
  * @public @memberof xrt_device
  */
-static inline void
+static inline xrt_result_t
 xrt_device_get_view_poses(struct xrt_device *xdev,
                           const struct xrt_vec3 *default_eye_relation,
                           int64_t at_timestamp_ns,
@@ -825,6 +825,7 @@ xrt_device_get_view_poses(struct xrt_device *xdev,
 {
 	xdev->get_view_poses(xdev, default_eye_relation, at_timestamp_ns, view_count, out_head_relation, out_fovs,
 	                     out_poses);
+	return XRT_SUCCESS;
 }
 
 /*!
