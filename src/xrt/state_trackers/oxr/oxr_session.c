@@ -598,14 +598,15 @@ oxr_session_locate_views(struct oxr_logger *log,
 	struct xrt_fov fovs[XRT_MAX_VIEWS] = {0};
 	struct xrt_pose poses[XRT_MAX_VIEWS] = {0};
 
-	xrt_device_get_view_poses( //
-	    xdev,                  //
-	    &default_eye_relation, //
-	    xdisplay_time,         //
-	    view_count,            //
-	    &T_xdev_head,          //
-	    fovs,                  //
+	xrt_result_t xret = xrt_device_get_view_poses( //
+	    xdev,                                      //
+	    &default_eye_relation,                     //
+	    xdisplay_time,                             //
+	    view_count,                                //
+	    &T_xdev_head,                              //
+	    fovs,                                      //
 	    poses);
+	OXR_CHECK_XRET(log, sess, xret, xrt_device_get_view_poses);
 
 	// The xdev pose in the base space.
 	struct xrt_space_relation T_base_xdev = XRT_SPACE_RELATION_ZERO;
