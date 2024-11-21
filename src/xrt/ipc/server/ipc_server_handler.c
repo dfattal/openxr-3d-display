@@ -1991,20 +1991,14 @@ ipc_handle_device_get_view_poses(volatile struct ipc_client_state *ics,
 	struct xrt_fov fovs[IPC_MAX_RAW_VIEWS];
 	struct xrt_pose poses[IPC_MAX_RAW_VIEWS];
 
-	xrt_device_get_view_poses( //
-	    xdev,                  //
-	    fallback_eye_relation, //
-	    at_timestamp_ns,       //
-	    view_count,            //
-	    &reply.head_relation,  //
-	    fovs,                  //
-	    poses);                //
-
-	/*
-	 * Operation ok, head_relation has already been put in the reply
-	 * struct, so we don't need to send that manually.
-	 */
-	reply.result = XRT_SUCCESS;
+	reply.result = xrt_device_get_view_poses( //
+	    xdev,                                 //
+	    fallback_eye_relation,                //
+	    at_timestamp_ns,                      //
+	    view_count,                           //
+	    &reply.head_relation,                 //
+	    fovs,                                 //
+	    poses);                               //
 
 	/*
 	 * This isn't really needed, but demonstrates the server sending the
@@ -2052,16 +2046,14 @@ ipc_handle_device_get_view_poses_2(volatile struct ipc_client_state *ics,
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
 	struct xrt_device *xdev = get_xdev(ics, device_id);
-	xrt_device_get_view_poses(    //
-	    xdev,                     //
-	    default_eye_relation,     //
-	    at_timestamp_ns,          //
-	    view_count,               //
-	    &out_info->head_relation, //
-	    out_info->fovs,           //
-	    out_info->poses);         //
-
-	return XRT_SUCCESS;
+	return xrt_device_get_view_poses( //
+	    xdev,                         //
+	    default_eye_relation,         //
+	    at_timestamp_ns,              //
+	    view_count,                   //
+	    &out_info->head_relation,     //
+	    out_info->fovs,               //
+	    out_info->poses);             //
 }
 
 xrt_result_t
