@@ -436,7 +436,11 @@ null_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle
 
 	struct xrt_fov fovs[2] = {0};
 	struct xrt_pose poses[2] = {0};
-	xrt_device_get_view_poses(c->xdev, &default_eye_relation, display_time_ns, 2, &head_relation, fovs, poses);
+	xrt_result_t xret =
+	    xrt_device_get_view_poses(c->xdev, &default_eye_relation, display_time_ns, 2, &head_relation, fovs, poses);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 
 	/*

@@ -311,7 +311,7 @@ calc_pose_data(struct comp_renderer *r,
 	struct xrt_fov xdev_fovs[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
 	struct xrt_pose xdev_poses[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
 
-	xrt_device_get_view_poses(                           //
+	xrt_result_t xret = xrt_device_get_view_poses(       //
 	    r->c->xdev,                                      //
 	    &default_eye_relation,                           //
 	    r->c->frame.rendering.predicted_display_time_ns, // at_timestamp_ns
@@ -319,6 +319,13 @@ calc_pose_data(struct comp_renderer *r,
 	    &head_relation,                                  // out_head_relation
 	    xdev_fovs,                                       // out_fovs
 	    xdev_poses);                                     // out_poses
+	if (xret != XRT_SUCCESS) {
+		struct u_pp_sink_stack_only sink;
+		u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+		u_pp_xrt_result(dg, xret);
+		U_LOG_E("xrt_device_get_view_poses failed: %s", sink.buffer);
+		return;
+	}
 
 	struct xrt_fov dist_fov[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
 	for (uint32_t i = 0; i < view_count; i++) {
