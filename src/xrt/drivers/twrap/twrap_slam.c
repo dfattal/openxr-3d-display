@@ -136,18 +136,6 @@ twrap_slam_get_tracked_pose(struct xrt_device *xdev,
 }
 
 static void
-twrap_slam_get_view_poses(struct xrt_device *xdev,
-                          const struct xrt_vec3 *default_eye_relation,
-                          int64_t at_timestamp_ns,
-                          uint32_t view_count,
-                          struct xrt_space_relation *out_head_relation,
-                          struct xrt_fov *out_fovs,
-                          struct xrt_pose *out_poses)
-{
-	assert(false);
-}
-
-static void
 twrap_slam_destroy(struct xrt_device *xdev)
 {
 	struct slam_device *dx = slam_device(xdev);
@@ -173,7 +161,7 @@ twrap_slam_create_device(struct xrt_frame_context *xfctx,
 
 	dx->base.update_inputs = u_device_noop_update_inputs;
 	dx->base.get_tracked_pose = twrap_slam_get_tracked_pose;
-	dx->base.get_view_poses = twrap_slam_get_view_poses;
+	dx->base.get_view_poses = u_device_ni_get_view_poses;
 	dx->base.destroy = twrap_slam_destroy;
 	dx->base.name = name;
 	dx->base.tracking_origin->type = XRT_TRACKING_TYPE_OTHER;

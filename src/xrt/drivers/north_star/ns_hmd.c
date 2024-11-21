@@ -385,7 +385,7 @@ ns_hmd_get_tracked_pose(struct xrt_device *xdev,
 	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 ns_hmd_get_view_poses(struct xrt_device *xdev,
                       const struct xrt_vec3 *default_eye_relation,
                       int64_t at_timestamp_ns,
@@ -398,19 +398,24 @@ ns_hmd_get_view_poses(struct xrt_device *xdev,
 	NS_DEBUG(ns, "Called!");
 
 	// Use this to take care of most stuff, then fix up below.
-	u_device_get_view_poses(  //
-	    xdev,                 //
-	    default_eye_relation, //
-	    at_timestamp_ns,      //
-	    view_count,           //
-	    out_head_relation,    //
-	    out_fovs,             //
-	    out_poses);           //
+	xrt_result_t xret = u_device_get_view_poses( //
+	    xdev,                                    //
+	    default_eye_relation,                    //
+	    at_timestamp_ns,                         //
+	    view_count,                              //
+	    out_head_relation,                       //
+	    out_fovs,                                //
+	    out_poses);                              //
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 	// Fix fix.
 	for (uint32_t i = 0; i < view_count && i < ARRAY_SIZE(ns->config.head_pose_to_eye); i++) {
 		out_poses[i] = ns->config.head_pose_to_eye[i];
 	}
+
+	return XRT_SUCCESS;
 }
 
 bool

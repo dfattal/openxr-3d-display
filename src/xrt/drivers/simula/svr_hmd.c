@@ -99,7 +99,7 @@ svr_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 #define DEG_TO_RAD(DEG) (DEG * M_PI / 180.)
 
-static void
+static xrt_result_t
 svr_hmd_get_view_poses(struct xrt_device *xdev,
                        const struct xrt_vec3 *default_eye_relation,
                        int64_t at_timestamp_ns,
@@ -111,14 +111,17 @@ svr_hmd_get_view_poses(struct xrt_device *xdev,
 	//!@todo: default_eye_relation inherits from the env var OXR_DEBUG_IPD_MM / oxr_session.c
 	// probably needs a lot more attention
 
-	u_device_get_view_poses(  //
-	    xdev,                 //
-	    default_eye_relation, //
-	    at_timestamp_ns,      //
-	    view_count,           //
-	    out_head_relation,    //
-	    out_fovs,             //
-	    out_poses);           //
+	xrt_result_t xret = u_device_get_view_poses( //
+	    xdev,                                    //
+	    default_eye_relation,                    //
+	    at_timestamp_ns,                         //
+	    view_count,                              //
+	    out_head_relation,                       //
+	    out_fovs,                                //
+	    out_poses);                              //
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 	//!@todo you may need to invert this - I can't test locally
 	float turn_vals[2] = {5.0, -5.0};
@@ -126,6 +129,8 @@ svr_hmd_get_view_poses(struct xrt_device *xdev,
 		struct xrt_vec3 y_up = (struct xrt_vec3)XRT_VEC3_UNIT_Y;
 		math_quat_from_angle_vector(DEG_TO_RAD(turn_vals[i]), &y_up, &out_poses[i].orientation);
 	}
+
+	return XRT_SUCCESS;
 }
 
 //!@todo: remove hard-coding and move to u_distortion_mesh

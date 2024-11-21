@@ -174,8 +174,8 @@ HmdDevice::HmdDevice(const DeviceBuilder &builder) : Device(builder)
 	this->inputs = inputs_vec.data();
 	this->input_count = inputs_vec.size();
 
+	this->xrt_device::get_view_poses = &device_bouncer<HmdDevice, &HmdDevice::get_view_poses, xrt_result_t>;
 #define SETUP_MEMBER_FUNC(name) this->xrt_device::name = &device_bouncer<HmdDevice, &HmdDevice::name>
-	SETUP_MEMBER_FUNC(get_view_poses);
 	SETUP_MEMBER_FUNC(compute_distortion);
 #undef SETUP_MEMBER_FUNC
 }
@@ -515,7 +515,7 @@ HmdDevice::SetDisplayEyeToHead(uint32_t unWhichDevice,
 	this->eye[1].position = rightEye_postquat.position;
 }
 
-void
+xrt_result_t
 HmdDevice::get_view_poses(const xrt_vec3 *default_eye_relation,
                           uint64_t at_timestamp_ns,
                           uint32_t view_count,
@@ -526,14 +526,17 @@ HmdDevice::get_view_poses(const xrt_vec3 *default_eye_relation,
 	struct xrt_vec3 eye_relation = *default_eye_relation;
 	eye_relation.x = ipd;
 
-	u_device_get_view_poses( //
-	    this,                //
-	    &eye_relation,       //
-	    at_timestamp_ns,     //
-	    view_count,          //
-	    out_head_relation,   //
-	    out_fovs,            //
-	    out_poses);          //
+	xrt_result_t xret = u_device_get_view_poses( //
+	    this,                                    //
+	    &eye_relation,                           //
+	    at_timestamp_ns,                         //
+	    view_count,                              //
+	    out_head_relation,                       //
+	    out_fovs,                                //
+	    out_poses);                              //
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 	out_poses[0].orientation = this->eye[0].orientation;
 	out_poses[0].position.z = this->eye[0].position.z;
@@ -541,6 +544,8 @@ HmdDevice::get_view_poses(const xrt_vec3 *default_eye_relation,
 	out_poses[1].orientation = this->eye[1].orientation;
 	out_poses[1].position.z = this->eye[1].position.z;
 	out_poses[1].position.y = this->eye[1].position.y;
+
+	return XRT_SUCCESS;
 }
 
 bool

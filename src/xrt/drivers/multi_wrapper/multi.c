@@ -193,7 +193,7 @@ set_output(struct xrt_device *xdev, enum xrt_output_name name, const struct xrt_
 	xrt_device_set_output(target, name, value);
 }
 
-static void
+static xrt_result_t
 get_view_poses(struct xrt_device *xdev,
                const struct xrt_vec3 *default_eye_relation,
                int64_t at_timestamp_ns,
@@ -204,14 +204,17 @@ get_view_poses(struct xrt_device *xdev,
 {
 	struct multi_device *d = (struct multi_device *)xdev;
 	struct xrt_device *target = d->tracking_override.target;
-	xrt_device_get_view_poses(target, default_eye_relation, at_timestamp_ns, view_count, out_head_relation,
-	                          out_fovs, out_poses);
+	xrt_result_t xret = xrt_device_get_view_poses(target, default_eye_relation, at_timestamp_ns, view_count,
+	                                              out_head_relation, out_fovs, out_poses);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 	/*
 	 * Use xrt_device_ function to be sure it is exactly
 	 * like if the state-tracker called this function.
 	 */
-	xrt_device_get_tracked_pose(xdev, XRT_INPUT_GENERIC_HEAD_POSE, at_timestamp_ns, out_head_relation);
+	return xrt_device_get_tracked_pose(xdev, XRT_INPUT_GENERIC_HEAD_POSE, at_timestamp_ns, out_head_relation);
 }
 
 static bool

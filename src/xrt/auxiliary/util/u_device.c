@@ -451,7 +451,7 @@ u_device_get_view_pose(const struct xrt_vec3 *eye_relation, uint32_t view_index,
  *
  */
 
-void
+xrt_result_t
 u_device_get_view_poses(struct xrt_device *xdev,
                         const struct xrt_vec3 *default_eye_relation,
                         int64_t at_timestamp_ns,
@@ -460,7 +460,11 @@ u_device_get_view_poses(struct xrt_device *xdev,
                         struct xrt_fov *out_fovs,
                         struct xrt_pose *out_poses)
 {
-	xrt_device_get_tracked_pose(xdev, XRT_INPUT_GENERIC_HEAD_POSE, at_timestamp_ns, out_head_relation);
+	xrt_result_t xret =
+	    xrt_device_get_tracked_pose(xdev, XRT_INPUT_GENERIC_HEAD_POSE, at_timestamp_ns, out_head_relation);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 	for (uint32_t i = 0; i < view_count && i < ARRAY_SIZE(xdev->hmd->views); i++) {
 		out_fovs[i] = xdev->hmd->distortion.fov[i];
@@ -469,6 +473,8 @@ u_device_get_view_poses(struct xrt_device *xdev,
 	for (uint32_t i = 0; i < view_count; i++) {
 		u_device_get_view_pose(default_eye_relation, i, &out_poses[i]);
 	}
+
+	return XRT_SUCCESS;
 }
 
 xrt_result_t
@@ -521,7 +527,7 @@ u_device_ni_set_output(struct xrt_device *xdev, enum xrt_output_name name, const
 	E(get_hand_tracking);
 }
 
-void
+xrt_result_t
 u_device_ni_get_view_poses(struct xrt_device *xdev,
                            const struct xrt_vec3 *default_eye_relation,
                            int64_t at_timestamp_ns,
@@ -530,7 +536,8 @@ u_device_ni_get_view_poses(struct xrt_device *xdev,
                            struct xrt_fov *out_fovs,
                            struct xrt_pose *out_poses)
 {
-	E(get_hand_tracking);
+	E(get_view_poses);
+	return XRT_ERROR_NOT_IMPLEMENTED;
 }
 
 bool

@@ -74,7 +74,7 @@ r_hmd_get_tracked_pose(struct xrt_device *xdev,
 	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 r_hmd_get_view_poses(struct xrt_device *xdev,
                      const struct xrt_vec3 *default_eye_relation,
                      int64_t at_timestamp_ns,
@@ -86,23 +86,17 @@ r_hmd_get_view_poses(struct xrt_device *xdev,
 	struct r_hmd *rh = r_hmd(xdev);
 
 	if (!rh->r->latest.head.per_view_data_valid) {
-		u_device_get_view_poses(  //
-		    xdev,                 //
-		    default_eye_relation, //
-		    at_timestamp_ns,      //
-		    view_count,           //
-		    out_head_relation,    //
-		    out_fovs,             //
-		    out_poses);           //
-
-		// Done now
-		return;
+		return u_device_get_view_poses( //
+		    xdev,                       //
+		    default_eye_relation,       //
+		    at_timestamp_ns,            //
+		    view_count,                 //
+		    out_head_relation,          //
+		    out_fovs,                   //
+		    out_poses);                 //
 	}
 
-	if (view_count > ARRAY_SIZE(rh->r->latest.head.views)) {
-		U_LOG_E("Asking for too many views!");
-		return;
-	}
+	assert(view_count <= ARRAY_SIZE(rh->r->latest.head.views));
 
 	copy_head_center_to_relation(rh, out_head_relation);
 
@@ -110,6 +104,8 @@ r_hmd_get_view_poses(struct xrt_device *xdev,
 		out_poses[i] = rh->r->latest.head.views[i].pose;
 		out_fovs[i] = rh->r->latest.head.views[i].fov;
 	}
+
+	return XRT_SUCCESS;
 }
 
 static void

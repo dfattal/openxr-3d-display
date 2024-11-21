@@ -166,7 +166,7 @@ u_device_get_view_pose(const struct xrt_vec3 *eye_relation, uint32_t view_index,
  *
  * The field @ref xrt_device::hmd needs to be set and valid.
  */
-void
+xrt_result_t
 u_device_get_view_poses(struct xrt_device *xdev,
                         const struct xrt_vec3 *default_eye_relation,
                         int64_t at_timestamp_ns,
@@ -233,7 +233,7 @@ u_device_ni_set_output(struct xrt_device *xdev, enum xrt_output_name name, const
  *
  * @ingroup aux_util
  */
-void
+xrt_result_t
 u_device_ni_get_view_poses(struct xrt_device *xdev,
                            const struct xrt_vec3 *default_eye_relation,
                            int64_t at_timestamp_ns,

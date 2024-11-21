@@ -62,7 +62,7 @@ ipc_client_hmd(struct xrt_device *xdev)
 	return (ipc_client_hmd_t *)xdev;
 }
 
-static void
+static xrt_result_t
 call_get_view_poses_raw(ipc_client_hmd_t *ich,
                         const struct xrt_vec3 *default_eye_relation,
                         int64_t at_timestamp_ns,
@@ -117,6 +117,7 @@ call_get_view_poses_raw(ipc_client_hmd_t *ich,
 
 out:
 	ipc_client_connection_unlock(ipc_c);
+	return xret;
 }
 
 
@@ -126,7 +127,7 @@ out:
  *
  */
 
-static void
+static xrt_result_t
 ipc_client_hmd_get_view_poses(struct xrt_device *xdev,
                               const struct xrt_vec3 *default_eye_relation,
                               int64_t at_timestamp_ns,
@@ -149,7 +150,7 @@ ipc_client_hmd_get_view_poses(struct xrt_device *xdev,
 		    at_timestamp_ns,                     //
 		    view_count,                          //
 		    &info);                              //
-		IPC_CHK_ONLY_PRINT(ich->ipc_c, xret, "ipc_call_device_get_view_poses_2");
+		IPC_CHK_AND_RET(ich->ipc_c, xret, "ipc_call_device_get_view_poses_2");
 
 		*out_head_relation = info.head_relation;
 		for (int i = 0; i < 2; i++) {
@@ -159,20 +160,21 @@ ipc_client_hmd_get_view_poses(struct xrt_device *xdev,
 
 	} else if (view_count <= IPC_MAX_RAW_VIEWS) {
 		// Artificial limit.
-
-		call_get_view_poses_raw(  //
-		    ich,                  //
-		    default_eye_relation, //
-		    at_timestamp_ns,      //
-		    view_count,           //
-		    out_head_relation,    //
-		    out_fovs,             //
-		    out_poses);           //
+		xret = call_get_view_poses_raw( //
+		    ich,                        //
+		    default_eye_relation,       //
+		    at_timestamp_ns,            //
+		    view_count,                 //
+		    out_head_relation,          //
+		    out_fovs,                   //
+		    out_poses);                 //
 	} else {
 		IPC_ERROR(ich->ipc_c, "Cannot handle %u view_count, %u or less supported.", view_count,
 		          (uint32_t)IPC_MAX_RAW_VIEWS);
 		assert(false && !"Too large view_count!");
 	}
+
+	return xret;
 }
 
 static bool

@@ -124,7 +124,7 @@ public:
 	                    const vr::HmdMatrix34_t &eyeToHeadLeft,
 	                    const vr::HmdMatrix34_t &eyeToHeadRight);
 
-	void
+	xrt_result_t
 	get_view_poses(const xrt_vec3 *default_eye_relation,
 	               uint64_t at_timestamp_ns,
 	               uint32_t view_count,

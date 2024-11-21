@@ -128,7 +128,7 @@ sample_hmd_get_tracked_pose(struct xrt_device *xdev,
 	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 sample_hmd_get_view_poses(struct xrt_device *xdev,
                           const struct xrt_vec3 *default_eye_relation,
                           int64_t at_timestamp_ns,
@@ -141,14 +141,14 @@ sample_hmd_get_view_poses(struct xrt_device *xdev,
 	 * For HMDs you can call this function or directly set
 	 * the `get_view_poses` function on the device to it.
 	 */
-	u_device_get_view_poses(  //
-	    xdev,                 //
-	    default_eye_relation, //
-	    at_timestamp_ns,      //
-	    view_count,           //
-	    out_head_relation,    //
-	    out_fovs,             //
-	    out_poses);           //
+	return u_device_get_view_poses( //
+	    xdev,                       //
+	    default_eye_relation,       //
+	    at_timestamp_ns,            //
+	    view_count,                 //
+	    out_head_relation,          //
+	    out_fovs,                   //
+	    out_poses);                 //
 }
 
 static xrt_result_t

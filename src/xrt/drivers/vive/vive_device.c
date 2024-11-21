@@ -208,7 +208,7 @@ vive_device_get_tracked_pose(struct xrt_device *xdev,
 	return xret;
 }
 
-static void
+static xrt_result_t
 vive_device_get_view_poses(struct xrt_device *xdev,
                            const struct xrt_vec3 *default_eye_relation,
                            int64_t at_timestamp_ns,
@@ -222,20 +222,25 @@ vive_device_get_view_poses(struct xrt_device *xdev,
 	// Only supports two views.
 	assert(view_count <= 2);
 
-	u_device_get_view_poses(  //
-	    xdev,                 //
-	    default_eye_relation, //
-	    at_timestamp_ns,      //
-	    view_count,           //
-	    out_head_relation,    //
-	    out_fovs,             //
-	    out_poses);           //
+	xrt_result_t xret = u_device_get_view_poses( //
+	    xdev,                                    //
+	    default_eye_relation,                    //
+	    at_timestamp_ns,                         //
+	    view_count,                              //
+	    out_head_relation,                       //
+	    out_fovs,                                //
+	    out_poses);                              //
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 	// This is for the Index' canted displays, on the Vive [Pro] they are identity.
 	struct vive_device *d = vive_device(xdev);
 	for (uint32_t i = 0; i < view_count && i < ARRAY_SIZE(d->config.display.rot); i++) {
 		out_poses[i].orientation = d->config.display.rot[i];
 	}
+
+	return XRT_SUCCESS;
 }
 
 static int

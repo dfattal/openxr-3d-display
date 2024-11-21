@@ -523,7 +523,7 @@ survive_controller_get_hand_tracking(struct xrt_device *xdev,
 	return XRT_SUCCESS;
 }
 
-static void
+static xrt_result_t
 survive_device_get_view_poses(struct xrt_device *xdev,
                               const struct xrt_vec3 *default_eye_relation,
                               int64_t at_timestamp_ns,
@@ -547,19 +547,24 @@ survive_device_get_view_poses(struct xrt_device *xdev,
 		eye_relation.x = survive->hmd.ipd;
 	}
 
-	u_device_get_view_poses( //
-	    xdev,                //
-	    &eye_relation,       //
-	    at_timestamp_ns,     //
-	    view_count,          //
-	    out_head_relation,   //
-	    out_fovs,            //
-	    out_poses);          //
+	xrt_result_t xret = u_device_get_view_poses( //
+	    xdev,                                    //
+	    &eye_relation,                           //
+	    at_timestamp_ns,                         //
+	    view_count,                              //
+	    out_head_relation,                       //
+	    out_fovs,                                //
+	    out_poses);                              //
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 	// This is for the Index' canted displays, on the Vive [Pro] they are identity.
 	for (uint32_t i = 0; i < view_count && i < ARRAY_SIZE(survive->hmd.config.display.rot); i++) {
 		out_poses[i].orientation = survive->hmd.config.display.rot[i];
 	}
+
+	return XRT_SUCCESS;
 }
 
 enum InputComponent
