@@ -257,7 +257,10 @@ create_and_fill_in_distortion_buffer_for_view(struct vk_bundle *vk,
 			uv.y += 0.5f;
 
 			struct xrt_uv_triplet result;
-			xrt_device_compute_distortion(xdev, view, uv.x, uv.y, &result);
+			xrt_result_t xret = xrt_device_compute_distortion(xdev, view, uv.x, uv.y, &result);
+			if (xret != XRT_SUCCESS) {
+				VK_CHK_WITH_GOTO(VK_ERROR_UNKNOWN, "xrt_device_compute_distortion", err_buffers);
+			}
 
 			r->pixels[row][col] = result.r;
 			g->pixels[row][col] = result.g;
