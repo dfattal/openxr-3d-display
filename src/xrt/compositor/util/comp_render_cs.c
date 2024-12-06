@@ -352,8 +352,8 @@ do_cs_clear(struct render_compute *render, const struct comp_render_dispatch_dat
 
 
 	render_compute_clear(        //
-	    render,                  // crc
-	    d->cs.target_image,      // target_image
+	    render,                  //
+	    d->cs.target_image,      //
 	    d->cs.target_unorm_view, // target_image_view
 	    target_viewport_datas);  // views
 }
@@ -393,11 +393,11 @@ do_cs_distortion_from_scratch(struct render_compute *render, const struct comp_r
 	}
 
 	render_compute_projection(   //
-	    render,                  // crc
-	    src_samplers,            // src_samplers
-	    src_image_views,         // src_image_views
-	    src_norm_rects,          // src_rects
-	    d->cs.target_image,      // target_image
+	    render,                  //
+	    src_samplers,            //
+	    src_image_views,         //
+	    src_norm_rects,          //
+	    d->cs.target_image,      //
 	    d->cs.target_unorm_view, // target_image_view
 	    target_viewport_datas);  // views
 }

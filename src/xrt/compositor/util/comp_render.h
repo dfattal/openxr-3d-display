@@ -373,7 +373,7 @@ comp_render_gfx_dispatch(struct render_gfx *render,
  *
  * CS renderer control and dispatch - uses compute shaders
  *
- * Depends on @ref render_compute (often called `crc`)
+ * Depends on @ref render_compute
  *
  * @ingroup comp_render
  * @{
