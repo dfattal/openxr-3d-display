@@ -312,10 +312,10 @@ calc_pose_data(struct comp_renderer *r,
 	struct xrt_pose xdev_poses[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
 
 	xrt_device_get_view_poses(                           //
-	    r->c->xdev,                                      // xdev
-	    &default_eye_relation,                           // default_eye_relation
+	    r->c->xdev,                                      //
+	    &default_eye_relation,                           //
 	    r->c->frame.rendering.predicted_display_time_ns, // at_timestamp_ns
-	    view_count,                                      // view_count
+	    view_count,                                      //
 	    &head_relation,                                  // out_head_relation
 	    xdev_fovs,                                       // out_fovs
 	    xdev_poses);                                     // out_poses
@@ -397,8 +397,8 @@ renderer_create_renderings_and_fences(struct comp_renderer *r)
 
 		render_gfx_render_pass_init(          //
 		    &r->target_render_pass,           // rgrp
-		    &r->c->nr,                        // r
-		    r->c->target->format,             // format
+		    &r->c->nr,                        // struct render_resources
+		    r->c->target->format,             //
 		    VK_ATTACHMENT_LOAD_OP_CLEAR,      // load_op
 		    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR); // final_layout
 
@@ -568,7 +568,7 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	// Shared render pass between all scratch images.
 	render_gfx_render_pass_init(                   //
 	    &r->scratch_render_pass,                   // rgrp
-	    &r->c->nr,                                 // r
+	    &r->c->nr,                                 // struct render_resources
 	    VK_FORMAT_R8G8B8A8_SRGB,                   // format
 	    VK_ATTACHMENT_LOAD_OP_CLEAR,               // load_op
 	    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL); // final_layout
@@ -841,11 +841,11 @@ renderer_fini(struct comp_renderer *r)
  */
 
 /*!
- * @pre render_gfx_init(rr, &c->nr)
+ * @pre render_gfx_init(render, &c->nr)
  */
 static XRT_CHECK_RESULT VkResult
 dispatch_graphics(struct comp_renderer *r,
-                  struct render_gfx *rr,
+                  struct render_gfx *render,
                   struct comp_render_scratch_state *crss,
                   enum comp_target_fov_source fov_source)
 {
@@ -869,23 +869,23 @@ dispatch_graphics(struct comp_renderer *r,
 
 	// Viewport information.
 	struct render_viewport_data viewport_datas[XRT_MAX_VIEWS];
-	calc_viewport_data(r, viewport_datas, rr->r->view_count);
+	calc_viewport_data(r, viewport_datas, render->r->view_count);
 
 	// Vertex rotation information.
 	struct xrt_matrix_2x2 vertex_rots[XRT_MAX_VIEWS];
-	calc_vertex_rot_data(r, vertex_rots, rr->r->view_count);
+	calc_vertex_rot_data(r, vertex_rots, render->r->view_count);
 
 	// Device view information.
 	struct xrt_fov fovs[XRT_MAX_VIEWS];
 	struct xrt_pose world_poses[XRT_MAX_VIEWS];
 	struct xrt_pose eye_poses[XRT_MAX_VIEWS];
-	calc_pose_data(         //
-	    r,                  // r
-	    fov_source,         // fov_source
-	    fovs,               // fovs
-	    world_poses,        // world_poses
-	    eye_poses,          // eye_poses
-	    rr->r->view_count); // view_count
+	calc_pose_data(             //
+	    r,                      //
+	    fov_source,             //
+	    fovs,                   //
+	    world_poses,            //
+	    eye_poses,              //
+	    render->r->view_count); //
 
 
 	// The arguments for the dispatch function.
@@ -895,7 +895,7 @@ dispatch_graphics(struct comp_renderer *r,
 	    rtr,                      // rtr
 	    fast_path,                // fast_path
 	    do_timewarp);             // do_timewarp
-	for (uint32_t i = 0; i < rr->r->view_count; i++) {
+	for (uint32_t i = 0; i < render->r->view_count; i++) {
 		// Which image of the scratch images for this view are we using.
 		uint32_t scratch_index = crss->views[i].index;
 
@@ -920,16 +920,16 @@ dispatch_graphics(struct comp_renderer *r,
 		struct xrt_normalized_rect layer_norm_rect = {.x = 0.0f, .y = 0.0f, .w = 1.0f, .h = 1.0f};
 
 		comp_render_gfx_add_view( //
-		    &data,                // data
-		    &world_poses[i],      // world_pose
-		    &eye_poses[i],        // eye_pose
-		    &fovs[i],             // fov
-		    rsci_rtr,             // rtr
-		    &layer_viewport_data, // layer_viewport_data
-		    &layer_norm_rect,     // layer_norm_rect
-		    rsci->image,          // image
-		    rsci->srgb_view,      // srgb_view
-		    &vertex_rots[i],      // vertex_rot
+		    &data,                //
+		    &world_poses[i],      //
+		    &eye_poses[i],        //
+		    &fovs[i],             //
+		    rsci_rtr,             //
+		    &layer_viewport_data, //
+		    &layer_norm_rect,     //
+		    rsci->image,          //
+		    rsci->srgb_view,      //
+		    &vertex_rots[i],      //
 		    &viewport_datas[i]);  // target_viewport_data
 
 		if (layer_count == 0) {
@@ -940,20 +940,20 @@ dispatch_graphics(struct comp_renderer *r,
 	}
 
 	// Start the graphics pipeline.
-	render_gfx_begin(rr);
+	render_gfx_begin(render);
 
 	// Build the command buffer.
 	comp_render_gfx_dispatch( //
-	    rr,                   // rr
-	    layers,               // layers
-	    layer_count,          // layer_count
-	    &data);               // d
+	    render,               //
+	    layers,               //
+	    layer_count,          //
+	    &data);               //
 
 	// Make the command buffer submittable.
-	render_gfx_end(rr);
+	render_gfx_end(render);
 
 	// Everything is ready, submit to the queue.
-	ret = renderer_submit_queue(r, rr->r->cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
 	VK_CHK_AND_RET(ret, "renderer_submit_queue");
 
 	return ret;
@@ -967,11 +967,11 @@ dispatch_graphics(struct comp_renderer *r,
  */
 
 /*!
- * @pre render_compute_init(crc, &c->nr)
+ * @pre render_compute_init(render, &c->nr)
  */
 static XRT_CHECK_RESULT VkResult
 dispatch_compute(struct comp_renderer *r,
-                 struct render_compute *crc,
+                 struct render_compute *render,
                  struct comp_render_scratch_state *crss,
                  enum comp_target_fov_source fov_source)
 {
@@ -991,13 +991,13 @@ dispatch_compute(struct comp_renderer *r,
 	struct xrt_fov fovs[XRT_MAX_VIEWS];
 	struct xrt_pose world_poses[XRT_MAX_VIEWS];
 	struct xrt_pose eye_poses[XRT_MAX_VIEWS];
-	calc_pose_data(          //
-	    r,                   // r
-	    fov_source,          // fov_source
-	    fovs,                // fovs
-	    world_poses,         // world_poses
-	    eye_poses,           // eye_poses
-	    crc->r->view_count); // view_count
+	calc_pose_data(             //
+	    r,                      //
+	    fov_source,             //
+	    fovs,                   //
+	    world_poses,            //
+	    eye_poses,              //
+	    render->r->view_count); //
 
 	// Target Vulkan resources..
 	VkImage target_image = r->c->target->images[r->acquired_buffer].handle;
@@ -1005,7 +1005,7 @@ dispatch_compute(struct comp_renderer *r,
 
 	// Target view information.
 	struct render_viewport_data views[XRT_MAX_VIEWS];
-	calc_viewport_data(r, views, crc->r->view_count);
+	calc_viewport_data(r, views, render->r->view_count);
 
 	// The arguments for the dispatch function.
 	struct comp_render_dispatch_data data;
@@ -1016,7 +1016,7 @@ dispatch_compute(struct comp_renderer *r,
 	    fast_path,               // fast_path
 	    do_timewarp);            // do_timewarp
 
-	for (uint32_t i = 0; i < crc->r->view_count; i++) {
+	for (uint32_t i = 0; i < render->r->view_count; i++) {
 		// Which image of the scratch images for this view are we using.
 		uint32_t scratch_index = crss->views[i].index;
 
@@ -1038,15 +1038,15 @@ dispatch_compute(struct comp_renderer *r,
 		struct xrt_normalized_rect layer_norm_rect = {.x = 0.0f, .y = 0.0f, .w = 1.0f, .h = 1.0f};
 
 		comp_render_cs_add_view(  //
-		    &data,                // data
-		    &world_poses[i],      // world_pose
-		    &eye_poses[i],        // eye_pose
-		    &fovs[i],             // fov
-		    &layer_viewport_data, // layer_viewport_data
-		    &layer_norm_rect,     // layer_norm_rect
-		    rsci->image,          // image
-		    rsci->srgb_view,      // srgb_view
-		    rsci->unorm_view,     // unorm_view
+		    &data,                //
+		    &world_poses[i],      //
+		    &eye_poses[i],        //
+		    &fovs[i],             //
+		    &layer_viewport_data, //
+		    &layer_norm_rect,     //
+		    rsci->image,          //
+		    rsci->srgb_view,      //
+		    rsci->unorm_view,     //
 		    &views[i]);           // target_viewport_data
 
 		if (layer_count == 0) {
@@ -1057,20 +1057,20 @@ dispatch_compute(struct comp_renderer *r,
 	}
 
 	// Start the compute pipeline.
-	render_compute_begin(crc);
+	render_compute_begin(render);
 
 	// Build the command buffer.
 	comp_render_cs_dispatch( //
-	    crc,                 // crc
-	    layers,              // layers
-	    layer_count,         // layer_count
-	    &data);              // d
+	    render,              //
+	    layers,              //
+	    layer_count,         //
+	    &data);              //
 
 	// Make the command buffer submittable.
-	render_compute_end(crc);
+	render_compute_end(render);
 
 	// Everything is ready, submit to the queue.
-	ret = renderer_submit_queue(r, crc->r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 	VK_CHK_AND_RET(ret, "renderer_submit_queue");
 
 	return ret;
@@ -1133,16 +1133,16 @@ comp_renderer_draw(struct comp_renderer *r)
 	scratch_get_init(&crss, r, view_count);
 
 	bool use_compute = r->settings->use_compute;
-	struct render_gfx rr = {0};
-	struct render_compute crc = {0};
+	struct render_gfx render_g = {0};
+	struct render_compute render_c = {0};
 
 	VkResult res = VK_SUCCESS;
 	if (use_compute) {
-		render_compute_init(&crc, &c->nr);
-		res = dispatch_compute(r, &crc, &crss, fov_source);
+		render_compute_init(&render_c, &c->nr);
+		res = dispatch_compute(r, &render_c, &crss, fov_source);
 	} else {
-		render_gfx_init(&rr, &c->nr);
-		res = dispatch_graphics(r, &rr, &crss, fov_source);
+		render_gfx_init(&render_g, &c->nr);
+		res = dispatch_graphics(r, &render_g, &crss, fov_source);
 	}
 	if (res != VK_SUCCESS) {
 		return XRT_ERROR_VULKAN;
@@ -1244,9 +1244,9 @@ comp_renderer_draw(struct comp_renderer *r)
 	 */
 
 	if (use_compute) {
-		render_compute_fini(&crc);
+		render_compute_fini(&render_c);
 	} else {
-		render_gfx_fini(&rr);
+		render_gfx_fini(&render_g);
 	}
 
 
