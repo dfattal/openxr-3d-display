@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Compositor rendering code.
+ * @brief  Compositor (compute shader) rendering code.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Christoph Haag <christoph.haag@collabora.com>
  * @author Fernando Velazquez Innella <finnella@magicleap.com>
@@ -53,6 +53,7 @@ get_layer_depth_image(const struct comp_layer *layer, uint32_t swapchain_index, 
 	return &sc->images[image_index];
 }
 
+/// Data setup for a cylinder layer
 static inline void
 do_cs_cylinder_layer(const struct comp_layer *layer,
                      const struct xrt_matrix_4x4 *eye_view_mat,
@@ -117,6 +118,7 @@ do_cs_cylinder_layer(const struct comp_layer *layer,
 	*out_cur_image = cur_image;
 }
 
+/// Data setup for an "equirect2" layer
 static inline void
 do_cs_equirect2_layer(const struct comp_layer *layer,
                       const struct xrt_matrix_4x4 *eye_view_mat,
@@ -179,6 +181,7 @@ do_cs_equirect2_layer(const struct comp_layer *layer,
 	*out_cur_image = cur_image;
 }
 
+/// Data setup for a projection layer
 static inline void
 do_cs_projection_layer(const struct comp_layer *layer,
                        const struct xrt_pose *world_pose,
@@ -241,6 +244,7 @@ do_cs_projection_layer(const struct comp_layer *layer,
 	*out_cur_image = cur_image;
 }
 
+/// Data setup for a quad layer
 static inline void
 do_cs_quad_layer(const struct comp_layer *layer,
                  const struct xrt_matrix_4x4 *eye_view_mat,
@@ -266,6 +270,8 @@ do_cs_quad_layer(const struct comp_layer *layer,
 
 	// Set the normalized post transform values.
 	struct xrt_normalized_rect post_transform = XRT_STRUCT_INIT;
+
+	// Used for Subimage and OpenGL flip.
 	set_post_transform_rect( //
 	    layer_data,          // data
 	    &q->sub.norm_rect,   // src_norm_rect
@@ -331,7 +337,7 @@ do_cs_quad_layer(const struct comp_layer *layer,
  */
 
 static void
-do_cs_clear(struct render_compute *crc, const struct comp_render_dispatch_data *d)
+do_cs_clear(struct render_compute *render, const struct comp_render_dispatch_data *d)
 {
 	if (d->view_count > XRT_MAX_VIEWS) {
 		U_LOG_E("Only supports max %d views!", XRT_MAX_VIEWS);
@@ -346,21 +352,21 @@ do_cs_clear(struct render_compute *crc, const struct comp_render_dispatch_data *
 
 
 	render_compute_clear(        //
-	    crc,                     // crc
+	    render,                  // crc
 	    d->cs.target_image,      // target_image
 	    d->cs.target_unorm_view, // target_image_view
 	    target_viewport_datas);  // views
 }
 
 static void
-do_cs_distortion_from_scratch(struct render_compute *crc, const struct comp_render_dispatch_data *d)
+do_cs_distortion_from_scratch(struct render_compute *render, const struct comp_render_dispatch_data *d)
 {
 	if (d->view_count > XRT_MAX_VIEWS) {
 		U_LOG_E("Only supports max %d views!", XRT_MAX_VIEWS);
 		assert(d->view_count < XRT_MAX_VIEWS);
 		return;
 	}
-	VkSampler clamp_to_border_black = crc->r->samplers.clamp_to_border_black;
+	VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
 
 	// Data to fill in.
 	VkImageView src_image_views[XRT_MAX_VIEWS];
@@ -387,7 +393,7 @@ do_cs_distortion_from_scratch(struct render_compute *crc, const struct comp_rend
 	}
 
 	render_compute_projection(   //
-	    crc,                     // crc
+	    render,                  // crc
 	    src_samplers,            // src_samplers
 	    src_image_views,         // src_image_views
 	    src_norm_rects,          // src_rects
@@ -397,10 +403,10 @@ do_cs_distortion_from_scratch(struct render_compute *crc, const struct comp_rend
 }
 
 static void
-do_cs_distortion_for_layer(struct render_compute *crc,
+do_cs_distortion_for_layer(struct render_compute *render,
+                           const struct comp_render_dispatch_data *d,
                            const struct comp_layer *layer,
-                           const struct xrt_layer_projection_view_data *vds[XRT_MAX_VIEWS],
-                           const struct comp_render_dispatch_data *d)
+                           const struct xrt_layer_projection_view_data *vds[XRT_MAX_VIEWS])
 {
 	if (d->view_count > XRT_MAX_VIEWS) {
 		U_LOG_E("Only supports max %d views!", XRT_MAX_VIEWS);
@@ -411,7 +417,7 @@ do_cs_distortion_for_layer(struct render_compute *crc,
 	// Fetch from this data.
 	const struct xrt_layer_data *data = &layer->data;
 
-	VkSampler clamp_to_border_black = crc->r->samplers.clamp_to_border_black;
+	VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
 
 	// Data to fill in.
 	VkImageView src_image_views[XRT_MAX_VIEWS];
@@ -459,7 +465,7 @@ do_cs_distortion_for_layer(struct render_compute *crc,
 
 	if (!d->do_timewarp) {
 		render_compute_projection(   //
-		    crc,                     //
+		    render,                  //
 		    src_samplers,            //
 		    src_image_views,         //
 		    src_norm_rects,          //
@@ -468,7 +474,7 @@ do_cs_distortion_for_layer(struct render_compute *crc,
 		    target_viewport_datas);  //
 	} else {
 		render_compute_projection_timewarp( //
-		    crc,                            //
+		    render,                         //
 		    src_samplers,                   //
 		    src_image_views,                //
 		    src_norm_rects,                 //
@@ -489,7 +495,7 @@ do_cs_distortion_for_layer(struct render_compute *crc,
  */
 
 void
-comp_render_cs_layer(struct render_compute *crc,
+comp_render_cs_layer(struct render_compute *render,
                      uint32_t view_index,
                      const struct comp_layer *layers,
                      const uint32_t layer_count,
@@ -501,15 +507,15 @@ comp_render_cs_layer(struct render_compute *crc,
                      const struct render_viewport_data *target_view,
                      bool do_timewarp)
 {
-	VkSampler clamp_to_edge = crc->r->samplers.clamp_to_edge;
-	VkSampler clamp_to_border_black = crc->r->samplers.clamp_to_border_black;
+	VkSampler clamp_to_edge = render->r->samplers.clamp_to_edge;
+	VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
 
 	// Not the transform of the views, but the inverse: actual view matrices.
 	struct xrt_matrix_4x4 world_view_mat, eye_view_mat;
 	math_matrix_4x4_view_from_pose(world_pose, &world_view_mat);
 	math_matrix_4x4_view_from_pose(eye_pose, &eye_view_mat);
 
-	struct render_buffer *ubo = &crc->r->compute.layer.ubos[view_index];
+	struct render_buffer *ubo = &render->r->compute.layer.ubos[view_index];
 	struct render_compute_layer_ubo_data *ubo_data = ubo->mapped;
 
 	// Tightly pack layers in data struct.
@@ -546,12 +552,12 @@ comp_render_cs_layer(struct render_compute *crc,
 		case XRT_LAYER_PROJECTION_DEPTH: required_image_samplers = 2; break;
 		case XRT_LAYER_QUAD: required_image_samplers = 1; break;
 		default:
-			VK_ERROR(crc->r->vk, "Skipping layer #%u, unknown type: %u", c_layer_i, data->type);
+			VK_ERROR(render->r->vk, "Skipping layer #%u, unknown type: %u", c_layer_i, data->type);
 			continue; // Skip this layer if don't know about it.
 		}
 
 		//! Exit loop if shader cannot receive more image samplers
-		if (cur_image + required_image_samplers > crc->r->compute.layer.image_array_size) {
+		if (cur_image + required_image_samplers > render->r->compute.layer.image_array_size) {
 			break;
 		}
 
@@ -620,7 +626,7 @@ comp_render_cs_layer(struct render_compute *crc,
 		default:
 			// Should not get here!
 			assert(false);
-			VK_ERROR(crc->r->vk, "Should not get here!");
+			VK_ERROR(render->r->vk, "Should not get here!");
 			continue;
 		}
 
@@ -639,16 +645,16 @@ comp_render_cs_layer(struct render_compute *crc,
 	}
 
 	//! @todo: If Vulkan 1.2, use VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT and skip this
-	while (cur_image < crc->r->compute.layer.image_array_size) {
+	while (cur_image < render->r->compute.layer.image_array_size) {
 		src_samplers[cur_image] = clamp_to_edge;
-		src_image_views[cur_image] = crc->r->mock.color.image_view;
+		src_image_views[cur_image] = render->r->mock.color.image_view;
 		cur_image++;
 	}
 
-	VkDescriptorSet descriptor_set = crc->layer_descriptor_sets[view_index];
+	VkDescriptorSet descriptor_set = render->layer_descriptor_sets[view_index];
 
 	render_compute_layers( //
-	    crc,               //
+	    render,            //
 	    descriptor_set,    //
 	    ubo->buffer,       //
 	    src_samplers,      //
@@ -660,16 +666,16 @@ comp_render_cs_layer(struct render_compute *crc,
 }
 
 void
-comp_render_cs_layers(struct render_compute *crc,
+comp_render_cs_layers(struct render_compute *render,
                       const struct comp_layer *layers,
                       const uint32_t layer_count,
                       const struct comp_render_dispatch_data *d,
                       VkImageLayout transition_to)
 {
 	cmd_barrier_view_images(                   //
-	    crc->r->vk,                            //
+	    render->r->vk,                         //
 	    d,                                     //
-	    crc->r->cmd,                           // cmd
+	    render->r->cmd,                        // cmd
 	    0,                                     // src_access_mask
 	    VK_ACCESS_SHADER_WRITE_BIT,            // dst_access_mask
 	    VK_IMAGE_LAYOUT_UNDEFINED,             // transition_from
@@ -681,7 +687,7 @@ comp_render_cs_layers(struct render_compute *crc,
 		const struct comp_render_view_data *view = &d->views[view_index];
 
 		comp_render_cs_layer(            //
-		    crc,                         //
+		    render,                      //
 		    view_index,                  //
 		    layers,                      //
 		    layer_count,                 //
@@ -695,9 +701,9 @@ comp_render_cs_layers(struct render_compute *crc,
 	}
 
 	cmd_barrier_view_images(                   //
-	    crc->r->vk,                            //
+	    render->r->vk,                         //
 	    d,                                     //
-	    crc->r->cmd,                           // cmd
+	    render->r->cmd,                        // cmd
 	    VK_ACCESS_SHADER_WRITE_BIT,            // src_access_mask
 	    VK_ACCESS_MEMORY_READ_BIT,             // dst_access_mask
 	    VK_IMAGE_LAYOUT_GENERAL,               // transition_from
@@ -707,7 +713,7 @@ comp_render_cs_layers(struct render_compute *crc,
 }
 
 void
-comp_render_cs_dispatch(struct render_compute *crc,
+comp_render_cs_dispatch(struct render_compute *render,
                         const struct comp_layer *layers,
                         const uint32_t layer_count,
                         const struct comp_render_dispatch_data *d)
@@ -715,51 +721,69 @@ comp_render_cs_dispatch(struct render_compute *crc,
 	// Convenience.
 	bool fast_path = d->fast_path;
 
-	assert(!fast_path || layer_count > 0);
+	// Only used if fast_path is true.
+	const struct comp_layer *layer = &layers[0];
+
+	// Consistency check.
+	assert(!fast_path || layer_count >= 1);
 
 	// We want to read from the images afterwards.
 	VkImageLayout transition_to = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-	if (fast_path && layers[0].data.type == XRT_LAYER_PROJECTION) {
-		int i = 0;
-		const struct comp_layer *layer = &layers[i];
+	if (fast_path && layer->data.type == XRT_LAYER_PROJECTION) {
+		// Fast path.
 		const struct xrt_layer_projection_data *proj = &layer->data.proj;
 		const struct xrt_layer_projection_view_data *vds[XRT_MAX_VIEWS];
 		for (uint32_t view = 0; view < d->view_count; ++view) {
 			vds[view] = &proj->v[view];
 		}
 		do_cs_distortion_for_layer( //
-		    crc,                    // crc
-		    layer,                  // layer
-		    vds,                    // vds
-		    d);                     // d
-	} else if (fast_path && layers[0].data.type == XRT_LAYER_PROJECTION_DEPTH) {
-		int i = 0;
-		const struct comp_layer *layer = &layers[i];
+		    render,                 //
+		    d,                      //
+		    layer,                  //
+		    vds);                   //
+
+	} else if (fast_path && layer->data.type == XRT_LAYER_PROJECTION_DEPTH) {
+		// Fast path.
 		const struct xrt_layer_projection_depth_data *depth = &layer->data.depth;
 		const struct xrt_layer_projection_view_data *vds[XRT_MAX_VIEWS];
 		for (uint32_t view = 0; view < d->view_count; ++view) {
 			vds[view] = &depth->v[view];
 		}
 		do_cs_distortion_for_layer( //
-		    crc,                    // crc
-		    layer,                  // layer
-		    vds,                    // vds
-		    d);                     // d
+		    render,                 //
+		    d,                      //
+		    layer,                  //
+		    vds);                   //
+
 	} else if (layer_count > 0) {
+		// Compute layer squasher
+		if (fast_path) {
+			U_LOG_W("Wanted fast path but no projection layer, falling back to layer squasher.");
+		}
+
+
+		/*
+		 * Layer squashing.
+		 */
 		comp_render_cs_layers( //
-		    crc,               //
+		    render,            //
 		    layers,            //
 		    layer_count,       //
 		    d,                 //
 		    transition_to);    //
 
+		/*
+		 * Distortion.
+		 */
+
 		do_cs_distortion_from_scratch( //
-		    crc,                       //
+		    render,                    //
 		    d);                        //
 	} else {
+		// Just clear the screen
 		do_cs_clear( //
-		    crc,     //
+		    render,  //
 		    d);      //
 	}
 }

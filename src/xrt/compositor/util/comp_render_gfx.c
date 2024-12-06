@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Compositor gfx rendering code.
+ * @brief  Compositor (gfx - graphics shader) rendering code.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup comp_util
@@ -235,8 +235,10 @@ add_layer(struct gfx_layer_view_state *state, const struct xrt_layer_data *data,
 	state->premultiplied_alphas[cur_layer] = !is_layer_unpremultiplied(data);
 }
 
+/// Data setup for a cylinder layer
+/// Also allocates and writes a descriptor set!
 static VkResult
-do_cylinder_layer(struct render_gfx *rr,
+do_cylinder_layer(struct render_gfx *render,
                   const struct comp_layer *layer,
                   uint32_t view_index,
                   VkSampler clamp_to_edge,
@@ -248,7 +250,7 @@ do_cylinder_layer(struct render_gfx *rr,
 	const uint32_t array_index = c->sub.array_index;
 	const struct comp_swapchain_image *image = get_layer_image(layer, 0, c->sub.image_index);
 
-	struct vk_bundle *vk = rr->r->vk;
+	struct vk_bundle *vk = render->r->vk;
 	VkResult ret;
 
 	// Color
@@ -285,10 +287,10 @@ do_cylinder_layer(struct render_gfx *rr,
 	// Can fail if we have too many layers.
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 	ret = render_gfx_layer_cylinder_alloc_and_write( //
-	    rr,                                          // rr
-	    &data,                                       // data
-	    src_sampler,                                 // src_sampler
-	    src_image_view,                              // src_image_view
+	    render,                                      //
+	    &data,                                       //
+	    src_sampler,                                 //
+	    src_image_view,                              //
 	    &descriptor_set);                            // out_descriptor_set
 	VK_CHK_AND_RET(ret, "render_gfx_layer_quad_alloc_and_write");
 
@@ -299,8 +301,10 @@ do_cylinder_layer(struct render_gfx *rr,
 	return VK_SUCCESS;
 }
 
+/// Data setup for an "equirect2" layer
+/// Also allocates and writes a descriptor set!
 static VkResult
-do_equirect2_layer(struct render_gfx *rr,
+do_equirect2_layer(struct render_gfx *render,
                    const struct comp_layer *layer,
                    uint32_t view_index,
                    VkSampler clamp_to_edge,
@@ -312,7 +316,7 @@ do_equirect2_layer(struct render_gfx *rr,
 	const uint32_t array_index = eq2->sub.array_index;
 	const struct comp_swapchain_image *image = get_layer_image(layer, 0, eq2->sub.image_index);
 
-	struct vk_bundle *vk = rr->r->vk;
+	struct vk_bundle *vk = render->r->vk;
 	VkResult ret;
 
 	// Color
@@ -349,10 +353,10 @@ do_equirect2_layer(struct render_gfx *rr,
 	// Can fail if we have too many layers.
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 	ret = render_gfx_layer_equirect2_alloc_and_write( //
-	    rr,                                           // rr
-	    &data,                                        // data
-	    src_sampler,                                  // src_sampler
-	    src_image_view,                               // src_image_view
+	    render,                                       //
+	    &data,                                        //
+	    src_sampler,                                  //
+	    src_image_view,                               //
 	    &descriptor_set);                             // out_descriptor_set
 	VK_CHK_AND_RET(ret, "render_gfx_layer_quad_alloc_and_write");
 
@@ -363,8 +367,10 @@ do_equirect2_layer(struct render_gfx *rr,
 	return VK_SUCCESS;
 }
 
+/// Data setup for a projection layer
+/// Also allocates and writes a descriptor set!
 static VkResult
-do_projection_layer(struct render_gfx *rr,
+do_projection_layer(struct render_gfx *render,
                     const struct comp_layer *layer,
                     uint32_t view_index,
                     VkSampler clamp_to_edge,
@@ -385,7 +391,7 @@ do_projection_layer(struct render_gfx *rr,
 	uint32_t array_index = vd->sub.array_index;
 	const struct comp_swapchain_image *image = get_layer_image(layer, sc_array_index, vd->sub.image_index);
 
-	struct vk_bundle *vk = rr->r->vk;
+	struct vk_bundle *vk = render->r->vk;
 	VkResult ret;
 	// Color
 	VkSampler src_sampler = clamp_to_border_black;
@@ -411,10 +417,10 @@ do_projection_layer(struct render_gfx *rr,
 	// Can fail if we have too many layers.
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 	ret = render_gfx_layer_projection_alloc_and_write( //
-	    rr,                                            // rr
-	    &data,                                         // data
-	    src_sampler,                                   // src_sampler
-	    src_image_view,                                // src_image_view
+	    render,                                        //
+	    &data,                                         //
+	    src_sampler,                                   //
+	    src_image_view,                                //
 	    &descriptor_set);                              // out_descriptor_set
 	VK_CHK_AND_RET(ret, "render_gfx_layer_projection_alloc_and_write");
 
@@ -425,8 +431,10 @@ do_projection_layer(struct render_gfx *rr,
 	return VK_SUCCESS;
 }
 
+/// Data setup for a quad layer
+/// Also allocates and writes a descriptor set!
 static VkResult
-do_quad_layer(struct render_gfx *rr,
+do_quad_layer(struct render_gfx *render,
               const struct comp_layer *layer,
               uint32_t view_index,
               VkSampler clamp_to_edge,
@@ -438,7 +446,7 @@ do_quad_layer(struct render_gfx *rr,
 	const uint32_t array_index = q->sub.array_index;
 	const struct comp_swapchain_image *image = get_layer_image(layer, 0, q->sub.image_index);
 
-	struct vk_bundle *vk = rr->r->vk;
+	struct vk_bundle *vk = render->r->vk;
 	VkResult ret;
 
 	// Color
@@ -462,10 +470,10 @@ do_quad_layer(struct render_gfx *rr,
 	// Can fail if we have too many layers.
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 	ret = render_gfx_layer_quad_alloc_and_write( //
-	    rr,                                      // rr
-	    &data,                                   // data
-	    src_sampler,                             // src_sampler
-	    src_image_view,                          // src_image_view
+	    render,                                  //
+	    &data,                                   //
+	    src_sampler,                             //
+	    src_image_view,                          //
 	    &descriptor_set);                        // out_descriptor_set
 	VK_CHK_AND_RET(ret, "render_gfx_layer_quad_alloc_and_write");
 
@@ -477,14 +485,14 @@ do_quad_layer(struct render_gfx *rr,
 }
 
 static void
-do_layers(struct render_gfx *rr,
+do_layers(struct render_gfx *render,
           const struct comp_layer *layers,
           uint32_t layer_count,
           const struct comp_render_dispatch_data *d)
 {
 	COMP_TRACE_MARKER();
 
-	struct vk_bundle *vk = rr->r->vk;
+	struct vk_bundle *vk = render->r->vk;
 	VkResult ret;
 
 	struct gfx_layer_state ls = XRT_STRUCT_INIT;
@@ -538,8 +546,8 @@ do_layers(struct render_gfx *rr,
 
 	assert(layer_count <= RENDER_MAX_LAYERS && "Too many layers");
 
-	VkSampler clamp_to_edge = rr->r->samplers.clamp_to_edge;
-	VkSampler clamp_to_border_black = rr->r->samplers.clamp_to_border_black;
+	VkSampler clamp_to_edge = render->r->samplers.clamp_to_edge;
+	VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
 
 	for (uint32_t view = 0; view < d->view_count; view++) {
 
@@ -555,43 +563,43 @@ do_layers(struct render_gfx *rr,
 			switch (data->type) {
 			case XRT_LAYER_CYLINDER:
 				ret = do_cylinder_layer(   //
-				    rr,                    // rr
-				    &layers[i],            // layer
+				    render,                //
+				    &layers[i],            //
 				    view,                  // view_index
-				    clamp_to_edge,         // clamp_to_edge
-				    clamp_to_border_black, // clamp_to_border_black
-				    state);                // state
+				    clamp_to_edge,         //
+				    clamp_to_border_black, //
+				    state);                //
 				VK_CHK_WITH_GOTO(ret, "do_cylinder_layer", err_layer);
 				break;
 			case XRT_LAYER_EQUIRECT2:
 				ret = do_equirect2_layer(  //
-				    rr,                    // rr
-				    &layers[i],            // layer
+				    render,                //
+				    &layers[i],            //
 				    view,                  // view_index
-				    clamp_to_edge,         // clamp_to_edge
-				    clamp_to_border_black, // clamp_to_border_black
-				    state);                // state
+				    clamp_to_edge,         //
+				    clamp_to_border_black, //
+				    state);                //
 				VK_CHK_WITH_GOTO(ret, "do_equirect2_layer", err_layer);
 				break;
 			case XRT_LAYER_PROJECTION:
 			case XRT_LAYER_PROJECTION_DEPTH:
 				ret = do_projection_layer( //
-				    rr,                    // rr
-				    &layers[i],            // layer
+				    render,                //
+				    &layers[i],            //
 				    view,                  // view_index
-				    clamp_to_edge,         // clamp_to_edge
-				    clamp_to_border_black, // clamp_to_border_black
-				    state);                // state
+				    clamp_to_edge,         //
+				    clamp_to_border_black, //
+				    state);                //
 				VK_CHK_WITH_GOTO(ret, "do_projection_layer", err_layer);
 				break;
 			case XRT_LAYER_QUAD:
 				ret = do_quad_layer(       //
-				    rr,                    // rr
-				    &layers[i],            // layer
+				    render,                //
+				    &layers[i],            //
 				    view,                  // view_index
-				    clamp_to_edge,         // clamp_to_edge
-				    clamp_to_border_black, // clamp_to_border_black
-				    state);                // state
+				    clamp_to_edge,         //
+				    clamp_to_border_black, //
+				    state);                //
 				VK_CHK_WITH_GOTO(ret, "do_quad_layer", err_layer);
 				break;
 			default: break;
@@ -612,12 +620,12 @@ do_layers(struct render_gfx *rr,
 		const struct render_viewport_data *viewport_data = &d->views[view].layer_viewport_data;
 
 		render_gfx_begin_target(    //
-		    rr,                     //
+		    render,                 //
 		    d->views[view].gfx.rtr, //
 		    color);                 //
 
 		render_gfx_begin_view( //
-		    rr,                //
+		    render,            //
 		    view,              // view_index
 		    viewport_data);    // viewport_data
 
@@ -628,26 +636,26 @@ do_layers(struct render_gfx *rr,
 			switch (state->types[i]) {
 			case XRT_LAYER_CYLINDER:
 				render_gfx_layer_cylinder(          //
-				    rr,                             //
+				    render,                         //
 				    state->premultiplied_alphas[i], //
 				    state->descriptor_sets[i]);     //
 				break;
 			case XRT_LAYER_EQUIRECT2:
 				render_gfx_layer_equirect2(         //
-				    rr,                             //
+				    render,                         //
 				    state->premultiplied_alphas[i], //
 				    state->descriptor_sets[i]);     //
 				break;
 			case XRT_LAYER_PROJECTION:
 			case XRT_LAYER_PROJECTION_DEPTH:
 				render_gfx_layer_projection(        //
-				    rr,                             //
+				    render,                         //
 				    state->premultiplied_alphas[i], //
 				    state->descriptor_sets[i]);     //
 				break;
 			case XRT_LAYER_QUAD:
 				render_gfx_layer_quad(              //
-				    rr,                             //
+				    render,                         //
 				    state->premultiplied_alphas[i], //
 				    state->descriptor_sets[i]);     //
 				break;
@@ -655,9 +663,9 @@ do_layers(struct render_gfx *rr,
 			}
 		}
 
-		render_gfx_end_view(rr);
+		render_gfx_end_view(render);
 
-		render_gfx_end_target(rr);
+		render_gfx_end_target(render);
 	}
 
 
@@ -676,12 +684,12 @@ err_layer:
  */
 
 static void
-do_mesh(struct render_gfx *rr,
+do_mesh(struct render_gfx *render,
         bool do_timewarp,
         const struct gfx_mesh_data *md,
         const struct comp_render_dispatch_data *d)
 {
-	struct vk_bundle *vk = rr->r->vk;
+	struct vk_bundle *vk = render->r->vk;
 	VkResult ret;
 
 	/*
@@ -711,7 +719,7 @@ do_mesh(struct render_gfx *rr,
 		}
 
 		ret = render_gfx_mesh_alloc_and_write( //
-		    rr,                                //
+		    render,                            //
 		    &data,                             //
 		    md->views[i].src_sampler,          //
 		    md->views[i].src_image_view,       //
@@ -727,7 +735,7 @@ do_mesh(struct render_gfx *rr,
 	 */
 
 	render_gfx_begin_target(       //
-	    rr,                        //
+	    render,                    //
 	    d->gfx.rtr,                //
 	    &background_color_active); //
 
@@ -736,20 +744,20 @@ do_mesh(struct render_gfx *rr,
 		const struct render_viewport_data *viewport_data = &d->views[i].target_viewport_data;
 
 		render_gfx_begin_view( //
-		    rr,                //
+		    render,            //
 		    i,                 // view_index
-		    viewport_data);    // viewport_data
+		    viewport_data);    //
 
 		render_gfx_mesh_draw(      //
-		    rr,                    // rr
+		    render,                //
 		    i,                     // mesh_index
-		    ms.descriptor_sets[i], // descriptor_set
-		    do_timewarp);          // do_timewarp
+		    ms.descriptor_sets[i], //
+		    do_timewarp);          //
 
-		render_gfx_end_view(rr);
+		render_gfx_end_view(render);
 	}
 
-	render_gfx_end_target(rr);
+	render_gfx_end_target(render);
 
 	return;
 
@@ -759,14 +767,14 @@ err_no_memory:
 }
 
 static void
-do_mesh_from_proj(struct render_gfx *rr,
+do_mesh_from_proj(struct render_gfx *render,
                   const struct comp_render_dispatch_data *d,
                   const struct comp_layer *layer,
                   const struct xrt_layer_projection_view_data *vds[XRT_MAX_VIEWS])
 {
 	const struct xrt_layer_data *data = &layer->data;
 
-	const VkSampler clamp_to_border_black = rr->r->samplers.clamp_to_border_black;
+	const VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
 
 	struct gfx_mesh_data md = XRT_STRUCT_INIT;
 	for (uint32_t i = 0; i < d->view_count; i++) {
@@ -799,7 +807,7 @@ do_mesh_from_proj(struct render_gfx *rr,
 	}
 
 	do_mesh(            //
-	    rr,             //
+	    render,         //
 	    d->do_timewarp, //
 	    &md,            //
 	    d);             //
@@ -813,7 +821,7 @@ do_mesh_from_proj(struct render_gfx *rr,
  */
 
 void
-comp_render_gfx_dispatch(struct render_gfx *rr,
+comp_render_gfx_dispatch(struct render_gfx *render,
                          const struct comp_layer *layers,
                          const uint32_t layer_count,
                          const struct comp_render_dispatch_data *d)
@@ -831,11 +839,11 @@ comp_render_gfx_dispatch(struct render_gfx *rr,
 		// Fast path.
 		const struct xrt_layer_projection_data *proj = &layer->data.proj;
 		const struct xrt_layer_projection_view_data *vds[XRT_MAX_VIEWS];
-		for (uint32_t j = 0; j < d->view_count; ++j) {
-			vds[j] = &proj->v[j];
+		for (uint32_t view = 0; view < d->view_count; ++view) {
+			vds[view] = &proj->v[view];
 		}
 		do_mesh_from_proj( //
-		    rr,            //
+		    render,        //
 		    d,             //
 		    layer,         //
 		    vds);          //
@@ -848,20 +856,13 @@ comp_render_gfx_dispatch(struct render_gfx *rr,
 			vds[view] = &depth->v[view];
 		}
 		do_mesh_from_proj( //
-		    rr,            //
+		    render,        //
 		    d,             //
 		    layer,         //
 		    vds);          //
 
-	} else if (layer_count == 0) {
-		// Just clear the screen
-		render_gfx_begin_target(     //
-		    rr,                      //
-		    d->gfx.rtr,              //
-		    &background_color_idle); //
-
-		render_gfx_end_target(rr);
-	} else {
+	} else if (layer_count > 0) {
+		// Graphics layer squasher
 		if (fast_path) {
 			U_LOG_W("Wanted fast path but no projection layer, falling back to layer squasher.");
 		}
@@ -870,13 +871,11 @@ comp_render_gfx_dispatch(struct render_gfx *rr,
 		/*
 		 * Layer squashing.
 		 */
-
 		do_layers(       //
-		    rr,          // rr
-		    layers,      // layers
-		    layer_count, // layer_count
-		    d);          // d
-
+		    render,      //
+		    layers,      //
+		    layer_count, //
+		    d);          //
 
 		/*
 		 * Distortion.
@@ -886,18 +885,18 @@ comp_render_gfx_dispatch(struct render_gfx *rr,
 		VkImageLayout transition_to = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
 		cmd_barrier_view_images(                           //
-		    rr->r->vk,                                     //
+		    render->r->vk,                                 //
 		    d,                                             //
-		    rr->r->cmd,                                    // cmd
+		    render->r->cmd,                                // cmd
 		    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,          // src_access_mask
 		    VK_ACCESS_SHADER_READ_BIT,                     // dst_access_mask
-		    transition_from,                               // transition_from
-		    transition_to,                                 // transition_to
+		    transition_from,                               //
+		    transition_to,                                 //
 		    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, // src_stage_mask
 		    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);        // dst_stage_mask
 
 		// Shared between all views.
-		VkSampler clamp_to_border_black = rr->r->samplers.clamp_to_border_black;
+		VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
 
 		struct gfx_mesh_data md = XRT_STRUCT_INIT;
 		for (uint32_t i = 0; i < d->view_count; i++) {
@@ -907,20 +906,28 @@ comp_render_gfx_dispatch(struct render_gfx *rr,
 			struct xrt_normalized_rect src_norm_rect = d->views[i].layer_norm_rect;
 
 			gfx_mesh_add_view(         //
-			    &md,                   // md
+			    &md,                   //
 			    i,                     // view_index
-			    &src_pose,             // src_pose
-			    &src_fov,              // src_fov
-			    &src_norm_rect,        // src_norm_rect
+			    &src_pose,             //
+			    &src_fov,              //
+			    &src_norm_rect,        //
 			    clamp_to_border_black, // src_sampler
-			    src_image_view);       // src_image_view
+			    src_image_view);       //
 		}
 
 		// We are passing in the same old and new poses.
-		do_mesh(   //
-		    rr,    //
-		    false, // do_timewarp
-		    &md,   // md
-		    d);    // d
+		do_mesh(    //
+		    render, //
+		    false,  // do_timewarp
+		    &md,    //
+		    d);     //
+	} else {
+		// Just clear the screen
+		render_gfx_begin_target(     //
+		    render,                  //
+		    d->gfx.rtr,              //
+		    &background_color_idle); //
+
+		render_gfx_end_target(render);
 	}
 }

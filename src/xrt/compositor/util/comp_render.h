@@ -345,13 +345,13 @@ comp_render_gfx_add_view(struct comp_render_dispatch_data *data,
  * @note Swapchains in the @p layers must implement @ref comp_swapchain in
  * addition to just @ref xrt_swapchain, as this function downcasts to @ref comp_swapchain !
  *
- * @param rr GFX render object
+ * @param render GFX render object
  * @param[in] layers Layers to render, see note.
  * @param[in] layer_count Number of elements in @p layers array.
  * @param[in] d Common render dispatch data
  */
 void
-comp_render_gfx_dispatch(struct render_gfx *rr,
+comp_render_gfx_dispatch(struct render_gfx *render,
                          const struct comp_layer *layers,
                          const uint32_t layer_count,
                          const struct comp_render_dispatch_data *d);
@@ -468,7 +468,7 @@ comp_render_cs_add_view(struct comp_render_dispatch_data *data,
  * @note Swapchains in the @p layers must implement @ref comp_swapchain in
  * addition to just @ref xrt_swapchain, as this function downcasts to @ref comp_swapchain !
  *
- * @param crc Compute renderer object
+ * @param render Compute renderer object
  * @param view_index Index of the view
  * @param layers Layers to render, see note.
  * @param layer_count Number of elements in @p layers array.
@@ -481,7 +481,7 @@ comp_render_cs_add_view(struct comp_render_dispatch_data *data,
  * @param do_timewarp
  */
 void
-comp_render_cs_layer(struct render_compute *crc,
+comp_render_cs_layer(struct render_compute *render,
                      uint32_t view_index,
                      const struct comp_layer *layers,
                      const uint32_t layer_count,
@@ -513,21 +513,21 @@ comp_render_cs_layer(struct render_compute *crc,
  * @note Swapchains in the @p layers must implement @ref comp_swapchain in
  * addition to just @ref xrt_swapchain, as this function downcasts to @ref comp_swapchain !
  *
- * @param crc Compute renderer object
+ * @param render Compute renderer object
  * @param[in] layers Layers to render, see note.
  * @param[in] layer_count Number of elements in @p layers array.
  * @param[in] d Common render dispatch data
  * @param[in] transition_to Desired image layout for target images
  */
 void
-comp_render_cs_layers(struct render_compute *crc,
+comp_render_cs_layers(struct render_compute *render,
                       const struct comp_layer *layers,
                       const uint32_t layer_count,
                       const struct comp_render_dispatch_data *d,
                       VkImageLayout transition_to);
 
 /*!
- * Write commands to @p crc to do a full composition with distortion.
+ * Write commands to @p render to do a full composition with distortion.
  *
  * Helper function that takes a set of layers, new device poses, a scratch
  * images and writes the needed commands to the @ref render_compute to do a full
@@ -551,14 +551,14 @@ comp_render_cs_layers(struct render_compute *crc,
  * @note Swapchains in the @p layers must implement @ref comp_swapchain in
  * addition to just @ref xrt_swapchain, as this function downcasts to @ref comp_swapchain !
  *
- * @param crc Compute renderer object
+ * @param render Compute renderer object
  * @param[in] layers Layers to render, see note.
  * @param[in] layer_count Number of elements in @p layers array.
  * @param[in] d Common render dispatch data
  *
  */
 void
-comp_render_cs_dispatch(struct render_compute *crc,
+comp_render_cs_dispatch(struct render_compute *render,
                         const struct comp_layer *layers,
                         const uint32_t layer_count,
                         const struct comp_render_dispatch_data *d);
