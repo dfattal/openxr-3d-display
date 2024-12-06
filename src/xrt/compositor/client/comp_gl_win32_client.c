@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "client/comp_gl_client.h"
 #include "util/u_misc.h"
 #include "util/u_logging.h"
 
@@ -67,7 +68,7 @@ client_gl_win32_compositor_destroy(struct xrt_compositor *xc)
 {
 	struct client_gl_win32_compositor *c = client_gl_win32_compositor(xc);
 
-	client_gl_compositor_close(&c->base);
+	client_gl_compositor_fini(&c->base);
 
 	FreeLibrary(c->opengl);
 	c->opengl = NULL;

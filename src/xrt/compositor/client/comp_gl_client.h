@@ -203,7 +203,7 @@ client_gl_compositor(struct xrt_compositor *xc)
  * won't be called for you.
  *
  * @public @memberof client_gl_compositor
- * @see xrt_compositor_native
+ * @see xrt_compositor_native, client_gl_compositor_fini
  */
 bool
 client_gl_compositor_init(struct client_gl_compositor *c,
@@ -221,7 +221,7 @@ client_gl_compositor_init(struct client_gl_compositor *c,
  * @public @memberof client_gl_compositor
  */
 void
-client_gl_compositor_close(struct client_gl_compositor *c);
+client_gl_compositor_fini(struct client_gl_compositor *c);
 
 /*!
  * @copydoc client_gl_context_begin_locked_func_t

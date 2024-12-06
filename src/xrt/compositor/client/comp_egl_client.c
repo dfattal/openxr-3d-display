@@ -453,7 +453,7 @@ client_egl_compositor_destroy(struct xrt_compositor *xc)
 {
 	struct client_egl_compositor *ceglc = client_egl_compositor(xc);
 
-	client_gl_compositor_close(&ceglc->base);
+	client_gl_compositor_fini(&ceglc->base);
 
 	DESTROY_CONTEXT(ceglc->current.dpy, ceglc->current.ctx);
 	ceglc->current.ctx = EGL_NO_CONTEXT;

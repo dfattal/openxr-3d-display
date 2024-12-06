@@ -578,7 +578,7 @@ client_gl_compositor_destroy(struct xrt_compositor *xc)
  */
 
 void
-client_gl_compositor_close(struct client_gl_compositor *c)
+client_gl_compositor_fini(struct client_gl_compositor *c)
 {
 	os_mutex_destroy(&c->context_mutex);
 }
