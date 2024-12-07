@@ -317,6 +317,39 @@ comp_render_gfx_add_view(struct comp_render_dispatch_data *data,
 }
 
 /*!
+ * Dispatch the (graphics pipeline) layer squasher, on any number of views.
+ *
+ * All source layer images needs to be in the correct image layout, no barrier
+ * is inserted for them. The target images are barriered from undefined to general
+ * so they can be written to, then to the layout defined by @p transition_to.
+ *
+ * Expected layouts:
+ *
+ * - Layer images: `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`
+ * - Target images: Any
+ *
+ * After call layouts:
+ *
+ * - Layer images: `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`
+ * - Target images: @p transition_to
+ *
+ * @note Swapchains in the @p layers must implement @ref comp_swapchain in
+ * addition to just @ref xrt_swapchain, as this function downcasts to @ref comp_swapchain !
+ *
+ * @param render Graphics renderer object
+ * @param[in] layers Layers to render, see note.
+ * @param[in] layer_count Number of elements in @p layers array.
+ * @param[in] d Common render dispatch data
+ * @param[in] transition_to Desired image layout for target images
+ */
+void
+comp_render_gfx_layers(struct render_gfx *render,
+                       const struct comp_layer *layers,
+                       uint32_t layer_count,
+                       const struct comp_render_dispatch_data *d,
+                       VkImageLayout transition_to);
+
+/*!
  * Writes the needed commands to the @ref render_gfx to do a full composition with distortion.
  *
  * Takes a set of layers, new device poses, scratch
