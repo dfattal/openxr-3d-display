@@ -328,16 +328,8 @@ do_cs_quad_layer(const struct comp_layer *layer,
 	*out_cur_image = cur_image;
 }
 
-
-
-/*
- *
- * Compute distortion helpers.
- *
- */
-
 static void
-do_cs_clear(struct render_compute *render, const struct comp_render_dispatch_data *d)
+crc_clear_output(struct render_compute *render, const struct comp_render_dispatch_data *d)
 {
 	if (d->view_count > XRT_MAX_VIEWS) {
 		U_LOG_E("Only supports max %d views!", XRT_MAX_VIEWS);
@@ -358,8 +350,15 @@ do_cs_clear(struct render_compute *render, const struct comp_render_dispatch_dat
 	    target_viewport_datas);  // views
 }
 
+/*
+ *
+ * Compute distortion helpers.
+ *
+ */
+
+/// For use after squashing layers
 static void
-do_cs_distortion_from_scratch(struct render_compute *render, const struct comp_render_dispatch_data *d)
+crc_distortion_after_squash(struct render_compute *render, const struct comp_render_dispatch_data *d)
 {
 	if (d->view_count > XRT_MAX_VIEWS) {
 		U_LOG_E("Only supports max %d views!", XRT_MAX_VIEWS);
@@ -402,11 +401,12 @@ do_cs_distortion_from_scratch(struct render_compute *render, const struct comp_r
 	    target_viewport_datas);  // views
 }
 
+/// Fast path
 static void
-do_cs_distortion_for_layer(struct render_compute *render,
-                           const struct comp_render_dispatch_data *d,
-                           const struct comp_layer *layer,
-                           const struct xrt_layer_projection_view_data *vds[XRT_MAX_VIEWS])
+crc_distortion_fast_path(struct render_compute *render,
+                         const struct comp_render_dispatch_data *d,
+                         const struct comp_layer *layer,
+                         const struct xrt_layer_projection_view_data *vds[XRT_MAX_VIEWS])
 {
 	if (d->view_count > XRT_MAX_VIEWS) {
 		U_LOG_E("Only supports max %d views!", XRT_MAX_VIEWS);
@@ -490,7 +490,7 @@ do_cs_distortion_for_layer(struct render_compute *render,
 
 /*
  *
- * 'Exported' compute helpers.
+ * 'Exported' function(s).
  *
  */
 
@@ -707,7 +707,7 @@ comp_render_cs_layers(struct render_compute *render,
 	    VK_ACCESS_SHADER_WRITE_BIT,            // src_access_mask
 	    VK_ACCESS_MEMORY_READ_BIT,             // dst_access_mask
 	    VK_IMAGE_LAYOUT_GENERAL,               // transition_from
-	    transition_to,                         // transition_to
+	    transition_to,                         //
 	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  // src_stage_mask
 	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT); // dst_stage_mask
 }
@@ -737,11 +737,11 @@ comp_render_cs_dispatch(struct render_compute *render,
 		for (uint32_t view = 0; view < d->view_count; ++view) {
 			vds[view] = &proj->v[view];
 		}
-		do_cs_distortion_for_layer( //
-		    render,                 //
-		    d,                      //
-		    layer,                  //
-		    vds);                   //
+		crc_distortion_fast_path( //
+		    render,               //
+		    d,                    //
+		    layer,                //
+		    vds);                 //
 
 	} else if (fast_path && layer->data.type == XRT_LAYER_PROJECTION_DEPTH) {
 		// Fast path.
@@ -750,18 +750,17 @@ comp_render_cs_dispatch(struct render_compute *render,
 		for (uint32_t view = 0; view < d->view_count; ++view) {
 			vds[view] = &depth->v[view];
 		}
-		do_cs_distortion_for_layer( //
-		    render,                 //
-		    d,                      //
-		    layer,                  //
-		    vds);                   //
+		crc_distortion_fast_path( //
+		    render,               //
+		    d,                    //
+		    layer,                //
+		    vds);                 //
 
 	} else if (layer_count > 0) {
 		// Compute layer squasher
 		if (fast_path) {
 			U_LOG_W("Wanted fast path but no projection layer, falling back to layer squasher.");
 		}
-
 
 		/*
 		 * Layer squashing.
@@ -776,14 +775,14 @@ comp_render_cs_dispatch(struct render_compute *render,
 		/*
 		 * Distortion.
 		 */
+		crc_distortion_after_squash( //
+		    render,                  //
+		    d);                      //
 
-		do_cs_distortion_from_scratch( //
-		    render,                    //
-		    d);                        //
 	} else {
 		// Just clear the screen
-		do_cs_clear( //
-		    render,  //
-		    d);      //
+		crc_clear_output( //
+		    render,       //
+		    d);           //
 	}
 }
