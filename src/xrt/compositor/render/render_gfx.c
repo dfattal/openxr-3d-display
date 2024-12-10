@@ -34,7 +34,7 @@ vk_from_rtr(struct render_gfx_target_resources *rtr)
  * Get the @ref vk_bundle from @ref render_gfx.
  */
 static inline struct vk_bundle *
-vk_from_rr(struct render_gfx *render)
+vk_from_render(struct render_gfx *render)
 {
 	return render->r->vk;
 }
@@ -248,7 +248,7 @@ do_ubo_and_src_alloc_and_write(struct render_gfx *render,
 {
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 	struct render_sub_alloc ubo = XRT_STRUCT_INIT;
-	struct vk_bundle *vk = vk_from_rr(render);
+	struct vk_bundle *vk = vk_from_render(render);
 
 	VkResult ret;
 
@@ -295,7 +295,7 @@ do_ubo_and_src_alloc_and_write(struct render_gfx *render,
 static inline void
 dispatch_no_vbo(struct render_gfx *render, uint32_t vertex_count, VkPipeline pipeline, VkDescriptorSet descriptor_set)
 {
-	struct vk_bundle *vk = vk_from_rr(render);
+	struct vk_bundle *vk = vk_from_render(render);
 	struct render_resources *r = render->r;
 
 
@@ -971,7 +971,7 @@ render_gfx_init(struct render_gfx *render, struct render_resources *r)
 bool
 render_gfx_begin(struct render_gfx *render)
 {
-	struct vk_bundle *vk = vk_from_rr(render);
+	struct vk_bundle *vk = vk_from_render(render);
 	VkResult ret;
 
 	ret = vk->vkResetCommandPool(vk->device, render->r->cmd_pool, 0);
@@ -1006,7 +1006,7 @@ render_gfx_begin(struct render_gfx *render)
 bool
 render_gfx_end(struct render_gfx *render)
 {
-	struct vk_bundle *vk = vk_from_rr(render);
+	struct vk_bundle *vk = vk_from_render(render);
 	VkResult ret;
 
 	vk->vkCmdWriteTimestamp(                  //
@@ -1024,7 +1024,7 @@ render_gfx_end(struct render_gfx *render)
 void
 render_gfx_fini(struct render_gfx *render)
 {
-	struct vk_bundle *vk = vk_from_rr(render);
+	struct vk_bundle *vk = vk_from_render(render);
 	struct render_resources *r = render->r;
 
 	// Reclaim all descriptor sets.
@@ -1049,7 +1049,7 @@ render_gfx_begin_target(struct render_gfx *render,
                         struct render_gfx_target_resources *rtr,
                         const VkClearColorValue *color)
 {
-	struct vk_bundle *vk = vk_from_rr(render);
+	struct vk_bundle *vk = vk_from_render(render);
 
 	assert(render->rtr == NULL);
 	render->rtr = rtr;
@@ -1073,7 +1073,7 @@ render_gfx_begin_target(struct render_gfx *render,
 void
 render_gfx_end_target(struct render_gfx *render)
 {
-	struct vk_bundle *vk = vk_from_rr(render);
+	struct vk_bundle *vk = vk_from_render(render);
 
 	assert(render->rtr != NULL);
 	render->rtr = NULL;
@@ -1085,7 +1085,7 @@ render_gfx_end_target(struct render_gfx *render)
 void
 render_gfx_begin_view(struct render_gfx *render, uint32_t view, const struct render_viewport_data *viewport_data)
 {
-	struct vk_bundle *vk = vk_from_rr(render);
+	struct vk_bundle *vk = vk_from_render(render);
 
 	// We currently only support two views.
 	assert(view == 0 || view == 1);
@@ -1165,7 +1165,7 @@ render_gfx_mesh_alloc_and_write(struct render_gfx *render,
 void
 render_gfx_mesh_draw(struct render_gfx *render, uint32_t mesh_index, VkDescriptorSet descriptor_set, bool do_timewarp)
 {
-	struct vk_bundle *vk = vk_from_rr(render);
+	struct vk_bundle *vk = vk_from_render(render);
 	struct render_resources *r = render->r;
 
 
