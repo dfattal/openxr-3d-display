@@ -1,10 +1,12 @@
 // Copyright 2023, Jan Schmidt
+// Copyright 2024, Joel Valenciano
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  PSVR2 HMD device internals
  *
  * @author Jan Schmidt <jan@centricular.com>
+ * @author Joel Valenciano <joelv1907@gmail.com>
  * @ingroup drv_psvr2
  */
 #pragma once
@@ -104,6 +106,10 @@ enum psvr2_camera_mode
 	PSVR2_CAMERA_MODE_1 = 1,
 	PSVR2_CAMERA_MODE_10 = 0x10,
 };
+
+bool
+psvr2_compute_distortion_asymmetric(
+    float *calibration, struct xrt_uv_triplet *distCoords, int eEye, float fU, float fV);
 
 #ifdef __cplusplus
 }
