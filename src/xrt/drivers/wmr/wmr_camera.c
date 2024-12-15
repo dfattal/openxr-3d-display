@@ -51,7 +51,7 @@ update_expgain(struct wmr_camera *cam, struct xrt_frame **frames);
 
 #define CAM_ENDPOINT 0x05
 
-#define NUM_XFERS 4
+#define NUM_XFERS 9
 
 #define WMR_CAMERA_CMD_GAIN 0x80
 #define WMR_CAMERA_CMD_ON 0x81
@@ -463,6 +463,7 @@ wmr_camera_open(struct wmr_camera_open_config *config)
 	for (i = 0; i < NUM_XFERS; i++) {
 		cam->xfers[i] = libusb_alloc_transfer(0);
 		if (cam->xfers[i] == NULL) {
+			WMR_CAM_ERROR(cam, "Failed to allocate transfer %d", i);
 			res = LIBUSB_ERROR_NO_MEM;
 			goto fail;
 		}
@@ -609,6 +610,7 @@ wmr_camera_start(struct wmr_camera *cam)
 
 		res = libusb_submit_transfer(cam->xfers[i]);
 		if (res < 0) {
+			WMR_CAM_ERROR(cam, "Failed to submit transfer %d", i);
 			goto fail;
 		}
 	}
