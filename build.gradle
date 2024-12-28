@@ -24,6 +24,9 @@ buildscript {
 
         // If you update this, must also update .gitlab-ci/config.yml
         buildToolsVersion = '34.0.0'
+
+        // ktfmt version
+        ktfmtVersion = "0.53"
     }
     repositories {
         google()
