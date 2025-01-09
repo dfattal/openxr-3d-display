@@ -332,7 +332,7 @@ compositor_get_display_refresh_rate(struct xrt_compositor *xc, float *out_displa
 #else
 	struct comp_compositor *c = comp_compositor(xc);
 
-	if (c->target->get_current_refresh_rate) {
+	if (c->target && c->target->get_current_refresh_rate) {
 		return comp_target_get_current_refresh_rate(c->target, out_display_refresh_rate_hz);
 	} else {
 		*out_display_refresh_rate_hz = (float)(1. / time_ns_to_s(c->frame_interval_ns));
@@ -364,7 +364,7 @@ compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display
 	dlclose(android_handle);
 #else
 	struct comp_compositor *c = comp_compositor(xc);
-	if (c->target->request_refresh_rate) {
+	if (c->target && c->target->request_refresh_rate) {
 		xrt_result_t result = comp_target_request_refresh_rate(c->target, display_refresh_rate_hz);
 		// Assume refresh rate change is immediate
 		if (result == XRT_SUCCESS)
@@ -1168,7 +1168,7 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 		sys_info->refresh_rates_hz[i] = metrics.refresh_rates[i];
 	}
 #else
-	if (c->target->get_refresh_rates) {
+	if (c->target && c->target->get_refresh_rates) {
 		comp_target_get_refresh_rates(c->target, &sys_info->refresh_rate_count, sys_info->refresh_rates_hz);
 	} else {
 		//! @todo: Query all supported refresh rates of the current mode
