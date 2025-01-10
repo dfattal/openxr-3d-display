@@ -314,7 +314,7 @@ do_post_create_vulkan_setup(struct vk_bundle *vk,
 	VkCommandBuffer cmd_buffer;
 	VkResult ret;
 
-	VkComponentMapping components = {
+	VkComponentMapping no_alpha_components = {
 	    .r = VK_COMPONENT_SWIZZLE_R,
 	    .g = VK_COMPONENT_SWIZZLE_G,
 	    .b = VK_COMPONENT_SWIZZLE_B,
@@ -366,7 +366,7 @@ do_post_create_vulkan_setup(struct vk_bundle *vk,
 			    image_view_type,                       // type
 			    image_view_format,                     // format
 			    subresource_range,                     // subresource_range
-			    components,                            // components
+			    no_alpha_components,                   // components
 			    &sc->images[i].views.no_alpha[layer]); // out_view
 
 			VK_CHK_WITH_GOTO(ret, "vk_create_view_swizzle", error);
