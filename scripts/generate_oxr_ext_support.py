@@ -33,6 +33,7 @@ def not_(s):
 # The second and later items might be modified using or_() and not_().
 # Keep sorted, KHR, EXT, Vendor, experimental (same order).
 EXTENSIONS = (
+    # Khronos extensions, sorted alphabetically.
     ['XR_KHR_android_create_instance', 'XR_USE_PLATFORM_ANDROID'],
     ['XR_KHR_android_thread_settings', 'XR_USE_PLATFORM_ANDROID'],
     ['XR_KHR_binding_modification'],
@@ -58,6 +59,7 @@ EXTENSIONS = (
     ['XR_KHR_vulkan_enable2', 'XR_USE_GRAPHICS_API_VULKAN'],
     ['XR_KHR_vulkan_swapchain_format_list', 'XR_USE_GRAPHICS_API_VULKAN', 'XRT_FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST'],
     ['XR_KHR_win32_convert_performance_counter_time', 'XR_USE_PLATFORM_WIN32'],
+    # EXT extensions, sorted alphabetically.
     ['XR_EXT_active_action_set_priority', 'XRT_FEATURE_OPENXR_ACTIVE_ACTION_SET_PRIORITY'],
     ['XR_EXT_debug_utils', 'XRT_FEATURE_OPENXR_DEBUG_UTILS'],
     ['XR_EXT_dpad_binding'],
@@ -70,6 +72,7 @@ EXTENSIONS = (
     ['XR_EXT_performance_settings', 'XRT_FEATURE_OPENXR_PERFORMANCE_SETTINGS'],
     ['XR_EXT_plane_detection', 'XRT_FEATURE_OPENXR_PLANE_DETECTION'],
     ['XR_EXT_samsung_odyssey_controller', 'XRT_FEATURE_OPENXR_INTERACTION_WINMR'],
+    # Vendor extensions, sorted alphabetically.
     ['XR_BD_controller_interaction', 'XRT_FEATURE_OPENXR_INTERACTION_BYTEDANCE'],
     ['XR_FB_body_tracking', 'XRT_FEATURE_OPENXR_BODY_TRACKING_FB'],
     ['XR_FB_composition_layer_alpha_blend', 'XRT_FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND'],
@@ -93,6 +96,7 @@ EXTENSIONS = (
     ['XR_MSFT_hand_interaction', 'XRT_FEATURE_OPENXR_INTERACTION_MSFT_HAND'],
     ['XR_MSFT_unbounded_reference_space', 'XRT_FEATURE_OPENXR_SPACE_UNBOUNDED'],
     ['XR_OPPO_controller_interaction', 'XRT_FEATURE_OPENXR_INTERACTION_OPPO'],
+    # Experimental extensions, sorted alphabetically.
     ['XR_EXTX_overlay', 'XRT_FEATURE_OPENXR_OVERLAY'],
     ['XR_HTCX_vive_tracker_interaction', 'ALWAYS_DISABLED'],
     ['XR_MNDX_ball_on_a_stick_controller', 'XRT_FEATURE_OPENXR_INTERACTION_MNDX'],
