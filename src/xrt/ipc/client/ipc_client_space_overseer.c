@@ -7,11 +7,14 @@
  * @ingroup ipc_client
  */
 
-#include "client/ipc_client.h"
-#include "client/ipc_client_connection.h"
-#include "shared/ipc_message_channel.h"
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_space.h"
+
+#include "shared/ipc_message_channel.h"
+
+#include "client/ipc_client.h"
+#include "client/ipc_client_xdev.h"
+#include "client/ipc_client_connection.h"
 
 #include "ipc_client_generated.h"
 

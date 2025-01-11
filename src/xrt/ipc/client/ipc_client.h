@@ -166,38 +166,12 @@ struct ipc_connection
 #endif // XRT_OS_ANDROID
 };
 
-/*!
- * An IPC client proxy for an @ref xrt_device.
- *
- * @implements xrt_device
- * @ingroup ipc_client
- */
-struct ipc_client_xdev
-{
-	struct xrt_device base;
-
-	struct ipc_connection *ipc_c;
-
-	uint32_t device_id;
-};
-
 
 /*
  *
  * Internal functions.
  *
  */
-
-/*!
- * Convenience helper to go from a xdev to @ref ipc_client_xdev.
- *
- * @ingroup ipc_client
- */
-static inline struct ipc_client_xdev *
-ipc_client_xdev(struct xrt_device *xdev)
-{
-	return (struct ipc_client_xdev *)xdev;
-}
 
 /*!
  * Create an IPC client system compositor.

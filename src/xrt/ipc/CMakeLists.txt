@@ -70,6 +70,8 @@ add_library(
 	client/ipc_client_space_overseer.c
 	client/ipc_client_system.c
 	client/ipc_client_system_devices.c
+	client/ipc_client_xdev.c
+	client/ipc_client_xdev.h
 	)
 target_include_directories(
 	ipc_client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
