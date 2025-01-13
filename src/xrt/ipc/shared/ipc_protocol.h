@@ -25,6 +25,7 @@
 #include "xrt/xrt_tracking.h"
 #include "xrt/xrt_config_build.h"
 
+#include <assert.h>
 #include <sys/types.h>
 
 
@@ -73,6 +74,9 @@ struct ipc_shared_tracking_origin
 	struct xrt_pose offset;
 };
 
+static_assert(sizeof(struct ipc_shared_tracking_origin) == 288,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
+
 /*!
  * A binding in the shared memory area.
  *
@@ -92,6 +96,9 @@ struct ipc_shared_binding_profile
 	//! Offset into the array of pairs where this output bindings starts.
 	uint32_t first_output_index;
 };
+
+static_assert(sizeof(struct ipc_shared_binding_profile) == 20,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 /*!
  * A device in the shared memory area.
@@ -140,6 +147,9 @@ struct ipc_shared_device
 	bool battery_status_supported;
 };
 
+static_assert(sizeof(struct ipc_shared_device) == 560,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
+
 /*!
  * Data for a single composition layer.
  *
@@ -166,6 +176,9 @@ struct ipc_layer_entry
 	struct xrt_layer_data data;
 };
 
+static_assert(sizeof(struct ipc_layer_entry) == 392,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
+
 /*!
  * Render state for a single client, including all layers.
  *
@@ -177,6 +190,9 @@ struct ipc_layer_slot
 	uint32_t layer_count;
 	struct ipc_layer_entry layers[IPC_MAX_LAYERS];
 };
+
+static_assert(sizeof(struct ipc_layer_slot) == IPC_MAX_LAYERS * sizeof(struct ipc_layer_entry) + 32,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 /*!
  * A big struct that contains all data that is shared to a client, no pointers
@@ -282,6 +298,9 @@ struct ipc_shared_memory
 	uint64_t startup_timestamp;
 };
 
+static_assert(sizeof(struct ipc_shared_memory) == 6497680,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
+
 /*!
  * Initial info from a client when it connects.
  */
@@ -291,11 +310,17 @@ struct ipc_client_description
 	struct xrt_application_info info;
 };
 
+static_assert(sizeof(struct ipc_client_description) == 140,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
+
 struct ipc_client_list
 {
 	uint32_t ids[IPC_MAX_CLIENTS];
 	uint32_t id_count;
 };
+
+static_assert(sizeof(struct ipc_client_list) == 36,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 /*!
  * State for a connected application.
@@ -318,6 +343,9 @@ struct ipc_app_state
 	struct xrt_application_info info;
 };
 
+static_assert(sizeof(struct ipc_app_state) == 156,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
+
 
 /*!
  * Arguments for creating swapchains from native images.
@@ -326,6 +354,9 @@ struct ipc_arg_swapchain_from_native
 {
 	uint32_t sizes[XRT_MAX_SWAPCHAIN_IMAGES];
 };
+
+static_assert(sizeof(struct ipc_arg_swapchain_from_native) == 32,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 /*!
  * Arguments for xrt_device::get_view_poses with two views.
@@ -336,3 +367,6 @@ struct ipc_info_get_view_poses_2
 	struct xrt_pose poses[XRT_MAX_VIEWS];
 	struct xrt_space_relation head_relation;
 };
+
+static_assert(sizeof(struct ipc_info_get_view_poses_2) == 144,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
