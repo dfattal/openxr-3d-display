@@ -151,7 +151,7 @@ sample_hmd_get_view_poses(struct xrt_device *xdev,
 	    out_poses);           //
 }
 
-xrt_result_t
+static xrt_result_t
 sample_hmd_get_visibility_mask(struct xrt_device *xdev,
                                enum xrt_visibility_mask_type type,
                                uint32_t view_index,
