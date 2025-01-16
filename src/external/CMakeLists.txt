@@ -7,6 +7,11 @@ if(BUILD_TESTING)
 	target_include_directories(
 		xrt-external-catch2 SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/Catch2
 		)
+	if(MSVC)
+		# Needed for Visual Studio 2019.
+		# https://github.com/catchorg/Catch2/issues/2916#issuecomment-2404082203
+		target_compile_options(xrt-external-catch2 PRIVATE "/Zc:hiddenFriend-")
+	endif()
 endif()
 
 # OpenVR
