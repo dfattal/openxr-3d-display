@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2025, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -6,6 +6,7 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Moses Turner <moses@collabora.com>
+ * @author Simon Zeni <simon.zeni@collabora.com>
  * @ingroup aux_util
  */
 
@@ -174,6 +175,16 @@ u_device_get_view_poses(struct xrt_device *xdev,
                         struct xrt_fov *out_fovs,
                         struct xrt_pose *out_poses);
 
+/*!
+ * Helper function to implement @ref xrt_device::get_visibility_mask in a HMD driver.
+ *
+ * The field @ref xrt_device::hmd needs to be set and valid.
+ */
+xrt_result_t
+u_device_get_visibility_mask(struct xrt_device *xdev,
+                             enum xrt_visibility_mask_type type,
+                             uint32_t view_index,
+                             struct xrt_visibility_mask **out_mask);
 
 /*
  *

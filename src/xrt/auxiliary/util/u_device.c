@@ -1,4 +1,4 @@
-// Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2019-2025, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -6,12 +6,14 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @author Moses Turner <moses@collabora.com>
+ * @author Simon Zeni <simon.zeni@collabora.com>
  * @ingroup aux_util
  */
 
-#include "util/u_logging.h"
 #include "util/u_device.h"
+#include "util/u_logging.h"
 #include "util/u_misc.h"
+#include "util/u_visibility_mask.h"
 
 #include "math/m_mathinclude.h"
 #include "math/m_api.h"
@@ -469,6 +471,16 @@ u_device_get_view_poses(struct xrt_device *xdev,
 	}
 }
 
+xrt_result_t
+u_device_get_visibility_mask(struct xrt_device *xdev,
+                             enum xrt_visibility_mask_type type,
+                             uint32_t view_index,
+                             struct xrt_visibility_mask **out_mask)
+{
+	const struct xrt_fov fov = xdev->hmd->distortion.fov[view_index];
+	u_visibility_mask_get_default(type, &fov, out_mask);
+	return XRT_SUCCESS;
+}
 
 /*
  *
