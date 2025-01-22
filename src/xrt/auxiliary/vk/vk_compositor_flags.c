@@ -1,4 +1,4 @@
-// Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2019-2025, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -29,6 +29,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER
+#include "android/android_ahardwarebuffer_allocator.h"
+#endif
 
 /*
  *
@@ -347,6 +350,11 @@ vk_csci_is_format_supported(struct vk_bundle *vk, VkFormat format, enum xrt_swap
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	if (!has_ahardware_buffer_format_conversion(format)) {
 		VK_DEBUG(vk, "Format '%s' does not map to a AHardwareBuffer format!", vk_format_string(format));
+		return false;
+	}
+
+	if (!ahardwarebuffer_is_supported(format, xbits)) {
+		VK_DEBUG(vk, "Format '%s' is not supported.", vk_format_string(format));
 		return false;
 	}
 #endif
