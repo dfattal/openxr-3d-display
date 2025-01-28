@@ -12,6 +12,7 @@
 #include "xrt/xrt_device.h"
 #include <SDL2/SDL.h>
 #include <assert.h>
+#include <string.h>
 
 // Amount of look_speed units a mouse delta of 1px in screen space will rotate the device
 #define SENSITIVITY 0.1f

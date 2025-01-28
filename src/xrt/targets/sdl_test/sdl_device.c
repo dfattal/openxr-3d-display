@@ -13,6 +13,7 @@
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
 
+#include <stdio.h>
 
 static xrt_result_t
 sdl_hmd_get_tracked_pose(struct xrt_device *xdev,

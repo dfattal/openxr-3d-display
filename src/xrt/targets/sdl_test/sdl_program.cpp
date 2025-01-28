@@ -13,6 +13,7 @@
 
 #include "sdl_internal.hpp"
 
+#include <cstdio>
 
 void
 sdl_create_window(struct sdl_program *sp)

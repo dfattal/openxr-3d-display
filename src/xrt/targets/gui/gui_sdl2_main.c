@@ -10,6 +10,7 @@
 #include "util/u_var.h"
 #include "gui_sdl2.h"
 #include "util/u_trace_marker.h"
+#include <string.h>
 
 U_TRACE_TARGET_SETUP(U_TRACE_WHICH_SERVICE)
 
