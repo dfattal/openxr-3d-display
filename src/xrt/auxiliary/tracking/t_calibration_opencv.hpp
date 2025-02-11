@@ -34,6 +34,36 @@ t_num_opencv_params_from_distortion_model(const enum t_camera_distortion_model m
 	default: return t_num_params_from_distortion_model(model);
 	}
 }
+
+/*!
+ * @brief Determines whether a camera distortion model is suitable for use in OpenCV as a fisheye distortion.
+ *
+ * @param model The distortion model in question.
+ */
+static inline bool
+t_camera_distortion_model_is_opencv_fisheye(const enum t_camera_distortion_model model)
+{
+	return model == T_DISTORTION_FISHEYE_KB4;
+}
+
+/*!
+ * @brief Determines whether a camera distortion model is suitable for use in OpenCV as a non-fisheye distortion.
+ *
+ * @param model The distortion model in question.
+ */
+static inline bool
+t_camera_distortion_model_is_opencv_non_fisheye(const enum t_camera_distortion_model model)
+{
+	switch (model) {
+	case T_DISTORTION_OPENCV_RADTAN_5:
+	case T_DISTORTION_OPENCV_RADTAN_8:
+	case T_DISTORTION_OPENCV_RADTAN_14:
+	// @note WMR is not supported by OpenCV, but we re-interpret it into a format which is, so this is also valid.
+	case T_DISTORTION_WMR: return true;
+	default: return false;
+	}
+}
+
 /*!
  * @brief Essential calibration data wrapped for C++.
  *
