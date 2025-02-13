@@ -369,6 +369,14 @@ p_udev_add_v4l(struct prober_device *pdev, uint32_t v4l_index, uint32_t usb_ifac
 #endif
 }
 
+static bool
+device_is_virtual(struct udev_device *raw_dev)
+{
+	const char *prop_id_path = udev_device_get_property_value(raw_dev, "ID_PATH");
+
+	return (prop_id_path == NULL);
+}
+
 static void
 p_udev_enumerate_hidraw(struct prober *p, struct udev *udev)
 {
@@ -388,7 +396,7 @@ p_udev_enumerate_hidraw(struct prober *p, struct udev *udev)
 		struct udev_device *raw_dev = NULL;
 		uint16_t vendor_id;
 		uint16_t product_id;
-		uint16_t interface;
+		uint16_t interface = 0;
 		uint8_t dev_class = 0;
 		uint16_t usb_bus = 0;
 		uint16_t usb_addr = 0;
@@ -428,14 +436,16 @@ p_udev_enumerate_hidraw(struct prober *p, struct udev *udev)
 		default: P_ERROR(p, "Unknown hidraw bus_type: '%i', ignoring.", bus_type); goto next;
 		}
 
-		// HID interface.
-		ret = p_udev_get_interface_number(raw_dev, &interface);
-		if (ret != 0) {
-			P_ERROR(p,
-			        "In enumerating hidraw devices: "
-			        "Failed to get interface number for '%s'",
-			        sysfs_path);
-			goto next;
+		// Get USB interface number for non-virtual devices.
+		if (!device_is_virtual(raw_dev)) {
+			ret = p_udev_get_interface_number(raw_dev, &interface);
+			if (ret != 0) {
+				P_ERROR(p,
+				        "In enumerating hidraw devices: "
+				        "Failed to get interface number for '%s'",
+				        sysfs_path);
+				goto next;
+			}
 		}
 
 		if (bus_type == HIDRAW_BUS_BLUETOOTH) {
