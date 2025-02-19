@@ -57,7 +57,7 @@ add_library(
 
 if(XRT_HAVE_VULKAN)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_vk.c oxr_swapchain_vk.c oxr_vulkan.c)
-	target_link_libraries(st_oxr PUBLIC Vulkan::Vulkan)
+	target_link_libraries(st_oxr PUBLIC aux_vk)
 endif()
 
 if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)

@@ -5,7 +5,7 @@ if(XRT_HAVE_OPENGL)
 	add_subdirectory(gui)
 endif()
 
-if(XRT_FEATURE_OPENXR)
+if(XRT_MODULE_OPENXR_STATE_TRACKER)
 	add_subdirectory(oxr)
 endif()
 
