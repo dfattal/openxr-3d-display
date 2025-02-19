@@ -453,22 +453,27 @@ get_identifier_str_in_profile(struct oxr_logger *log,
 	return str;
 }
 
-void
+bool
 oxr_get_profile_for_device_name(struct oxr_logger *log,
                                 struct oxr_session *sess,
                                 enum xrt_device_name name,
                                 struct oxr_interaction_profile **out_p)
 {
+	if (name == XRT_DEVICE_INVALID) {
+		return false;
+	}
 	/*
 	 * Map xrt_device_name to an interaction profile XrPath.
 	 * Set *out_p to an oxr_interaction_profile if bindings for that interaction profile XrPath have been suggested.
 	 */
 	for (uint32_t i = 0; i < ARRAY_SIZE(profile_templates); i++) {
 		if (name == profile_templates[i].name) {
-			interaction_profile_find_in_session(log, sess, profile_templates[i].path_cache, out_p);
-			return;
+			if (interaction_profile_find_in_session(log, sess, profile_templates[i].path_cache, out_p)) {
+				return true;
+			}
 		}
 	}
+	return false;
 }
 
 

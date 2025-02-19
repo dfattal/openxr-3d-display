@@ -651,7 +651,7 @@ oxr_find_profile_for_device(struct oxr_logger *log,
                             struct xrt_device *xdev,
                             struct oxr_interaction_profile **out_p);
 
-void
+bool
 oxr_get_profile_for_device_name(struct oxr_logger *log,
                                 struct oxr_session *sess,
                                 enum xrt_device_name name,
