@@ -93,11 +93,9 @@ destroy(struct xrt_system *xsys)
 
 	if (usys->sessions.count > 0) {
 		U_LOG_E("Number of sessions not zero, things will crash!");
-		free(usys->sessions.pairs);
-		usys->sessions.pairs = NULL;
-		usys->sessions.count = 0;
 	}
 
+	free(usys->sessions.pairs);
 	free(usys);
 }
 
@@ -120,6 +118,14 @@ u_system_create(void)
 	// xrt_session_event_sink fields.
 	usys->broadcast.push_event = push_event;
 
+	usys->sessions.capacity = 2;
+	usys->sessions.pairs = U_TYPED_ARRAY_CALLOC(struct u_system_session_pair, usys->sessions.capacity);
+	if (usys->sessions.pairs == NULL) {
+		U_LOG_E("Failed to allocate session array");
+		free(usys);
+		return NULL;
+	}
+
 	// u_system fields.
 	XRT_MAYBE_UNUSED int ret = os_mutex_init(&usys->sessions.mutex);
 	assert(ret == 0);
@@ -135,13 +141,22 @@ u_system_add_session(struct u_system *usys, struct xrt_session *xs, struct xrt_s
 
 	os_mutex_lock(&usys->sessions.mutex);
 
-	uint32_t count = usys->sessions.count;
+	const uint32_t new_count = usys->sessions.count + 1;
 
-	U_ARRAY_REALLOC_OR_FREE(usys->sessions.pairs, struct u_system_session_pair, count + 1);
+	if (new_count > usys->sessions.capacity) {
+		usys->sessions.capacity *= 2;
+		const size_t size = usys->sessions.capacity * sizeof(*usys->sessions.pairs);
+		struct u_system_session_pair *tmp = realloc(usys->sessions.pairs, size);
+		if (tmp == NULL) {
+			U_LOG_E("Failed to reallocate session array");
+			goto add_unlock;
+		}
+		usys->sessions.pairs = tmp;
+	}
 
-	usys->sessions.pairs[count] = (struct u_system_session_pair){xs, xses};
-	usys->sessions.count++;
+	usys->sessions.pairs[usys->sessions.count++] = (struct u_system_session_pair){xs, xses};
 
+add_unlock:
 	os_mutex_unlock(&usys->sessions.mutex);
 }
 
@@ -165,7 +180,7 @@ u_system_remove_session(struct u_system *usys, struct xrt_session *xs, struct xr
 	// Guards against empty array as well as not finding the session.
 	if (dst >= count) {
 		U_LOG_E("Could not find session to remove!");
-		goto unlock;
+		goto remove_unlock;
 	}
 
 	// Should not be true with above check.
@@ -183,10 +198,12 @@ u_system_remove_session(struct u_system *usys, struct xrt_session *xs, struct xr
 	}
 
 	count--;
-	U_ARRAY_REALLOC_OR_FREE(usys->sessions.pairs, struct u_system_session_pair, count);
+	// This ensures that the memory returned in add is always zero initialized.
+	U_ZERO(&usys->sessions.pairs[count]);
+
 	usys->sessions.count = count;
 
-unlock:
+remove_unlock:
 	os_mutex_unlock(&usys->sessions.mutex);
 }
 

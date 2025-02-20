@@ -52,6 +52,8 @@ struct u_system
 
 		//! Number of session and event sink pairs.
 		uint32_t count;
+		//! Capacity of the session array.
+		uint32_t capacity;
 		//! Array of session and event sink pairs.
 		struct u_system_session_pair *pairs;
 	} sessions;
