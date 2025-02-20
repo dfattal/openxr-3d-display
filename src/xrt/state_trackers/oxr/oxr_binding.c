@@ -539,9 +539,16 @@ oxr_destroy_profiles(struct oxr_interaction_profile **profiles, const size_t pro
 			b->output = 0;
 		}
 
+		for (size_t y = 0; y < p->dpad_count; ++y) {
+			struct oxr_dpad_emulation *d = &p->dpads[y];
+			free(d->paths);
+		}
+
 		free(p->bindings);
 		p->bindings = NULL;
 		p->binding_count = 0;
+
+		free(p->dpads);
 
 		oxr_dpad_state_deinit(&p->dpad_state);
 
