@@ -92,6 +92,7 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 	xrt_space_overseer_destroy(&inst->system.xso);
 	os_mutex_destroy(&inst->system.sync_actions_mutex);
 	xrt_system_devices_destroy(&inst->system.xsysd);
+	xrt_system_destroy(&inst->system.xsys);
 
 #ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
 	u_debug_gui_stop(&inst->debug_ui);
