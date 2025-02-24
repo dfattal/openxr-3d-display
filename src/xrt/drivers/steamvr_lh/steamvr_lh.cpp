@@ -356,7 +356,16 @@ Context::VendorSpecificEvent(uint32_t unWhichDevice,
                              vr::EVREventType eventType,
                              const vr::VREvent_Data_t &eventData,
                              double eventTimeOffset)
-{}
+{
+	std::lock_guard lk(event_queue_mut);
+	events.push_back({std::chrono::steady_clock::now(),
+	                  {
+	                      .eventType = eventType,
+	                      .trackedDeviceIndex = unWhichDevice,
+	                      .eventAgeSeconds = {},
+	                      .data = eventData,
+	                  }});
+}
 
 bool
 Context::IsExiting()
