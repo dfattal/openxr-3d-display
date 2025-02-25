@@ -114,9 +114,25 @@ public:
 		parent = nullptr;
 	}
 
-	JSONNode(JSONNode &&) = default;
+	JSONNode(JSONNode &&node)
+	{
+		*this = std::move(node);
+	}
 
 	JSONNode(const JSONNode &node)
+	{
+		*this = node;
+	};
+
+	JSONNode &
+	operator=(JSONNode &&rhs)
+	{
+		swap(*this, rhs);
+		return *this;
+	}
+
+	JSONNode &
+	operator=(const JSONNode &node)
 	{
 		is_owner = node.is_owner;
 		parent = node.parent;
@@ -125,15 +141,7 @@ public:
 		} else {
 			cjson = node.cjson; // Shallow copy
 		}
-	};
 
-	JSONNode &
-	operator=(JSONNode &&) = default;
-
-	JSONNode &
-	operator=(JSONNode rhs)
-	{
-		swap(*this, rhs);
 		return *this;
 	};
 
