@@ -240,6 +240,26 @@ if(XRT_BUILD_DRIVER_ROKID)
 	list(APPEND ENABLED_HEADSET_DRIVERS rokid)
 endif()
 
+if(XRT_BUILD_DRIVER_RIFT)
+	add_library(
+		drv_rift STATIC
+		rift/rift_hmd.c
+		rift/rift_prober.c
+		)
+	target_include_directories(drv_rift SYSTEM PRIVATE)
+	target_link_libraries(
+		drv_rift
+		PRIVATE
+			xrt-interfaces
+			aux_util
+			aux_util_sink
+			aux_math
+			xrt-external-cjson
+			xrt-external-tinyceres
+		)
+	list(APPEND ENABLED_HEADSET_DRIVERS rift)
+endif()
+
 if(XRT_BUILD_DRIVER_RIFT_S)
 	add_library(
 		drv_rift_s STATIC

@@ -40,6 +40,10 @@
 #include "psvr/psvr_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_RIFT
+#include "rift/rift_interface.h"
+#endif
+
 #ifdef XRT_BUILD_DRIVER_RIFT_S
 #include "rift_s/rift_s_interface.h"
 #endif
@@ -183,6 +187,10 @@ struct xrt_prober_entry target_entry_list[] = {
     {PSSENSE_VID, PSSENSE_PID_LEFT, pssense_found, "PlayStation VR2 Sense Controller (L)", "pssense"},
     {PSSENSE_VID, PSSENSE_PID_RIGHT, pssense_found, "PlayStation VR2 Sense Controller (R)", "pssense"},
 #endif // XRT_BUILD_DRIVER_PSSENSE
+
+#ifdef XRT_BUILD_DRIVER_RIFT
+    {OCULUS_VR_VID, OCULUS_DK2_PID, rift_found, "Rift (DK2)", "rift"},
+#endif // XRT_BUILD_DRIVER_HDK
 
 #ifdef XRT_BUILD_DRIVER_ROKID
     {ROKID_VID, ROKID_PID, rokid_found, "Rokid Air or Max", "rokid"},
