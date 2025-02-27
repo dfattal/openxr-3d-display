@@ -1005,6 +1005,7 @@ compositor_init_renderer(struct comp_compositor *c)
 xrt_result_t
 comp_main_create_system_compositor(struct xrt_device *xdev,
                                    const struct comp_target_factory *ctf,
+                                   struct u_pacing_app_factory *upaf,
                                    struct xrt_system_compositor **out_xsysc)
 {
 	COMP_TRACE_MARKER();
@@ -1025,6 +1026,8 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 	c->frame.waited.id = -1;
 	c->frame.rendering.id = -1;
 	c->xdev = xdev;
+
+	xrt_result_t xret = XRT_SUCCESS;
 
 	COMP_DEBUG(c, "Doing init %p", (void *)c);
 
@@ -1073,9 +1076,9 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 	    !compositor_init_vulkan(c) ||
 	    !compositor_init_render_resources(c)) {
 		COMP_ERROR(c, "Failed to init compositor %p", (void *)c);
-		c->base.base.base.destroy(&c->base.base.base);
 
-		return XRT_ERROR_VULKAN;
+		xret = XRT_ERROR_VULKAN;
+		goto error;
 	}
 
 	if (!c->deferred_surface) {
@@ -1083,9 +1086,9 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 		    !compositor_init_swapchain(c) ||
 		    !compositor_init_renderer(c)) {
 			COMP_ERROR(c, "Failed to init compositor %p", (void*)c);
-			c->base.base.base.destroy(&c->base.base.base);
 
-			return XRT_ERROR_VULKAN;
+			xret = XRT_ERROR_VULKAN;
+			goto error;
 		}
 		comp_target_set_title(c->target, WINDOW_TITLE);
 	}
@@ -1205,10 +1208,20 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 	}
 
 	// Standard app pacer.
-	struct u_pacing_app_factory *upaf = NULL;
-	xrt_result_t xret = u_pa_factory_create(&upaf);
-	assert(xret == XRT_SUCCESS && upaf != NULL);
-	(void)xret;
+	if (upaf == NULL) {
+		xret = u_pa_factory_create(&upaf);
+		if (xret != XRT_SUCCESS || upaf == NULL) {
+			COMP_ERROR(c, "Failed to create app pacing factory");
+			goto error;
+		}
+	}
 
 	return comp_multi_create_system_compositor(&c->base.base, upaf, sys_info, !c->deferred_surface, out_xsysc);
+
+error:
+	if (c != NULL) {
+		c->base.base.base.destroy(&c->base.base.base);
+	}
+	u_paf_destroy(&upaf);
+	return xret;
 }
