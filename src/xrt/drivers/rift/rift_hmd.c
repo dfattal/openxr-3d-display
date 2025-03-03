@@ -603,6 +603,20 @@ rift_hmd_create(struct os_hid_device *dev, enum rift_variant variant, char *devi
 	info.fov[0] = 93;
 	info.fov[1] = 93;
 
+	char *icd_str = getenv("RIFT_OVERRIDE_ICD");
+	if (icd_str != NULL) {
+		// mm -> meters
+		float icd = strtof(icd_str, NULL) / 1000.0f;
+
+		// 0 is error, and less than zero is invalid
+		if (icd > 0.0f) {
+			hmd->extra_display_info.icd = icd;
+			HMD_INFO(hmd, "Forcing ICD to %f", hmd->extra_display_info.icd);
+		} else {
+			HMD_ERROR(hmd, "Failed to parse ICD override, expected float in millimeters, got %s", icd_str);
+		}
+	}
+
 	if (!u_device_setup_split_side_by_side(&hmd->base, &info)) {
 		HMD_ERROR(hmd, "Failed to setup basic device info");
 		goto error;
