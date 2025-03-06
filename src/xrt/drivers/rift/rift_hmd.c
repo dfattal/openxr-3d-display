@@ -348,7 +348,7 @@ sensor_thread_tick(struct rift_hmd *hmd)
 	}
 
 	if (result == 0) {
-		HMD_WARN(hmd, "Timed out waiting for packet from headset, packet should come in every %d milliseconds",
+		HMD_WARN(hmd, "Timed out waiting for packet from headset, packets should come in at %dhz",
 		         IMU_SAMPLE_RATE);
 		return 0;
 	}
@@ -362,8 +362,14 @@ sensor_thread_tick(struct rift_hmd *hmd)
 		}
 
 		struct dk2_in_report report;
-		assert(result >= (int)sizeof(report));
 
+		// don't treat invalid IN reports as fatal, just ignore them
+		if (result < (int)sizeof(report)) {
+			HMD_WARN(hmd, "Got malformed DK2 IN report with size %d", result);
+			return 0;
+		}
+
+		// TODO: handle endianness
 		memcpy(&report, buf + 1, sizeof(report));
 
 		// if there's no samples, just do nothing.
@@ -371,42 +377,61 @@ sensor_thread_tick(struct rift_hmd *hmd)
 			return 0;
 		}
 
-		int64_t remote_sample_timestamp_ns = (int64_t)report.sample_timestamp * 1000;
-
-		// ignore samples that are behind the latest current sample
-		if (remote_sample_timestamp_ns < hmd->last_sample_time_ns) {
-			return 0;
+		if (!hmd->processed_sample_packet) {
+			hmd->last_remote_sample_time_us = report.sample_timestamp;
+			hmd->processed_sample_packet = true;
 		}
 
-		hmd->last_sample_time_ns = remote_sample_timestamp_ns;
+		// wrap-around intentional and A-OK, given these are unsigned
+		uint32_t remote_sample_delta_us = report.sample_timestamp - hmd->last_remote_sample_time_us;
+
+		hmd->last_remote_sample_time_us = report.sample_timestamp;
+
+		hmd->last_remote_sample_time_ns += (int64_t)remote_sample_delta_us * OS_NS_PER_USEC;
 
 		m_clock_windowed_skew_tracker_push(hmd->clock_tracker, os_monotonic_get_ns(),
-		                                   remote_sample_timestamp_ns);
+		                                   hmd->last_remote_sample_time_ns);
 
 		int64_t local_timestamp_ns;
 		// if we haven't synchronized our clocks, just do nothing
-		if (!m_clock_windowed_skew_tracker_to_local(hmd->clock_tracker, remote_sample_timestamp_ns,
+		if (!m_clock_windowed_skew_tracker_to_local(hmd->clock_tracker, hmd->last_remote_sample_time_ns,
 		                                            &local_timestamp_ns)) {
 			return 0;
 		}
 
-		struct dk2_sample_pack sample_pack = report.samples[report.num_samples >= 2 ? 1 : 0];
+		if (report.num_samples > 1)
+			HMD_TRACE(hmd,
+			          "Had more than one sample queued! We aren't receiving IN reports fast enough, HMD "
+			          "had %d samples in the queue! Having to work back that first sample...",
+			          report.num_samples);
 
-		int32_t accel_raw[3], gyro_raw[3];
-		rift_decode_sample(sample_pack.accel.data, accel_raw);
-		rift_decode_sample(sample_pack.gyro.data, gyro_raw);
+		for (int i = 0; i < MIN(DK2_MAX_SAMPLES, report.num_samples); i++) {
+			struct dk2_sample_pack latest_sample_pack = report.samples[i];
 
-		struct xrt_vec3 accel, gyro;
-		rift_sample_to_imu_space(accel_raw, &accel);
-		rift_sample_to_imu_space(gyro_raw, &gyro);
+			int32_t accel_raw[3], gyro_raw[3];
+			rift_decode_sample(latest_sample_pack.accel.data, accel_raw);
+			rift_decode_sample(latest_sample_pack.gyro.data, gyro_raw);
 
-		m_imu_3dof_update(&hmd->fusion, local_timestamp_ns, &accel, &gyro);
+			struct xrt_vec3 accel, gyro;
+			rift_sample_to_imu_space(accel_raw, &accel);
+			rift_sample_to_imu_space(gyro_raw, &gyro);
 
-		struct xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
-		relation.relation_flags = (enum xrt_space_relation_flags)(XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-		                                                          XRT_SPACE_RELATION_ORIENTATION_VALID_BIT);
-		relation.pose.orientation = hmd->fusion.rot;
-		m_relation_history_push(hmd->relation_hist, &relation, local_timestamp_ns);
+			// work back the likely timestamp of the current sample
+			// if there's only one sample, then this will always be zero, if there's two or more samples,
+			// the previous samples will be offset by the sample rate of the IMU
+			int64_t sample_local_timestamp_ns =
+			    local_timestamp_ns - ((MIN(report.num_samples, DK2_MAX_SAMPLES) - 1) * NS_PER_SAMPLE);
+
+			// update the IMU for that sample
+			m_imu_3dof_update(&hmd->fusion, sample_local_timestamp_ns, &accel, &gyro);
+
+			// push the pose of the IMU for that sample, doing so per sample
+			struct xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
+			relation.relation_flags = (enum xrt_space_relation_flags)(
+			    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT);
+			relation.pose.orientation = hmd->fusion.rot;
+			m_relation_history_push(hmd->relation_hist, &relation, sample_local_timestamp_ns);
+		}
 
 		break;
 	}
@@ -662,7 +687,7 @@ rift_hmd_create(struct os_hid_device *dev, enum rift_variant variant, char *devi
 		goto error;
 	}
 
-	m_imu_3dof_init(&hmd->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_300MS);
+	m_imu_3dof_init(&hmd->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 	hmd->clock_tracker = m_clock_windowed_skew_tracker_alloc(64);
 
 	result = os_thread_helper_start(&hmd->sensor_thread, sensor_thread, hmd);
@@ -675,6 +700,7 @@ rift_hmd_create(struct os_hid_device *dev, enum rift_variant variant, char *devi
 	// Setup variable tracker: Optional but useful for debugging
 	u_var_add_root(hmd, "Rift HMD", true);
 	u_var_add_log_level(hmd, &hmd->log_level, "log_level");
+	u_var_add_f32(hmd, &hmd->extra_display_info.icd, "ICD");
 	m_imu_3dof_add_vars(&hmd->fusion, hmd, "3dof_");
 
 	return hmd;
