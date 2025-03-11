@@ -21,3 +21,5 @@ EXPORTS
     mnd_root_get_tracking_origin_count
     mnd_root_get_tracking_origin_name
     mnd_root_get_device_battery_status
+    mnd_root_get_device_brightness
+    mnd_root_set_device_brightness

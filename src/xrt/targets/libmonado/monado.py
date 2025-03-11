@@ -72,6 +72,12 @@ class Device:
         self.name = name
         self.serial = serial
 
+    def __repr__(self):
+        return f"{self.name} ({self.serial})"
+
+    def __str__(self):
+        return repr(self)
+
 
 class Client:
     def __init__(self, ident, name, primary, focused, visible, active, overlay, io_active):
@@ -217,3 +223,15 @@ class Monado:
                 raise Exception(f"Could not get device role: {role_name}")
             role_map[role_name] = device_int_id_ptr[0]
         return role_map
+
+    def get_device_brightness(self, index: int) -> float:
+        brightness_ptr = self.ffi.new("float *")
+        ret = self.lib.mnd_root_get_device_brightness(self.root, index, brightness_ptr)
+        if ret != 0:
+            raise Exception(f"get_device_brightness failed: {ret}")
+        return brightness_ptr[0]
+
+    def set_device_brightness(self, index: int, brightness: float, relative: bool) -> None:
+        ret = self.lib.mnd_root_set_device_brightness(self.root, index, brightness, relative)
+        if ret != 0:
+            raise Exception(f"set_device_brightness failed: {ret}")

@@ -46,6 +46,8 @@ typedef enum mnd_result
 	MND_ERROR_INVALID_PROPERTY = -6,
 	//! Supported in version 1.3 and above.
 	MND_ERROR_INVALID_OPERATION = -7,
+	//! Supported in version 1.5 and above.
+	MND_ERROR_UNSUPPORTED_OPERATION = -7,
 } mnd_result_t;
 
 /*!
@@ -78,6 +80,8 @@ typedef enum mnd_property
 	MND_PROPERTY_SUPPORTS_POSITION_BOOL = 3,
 	//! Supported in version 1.4.0 and above.
 	MND_PROPERTY_SUPPORTS_ORIENTATION_BOOL = 4,
+	//! Supported in version 1.5.0 and above.
+	MND_PROPERTY_SUPPORTS_BRIGHTNESS_BOOL = 5,
 } mnd_property_t;
 
 /*!
@@ -492,6 +496,35 @@ mnd_root_get_tracking_origin_name(mnd_root_t *root, uint32_t origin_id, const ch
 mnd_result_t
 mnd_root_get_device_battery_status(
     mnd_root_t *root, uint32_t device_index, bool *out_present, bool *out_charging, float *out_charge);
+
+/*!
+ * Get current brightness of a display device.
+ *
+ * @param root                 The libmonado state.
+ * @param device_index         Index of device to retrieve brightness from.
+ * @param[out] out_brightness  Pointer to value to populate with the current device brightness, where 0 is 0%, and 1 is
+ * 100%.
+ *
+ * @return MND_SUCCESS on success
+ */
+mnd_result_t
+mnd_root_get_device_brightness(mnd_root_t *root, uint32_t device_index, float *out_brightness);
+
+/*!
+ * @brief Set the display brightness.
+ *
+ * @param root                 The libmonado state.
+ * @param device_index         Index of device to retrieve battery info from.
+ * @param[in] brightness       Desired display brightness, usually between 0 and 1. Some devices may
+ *                             allow exceeding 1 if the supported range exceeds 100%, but it will be clamped to
+ *                             the supported range.
+ * @param[in] relative         Whether to add \a brightness to the current brightness, instead of overwriting
+ *                             the current brightness.
+ *
+ * @return MND_SUCCESS on success
+ */
+mnd_result_t
+mnd_root_set_device_brightness(mnd_root_t *root, uint32_t device_index, float brightness, bool relative);
 
 #ifdef __cplusplus
 }
