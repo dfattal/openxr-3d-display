@@ -9,6 +9,7 @@
  * @ingroup oxr_main
  */
 
+#include "bindings/b_generated_bindings.h"
 #include "util/u_debug.h"
 #include "util/u_time.h"
 #include "util/u_misc.h"
@@ -1618,10 +1619,11 @@ oxr_action_bind_io(struct oxr_logger *log,
 		} else {
 			oxr_slog(slog, "\t\tBound to:\n");
 			for (uint32_t i = 0; i < input_count; i++) {
-				enum xrt_input_type t = XRT_GET_INPUT_TYPE(inputs[i].input->name);
-				bool active = inputs[i].input->active;
-				oxr_slog(slog, "\t\t\t'%s' on '%s' (%s)\n", xrt_input_type_to_str(t),
-				         inputs[i].xdev->str, active ? "active" : "inactive");
+				struct xrt_input *input = inputs[i].input;
+				enum xrt_input_type t = XRT_GET_INPUT_TYPE(input->name);
+				bool active = input->active;
+				oxr_slog(slog, "\t\t\t'%s' ('%s') on '%s' (%s)\n", xrt_input_name_string(input->name),
+				         xrt_input_type_to_str(t), inputs[i].xdev->str, active ? "active" : "inactive");
 			}
 		}
 
