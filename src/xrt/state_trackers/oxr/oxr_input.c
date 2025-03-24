@@ -769,7 +769,8 @@ get_binding(struct oxr_logger *log,
 
 		if (found) {
 			if (xbp == NULL) {
-				oxr_slog(slog, "\t\t\t\tBound (xdev)!\n");
+				oxr_slog(slog, "\t\t\t\tBound (xdev '%s'): %s!\n", xdev->str,
+				         xrt_input_name_string(binding_points[i]->input));
 			} else {
 				oxr_slog(slog, "\t\t\t\tBound (xbp)!\n");
 			}
