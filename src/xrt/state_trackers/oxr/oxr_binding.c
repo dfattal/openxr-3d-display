@@ -400,7 +400,7 @@ void
 oxr_binding_find_bindings_from_key(struct oxr_logger *log,
                                    struct oxr_interaction_profile *profile,
                                    uint32_t key,
-                                   size_t max_bounding_count,
+                                   size_t max_binding_count,
                                    struct oxr_binding **out_bindings,
                                    size_t *out_binding_count)
 {
@@ -427,13 +427,13 @@ oxr_binding_find_bindings_from_key(struct oxr_logger *log,
 		}
 
 		//! @todo Should return total count instead of fixed max.
-		if (binding_count >= max_bounding_count) {
+		if (binding_count >= max_binding_count) {
 			oxr_warn(log, "Internal limit reached, action has too many bindings!");
 			break;
 		}
 	}
 
-	assert(binding_count <= max_bounding_count);
+	assert(binding_count <= max_binding_count);
 
 	*out_binding_count = binding_count;
 }

@@ -684,7 +684,7 @@ void
 oxr_binding_find_bindings_from_key(struct oxr_logger *log,
                                    struct oxr_interaction_profile *profile,
                                    uint32_t key,
-                                   size_t max_bounding_count,
+                                   size_t max_binding_count,
                                    struct oxr_binding **out_bindings,
                                    size_t *out_binding_count);
 
