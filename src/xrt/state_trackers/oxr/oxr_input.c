@@ -1585,6 +1585,10 @@ oxr_action_bind_io(struct oxr_logger *log,
 		for (uint32_t i = 0; i < input_count; i++) {
 			// Only add the input if we can find a transform.
 
+			oxr_slog(slog, "\t\tFinding transforms for '%s' to action '%s' of type '%s'\n",
+			         xrt_input_name_string(inputs[i].input->name), act_ref->name,
+			         xr_action_type_to_str(act_ref->action_type));
+
 			enum oxr_dpad_region dpad_region;
 			if (get_dpad_region_from_path(log, sess->sys->inst, inputs[i].bound_path, &dpad_region)) {
 				struct oxr_dpad_entry *entry = oxr_dpad_state_get(&profile->dpad_state, act_set_key);
