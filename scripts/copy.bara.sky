@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BSL-1.0
 """Configuration for "copybara" <https://github.com/google/copybara> to update vendored source"""
 
-gitlab_url = "git@gitlab.freedesktop.org:rpavlik/monado.git"
+gitlab_url = "git@ssh.gitlab.freedesktop.org:rpavlik/monado.git"
 author = "Rylie Pavlik <rylie.pavlik@collabora.com>"
 
 # update-stb: Update STB libraries
@@ -149,5 +149,31 @@ core.workflow(
     transformations = [
         metadata.replace_message("external/renderdoc_api: Update RenderDoc API from upstream"),
         core.move("renderdoc/api/app/", "src/external/renderdoc_api/"),
+    ],
+)
+
+# update-jnipp: Update jnipp library (used on Android)
+core.workflow(
+    name="update-jnipp",
+    custom_rev_id="JNIPP_REV_ID",
+    origin=git.github_origin(
+        url="https://github.com/mitchdowd/jnipp.git",
+        describe_version=True,
+        ref="master",
+    ),
+    destination=git.destination(
+        url=gitlab_url,
+        fetch="main",
+        push="update-jnipp",
+    ),
+    destination_files=glob(["src/external/jnipp/**"]),
+    origin_files=glob(["**"], exclude=[".*", ".*/**", "*.sln"]),
+    authoring=authoring.pass_thru(author),
+    transformations=[
+        metadata.expose_label("GIT_DESCRIBE_CHANGE_VERSION"),
+        metadata.replace_message(
+            "Update jnipp from upstream ${GIT_DESCRIBE_CHANGE_VERSION}"
+        ),
+        core.move("", "src/external/jnipp/"),
     ],
 )
