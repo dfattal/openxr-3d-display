@@ -390,13 +390,15 @@ client_egl_insert_fence(struct xrt_compositor *xc, xrt_graphics_sync_handle_t *o
 	EGLDisplay dpy = ceglc->current.dpy;
 
 #ifdef XRT_GRAPHICS_SYNC_HANDLE_IS_FD
-
+	// https://registry.khronos.org/EGL/extensions/ANDROID/EGL_ANDROID_native_fence_sync.txt
+	// create also inserts the fence in the command stream
 	EGLSyncKHR sync = eglCreateSyncKHR(dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, NULL);
 	if (sync == EGL_NO_SYNC_KHR) {
 		EGL_ERROR("Failed to insert fence!");
 		return XRT_ERROR_FENCE_CREATE_FAILED;
 	}
 
+	// Flush needed to create native FD
 	glFlush();
 
 	int fence_fd = eglDupNativeFenceFDANDROID(dpy, sync);
