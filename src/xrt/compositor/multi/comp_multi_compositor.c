@@ -787,7 +787,7 @@ multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		    &xcf);                                 //
 		/*!
 		 * If import_fence succeeded, we have transferred ownership to
-		 * the compositor no need to do anything more. If the call
+		 * the compositor; no need to do anything more. If the call
 		 * failed we need to close the handle.
 		 */
 		if (xret == XRT_SUCCESS) {
