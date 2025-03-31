@@ -266,10 +266,12 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	}
 
 	// In
+#if !defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	VkImageMemoryRequirementsInfo2 memory_requirements_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
 	    .image = image,
 	};
+#endif
 
 	// Out->pNext
 	VkMemoryDedicatedRequirements memory_dedicated_requirements = {

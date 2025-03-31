@@ -241,7 +241,7 @@ android_device_compute_distortion(
 
 
 struct android_device *
-android_device_create()
+android_device_create(void)
 {
 	enum u_device_alloc_flags flags =
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);

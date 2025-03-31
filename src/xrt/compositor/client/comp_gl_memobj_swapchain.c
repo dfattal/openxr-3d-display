@@ -72,7 +72,7 @@ client_gl_memobj_swapchain_destroy(struct xrt_swapchain *xsc)
 	free(sc);
 }
 
-static bool
+XRT_MAYBE_UNUSED static bool
 client_gl_memobj_swapchain_import(GLuint memory, size_t size, xrt_graphics_buffer_handle_t handle)
 {
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)

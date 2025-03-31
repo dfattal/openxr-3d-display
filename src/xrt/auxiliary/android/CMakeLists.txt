@@ -7,7 +7,7 @@ add_library(
 	)
 target_include_directories(android_app_glue PUBLIC ${ANDROID_NDK}/sources/android/native_app_glue)
 # disable these warnings in external code
-target_compile_options(android_app_glue PRIVATE -Wno-format-pedantic)
+target_compile_options(android_app_glue PRIVATE -Wno-format-pedantic -Wno-strict-prototypes)
 
 add_library(
 	aux_android STATIC

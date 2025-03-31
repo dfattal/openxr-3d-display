@@ -230,6 +230,7 @@ android_custom_surface_get_display_metrics(struct _JavaVM *vm,
 		    .xdpi = displayMetrics.get<float>("xdpi"),
 		    .ydpi = displayMetrics.get<float>("ydpi"),
 		    .refresh_rate = displayRefreshRate,
+		    .refresh_rates = {},
 		    .refresh_rate_count = (uint32_t)supported_refresh_rates.size(),
 		};
 		for (int i = 0; i < (int)metrics.refresh_rate_count; ++i) {

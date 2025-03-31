@@ -100,7 +100,7 @@ oxr_session_populate_gles_android(struct oxr_logger *log,
 		                 "XrGraphicsBindingEGLMNDX::config cannot be null when EGL_KHR_no_config_context is "
 		                 "not supported by the display.");
 	}
-	if (xret != XR_SUCCESS || xcgl == NULL) {
+	if (xret != XRT_SUCCESS || xcgl == NULL) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Failed to create an egl client compositor");
 	}
 
