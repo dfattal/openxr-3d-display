@@ -31,6 +31,7 @@
 #include "util/u_frame_times_widget.h"
 
 #include "util/comp_render.h"
+#include "util/comp_high_level_render.h"
 
 #include "main/comp_frame.h"
 #include "main/comp_mirror_to_debug_gui.h"
@@ -142,52 +143,6 @@ struct comp_renderer
 	//! @}
 };
 
-struct comp_scratch_view_state
-{
-	uint32_t index;
-
-	bool used;
-};
-
-/// Holds an array of @ref comp_scratch_view_state to match the number of views
-struct comp_render_scratch_state
-{
-	struct comp_scratch_view_state views[2];
-};
-
-
-/*
- *
- * Scratch helpers.
- *
- */
-
-/// Zeroes the object pointed to by @p crss then populates it with the image indices.
-static void
-scratch_get_init(struct comp_render_scratch_state *crss, struct comp_renderer *r, uint32_t view_count)
-{
-	struct comp_compositor *c = r->c;
-	U_ZERO(crss);
-
-	for (uint32_t i = 0; i < view_count; i++) {
-		comp_scratch_single_images_get(&c->scratch.views[i].cssi, &crss->views[i].index);
-	}
-}
-
-/// Calls done or discard on each view in @p crss, depending on whether "used" is set.
-static void
-scratch_get_fini(struct comp_render_scratch_state *crss, struct comp_renderer *r, uint32_t view_count)
-{
-	struct comp_compositor *c = r->c;
-
-	for (uint32_t i = 0; i < view_count; i++) {
-		if (crss->views[i].used) {
-			comp_scratch_single_images_done(&c->scratch.views[i].cssi);
-		} else {
-			comp_scratch_single_images_discard(&c->scratch.views[i].cssi);
-		}
-	}
-}
 
 /*
  *
@@ -882,7 +837,7 @@ renderer_fini(struct comp_renderer *r)
 static XRT_CHECK_RESULT VkResult
 dispatch_graphics(struct comp_renderer *r,
                   struct render_gfx *render,
-                  struct comp_render_scratch_state *crss,
+                  struct chl_frame_state *frame_state,
                   enum comp_target_fov_source fov_source)
 {
 	COMP_TRACE_MARKER();
@@ -894,14 +849,9 @@ dispatch_graphics(struct comp_renderer *r,
 	// Basics
 	const struct comp_layer *layers = c->base.layer_accum.layers;
 	uint32_t layer_count = c->base.layer_accum.layer_count;
-	bool fast_path = c->base.frame_params.one_projection_layer_fast_path;
-	bool do_timewarp = !c->debug.atw_off;
 
 	// Resources for the distortion render target.
 	struct render_gfx_target_resources *rtr = &r->rtr_array[r->acquired_buffer];
-
-	// Consistency check.
-	assert(!fast_path || c->base.layer_accum.layer_count >= 1);
 
 	// Viewport information.
 	struct render_viewport_data viewport_datas[XRT_MAX_VIEWS];
@@ -923,78 +873,18 @@ dispatch_graphics(struct comp_renderer *r,
 	    eye_poses,              //
 	    render->r->view_count); //
 
-
-	// The arguments for the dispatch function.
-	struct comp_render_dispatch_data data;
-	comp_render_initial_init( //
-	    &data,                // data
-	    fast_path,            // fast_path
-	    do_timewarp);         // do_timewarp
-
-	for (uint32_t i = 0; i < render->r->view_count; i++) {
-		// Which image of the scratch images for this view are we using.
-		uint32_t scratch_index = crss->views[i].index;
-
-		// The set of scratch images we are using for this view.
-		struct comp_scratch_single_images *scratch_view = &c->scratch.views[i].cssi;
-
-		// The render target resources for the scratch images.
-		struct render_gfx_target_resources *rsci_rtr = &c->scratch.views[i].targets[scratch_index];
-
-		// Scratch color image.
-		struct render_scratch_color_image *rsci = &scratch_view->images[scratch_index];
-
-		// Use the whole scratch image.
-		struct render_viewport_data layer_viewport_data = {
-		    .x = 0,
-		    .y = 0,
-		    .w = scratch_view->info.width,
-		    .h = scratch_view->info.height,
-		};
-
-		// Scratch image covers the whole image.
-		struct xrt_normalized_rect layer_norm_rect = {.x = 0.0f, .y = 0.0f, .w = 1.0f, .h = 1.0f};
-
-		VkImageView sample_view = comp_scratch_single_images_get_sample_view(scratch_view, scratch_index);
-
-		comp_render_gfx_add_squash_view( //
-		    &data,                       //
-		    &world_poses[i],             //
-		    &eye_poses[i],               //
-		    &fovs[i],                    //
-		    rsci->image,                 // squash_image
-		    rsci_rtr,                    // squash_rtr
-		    &layer_viewport_data);       // squash_viewport_data
-
-		comp_render_gfx_add_target_view( //
-		    &data,                       //
-		    sample_view,                 // squash_as_src_sample_view
-		    &layer_norm_rect,            // squash_as_src_norm_rect
-		    &vertex_rots[i],             // target_vertex_rot
-		    &viewport_datas[i]);         // target_viewport_data
-
-		if (layer_count == 0) {
-			crss->views[i].used = false;
-		} else {
-			crss->views[i].used = !fast_path;
-		}
-	}
-
-	// Add the target info.
-	comp_render_gfx_add_target(&data, rtr);
-
-	// Start the graphics pipeline.
-	render_gfx_begin(render);
-
-	// Build the command buffer.
-	comp_render_gfx_dispatch( //
-	    render,               //
-	    layers,               //
-	    layer_count,          //
-	    &data);               //
-
-	// Make the command buffer submittable.
-	render_gfx_end(render);
+	// Does everything.
+	chl_frame_state_gfx_default_pipeline( //
+	    frame_state,                      //
+	    render,                           //
+	    layers,                           //
+	    layer_count,                      //
+	    world_poses,                      //
+	    eye_poses,                        //
+	    fovs,                             //
+	    rtr,                              //
+	    viewport_datas,                   //
+	    vertex_rots);                     //
 
 	// Everything is ready, submit to the queue.
 	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
@@ -1016,7 +906,7 @@ dispatch_graphics(struct comp_renderer *r,
 static XRT_CHECK_RESULT VkResult
 dispatch_compute(struct comp_renderer *r,
                  struct render_compute *render,
-                 struct comp_render_scratch_state *crss,
+                 struct chl_frame_state *frame_state,
                  enum comp_target_fov_source fov_source)
 {
 	COMP_TRACE_MARKER();
@@ -1028,8 +918,6 @@ dispatch_compute(struct comp_renderer *r,
 	// Basics
 	const struct comp_layer *layers = c->base.layer_accum.layers;
 	uint32_t layer_count = c->base.layer_accum.layer_count;
-	bool fast_path = c->base.frame_params.one_projection_layer_fast_path;
-	bool do_timewarp = !c->debug.atw_off;
 
 	// Device view information.
 	struct xrt_fov fovs[XRT_MAX_VIEWS];
@@ -1045,83 +933,24 @@ dispatch_compute(struct comp_renderer *r,
 
 	// Target Vulkan resources..
 	VkImage target_image = r->c->target->images[r->acquired_buffer].handle;
-	VkImageView target_image_view = r->c->target->images[r->acquired_buffer].view;
+	VkImageView target_storage_view = r->c->target->images[r->acquired_buffer].view;
 
 	// Target view information.
-	struct render_viewport_data views[XRT_MAX_VIEWS];
-	calc_viewport_data(r, views, render->r->view_count);
+	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
+	calc_viewport_data(r, target_viewport_datas, render->r->view_count);
 
-	// The arguments for the dispatch function.
-	struct comp_render_dispatch_data data;
-	comp_render_initial_init( //
-	    &data,                // data
-	    fast_path,            // fast_path
-	    do_timewarp);         // do_timewarp
-
-	for (uint32_t i = 0; i < render->r->view_count; i++) {
-		// Which image of the scratch images for this view are we using.
-		uint32_t scratch_index = crss->views[i].index;
-
-		// The set of scratch images we are using for this view.
-		struct comp_scratch_single_images *scratch_view = &c->scratch.views[i].cssi;
-
-		// Scratch color image.
-		struct render_scratch_color_image *rsci = &scratch_view->images[scratch_index];
-
-		// Use the whole scratch image.
-		struct render_viewport_data layer_viewport_data = {
-		    .x = 0,
-		    .y = 0,
-		    .w = scratch_view->info.width,
-		    .h = scratch_view->info.height,
-		};
-
-		// Scratch image covers the whole image.
-		struct xrt_normalized_rect layer_norm_rect = {.x = 0.0f, .y = 0.0f, .w = 1.0f, .h = 1.0f};
-
-		VkImageView sample_view = comp_scratch_single_images_get_sample_view(scratch_view, scratch_index);
-		VkImageView storage_view = comp_scratch_single_images_get_storage_view(scratch_view, scratch_index);
-
-		comp_render_cs_add_squash_view( //
-		    &data,                      //
-		    &world_poses[i],            //
-		    &eye_poses[i],              //
-		    &fovs[i],                   //
-		    rsci->image,                // squash_image
-		    storage_view,               // squash_storage_view
-		    &layer_viewport_data);      // squash_viewport_data
-
-		comp_render_cs_add_target_view( //
-		    &data,                      //
-		    sample_view,                // squash_as_src_sample_view
-		    &layer_norm_rect,           // squash_as_src_norm_rect
-		    &views[i]);                 // target_viewport_data
-
-		if (layer_count == 0) {
-			crss->views[i].used = false;
-		} else {
-			crss->views[i].used = !fast_path;
-		}
-	}
-
-	// Add the target info.
-	comp_render_cs_add_target( //
-	    &data,                 // data
-	    target_image,          // target_image
-	    target_image_view);    // target_unorm_view
-
-	// Start the compute pipeline.
-	render_compute_begin(render);
-
-	// Build the command buffer.
-	comp_render_cs_dispatch( //
-	    render,              //
-	    layers,              //
-	    layer_count,         //
-	    &data);              //
-
-	// Make the command buffer submittable.
-	render_compute_end(render);
+	// Does everything.
+	chl_frame_state_cs_default_pipeline( //
+	    frame_state,                     //
+	    render,                          //
+	    layers,                          //
+	    layer_count,                     //
+	    world_poses,                     //
+	    eye_poses,                       //
+	    fovs,                            //
+	    target_image,                    //
+	    target_storage_view,             //
+	    target_viewport_datas);          //
 
 	// Everything is ready, submit to the queue.
 	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -1182,9 +1011,21 @@ comp_renderer_draw(struct comp_renderer *r)
 	const uint32_t view_count = c->nr.view_count;
 	enum comp_target_fov_source fov_source = COMP_TARGET_FOV_SOURCE_DISTORTION;
 
+	bool fast_path = c->base.frame_params.one_projection_layer_fast_path;
+	bool do_timewarp = !c->debug.atw_off;
+
+	// Consistency check.
+	assert(!fast_path || c->base.layer_accum.layer_count >= 1);
+
 	// For scratch image debugging.
-	struct comp_render_scratch_state crss;
-	scratch_get_init(&crss, r, view_count);
+	struct chl_frame_state frame_state;
+	chl_frame_state_init( //
+	    &frame_state,     //
+	    &c->nr,           //
+	    view_count,       //
+	    do_timewarp,      //
+	    fast_path,        //
+	    &c->scratch);     //
 
 	bool use_compute = r->settings->use_compute;
 	struct render_gfx render_g = {0};
@@ -1193,10 +1034,10 @@ comp_renderer_draw(struct comp_renderer *r)
 	VkResult res = VK_SUCCESS;
 	if (use_compute) {
 		render_compute_init(&render_c, &c->nr);
-		res = dispatch_compute(r, &render_c, &crss, fov_source);
+		res = dispatch_compute(r, &render_c, &frame_state, fov_source);
 	} else {
 		render_gfx_init(&render_g, &c->nr);
-		res = dispatch_graphics(r, &render_g, &crss, fov_source);
+		res = dispatch_graphics(r, &render_g, &frame_state, fov_source);
 	}
 	if (res != VK_SUCCESS) {
 		return XRT_ERROR_VULKAN;
@@ -1206,20 +1047,24 @@ comp_renderer_draw(struct comp_renderer *r)
 	if (c->peek) {
 		switch (comp_window_peek_get_eye(c->peek)) {
 		case COMP_WINDOW_PEEK_EYE_LEFT: {
+			uint32_t scratch_index = frame_state.scratch_state.views[0].index;
 			struct comp_scratch_single_images *view = &c->scratch.views[0].cssi;
-			comp_window_peek_blit(                       //
-			    c->peek,                                 //
-			    view->images[crss.views[0].index].image, //
-			    view->info.width,                        //
-			    view->info.height);                      //
+
+			comp_window_peek_blit(                 //
+			    c->peek,                           //
+			    view->images[scratch_index].image, //
+			    view->info.width,                  //
+			    view->info.height);                //
 		} break;
 		case COMP_WINDOW_PEEK_EYE_RIGHT: {
+			uint32_t scratch_index = frame_state.scratch_state.views[1].index;
 			struct comp_scratch_single_images *view = &c->scratch.views[1].cssi;
-			comp_window_peek_blit(                       //
-			    c->peek,                                 //
-			    view->images[crss.views[1].index].image, //
-			    view->info.width,                        //
-			    view->info.height);                      //
+
+			comp_window_peek_blit(                 //
+			    c->peek,                           //
+			    view->images[scratch_index].image, //
+			    view->info.width,                  //
+			    view->info.height);                //
 		} break;
 		case COMP_WINDOW_PEEK_EYE_BOTH:
 			/* TODO: display the undistorted image */
@@ -1245,8 +1090,9 @@ comp_renderer_draw(struct comp_renderer *r)
 	comp_mirror_fixup_ui_state(&r->mirror_to_debug_gui, c);
 	if (comp_mirror_is_ready_and_active(&r->mirror_to_debug_gui, c, predicted_display_time_ns)) {
 
+		uint32_t scratch_index = frame_state.scratch_state.views[0].index;
 		struct comp_scratch_single_images *view = &c->scratch.views[0].cssi;
-		struct render_scratch_color_image *rsci = &view->images[crss.views[0].index];
+		struct render_scratch_color_image *rsci = &view->images[scratch_index];
 		VkExtent2D extent = {view->info.width, view->info.width};
 
 		// Used for both, want clamp to edge to no bring in black.
@@ -1276,8 +1122,11 @@ comp_renderer_draw(struct comp_renderer *r)
 	 */
 	renderer_wait_queue_idle(r);
 
-	// Finalize the scratch images, send to debug UI if active.
-	scratch_get_fini(&crss, r, view_count);
+	/*
+	 * Free any resources and finalize the scratch images,
+	 * which sends them send to debug UI if it is active.
+	 */
+	chl_frame_state_fini(&frame_state);
 
 	// Check timestamps.
 	if (xret == XRT_SUCCESS) {
