@@ -101,6 +101,17 @@ common_shutdown(volatile struct ipc_client_state *ics)
 		ics->device_feature_used[i] = false;
 	}
 
+	// Make sure undestroyed plane detections are cleaned up
+	for (uint32_t i = 0; i < ics->plane_detection_count; i++) {
+		xrt_device_destroy_plane_detection_ext(ics->plane_detection_xdev[i], ics->plane_detection_ids[i]);
+	}
+	free(ics->plane_detection_ids);
+	free(ics->plane_detection_xdev);
+	ics->plane_detection_ids = NULL;
+	ics->plane_detection_xdev = NULL;
+	ics->plane_detection_size = 0;
+	ics->plane_detection_count = 0;
+
 	// Should we stop the server when a client disconnects?
 	if (ics->server->exit_on_disconnect) {
 		ics->server->running = false;

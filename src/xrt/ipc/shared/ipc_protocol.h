@@ -145,9 +145,11 @@ struct ipc_shared_device
 	bool form_factor_check_supported;
 	bool stage_supported;
 	bool battery_status_supported;
+	bool planes_supported;
+	enum xrt_plane_detection_capability_flags_ext plane_capability_flags;
 };
 
-static_assert(sizeof(struct ipc_shared_device) == 560,
+static_assert(sizeof(struct ipc_shared_device) == 564,
               "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 /*!
@@ -296,9 +298,10 @@ struct ipc_shared_memory
 	struct ipc_layer_slot slots[IPC_MAX_SLOTS];
 
 	uint64_t startup_timestamp;
+	struct xrt_plane_detector_begin_info_ext plane_begin_info_ext;
 };
 
-static_assert(sizeof(struct ipc_shared_memory) == 6497680,
+static_assert(sizeof(struct ipc_shared_memory) == 6499920,
               "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 /*!

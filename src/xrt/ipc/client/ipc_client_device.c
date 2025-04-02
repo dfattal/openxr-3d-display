@@ -280,6 +280,8 @@ ipc_client_device_create(struct ipc_connection *ipc_c, struct xrt_tracking_origi
 	icd->base.body_tracking_supported = isdev->body_tracking_supported;
 	icd->base.force_feedback_supported = isdev->force_feedback_supported;
 	icd->base.stage_supported = isdev->stage_supported;
+	icd->base.planes_supported = isdev->planes_supported;
+	icd->base.plane_capability_flags = isdev->plane_capability_flags;
 
 	icd->base.device_type = isdev->device_type;
 	return &icd->base;

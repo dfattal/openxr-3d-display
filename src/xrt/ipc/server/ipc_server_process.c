@@ -356,6 +356,8 @@ init_shm(struct ipc_server *s)
 		isdev->body_tracking_supported = xdev->body_tracking_supported;
 		isdev->stage_supported = xdev->stage_supported;
 		isdev->battery_status_supported = xdev->battery_status_supported;
+		isdev->planes_supported = xdev->planes_supported;
+		isdev->plane_capability_flags = xdev->plane_capability_flags;
 
 		// Setup the tracking origin.
 		isdev->tracking_origin_index = (uint32_t)-1;
@@ -964,6 +966,11 @@ ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_h
 	ics->server = vs;
 	ics->server_thread_index = cs_index;
 	ics->io_active = true;
+
+	ics->plane_detection_size = 0;
+	ics->plane_detection_count = 0;
+	ics->plane_detection_ids = NULL;
+	ics->plane_detection_xdev = NULL;
 
 	os_thread_start(&it->thread, ipc_server_client_thread, (void *)ics);
 
