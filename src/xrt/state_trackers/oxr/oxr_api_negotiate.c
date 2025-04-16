@@ -1,4 +1,5 @@
 // Copyright 2018-2024, Collabora, Ltd.
+// Copyright 2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -101,6 +102,28 @@ oxr_xrEnumerateApiLayerProperties(uint32_t propertyCapacityInput,
 	return XR_SUCCESS;
 }
 
+
+/*!
+ * @brief Helper define for generating that GetInstanceProcAddr function.
+ *
+ * Return the function if the extra condition is true.
+ */
+#define RETURN_IF_TRUE(funcName, extraCondition)                                                                       \
+	do {                                                                                                           \
+		if (extraCondition) {                                                                                  \
+			PFN_##funcName ret = &oxr_##funcName;                                                          \
+			*out_function = (PFN_xrVoidFunction)(ret);                                                     \
+			return XR_SUCCESS;                                                                             \
+		}                                                                                                      \
+	} while (false)
+
+/*!
+ * @brief Helper define for generating that GetInstanceProcAddr function.
+ *
+ * Return the function if the extension is enabled.
+ */
+#define RETURN_IF_EXT(funcName, short_ext_name) RETURN_IF_TRUE(funcName, inst->extensions.short_ext_name)
+
 /*!
  * @brief Helper define for generating that GetInstanceProcAddr function.
  *
@@ -124,11 +147,7 @@ oxr_xrEnumerateApiLayerProperties(uint32_t propertyCapacityInput,
 #define ENTRY_IF(funcName, extraCondition, message)                                                                    \
 	do {                                                                                                           \
 		if (strcmp(name, #funcName) == 0) {                                                                    \
-			if (extraCondition) {                                                                          \
-				PFN_##funcName ret = &oxr_##funcName;                                                  \
-				*out_function = (PFN_xrVoidFunction)(ret);                                             \
-				return XR_SUCCESS;                                                                     \
-			}                                                                                              \
+			RETURN_IF_TRUE(funcName, extraCondition);                                                      \
 			return XR_ERROR_FUNCTION_UNSUPPORTED;                                                          \
 		}                                                                                                      \
 	} while (false)
@@ -298,13 +317,43 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrSessionInsertDebugUtilsLabelEXT, EXT_debug_utils);
 #endif // OXR_HAVE_EXT_debug_utils
 
+	if (strcmp(name, "xrGetOpenGLGraphicsRequirementsKHR") == 0) {
+		bool enabled_extension = false;
 #ifdef OXR_HAVE_KHR_opengl_enable
-	ENTRY_IF_EXT(xrGetOpenGLGraphicsRequirementsKHR, KHR_opengl_enable);
-#endif // OXR_HAVE_KHR_opengl_enable
+		enabled_extension |= inst->extensions.KHR_opengl_enable;
+#endif
+#ifdef OXR_HAVE_MNDX_egl_enable
+		enabled_extension |= inst->extensions.MNDX_egl_enable;
+#endif
 
+#ifdef XR_USE_GRAPHICS_API_OPENGL
+		RETURN_IF_TRUE(xrGetOpenGLGraphicsRequirementsKHR, enabled_extension);
+#else
+		if (enabled_extension) {
+			oxr_warn(log, "Asked for xrGetOpenGLGraphicsRequirementsKHR but not compiled in.");
+		}
+#endif
+		return XR_ERROR_FUNCTION_UNSUPPORTED;
+	}
+
+	if (strcmp(name, "xrGetOpenGLESGraphicsRequirementsKHR") == 0) {
+		bool enabled_extension = false;
 #ifdef OXR_HAVE_KHR_opengl_es_enable
-	ENTRY_IF_EXT(xrGetOpenGLESGraphicsRequirementsKHR, KHR_opengl_es_enable);
-#endif // OXR_HAVE_KHR_opengl_es_enable
+		enabled_extension |= inst->extensions.KHR_opengl_es_enable;
+#endif
+#ifdef OXR_HAVE_MNDX_egl_enable
+		enabled_extension |= inst->extensions.MNDX_egl_enable;
+#endif
+
+#ifdef XR_USE_GRAPHICS_API_OPENGL_ES
+		RETURN_IF_TRUE(xrGetOpenGLESGraphicsRequirementsKHR, enabled_extension);
+#else
+		if (enabled_extension) {
+			oxr_warn(log, "Asked for xrGetOpenGLESGraphicsRequirementsKHR but not compiled in.");
+		}
+#endif
+		return XR_ERROR_FUNCTION_UNSUPPORTED;
+	}
 
 #ifdef OXR_HAVE_KHR_visibility_mask
 	ENTRY_IF_EXT(xrGetVisibilityMaskKHR, KHR_visibility_mask);
