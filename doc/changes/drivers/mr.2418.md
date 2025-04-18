@@ -1,0 +1,4 @@
+---
+- mr.2418
+---
+- steamvr_lh: Allow building lighthouse driver without `XRT_HAVE_STEAM`

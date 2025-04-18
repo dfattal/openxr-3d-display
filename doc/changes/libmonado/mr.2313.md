@@ -1,0 +1,4 @@
+---
+- mr.2313
+---
+- Add: In libmonado, add tracking-related device properties

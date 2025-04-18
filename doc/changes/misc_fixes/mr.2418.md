@@ -1,4 +1,0 @@
----
-- mr.2418
----
-- Allow building lighthouse driver without XRT_HAVE_STEAM

@@ -1,0 +1,3 @@
+- Add: In libmonado, add get/set for reference space offsets & tracking origin offsets.
+- Add: In libmonado, add getters for tracking origin count and name.
+- Change: Bump the libmonado API version from 1.2 to 1.3.
