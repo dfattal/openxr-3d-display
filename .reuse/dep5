@@ -6,6 +6,7 @@ Files: doc/changes/drivers/*
   doc/changes/misc_features/*
   doc/changes/misc_fixes/*
   doc/changes/state_trackers/*
+  doc/changes/libmonado/*
   doc/changes/ipc/*
   doc/changes/xrt/*
   doc/changes/auxiliary/*
@@ -13,7 +14,7 @@ Files: doc/changes/drivers/*
   doc/changes/doc/*
   doc/changes/big/*
   doc/changes/tracking/*
-Copyright: 2020-2021, Collabora, Ltd. and the Monado contributors
+Copyright: 2020-2025, Collabora, Ltd. and the Monado contributors
 License: CC0-1.0
 Comment: Prevents needing a license header per fragment between releases.
 
