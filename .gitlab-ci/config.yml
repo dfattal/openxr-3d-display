@@ -271,7 +271,7 @@ distributions:
 
   - name: alpine
     images:
-      - tag: "2024-01-16"
+      - tag: "2025-04-18"
         packages:
           - "cmake"
           - "cmd:glslangValidator"
