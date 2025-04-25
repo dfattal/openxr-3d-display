@@ -116,7 +116,7 @@ struct ns_builder
 static bool
 ns_config_load(struct ns_builder *nsb)
 {
-	const char *file_content = u_file_read_content_from_path(nsb->config_path);
+	const char *file_content = u_file_read_content_from_path(nsb->config_path, NULL);
 	if (file_content == NULL) {
 		U_LOG_E("The file at \"%s\" was unable to load. Either there wasn't a file there or it was empty.",
 		        nsb->config_path);

@@ -71,7 +71,7 @@ process_poly_values(const cJSON *values, struct svr_display_distortion_polynomia
 static bool
 process_config(const char *config_path, struct svr_two_displays_distortion *out_dist)
 {
-	char *file_content = u_file_read_content_from_path(config_path);
+	char *file_content = u_file_read_content_from_path(config_path, NULL);
 	if (file_content == NULL) {
 		U_LOG_E("The file at \"%s\" was unable to load. Either there wasn't a file there or it was empty.",
 		        config_path);

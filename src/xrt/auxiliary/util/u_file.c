@@ -218,7 +218,7 @@ u_file_get_path_in_runtime_dir(const char *suffix, char *out_path, size_t out_pa
 }
 
 char *
-u_file_read_content(FILE *file)
+u_file_read_content(FILE *file, size_t *out_file_size)
 {
 	// Go to the end of the file.
 	fseek(file, 0L, SEEK_END);
@@ -239,17 +239,20 @@ u_file_read_content(FILE *file)
 		return NULL;
 	}
 
+	if (out_file_size)
+		*out_file_size = file_size;
+
 	return buffer;
 }
 
 char *
-u_file_read_content_from_path(const char *path)
+u_file_read_content_from_path(const char *path, size_t *out_file_size)
 {
 	FILE *file = fopen(path, "rb");
 	if (file == NULL) {
 		return NULL;
 	}
-	char *file_content = u_file_read_content(file);
+	char *file_content = u_file_read_content(file, out_file_size);
 	int ret = fclose(file);
 	// We don't care about the return value since we're just reading
 	(void)ret;

@@ -61,7 +61,7 @@ u_config_json_open_or_create_file(struct u_config_json *json, const char *filena
 
 	json->file_loaded = true;
 
-	char *str = u_file_read_content(file);
+	char *str = u_file_read_content(file, NULL);
 	fclose(file);
 	if (str == NULL) {
 		U_LOG_E("Could not read the contents of '%s'!", tmp);
