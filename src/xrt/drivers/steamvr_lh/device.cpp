@@ -208,6 +208,13 @@ brightness_to_analog_gain(float brightness)
 }
 } // namespace
 
+Property::Property(vr::PropertyTypeTag_t tag, void *buffer, uint32_t bufferSize)
+{
+	this->tag = tag;
+	this->buffer.resize(bufferSize);
+	std::memcpy(this->buffer.data(), buffer, bufferSize);
+}
+
 HmdDevice::HmdDevice(const DeviceBuilder &builder) : Device(builder)
 {
 	this->name = XRT_DEVICE_GENERIC_HMD;
@@ -789,12 +796,28 @@ Device::update_pose(const vr::DriverPose_t &newPose) const
 	m_relation_history_push(relation_hist, &relation, ts);
 }
 
-void
+vr::ETrackedPropertyError
 Device::handle_properties(const vr::PropertyWrite_t *batch, uint32_t count)
 {
 	for (uint32_t i = 0; i < count; ++i) {
-		handle_property_write(batch[i]);
+		vr::ETrackedPropertyError err = handle_property_write(batch[i]);
+		if (err != vr::ETrackedPropertyError::TrackedProp_Success) {
+			return err;
+		}
 	}
+	return vr::ETrackedPropertyError::TrackedProp_Success;
+}
+
+vr::ETrackedPropertyError
+Device::handle_read_properties(vr::PropertyRead_t *batch, uint32_t count)
+{
+	for (uint32_t i = 0; i < count; ++i) {
+		vr::ETrackedPropertyError err = handle_generic_property_read(batch[i]);
+		if (err != vr::ETrackedPropertyError::TrackedProp_Success) {
+			return err;
+		}
+	}
+	return vr::ETrackedPropertyError::TrackedProp_Success;
 }
 
 void
@@ -829,7 +852,52 @@ parse_profile(std::string_view path)
 }
 } // namespace
 
-void
+vr::ETrackedPropertyError
+Device::handle_generic_property_write(const vr::PropertyWrite_t &prop)
+{
+	switch (prop.writeType) {
+	case vr::EPropertyWriteType::PropertyWrite_Set:
+		if (properties.count(prop.prop) > 0) {
+			Property &p = properties.at(prop.prop);
+			if (p.tag != prop.unTag) {
+				return vr::ETrackedPropertyError::TrackedProp_WrongDataType;
+			}
+			p.buffer.resize(prop.unBufferSize);
+			std::memcpy(p.buffer.data(), prop.pvBuffer, prop.unBufferSize);
+			return vr::ETrackedPropertyError::TrackedProp_Success;
+		} else {
+			properties.emplace(std::piecewise_construct, std::forward_as_tuple(prop.prop),
+			                   std::forward_as_tuple(prop.unTag, prop.pvBuffer, prop.unBufferSize));
+		}
+		break;
+	case vr::EPropertyWriteType::PropertyWrite_Erase: properties.erase(prop.prop); break;
+	case vr::EPropertyWriteType::PropertyWrite_SetError:
+		DEV_DEBUG("Property write type SetError not supported! (property %d)", prop.prop);
+		break;
+	}
+	return vr::ETrackedPropertyError::TrackedProp_Success;
+}
+
+vr::ETrackedPropertyError
+Device::handle_generic_property_read(vr::PropertyRead_t &prop)
+{
+	if (properties.count(prop.prop) == 0) {
+		// not verified if this is the correct error
+		return vr::ETrackedPropertyError::TrackedProp_UnknownProperty;
+	}
+	Property &p = properties.at(prop.prop);
+	prop.unTag = p.tag;
+	prop.unRequiredBufferSize = p.buffer.size();
+	if (prop.pvBuffer == nullptr || prop.unBufferSize < p.buffer.size()) {
+		prop.eError = vr::ETrackedPropertyError::TrackedProp_BufferTooSmall;
+		return prop.eError;
+	}
+	std::memcpy(prop.pvBuffer, p.buffer.data(), p.buffer.size());
+	prop.eError = vr::ETrackedPropertyError::TrackedProp_Success;
+	return prop.eError;
+}
+
+vr::ETrackedPropertyError
 Device::handle_property_write(const vr::PropertyWrite_t &prop)
 {
 	switch (prop.prop) {
@@ -854,9 +922,10 @@ Device::handle_property_write(const vr::PropertyWrite_t &prop)
 		break;
 	}
 	}
+	return handle_generic_property_write(prop);
 }
 
-void
+vr::ETrackedPropertyError
 HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 {
 	switch (prop.prop) {
@@ -907,13 +976,13 @@ HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 		break;
 	}
 	default: {
-		Device::handle_property_write(prop);
-		break;
+		return Device::handle_property_write(prop);
 	}
 	}
+	return handle_generic_property_write(prop);
 }
 
-void
+vr::ETrackedPropertyError
 ControllerDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 {
 	switch (prop.prop) {
@@ -943,8 +1012,7 @@ ControllerDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 			                     (this->manufacturer.size() != name.size());
 			fixedProp.unBufferSize = name.end() - (char *)fixedProp.pvBuffer;
 		}
-		Device::handle_property_write(fixedProp);
-		break;
+		return Device::handle_property_write(fixedProp);
 	}
 	case vr::Prop_ControllerRoleHint_Int32: {
 		vr::ETrackedControllerRole role = *static_cast<vr::ETrackedControllerRole *>(prop.pvBuffer);
@@ -1037,8 +1105,8 @@ ControllerDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 		break;
 	}
 	default: {
-		Device::handle_property_write(prop);
-		break;
+		return Device::handle_property_write(prop);
 	}
 	}
+	return handle_generic_property_write(prop);
 }

@@ -667,7 +667,12 @@ Context::ReadPropertyBatch(vr::PropertyContainerHandle_t ulContainerHandle,
                            vr::PropertyRead_t *pBatch,
                            uint32_t unBatchEntryCount)
 {
-	return vr::TrackedProp_Success;
+	Device *device = prop_container_to_device(ulContainerHandle);
+	if (!device)
+		return vr::TrackedProp_InvalidContainer;
+	if (!pBatch)
+		return vr::TrackedProp_InvalidOperation; // not verified vs steamvr
+	return device->handle_read_properties(pBatch, unBatchEntryCount);
 }
 
 vr::ETrackedPropertyError
@@ -680,8 +685,7 @@ Context::WritePropertyBatch(vr::PropertyContainerHandle_t ulContainerHandle,
 		return vr::TrackedProp_InvalidContainer;
 	if (!pBatch)
 		return vr::TrackedProp_InvalidOperation; // not verified vs steamvr
-	device->handle_properties(pBatch, unBatchEntryCount);
-	return vr::TrackedProp_Success;
+	return device->handle_properties(pBatch, unBatchEntryCount);
 }
 
 const char *

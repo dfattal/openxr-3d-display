@@ -44,6 +44,15 @@ struct DeviceBuilder
 	operator=(const DeviceBuilder &) = delete;
 };
 
+class Property
+{
+public:
+	Property(vr::PropertyTypeTag_t tag, void *buffer, uint32_t bufferSize);
+
+	vr::PropertyTypeTag_t tag;
+	std::vector<uint8_t> buffer;
+};
+
 class Device : public xrt_device
 {
 
@@ -65,8 +74,11 @@ public:
 	void
 	get_pose(uint64_t at_timestamp_ns, xrt_space_relation *out_relation);
 
-	void
+	vr::ETrackedPropertyError
 	handle_properties(const vr::PropertyWrite_t *batch, uint32_t count);
+
+	vr::ETrackedPropertyError
+	handle_read_properties(vr::PropertyRead_t *batch, uint32_t count);
 
 	//! Maps to @ref xrt_device::get_tracked_pose.
 	virtual xrt_result_t
@@ -79,6 +91,7 @@ protected:
 	Device(const DeviceBuilder &builder);
 	std::shared_ptr<Context> ctx;
 	vr::PropertyContainerHandle_t container_handle{0};
+	std::unordered_map<vr::ETrackedDeviceProperty, Property> properties;
 	std::unordered_map<std::string_view, xrt_input *> inputs_map;
 	std::vector<xrt_input> inputs_vec;
 	inline static xrt_pose chaperone = XRT_POSE_IDENTITY;
@@ -90,7 +103,12 @@ protected:
 	bool charging{false};
 	float charge{1.0F};
 
-	virtual void
+	vr::ETrackedPropertyError
+	handle_generic_property_write(const vr::PropertyWrite_t &prop);
+	vr::ETrackedPropertyError
+	handle_generic_property_read(vr::PropertyRead_t &prop);
+
+	virtual vr::ETrackedPropertyError
 	handle_property_write(const vr::PropertyWrite_t &prop);
 
 private:
@@ -158,7 +176,7 @@ public:
 private:
 	std::unique_ptr<Parts> hmd_parts{nullptr};
 
-	void
+	vr::ETrackedPropertyError
 	handle_property_write(const vr::PropertyWrite_t &prop) override;
 
 	void
@@ -214,6 +232,6 @@ private:
 	void
 	set_hand_tracking_hand(xrt_input_name name);
 
-	void
+	vr::ETrackedPropertyError
 	handle_property_write(const vr::PropertyWrite_t &prop) override;
 };
