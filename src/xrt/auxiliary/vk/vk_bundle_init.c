@@ -1116,16 +1116,18 @@ filter_device_features(struct vk_bundle *vk,
 
 	VK_DEBUG(vk,
 	         "Features:"
+	         "\n\text_fmt_resolve: %i"
 	         "\n\tnull_descriptor: %i"
 	         "\n\tshader_image_gather_extended: %i"
 	         "\n\tshader_storage_image_write_without_format: %i"
-	         "\n\ttimeline_semaphore: %i"
-	         "\n\tsynchronization_2: %i",                                //
+	         "\n\tsynchronization_2: %i"
+	         "\n\ttimeline_semaphore: %i",                               //
+	         device_features->ext_fmt_resolve,                           //
 	         device_features->null_descriptor,                           //
 	         device_features->shader_image_gather_extended,              //
 	         device_features->shader_storage_image_write_without_format, //
-	         device_features->timeline_semaphore,                        //
-	         device_features->synchronization_2);
+	         device_features->synchronization_2,                         //
+	         device_features->timeline_semaphore);                       //
 }
 
 
