@@ -652,6 +652,7 @@ ipc_handle_space_locate_spaces(volatile struct ipc_client_state *ics,
 	// only after sending the allocation result can we skip to the end in the allocation error case
 	if (space_ids == NULL) {
 		IPC_ERROR(s, "Failed to allocate space for receiving spaces ids");
+		xret = XRT_ERROR_ALLOCATION;
 		goto out_locate_spaces;
 	}
 
