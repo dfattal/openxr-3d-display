@@ -1,4 +1,4 @@
-// Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2019-2025, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,16 +9,17 @@
  */
 
 #include "xrt/xrt_config_os.h"
+#include "xrt/xrt_windows.h"
 #include "util/u_file.h"
 
 #include <errno.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-
 #if defined(XRT_OS_WINDOWS) && !defined(XRT_ENV_MINGW)
-#define PATH_MAX MAX_PATH
+#define PATH_MAX 4096
 #endif
 
 #ifdef XRT_OS_LINUX
@@ -196,13 +197,24 @@ u_file_get_hand_tracking_models_dir(char *out_path, size_t out_path_size)
 int
 u_file_get_runtime_dir(char *out_path, size_t out_path_size)
 {
-	const char *xgd_rt = getenv("XDG_RUNTIME_DIR");
-	if (xgd_rt != NULL) {
-		return snprintf(out_path, out_path_size, "%s", xgd_rt);
+	const char *xdg_rt = getenv("XDG_RUNTIME_DIR");
+	if (xdg_rt != NULL) {
+		return snprintf(out_path, out_path_size, "%s", xdg_rt);
 	}
 
-	const char *tmp = "/tmp";
-	return snprintf(out_path, out_path_size, "%s", tmp);
+	const char *xdg_cache = getenv("XDG_CACHE_HOME");
+	if (xdg_cache != NULL) {
+		return snprintf(out_path, out_path_size, "%s", xdg_cache);
+	}
+
+#ifdef XRT_OS_WINDOWS
+	WCHAR temp[MAX_PATH] = {0};
+	GetTempPath2W(sizeof(temp), temp);
+	return wcstombs(out_path, temp, out_path_size);
+#else
+	const char *cache = "~/.cache";
+	return snprintf(out_path, out_path_size, "%s", cache);
+#endif
 }
 
 int

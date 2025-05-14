@@ -1,4 +1,4 @@
-// Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2019-2025, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,10 +9,7 @@
 
 #pragma once
 
-#include "xrt/xrt_compiler.h"
-
 #include <stdio.h>
-
 
 #ifdef __cplusplus
 extern "C" {
