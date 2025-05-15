@@ -68,7 +68,31 @@ static struct xrt_binding_output_pair simple_outputs_og[1] = {
     {XRT_OUTPUT_NAME_SIMPLE_VIBRATION, XRT_OUTPUT_NAME_WMR_HAPTIC},
 };
 
-static struct xrt_binding_profile binding_profiles_og[1] = {
+static struct xrt_binding_input_pair vive_inputs_og[10] = {
+    {XRT_INPUT_VIVE_SYSTEM_CLICK, XRT_INPUT_WMR_HOME_CLICK},
+    {XRT_INPUT_VIVE_SQUEEZE_CLICK, XRT_INPUT_WMR_SQUEEZE_CLICK},
+    {XRT_INPUT_VIVE_MENU_CLICK, XRT_INPUT_WMR_MENU_CLICK},
+    {XRT_INPUT_VIVE_TRIGGER_CLICK, XRT_INPUT_WMR_TRIGGER_VALUE},
+    {XRT_INPUT_VIVE_TRIGGER_VALUE, XRT_INPUT_WMR_TRIGGER_VALUE},
+    {XRT_INPUT_VIVE_TRACKPAD, XRT_INPUT_WMR_TRACKPAD},
+    {XRT_INPUT_VIVE_TRACKPAD_CLICK, XRT_INPUT_WMR_TRACKPAD_CLICK},
+    {XRT_INPUT_VIVE_TRACKPAD_TOUCH, XRT_INPUT_WMR_TRACKPAD_TOUCH},
+    {XRT_INPUT_VIVE_GRIP_POSE, XRT_INPUT_WMR_GRIP_POSE},
+    {XRT_INPUT_VIVE_AIM_POSE, XRT_INPUT_WMR_AIM_POSE},
+};
+
+static struct xrt_binding_output_pair vive_outputs_og[1] = {
+    {XRT_OUTPUT_NAME_VIVE_HAPTIC, XRT_OUTPUT_NAME_WMR_HAPTIC},
+};
+
+static struct xrt_binding_profile binding_profiles_og[2] = {
+    {
+        .name = XRT_DEVICE_VIVE_WAND,
+        .inputs = vive_inputs_og,
+        .input_count = ARRAY_SIZE(vive_inputs_og),
+        .outputs = vive_outputs_og,
+        .output_count = ARRAY_SIZE(vive_outputs_og),
+    },
     {
         .name = XRT_DEVICE_SIMPLE_CONTROLLER,
         .inputs = simple_inputs_og,
@@ -89,7 +113,56 @@ static struct xrt_binding_output_pair simple_outputs_odyssey[1] = {
     {XRT_OUTPUT_NAME_SIMPLE_VIBRATION, XRT_OUTPUT_NAME_ODYSSEY_CONTROLLER_HAPTIC},
 };
 
-static struct xrt_binding_profile binding_profiles_odyssey[1] = {
+static struct xrt_binding_input_pair wmr_inputs_odyssey[11] = {
+    {XRT_INPUT_WMR_MENU_CLICK, XRT_INPUT_ODYSSEY_CONTROLLER_MENU_CLICK},
+    {XRT_INPUT_WMR_SQUEEZE_CLICK, XRT_INPUT_ODYSSEY_CONTROLLER_SQUEEZE_CLICK},
+    {XRT_INPUT_WMR_TRIGGER_VALUE, XRT_INPUT_ODYSSEY_CONTROLLER_TRIGGER_VALUE},
+    {XRT_INPUT_WMR_THUMBSTICK_CLICK, XRT_INPUT_ODYSSEY_CONTROLLER_THUMBSTICK_CLICK},
+    {XRT_INPUT_WMR_THUMBSTICK, XRT_INPUT_ODYSSEY_CONTROLLER_THUMBSTICK},
+    {XRT_INPUT_WMR_TRACKPAD_CLICK, XRT_INPUT_ODYSSEY_CONTROLLER_TRACKPAD_CLICK},
+    {XRT_INPUT_WMR_TRACKPAD_TOUCH, XRT_INPUT_ODYSSEY_CONTROLLER_TRACKPAD_TOUCH},
+    {XRT_INPUT_WMR_TRACKPAD, XRT_INPUT_ODYSSEY_CONTROLLER_TRACKPAD},
+    {XRT_INPUT_WMR_GRIP_POSE, XRT_INPUT_ODYSSEY_CONTROLLER_GRIP_POSE},
+    {XRT_INPUT_WMR_AIM_POSE, XRT_INPUT_ODYSSEY_CONTROLLER_AIM_POSE},
+    {XRT_INPUT_WMR_HOME_CLICK, XRT_INPUT_ODYSSEY_CONTROLLER_HOME_CLICK},
+};
+
+static struct xrt_binding_output_pair wmr_outputs_odyssey[1] = {
+    {XRT_OUTPUT_NAME_WMR_HAPTIC, XRT_OUTPUT_NAME_ODYSSEY_CONTROLLER_HAPTIC},
+};
+
+static struct xrt_binding_input_pair vive_inputs_odyssey[10] = {
+    {XRT_INPUT_VIVE_SYSTEM_CLICK, XRT_INPUT_ODYSSEY_CONTROLLER_HOME_CLICK},
+    {XRT_INPUT_VIVE_SQUEEZE_CLICK, XRT_INPUT_ODYSSEY_CONTROLLER_SQUEEZE_CLICK},
+    {XRT_INPUT_VIVE_MENU_CLICK, XRT_INPUT_ODYSSEY_CONTROLLER_MENU_CLICK},
+    {XRT_INPUT_VIVE_TRIGGER_CLICK, XRT_INPUT_ODYSSEY_CONTROLLER_TRIGGER_VALUE},
+    {XRT_INPUT_VIVE_TRIGGER_VALUE, XRT_INPUT_ODYSSEY_CONTROLLER_TRIGGER_VALUE},
+    {XRT_INPUT_VIVE_TRACKPAD, XRT_INPUT_ODYSSEY_CONTROLLER_TRACKPAD},
+    {XRT_INPUT_VIVE_TRACKPAD_CLICK, XRT_INPUT_ODYSSEY_CONTROLLER_TRACKPAD_CLICK},
+    {XRT_INPUT_VIVE_TRACKPAD_TOUCH, XRT_INPUT_ODYSSEY_CONTROLLER_TRACKPAD_TOUCH},
+    {XRT_INPUT_VIVE_GRIP_POSE, XRT_INPUT_ODYSSEY_CONTROLLER_GRIP_POSE},
+    {XRT_INPUT_VIVE_AIM_POSE, XRT_INPUT_ODYSSEY_CONTROLLER_AIM_POSE},
+};
+
+static struct xrt_binding_output_pair vive_outputs_odyssey[1] = {
+    {XRT_OUTPUT_NAME_VIVE_HAPTIC, XRT_OUTPUT_NAME_ODYSSEY_CONTROLLER_HAPTIC},
+};
+
+static struct xrt_binding_profile binding_profiles_odyssey[3] = {
+    {
+        .name = XRT_DEVICE_WMR_CONTROLLER,
+        .inputs = wmr_inputs_odyssey,
+        .input_count = ARRAY_SIZE(wmr_inputs_odyssey),
+        .outputs = wmr_outputs_odyssey,
+        .output_count = ARRAY_SIZE(wmr_outputs_odyssey),
+    },
+    {
+        .name = XRT_DEVICE_VIVE_WAND,
+        .inputs = vive_inputs_odyssey,
+        .input_count = ARRAY_SIZE(vive_inputs_odyssey),
+        .outputs = vive_outputs_odyssey,
+        .output_count = ARRAY_SIZE(vive_outputs_odyssey),
+    },
     {
         .name = XRT_DEVICE_SIMPLE_CONTROLLER,
         .inputs = simple_inputs_odyssey,
