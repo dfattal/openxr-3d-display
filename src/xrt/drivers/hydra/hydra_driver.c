@@ -276,9 +276,11 @@ static void
 hydra_device_parse_controller(struct hydra_device *hd, uint8_t *buf)
 {
 	struct hydra_controller_state *state = &hd->state;
+
 	static const float SCALE_MM_TO_METER = 0.001f;
 	static const float SCALE_INT16_TO_FLOAT_PLUSMINUS_1 = 1.0f / 32768.0f;
 	static const float SCALE_UINT8_TO_FLOAT_0_TO_1 = 1.0f / 255.0f;
+
 	state->pose.position.x = hydra_read_int16_le(&buf) * SCALE_MM_TO_METER;
 	state->pose.position.z = hydra_read_int16_le(&buf) * SCALE_MM_TO_METER;
 	state->pose.position.y = -hydra_read_int16_le(&buf) * SCALE_MM_TO_METER;
@@ -286,12 +288,27 @@ hydra_device_parse_controller(struct hydra_device *hd, uint8_t *buf)
 	// the negatives are to fix handedness
 	state->pose.orientation.w = hydra_read_int16_le(&buf) * SCALE_INT16_TO_FLOAT_PLUSMINUS_1;
 	state->pose.orientation.x = hydra_read_int16_le(&buf) * SCALE_INT16_TO_FLOAT_PLUSMINUS_1;
-	state->pose.orientation.y = -hydra_read_int16_le(&buf) * SCALE_INT16_TO_FLOAT_PLUSMINUS_1;
-	state->pose.orientation.z = -hydra_read_int16_le(&buf) * SCALE_INT16_TO_FLOAT_PLUSMINUS_1;
+	state->pose.orientation.y = hydra_read_int16_le(&buf) * SCALE_INT16_TO_FLOAT_PLUSMINUS_1;
+	state->pose.orientation.z = hydra_read_int16_le(&buf) * SCALE_INT16_TO_FLOAT_PLUSMINUS_1;
 
 	//! @todo the presence of this suggest we're not decoding the
 	//! orientation right.
 	math_quat_normalize(&state->pose.orientation);
+
+	struct xrt_quat fixed = {
+	    .x = state->pose.orientation.x,
+	    .y = -state->pose.orientation.z,
+	    .z = state->pose.orientation.y,
+	    .w = state->pose.orientation.w,
+	};
+
+	struct xrt_quat adjustment = {.x = 0, .y = 1, .z = 0, .w = 0};
+	math_quat_rotate(&fixed, &adjustment, &fixed);
+
+	adjustment = (struct xrt_quat){.x = 0, .y = 0, .z = 1, .w = 0};
+	math_quat_rotate(&fixed, &adjustment, &fixed);
+
+	state->pose.orientation = fixed;
 
 	state->buttons = hydra_read_uint8(&buf);
 
