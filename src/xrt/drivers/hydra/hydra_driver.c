@@ -23,6 +23,9 @@
 #include "os/os_time.h"
 
 #include "math/m_api.h"
+#include "math/m_relation_history.h"
+#include "math/m_space.h"
+
 #include "util/u_debug.h"
 #include "util/u_device.h"
 #include "util/u_misc.h"
@@ -58,7 +61,8 @@ enum hydra_input_index
 	HYDRA_INDEX_JOYSTICK_CLICK,
 	HYDRA_INDEX_JOYSTICK_VALUE,
 	HYDRA_INDEX_TRIGGER_VALUE,
-	HYDRA_INDEX_POSE,
+	HYDRA_INDEX_GRIP_POSE,
+	HYDRA_INDEX_AIM_POSE,
 	HYDRA_MAX_CONTROLLER_INDEX
 };
 
@@ -510,18 +514,29 @@ hydra_device_get_tracked_pose(struct xrt_device *xdev,
 
 	hydra_system_update(hs);
 
-	out_relation->pose = hd->state.pose;
+	struct xrt_relation_chain xrc = {0};
 
-	//! @todo how do we report this is not (necessarily) the same base space
-	//! as the HMD?
-	out_relation->relation_flags = (enum xrt_space_relation_flags)(
-	    XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
-	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-	// struct xrt_vec3 pos = out_relation->pose.position;
-	// struct xrt_quat quat = out_relation->pose.orientation;
-	// HYDRA_SPEW(hd, "GET_TRACKED_POSE (%f, %f, %f) (%f, %f, %f, %f) ",
-	// pos.x,
-	//            pos.y, pos.z, quat.x, quat.y, quat.z, quat.w);
+	switch (name) {
+	case XRT_INPUT_HYDRA_AIM_POSE: {
+		const struct xrt_pose aim_offset = {
+		    .position = {0, 0.045, -0.08},
+		    .orientation = {-0.258819, 0, 0, 0.9659258},
+		};
+		m_relation_chain_push_pose(&xrc, &aim_offset);
+		break;
+	}
+	case XRT_INPUT_HYDRA_GRIP_POSE:
+	default: break;
+	}
+
+	struct xrt_space_relation device_relation = {
+	    .pose = hd->state.pose,
+	    .relation_flags = XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
+	                      XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT};
+
+	m_relation_chain_push_relation(&xrc, &device_relation);
+
+	m_relation_chain_resolve(&xrc, out_relation);
 
 	return XRT_SUCCESS;
 }
@@ -604,15 +619,15 @@ static struct xrt_binding_input_pair touch_inputs[19] = {
     {XRT_INPUT_TOUCH_TRIGGER_VALUE, XRT_INPUT_HYDRA_TRIGGER_VALUE},
     {XRT_INPUT_TOUCH_THUMBSTICK_CLICK, XRT_INPUT_HYDRA_JOYSTICK_CLICK},
     {XRT_INPUT_TOUCH_THUMBSTICK, XRT_INPUT_HYDRA_JOYSTICK_VALUE},
-    {XRT_INPUT_TOUCH_GRIP_POSE, XRT_INPUT_HYDRA_POSE},
-    {XRT_INPUT_TOUCH_AIM_POSE, XRT_INPUT_HYDRA_POSE},
+    {XRT_INPUT_TOUCH_GRIP_POSE, XRT_INPUT_HYDRA_GRIP_POSE},
+    {XRT_INPUT_TOUCH_AIM_POSE, XRT_INPUT_HYDRA_AIM_POSE},
 };
 
 static struct xrt_binding_input_pair simple_inputs[4] = {
     {XRT_INPUT_SIMPLE_SELECT_CLICK, XRT_INPUT_HYDRA_TRIGGER_VALUE},
     {XRT_INPUT_SIMPLE_MENU_CLICK, XRT_INPUT_HYDRA_MIDDLE_CLICK},
-    {XRT_INPUT_SIMPLE_GRIP_POSE, XRT_INPUT_HYDRA_POSE},
-    {XRT_INPUT_SIMPLE_AIM_POSE, XRT_INPUT_HYDRA_POSE},
+    {XRT_INPUT_SIMPLE_GRIP_POSE, XRT_INPUT_HYDRA_GRIP_POSE},
+    {XRT_INPUT_SIMPLE_AIM_POSE, XRT_INPUT_HYDRA_AIM_POSE},
 };
 
 static struct xrt_binding_profile binding_profiles[2] = {
@@ -664,8 +679,8 @@ hydra_found(struct xrt_prober *xp,
 	hs->command_hid = command_hid;
 
 	enum u_device_alloc_flags flags = (enum u_device_alloc_flags)0;
-	hs->devs[0] = U_DEVICE_ALLOCATE(struct hydra_device, flags, 10, 0);
-	hs->devs[1] = U_DEVICE_ALLOCATE(struct hydra_device, flags, 10, 0);
+	hs->devs[0] = U_DEVICE_ALLOCATE(struct hydra_device, flags, HYDRA_MAX_CONTROLLER_INDEX, 0);
+	hs->devs[1] = U_DEVICE_ALLOCATE(struct hydra_device, flags, HYDRA_MAX_CONTROLLER_INDEX, 0);
 
 	hs->report_counter = -1;
 	hs->refs = 2;
@@ -692,7 +707,8 @@ hydra_found(struct xrt_prober *xp,
 		SET_INPUT(JOYSTICK_CLICK);
 		SET_INPUT(JOYSTICK_VALUE);
 		SET_INPUT(TRIGGER_VALUE);
-		SET_INPUT(POSE);
+		SET_INPUT(GRIP_POSE);
+		SET_INPUT(AIM_POSE);
 		hd->index = i;
 		hd->sys = hs;
 

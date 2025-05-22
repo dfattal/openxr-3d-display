@@ -866,7 +866,7 @@ public:
 		} else if (m_xdev->name == XRT_DEVICE_DAYDREAM) {
 			grip_name = XRT_INPUT_DAYDREAM_POSE;
 		} else if (m_xdev->name == XRT_DEVICE_HYDRA) {
-			grip_name = XRT_INPUT_HYDRA_POSE;
+			grip_name = XRT_INPUT_HYDRA_GRIP_POSE;
 		} else if (m_xdev->name == XRT_DEVICE_TOUCH_CONTROLLER) {
 			grip_name = XRT_INPUT_TOUCH_GRIP_POSE;
 		} else if (m_xdev->name == XRT_DEVICE_SIMPLE_CONTROLLER) {

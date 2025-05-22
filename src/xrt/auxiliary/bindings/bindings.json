@@ -2098,9 +2098,21 @@
 				"/input/grip": {
 					"type": "pose",
 					"localized_name": "Grip",
-					"components": ["pose"],
+					"components": [
+						"pose"
+					],
 					"monado_bindings": {
-						"pose": "XRT_INPUT_HYDRA_POSE"
+						"pose": "XRT_INPUT_HYDRA_GRIP_POSE"
+					}
+				},
+				"/input/aim": {
+					"type": "pose",
+					"localized_name": "Aim",
+					"components": [
+						"pose"
+					],
+					"monado_bindings": {
+						"pose": "XRT_INPUT_HYDRA_AIM_POSE"
 					}
 				}
 			}
