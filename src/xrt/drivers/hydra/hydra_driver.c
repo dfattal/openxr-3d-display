@@ -650,10 +650,6 @@ hydra_found(struct xrt_prober *xp,
 	hs->devs[0] = U_DEVICE_ALLOCATE(struct hydra_device, flags, 10, 0);
 	hs->devs[1] = U_DEVICE_ALLOCATE(struct hydra_device, flags, 10, 0);
 
-	// Populate the "tracking" member with the system.
-	hs->devs[0]->base.tracking_origin = &(hs->base);
-	hs->devs[1]->base.tracking_origin = &(hs->base);
-
 	hs->report_counter = -1;
 	hs->refs = 2;
 
@@ -686,13 +682,14 @@ hydra_found(struct xrt_prober *xp,
 		hd->base.binding_profiles = binding_profiles;
 		hd->base.binding_profile_count = ARRAY_SIZE(binding_profiles);
 
+		hd->base.tracking_origin = &hs->base;
+
+		hd->base.position_tracking_supported = true;
+		hd->base.orientation_tracking_supported = true;
+		hd->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
+
 		out_xdevs[i] = &(hd->base);
 	}
-
-	hs->devs[0]->base.orientation_tracking_supported = true;
-	hs->devs[0]->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
-	hs->devs[1]->base.position_tracking_supported = true;
-	hs->devs[1]->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 
 	U_LOG_I("Opened razer hydra!");
 	return 2;
