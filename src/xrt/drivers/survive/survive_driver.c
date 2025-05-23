@@ -934,7 +934,7 @@ _create_hmd_device(struct survive_system *sys, const struct SurviveSimpleObject 
 	survive->base.tracking_origin = &sys->base;
 
 	SURVIVE_INFO(survive, "survive HMD present");
-	m_relation_history_create(&survive->relation_hist);
+	m_relation_history_create(&survive->relation_hist, NULL);
 
 
 	size_t idx = 0;
@@ -1083,7 +1083,7 @@ _create_controller_device(struct survive_system *sys,
 	int outputs = 1;
 	struct survive_device *survive = U_DEVICE_ALLOCATE(struct survive_device, flags, inputs, outputs);
 	survive->ctrl.config = *config;
-	m_relation_history_create(&survive->relation_hist);
+	m_relation_history_create(&survive->relation_hist, NULL);
 
 	sys->controllers[idx] = survive;
 	survive->sys = sys;
