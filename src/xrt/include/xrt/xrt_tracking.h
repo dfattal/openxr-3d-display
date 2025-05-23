@@ -52,8 +52,8 @@ enum xrt_tracking_type
 	// The device(s) are tracked by Ligthhouse
 	XRT_TRACKING_TYPE_LIGHTHOUSE,
 
-	// The device(s) are tracked by Hydra
-	XRT_TRACKING_TYPE_HYDRA,
+	// The device(s) are tracked by magnetic fields, eg. Razer Hydra.
+	XRT_TRACKING_TYPE_MAGNETIC,
 
 	// The device(s) are tracked by external SLAM
 	XRT_TRACKING_TYPE_EXTERNAL_SLAM,
