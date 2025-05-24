@@ -12,7 +12,7 @@
 # Partially inspired by https://about.gitlab.com/blog/2018/10/24/setting-up-gitlab-ci-for-android-projects/
 
 set -eo pipefail
-VERSION=11076708
+VERSION=13114758
 ROOT=${ROOT:-/opt/android-sdk}
 ANDROID_COMPILE_SDK=${ANDROID_COMPILE_SDK:-35}
 ANDROID_BUILD_TOOLS=${ANDROID_BUILD_TOOLS:-34.0.0}

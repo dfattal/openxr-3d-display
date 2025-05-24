@@ -141,7 +141,7 @@ win:container_prep:
 .monado.variables.debian:bookworm-ndk:
   variables:
     FDO_DISTRIBUTION_VERSION: "bookworm"
-    FDO_DISTRIBUTION_TAG: "2025-01-17"
+    FDO_DISTRIBUTION_TAG: "2025-05-24"
     FDO_REPO_SUFFIX: ndk
 
 # Variables for build and usage of Ubuntu jammy image
