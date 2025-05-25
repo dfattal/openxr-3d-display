@@ -1623,12 +1623,13 @@ oxr_action_bind_io(struct oxr_logger *log,
 			cache->inputs = NULL;
 		} else {
 			oxr_slog(slog, "\t\tBound to:\n");
-			for (uint32_t i = 0; i < input_count; i++) {
-				struct xrt_input *input = inputs[i].input;
+			for (uint32_t i = 0; i < count; i++) {
+				struct xrt_input *input = cache->inputs[i].input;
 				enum xrt_input_type t = XRT_GET_INPUT_TYPE(input->name);
 				bool active = input->active;
 				oxr_slog(slog, "\t\t\t'%s' ('%s') on '%s' (%s)\n", xrt_input_name_string(input->name),
-				         xrt_input_type_to_str(t), inputs[i].xdev->str, active ? "active" : "inactive");
+				         xrt_input_type_to_str(t), cache->inputs[i].xdev->str,
+				         active ? "active" : "inactive");
 			}
 		}
 
