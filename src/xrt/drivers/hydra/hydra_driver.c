@@ -22,6 +22,7 @@
 #include "os/os_hid.h"
 #include "os/os_time.h"
 #include "os/os_threading.h"
+#include "xrt/xrt_byte_order.h"
 
 #include "math/m_api.h"
 #include "math/m_relation_history.h"
@@ -275,7 +276,6 @@ static inline int16_t
 hydra_read_int16_le(uint8_t **bufptr)
 {
 	uint8_t *buf = *bufptr;
-	//! @todo nothing actually defines XRT_BIG_ENDIAN when needed!
 #ifdef XRT_BIG_ENDIAN
 	uint8_t bytes[2] = {buf[1], buf[0]};
 #else

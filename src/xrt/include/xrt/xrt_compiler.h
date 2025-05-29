@@ -24,6 +24,27 @@
 #include "xrt_windows.h"
 #endif // _MSC_VER
 
+#if (defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN) ||                                                         \
+    (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) ||                                             \
+    (defined(__STDC_ENDIAN_NATIVE__) && __STDC_ENDIAN_NATIVE__ == __STDC_ENDIAN_BIG__) || defined(__BIG_ENDIAN__) ||   \
+    defined(__ARMEB__) || defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || defined(__MIBSEB) ||   \
+    defined(__MIBSEB__)
+
+#define XRT_BIG_ENDIAN
+
+#elif (defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN) ||                                                    \
+    (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__) ||                                          \
+    (defined(__STDC_ENDIAN_NATIVE__) && __STDC_ENDIAN_NATIVE__ == __STDC_ENDIAN_LITTLE__) ||                           \
+    defined(__LITTLE_ENDIAN__) || defined(__ARMEL__) || defined(__THUMBEL__) || defined(__AARCH64EL__) ||              \
+    defined(_MIPSEL) || defined(__MIPSEL) || defined(__MIPSEL__) || defined(__x86_64__) || defined(_M_X64) ||          \
+    defined(i386) || defined(__i386__) || defined(__i386) || defined(_M_IX86)
+
+#undef XRT_BIG_ENDIAN
+
+#else
+#error "@todo: Unable to determine current architecture."
+#endif
+
 /*!
  * Array size helper.
  */

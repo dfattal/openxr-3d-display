@@ -10,13 +10,12 @@
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup drv_wmr
  */
-#include <asm/byteorder.h>
-#include <libusb.h>
-#include <stdlib.h>
-#include <assert.h>
 
 #include "math/m_api.h"
+
 #include "os/os_threading.h"
+#include "xrt/xrt_byte_order.h"
+
 #include "util/u_autoexpgain.h"
 #include "util/u_debug.h"
 #include "util/u_var.h"
@@ -27,6 +26,10 @@
 #include "wmr_config.h"
 #include "wmr_protocol.h"
 #include "wmr_camera.h"
+
+#include <libusb.h>
+#include <stdlib.h>
+#include <assert.h>
 
 //! Specifies whether the user wants to enable autoexposure from the start.
 DEBUG_GET_ONCE_BOOL_OPTION(wmr_autoexposure, "WMR_AUTOEXPOSURE", true)

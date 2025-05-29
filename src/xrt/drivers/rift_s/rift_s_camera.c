@@ -15,13 +15,13 @@
  * @author Jan Schmidt <jan@centricular.com>
  * @ingroup drv_rift_s
  */
-#include <asm/byteorder.h>
 #include <string.h>
 
 #include "rift_s.h"
 #include "rift_s_camera.h"
 
 #include "os/os_threading.h"
+#include "xrt/xrt_byte_order.h"
 
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_frame.h"
