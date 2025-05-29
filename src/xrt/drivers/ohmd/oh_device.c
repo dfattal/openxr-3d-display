@@ -1217,7 +1217,11 @@ oh_device_create(ohmd_context *ctx, bool no_hmds, struct xrt_device **out_xdevs)
 		} else if (strncmp(prod, "Rift S", strlen("Rift S")) == 0) {
 			U_LOG_W("Ignoring OpenHMD Rift S device idx %i. Use the native Monado Rift S driver.", i);
 			continue;
-		}
+		} /*
+		else if (strncmp(prod, "Rift (DK2)", strlen("Rift (DK2)")) == 0) {
+		        U_LOG_W("Ignoring OpenHMD Rift DK2 device idx %i. Use the native Monado Rift DK2 driver.", i);
+		        continue;
+		} */ // This block of code is disabled until 6dof support is upstreamed.
 
 		if (device_class == OHMD_DEVICE_CLASS_CONTROLLER) {
 			if ((device_flags & OHMD_DEVICE_FLAGS_LEFT_CONTROLLER) != 0) {
