@@ -13,8 +13,9 @@
 #pragma once
 
 #include "xrt/xrt_compiler.h"
-
 #include "xrt/xrt_results.h"
+
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -2124,6 +2125,20 @@ enum xrt_visibility_mask_type
  *
  */
 
+// @note We're not using U_LOG_RAW because we can't include u_logging.h inside xrt_defines.h without causing problems.
+#if 0
+#define XRT_REFERENCE_DEBUG_PRINT(ACTION, PTR, COUNT)                                                                  \
+	do {                                                                                                           \
+		int32_t __count = (COUNT);                                                                             \
+		printf(#ACTION " %p to %u", (void *)(PTR), __count);                                                   \
+		if (__count < 0) {                                                                                     \
+			XRT_DEBUGBREAK();                                                                              \
+		}                                                                                                      \
+	} while (false)
+#else
+#define XRT_REFERENCE_DEBUG_PRINT(ACTION, PTR, COUNT)
+#endif
+
 /*!
  * Increment the reference, probably want @ref xrt_reference_inc_and_was_zero.
  *
@@ -2133,7 +2148,9 @@ enum xrt_visibility_mask_type
 static inline void
 xrt_reference_inc(struct xrt_reference *xref)
 {
-	xrt_atomic_s32_inc_return(&xref->count);
+	XRT_MAYBE_UNUSED int32_t count = xrt_atomic_s32_inc_return(&xref->count);
+
+	XRT_REFERENCE_DEBUG_PRINT(Incremented, xref, count);
 }
 
 /*!
@@ -2145,7 +2162,9 @@ xrt_reference_inc(struct xrt_reference *xref)
 static inline void
 xrt_reference_dec(struct xrt_reference *xref)
 {
-	xrt_atomic_s32_dec_return(&xref->count);
+	XRT_MAYBE_UNUSED int32_t count = xrt_atomic_s32_dec_return(&xref->count);
+
+	XRT_REFERENCE_DEBUG_PRINT(Decremented, xref, count);
 }
 
 /*!
@@ -2158,6 +2177,9 @@ XRT_CHECK_RESULT static inline bool
 xrt_reference_inc_and_was_zero(struct xrt_reference *xref)
 {
 	int32_t count = xrt_atomic_s32_inc_return(&xref->count);
+
+	XRT_REFERENCE_DEBUG_PRINT(Incremented, xref, count);
+
 	return count == 1;
 }
 
@@ -2171,9 +2193,11 @@ XRT_CHECK_RESULT static inline bool
 xrt_reference_dec_and_is_zero(struct xrt_reference *xref)
 {
 	int32_t count = xrt_atomic_s32_dec_return(&xref->count);
+
+	XRT_REFERENCE_DEBUG_PRINT(Decremented, xref, count);
+
 	return count == 0;
 }
-
 
 #ifdef __cplusplus
 }
