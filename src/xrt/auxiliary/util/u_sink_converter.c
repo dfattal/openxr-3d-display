@@ -292,6 +292,28 @@ from_YUV888_to_R8G8B8(struct xrt_frame *dst_frame, uint32_t w, uint32_t h, size_
  */
 
 #ifdef XRT_HAVE_JPEG
+
+#include <setjmp.h>
+
+struct jpeg_decoder_err
+{
+	struct jpeg_error_mgr base;
+
+	char error_msg[JMSG_LENGTH_MAX];
+	jmp_buf setjmp_buffer;
+};
+
+METHODDEF(void) handle_jpeg_error(j_common_ptr cinfo)
+{
+	struct jpeg_decoder_err *err_mgr = (struct jpeg_decoder_err *)cinfo->err;
+
+	(*(cinfo->err->format_message))(cinfo, err_mgr->error_msg);
+	U_LOG_E("JPEG decode error: %s", err_mgr->error_msg);
+
+	// Jump to the setjmp point if we get an error
+	longjmp(err_mgr->setjmp_buffer, 1);
+}
+
 static bool
 check_header(size_t size, const uint8_t *data)
 {
@@ -318,12 +340,19 @@ from_MJPEG_to_frame(struct xrt_frame *dst_frame, size_t size, const uint8_t *dat
 	}
 
 	struct jpeg_decompress_struct cinfo = {0};
-	struct jpeg_error_mgr jerr = {0};
+	struct jpeg_decoder_err jerr = {0};
 
-	cinfo.err = jpeg_std_error(&jerr);
-	jerr.trace_level = 0;
+	cinfo.err = jpeg_std_error(&jerr.base);
+	jerr.base.trace_level = 0;
+	jerr.base.error_exit = handle_jpeg_error;
 
 	jpeg_create_decompress(&cinfo);
+
+	// If an error occurs, it will longjmp back here, indicating failure
+	if (setjmp(jerr.setjmp_buffer)) {
+		goto fail;
+	}
+
 	jpeg_mem_src(&cinfo, data, size);
 
 	int ret = jpeg_read_header(&cinfo, TRUE);
@@ -359,6 +388,9 @@ from_MJPEG_to_frame(struct xrt_frame *dst_frame, size_t size, const uint8_t *dat
 	jpeg_destroy_decompress(&cinfo);
 
 	return true;
+fail:
+	jpeg_abort_decompress(&cinfo);
+	return false;
 }
 #endif
 
@@ -498,6 +530,7 @@ convert_frame_l8(struct xrt_frame_sink *xs, struct xrt_frame *xf)
 		if (!create_frame_with_format(xf, XRT_FORMAT_L8, &converted)) {
 			return;
 		}
+
 		if (!from_MJPEG_to_frame(converted, xf->size, xf->data)) {
 			// Make sure to free frame when we fail to decode.
 			xrt_frame_reference(&converted, NULL);
