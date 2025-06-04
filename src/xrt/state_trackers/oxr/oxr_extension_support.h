@@ -158,6 +158,18 @@
 
 
 /*
+ * XR_KHR_extended_struct_name_lengths
+ */
+#if defined(XR_KHR_extended_struct_name_lengths)
+#define OXR_HAVE_KHR_extended_struct_name_lengths
+#define OXR_EXTENSION_SUPPORT_KHR_extended_struct_name_lengths(_)                                                      \
+	_(KHR_extended_struct_name_lengths, KHR_EXTENDED_STRUCT_NAME_LENGTHS)
+#else
+#define OXR_EXTENSION_SUPPORT_KHR_extended_struct_name_lengths(_)
+#endif
+
+
+/*
  * XR_KHR_loader_init
  */
 #if defined(XR_KHR_loader_init) && defined(XR_USE_PLATFORM_ANDROID)
@@ -805,6 +817,7 @@
     OXR_EXTENSION_SUPPORT_KHR_convert_timespec_time(_) \
     OXR_EXTENSION_SUPPORT_KHR_D3D11_enable(_) \
     OXR_EXTENSION_SUPPORT_KHR_D3D12_enable(_) \
+    OXR_EXTENSION_SUPPORT_KHR_extended_struct_name_lengths(_) \
     OXR_EXTENSION_SUPPORT_KHR_loader_init(_) \
     OXR_EXTENSION_SUPPORT_KHR_loader_init_android(_) \
     OXR_EXTENSION_SUPPORT_KHR_locate_spaces(_) \

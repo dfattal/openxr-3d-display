@@ -117,6 +117,14 @@ XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrConvertTimeToWin32PerformanceCounterKHR(XrInstance instance, XrTime time, LARGE_INTEGER *performanceCounter);
 #endif // XR_USE_PLATFORM_WIN32
 
+#ifdef OXR_HAVE_KHR_extended_struct_name_lengths
+//! OpenXR API function @ep{xrStructureTypeToString2KHR}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrStructureTypeToString2KHR(XrInstance instance,
+                                XrStructureType value,
+                                char buffer[XR_MAX_STRUCTURE_NAME_SIZE_EXTENDED_KHR]);
+#endif // OXR_HAVE_KHR_extended_struct_name_lengths
+
 /*
  *
  * oxr_api_system.c

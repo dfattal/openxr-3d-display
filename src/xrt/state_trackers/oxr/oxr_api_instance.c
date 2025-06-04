@@ -290,9 +290,39 @@ oxr_xrStructureTypeToString(XrInstance instance, XrStructureType value, char buf
 	default: snprintf(buffer, XR_MAX_STRUCTURE_NAME_SIZE, "XR_UNKNOWN_STRUCTURE_TYPE_%d", value);
 	}
 	// The function snprintf always null terminates.
-
+#undef MAKE_TYPE_CASE
 	return XR_SUCCESS;
 }
+
+// ---- XR_KHR_extended_struct_name_lengths extension
+#ifdef OXR_HAVE_KHR_extended_struct_name_lengths
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrStructureTypeToString2KHR(XrInstance instance,
+                                XrStructureType value,
+                                char buffer[XR_MAX_STRUCTURE_NAME_SIZE_EXTENDED_KHR])
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_instance *inst;
+	struct oxr_logger log;
+	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrStructureTypeToString2KHR");
+	OXR_VERIFY_EXTENSION(&log, inst, KHR_extended_struct_name_lengths);
+
+	static_assert(XR_MAX_STRUCTURE_NAME_SIZE_EXTENDED_KHR == 256,
+	              "XR_MAX_STRUCTURE_NAME_SIZE_EXTENDED_KHR has changed, please update the format string");
+
+#define MAKE_TYPE_CASE(VAL, _)                                                                                         \
+	case VAL: snprintf(buffer, XR_MAX_STRUCTURE_NAME_SIZE_EXTENDED_KHR, "%.255s", #VAL); break;
+
+	switch (value) {
+		XR_LIST_ENUM_XrStructureType(MAKE_TYPE_CASE);
+	default: snprintf(buffer, XR_MAX_STRUCTURE_NAME_SIZE_EXTENDED_KHR, "XR_UNKNOWN_STRUCTURE_TYPE_%d", value);
+	}
+	// The function snprintf always null terminates.
+#undef MAKE_TYPE_CASE
+	return XR_SUCCESS;
+}
+#endif // OXR_HAVE_KHR_extended_struct_name_lengths
 
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrStringToPath(XrInstance instance, const char *pathString, XrPath *out_path)
