@@ -279,12 +279,15 @@ oxr_xrStructureTypeToString(XrInstance instance, XrStructureType value, char buf
 	struct oxr_logger log;
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrStructureTypeToString");
 
+	static_assert(XR_MAX_STRUCTURE_NAME_SIZE == 64,
+	              "XR_MAX_STRUCTURE_NAME_SIZE has changed, please update the format string");
+
 #define MAKE_TYPE_CASE(VAL, _)                                                                                         \
-	case VAL: snprintf(buffer, XR_MAX_RESULT_STRING_SIZE, #VAL); break;
+	case VAL: snprintf(buffer, XR_MAX_STRUCTURE_NAME_SIZE, "%.63s", #VAL); break;
 
 	switch (value) {
 		XR_LIST_ENUM_XrStructureType(MAKE_TYPE_CASE);
-	default: snprintf(buffer, XR_MAX_RESULT_STRING_SIZE, "XR_UNKNOWN_STRUCTURE_TYPE_%d", value);
+	default: snprintf(buffer, XR_MAX_STRUCTURE_NAME_SIZE, "XR_UNKNOWN_STRUCTURE_TYPE_%d", value);
 	}
 	// The function snprintf always null terminates.
 
