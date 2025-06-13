@@ -1218,7 +1218,7 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	ret = os_mutex_init(&d->fusion.mutex);
 	if (ret != 0) {
 		VIVE_ERROR(d, "Failed to init 3dof mutex");
-		return false;
+		return NULL;
 	}
 
 	ret = os_thread_helper_start(&d->sensors_thread, vive_sensors_run_thread, d);

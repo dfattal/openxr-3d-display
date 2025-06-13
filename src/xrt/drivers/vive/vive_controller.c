@@ -1067,7 +1067,7 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 	int ret = os_mutex_init(&d->fusion.mutex);
 	if (ret != 0) {
 		VIVE_ERROR(d, "Failed to init 3dof mutex");
-		return false;
+		return NULL;
 	}
 
 	/* default values, will be queried from device */
