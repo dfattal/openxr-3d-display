@@ -197,7 +197,7 @@ Device::~Device()
 
 Device::Device(const DeviceBuilder &builder) : xrt_device({}), ctx(builder.ctx), driver(builder.driver)
 {
-	m_relation_history_create(&relation_hist, NULL);
+	m_relation_history_create(&relation_hist);
 	std::strncpy(this->serial, builder.serial, XRT_DEVICE_NAME_LEN - 1);
 	this->serial[XRT_DEVICE_NAME_LEN - 1] = 0;
 	this->tracking_origin = ctx.get();

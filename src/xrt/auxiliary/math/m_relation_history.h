@@ -13,8 +13,6 @@
 
 #include "xrt/xrt_defines.h"
 
-#include "math/m_filter_one_euro.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -44,19 +42,13 @@ enum m_relation_history_result
 	M_RELATION_HISTORY_RESULT_REVERSE_PREDICTED, //!< The desired timestamp was older than the oldest entry
 };
 
-struct m_relation_history_filters
-{
-	struct m_filter_euro_vec3 position;
-	struct m_filter_euro_quat orientation;
-};
-
 /*!
  * Creates an opaque relation_history object.
  *
  * @public @memberof m_relation_history
  */
 void
-m_relation_history_create(struct m_relation_history **rh, struct m_relation_history_filters *motion_vector_filters);
+m_relation_history_create(struct m_relation_history **rh);
 
 /*!
  * Pushes a new pose to the history.
@@ -167,7 +159,7 @@ private:
 
 public:
 	// clang-format off
-	RelationHistory(struct m_relation_history_filters *motion_vector_filters) noexcept { m_relation_history_create(&mPtr, motion_vector_filters); }
+	RelationHistory() noexcept { m_relation_history_create(&mPtr); }
 	~RelationHistory() { m_relation_history_destroy(&mPtr); }
 	// clang-format on
 

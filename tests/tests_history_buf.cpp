@@ -31,7 +31,7 @@ TEST_CASE("m_relation_history")
 {
 	m_relation_history *rh = nullptr;
 
-	m_relation_history_create(&rh, nullptr);
+	m_relation_history_create(&rh);
 	SECTION("empty buffer")
 	{
 		xrt_space_relation out_relation = XRT_SPACE_RELATION_ZERO;
@@ -125,7 +125,7 @@ TEST_CASE("m_relation_history")
 TEST_CASE("RelationHistory")
 {
 	using xrt::auxiliary::math::RelationHistory;
-	RelationHistory rh{nullptr};
+	RelationHistory rh;
 
 	SECTION("empty buffer")
 	{

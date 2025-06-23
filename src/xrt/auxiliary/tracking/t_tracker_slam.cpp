@@ -286,14 +286,14 @@ struct TrackerSlam
 
 	//! Type of prediction to use
 	t_slam_prediction_type pred_type;
-	u_var_combo pred_combo;             //!< UI combo box to select @ref pred_type
-	RelationHistory slam_rels{nullptr}; //!< A history of relations produced purely from external SLAM tracker data
-	int dbg_pred_every = 1;             //!< Skip X SLAM poses so that you get tracked mostly by the prediction algo
-	int dbg_pred_counter = 0;           //!< SLAM pose counter for prediction debugging
-	struct os_mutex lock_ff;            //!< Lock for gyro_ff and accel_ff.
-	struct m_ff_vec3_f32 *gyro_ff;      //!< Last gyroscope samples
-	struct m_ff_vec3_f32 *accel_ff;     //!< Last accelerometer samples
-	vector<u_sink_debug> ui_sink;       //!< Sink to display frames in UI of each camera
+	u_var_combo pred_combo;         //!< UI combo box to select @ref pred_type
+	RelationHistory slam_rels{};    //!< A history of relations produced purely from external SLAM tracker data
+	int dbg_pred_every = 1;         //!< Skip X SLAM poses so that you get tracked mostly by the prediction algo
+	int dbg_pred_counter = 0;       //!< SLAM pose counter for prediction debugging
+	struct os_mutex lock_ff;        //!< Lock for gyro_ff and accel_ff.
+	struct m_ff_vec3_f32 *gyro_ff;  //!< Last gyroscope samples
+	struct m_ff_vec3_f32 *accel_ff; //!< Last accelerometer samples
+	vector<u_sink_debug> ui_sink;   //!< Sink to display frames in UI of each camera
 
 	//! Used to correct accelerometer measurements when integrating into the prediction.
 	//! @todo Should be automatically computed instead of required to be filled manually through the UI.

@@ -333,7 +333,7 @@ t_hand_tracking_async_default_create(struct xrt_frame_context *xfctx, struct t_h
 	hta->provider = sync;
 
 	for (int i = 0; i < 2; i++) {
-		m_relation_history_create(&hta->present.relation_hist[i], NULL);
+		m_relation_history_create(&hta->present.relation_hist[i]);
 	}
 
 	/*!

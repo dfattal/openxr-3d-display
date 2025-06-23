@@ -57,7 +57,7 @@ u_tracked_imu_3dof_create(struct xrt_frame_context *xfctx, struct u_tracked_imu_
 {
 	struct u_tracked_imu_3dof *dof3 = U_TYPED_CALLOC(struct u_tracked_imu_3dof);
 
-	m_relation_history_create(&dof3->rh, NULL);
+	m_relation_history_create(&dof3->rh);
 
 	m_imu_3dof_init(&dof3->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_300MS);
 	m_imu_3dof_add_vars(&dof3->fusion, debug_var_root, "");

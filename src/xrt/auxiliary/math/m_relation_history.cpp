@@ -17,7 +17,6 @@
 #include "math/m_api.h"
 #include "math/m_predict.h"
 #include "math/m_vec3.h"
-#include "math/m_filter_one_euro.h"
 
 #include "os/os_time.h"
 #include "os/os_threading.h"
@@ -48,20 +47,15 @@ static constexpr size_t BufLen = 4096;
 
 struct m_relation_history
 {
-	mutable os::Mutex mutex;
-
 	HistoryBuffer<struct relation_history_entry, BufLen> impl;
-
-	struct m_relation_history_filters *motion_vector_filters;
+	mutable os::Mutex mutex;
 };
 
+
 void
-m_relation_history_create(struct m_relation_history **rh_ptr, struct m_relation_history_filters *motion_vector_filters)
+m_relation_history_create(struct m_relation_history **rh_ptr)
 {
 	auto ret = std::make_unique<m_relation_history>();
-
-	ret->motion_vector_filters = motion_vector_filters;
-
 	*rh_ptr = ret.release();
 }
 
@@ -195,6 +189,7 @@ m_relation_history_estimate_motion(struct m_relation_history *rh,
                                    int64_t timestamp,
                                    struct xrt_space_relation *out_relation)
 {
+
 	int64_t last_time_ns;
 	struct xrt_space_relation last_relation;
 	if (!m_relation_history_get_latest(rh, &last_time_ns, &last_relation)) {
@@ -210,63 +205,24 @@ m_relation_history_estimate_motion(struct m_relation_history *rh,
 	// Brevity
 	enum xrt_space_relation_flags &outf = out_relation->relation_flags;
 
-	// update the filters if we're doing filtered motion vectors
-	if (rh->motion_vector_filters) {
-		struct xrt_vec3 previous_position = rh->motion_vector_filters->position.prev_y;
-		struct xrt_quat previous_orientation = rh->motion_vector_filters->orientation.prev_y;
 
-		struct xrt_vec3 new_position;
-		struct xrt_quat new_orientation;
+	if (tmp_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) {
+		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_POSITION_VALID_BIT);
+		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
 
-		if (in_relation->relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) {
-			m_filter_euro_vec3_run(&rh->motion_vector_filters->position, timestamp,
-			                       &in_relation->pose.position, &new_position);
-		}
+		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
 
-		if (in_relation->relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) {
-			m_filter_euro_quat_run(&rh->motion_vector_filters->orientation, timestamp,
-			                       &in_relation->pose.orientation, &new_orientation);
-		}
+		out_relation->linear_velocity = (in_relation->pose.position - last_relation.pose.position) / dt;
+	}
 
-		// @note this looks subtly wrong, where technically in valid sequences of relations
-		//       (valid, invalid, valid) we won't produce a filtered pose, but this is intentional.
-		if (tmp_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) {
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_POSITION_VALID_BIT);
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
+	if (tmp_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) {
+		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT);
+		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
+		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
 
-			out_relation->linear_velocity = (new_position - previous_position) / dt;
-		}
-
-		if (tmp_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) {
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT);
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
-
-			math_quat_finite_difference(&previous_orientation, &new_orientation, dt,
-			                            &out_relation->angular_velocity);
-		}
-	} else {
-		if (tmp_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) {
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_POSITION_VALID_BIT);
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
-
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
-
-			out_relation->linear_velocity = (in_relation->pose.position - last_relation.pose.position) / dt;
-		}
-
-		if (tmp_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) {
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT);
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-
-			outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
-
-			math_quat_finite_difference(&last_relation.pose.orientation, &in_relation->pose.orientation, dt,
-			                            &out_relation->angular_velocity);
-		}
+		math_quat_finite_difference(&last_relation.pose.orientation, &in_relation->pose.orientation, dt,
+		                            &out_relation->angular_velocity);
 	}
 
 	out_relation->pose = in_relation->pose;

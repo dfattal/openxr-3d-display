@@ -1210,7 +1210,7 @@ xreal_air_hmd_create_device(struct os_hid_device *sensor_device,
 	u_distortion_mesh_set_none(&hmd->base);
 
 	m_imu_3dof_init(&hmd->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
-	m_relation_history_create(&hmd->relation_hist, NULL);
+	m_relation_history_create(&hmd->relation_hist);
 
 	hmd->static_id = 0;
 	hmd->display_on = false;

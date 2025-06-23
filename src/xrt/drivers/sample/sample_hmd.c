@@ -195,7 +195,7 @@ sample_hmd_create(void)
 	snprintf(hmd->base.str, XRT_DEVICE_NAME_LEN, "Sample HMD");
 	snprintf(hmd->base.serial, XRT_DEVICE_NAME_LEN, "Sample HMD S/N");
 
-	m_relation_history_create(&hmd->relation_hist, NULL);
+	m_relation_history_create(&hmd->relation_hist);
 
 	// Setup input.
 	hmd->base.name = XRT_DEVICE_GENERIC_HMD;

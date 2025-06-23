@@ -1063,7 +1063,7 @@ vive_controller_create(struct os_hid_device *controller_hid, enum watchman_gen w
 	d->watchman_gen = watchman_gen;
 
 	m_imu_3dof_init(&d->fusion.i3dof, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
-	m_relation_history_create(&d->fusion.relation_hist, NULL);
+	m_relation_history_create(&d->fusion.relation_hist);
 	int ret = os_mutex_init(&d->fusion.mutex);
 	if (ret != 0) {
 		VIVE_ERROR(d, "Failed to init 3dof mutex");

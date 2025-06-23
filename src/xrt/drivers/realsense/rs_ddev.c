@@ -432,7 +432,7 @@ rs_ddev_create(int device_idx)
 {
 	struct rs_ddev *rs = U_DEVICE_ALLOCATE(struct rs_ddev, U_DEVICE_ALLOC_TRACKING_NONE, 1, 0);
 
-	m_relation_history_create(&rs->relation_hist, NULL);
+	m_relation_history_create(&rs->relation_hist);
 
 	rs->enable_mapping = true;
 	rs->enable_pose_jumping = true;
