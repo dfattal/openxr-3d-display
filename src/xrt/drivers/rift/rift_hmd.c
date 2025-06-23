@@ -613,7 +613,7 @@ rift_hmd_create(struct os_hid_device *dev, enum rift_variant variant, char *devi
 	strncpy(hmd->base.str, device_name, XRT_DEVICE_NAME_LEN);
 	strncpy(hmd->base.serial, serial_number, XRT_DEVICE_NAME_LEN);
 
-	m_relation_history_create(&hmd->relation_hist, NULL);
+	m_relation_history_create(&hmd->relation_hist);
 
 	// Setup input.
 	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
