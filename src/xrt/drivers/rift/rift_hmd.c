@@ -450,8 +450,14 @@ sensor_thread(void *ptr)
 
 	os_thread_helper_lock(&hmd->sensor_thread);
 
+	// uncomment this to be able to see if things are actually progressing as expected in a debugger, without having
+	// to count yourself
+	// #define TICK_DEBUG
+
 	int result = 0;
+#ifdef TICK_DEBUG
 	int ticks = 0;
+#endif
 
 	while (os_thread_helper_is_running_locked(&hmd->sensor_thread) && result >= 0) {
 		os_thread_helper_unlock(&hmd->sensor_thread);
@@ -459,7 +465,9 @@ sensor_thread(void *ptr)
 		result = sensor_thread_tick(hmd);
 
 		os_thread_helper_lock(&hmd->sensor_thread);
+#ifdef TICK_DEBUG
 		ticks += 1;
+#endif
 	}
 
 	os_thread_helper_unlock(&hmd->sensor_thread);
