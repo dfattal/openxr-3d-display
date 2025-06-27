@@ -22,10 +22,13 @@ The following will update all files from templates:
 make -f .gitlab-ci/ci-scripts.mk
 #}
 
-# workflow:
-#   rules:
-#     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-#     - if: $CI_PIPELINE_SOURCE == 'push'
+workflow:
+  rules:
+    # Switch between branch and merge request pipelines to avoid duplication
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
 
 variables:
   FDO_UPSTREAM_REPO: "monado/monado"
