@@ -223,7 +223,8 @@ create_context(
 	}
 
 	EGLint strategy;
-	if (eglQueryContext(display, app_context, EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT, &strategy)) {
+	if (api_type == EGL_OPENGL_ES_API &&
+	    eglQueryContext(display, app_context, EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT, &strategy)) {
 		attrs[attrc++] = EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT;
 		attrs[attrc++] = strategy;
 	}
