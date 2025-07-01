@@ -228,10 +228,9 @@ struct xrt_quat
  * @ingroup xrt_iface math
  * @relates xrt_quat
  */
-#define XRT_QUAT_IDENTITY                                                                                              \
-	{                                                                                                              \
-		0.f, 0.f, 0.f, 1.f                                                                                     \
-	}
+// clang-format off
+#define XRT_QUAT_IDENTITY {0.f, 0.f, 0.f, 1.f}
+// clang-format on
 
 /*!
  * A 1 element vector with single floats.
@@ -294,40 +293,36 @@ struct xrt_vec3_f64
  * @ingroup xrt_iface math
  * @relates xrt_vec3
  */
-#define XRT_VEC3_ZERO                                                                                                  \
-	{                                                                                                              \
-		0.f, 0.f, 0.f                                                                                          \
-	}
+// clang-format off
+#define XRT_VEC3_ZERO {0.f, 0.f, 0.f}
+// clang-format on
 /*!
  * Value for @ref xrt_vec3 with 1 in the @p x coordinate.
  *
  * @ingroup xrt_iface math
  * @relates xrt_vec3
  */
-#define XRT_VEC3_UNIT_X                                                                                                \
-	{                                                                                                              \
-		1.f, 0.f, 0.f                                                                                          \
-	}
+// clang-format off
+#define XRT_VEC3_UNIT_X {1.f, 0.f, 0.f}
+// clang-format on
 /*!
  * Value for @ref xrt_vec3 with 1 in the @p y coordinate.
  *
  * @ingroup xrt_iface math
  * @relates xrt_vec3
  */
-#define XRT_VEC3_UNIT_Y                                                                                                \
-	{                                                                                                              \
-		0.f, 1.f, 0.f                                                                                          \
-	}
+// clang-format off
+#define XRT_VEC3_UNIT_Y {0.f, 1.f, 0.f}
+// clang-format on
 /*!
  * Value for @ref xrt_vec3 with 1 in the @p z coordinate.
  *
  * @ingroup xrt_iface math
  * @relates xrt_vec3
  */
-#define XRT_VEC3_UNIT_Z                                                                                                \
-	{                                                                                                              \
-		0.f, 0.f, 1.f                                                                                          \
-	}
+// clang-format off
+#define XRT_VEC3_UNIT_Z {0.f, 0.f, 1.f}
+// clang-format on
 
 /*!
  * A 3 element vector with 32 bit integers.
@@ -474,10 +469,9 @@ struct xrt_pose
  * @ingroup xrt_iface math
  * @relates xrt_pose
  */
-#define XRT_POSE_IDENTITY                                                                                              \
-	{                                                                                                              \
-		XRT_QUAT_IDENTITY, XRT_VEC3_ZERO                                                                       \
-	}
+// clang-format off
+#define XRT_POSE_IDENTITY {XRT_QUAT_IDENTITY, XRT_VEC3_ZERO}
+// clang-format on
 
 /*!
  * Describes a projection matrix fov.
@@ -672,10 +666,9 @@ struct xrt_space_relation
  * @ingroup xrt_iface math
  * @relates xrt_space_relation
  */
-#define XRT_SPACE_RELATION_ZERO                                                                                        \
-	{                                                                                                              \
-		XRT_SPACE_RELATION_BITMASK_NONE, XRT_POSE_IDENTITY, XRT_VEC3_ZERO, XRT_VEC3_ZERO                       \
-	}
+// clang-format off
+#define XRT_SPACE_RELATION_ZERO {XRT_SPACE_RELATION_BITMASK_NONE, XRT_POSE_IDENTITY, XRT_VEC3_ZERO, XRT_VEC3_ZERO}
+// clang-format on
 
 /*!
  * The maximum number of steps that can be in a relation chain.
