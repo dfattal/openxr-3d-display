@@ -20,7 +20,7 @@
  * @implements xrt_frame_sink
  * @implements xrt_frame_node
  */
-struct u_sink_stereo_sbs_to_slam_sbs
+struct u_sink_stereo_sbs_split
 {
 	struct xrt_frame_sink base;
 	struct xrt_frame_node node;
@@ -34,7 +34,7 @@ split_frame(struct xrt_frame_sink *xfs, struct xrt_frame *xf)
 {
 	SINK_TRACE_MARKER();
 
-	struct u_sink_stereo_sbs_to_slam_sbs *s = (struct u_sink_stereo_sbs_to_slam_sbs *)xfs;
+	struct u_sink_stereo_sbs_split *s = (struct u_sink_stereo_sbs_split *)xfs;
 
 	assert(xf->width % 2 == 0);
 
@@ -73,7 +73,7 @@ split_break_apart(struct xrt_frame_node *node)
 static void
 split_destroy(struct xrt_frame_node *node)
 {
-	struct u_sink_stereo_sbs_to_slam_sbs *s = container_of(node, struct u_sink_stereo_sbs_to_slam_sbs, node);
+	struct u_sink_stereo_sbs_split *s = container_of(node, struct u_sink_stereo_sbs_split, node);
 
 	free(s);
 }
@@ -86,12 +86,12 @@ split_destroy(struct xrt_frame_node *node)
  */
 
 void
-u_sink_stereo_sbs_to_slam_sbs_create(struct xrt_frame_context *xfctx,
-                                     struct xrt_frame_sink *downstream_left,
-                                     struct xrt_frame_sink *downstream_right,
-                                     struct xrt_frame_sink **out_xfs)
+u_sink_stereo_sbs_split_create(struct xrt_frame_context *xfctx,
+                               struct xrt_frame_sink *downstream_left,
+                               struct xrt_frame_sink *downstream_right,
+                               struct xrt_frame_sink **out_xfs)
 {
-	struct u_sink_stereo_sbs_to_slam_sbs *s = U_TYPED_CALLOC(struct u_sink_stereo_sbs_to_slam_sbs);
+	struct u_sink_stereo_sbs_split *s = U_TYPED_CALLOC(struct u_sink_stereo_sbs_split);
 
 	s->base.push_frame = split_frame;
 	s->node.break_apart = split_break_apart;

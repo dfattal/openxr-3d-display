@@ -172,14 +172,14 @@ u_sink_split_create(struct xrt_frame_context *xfctx,
  * Splits Stereo SBS frames into two independent frames
  */
 void
-u_sink_stereo_sbs_to_slam_sbs_create(struct xrt_frame_context *xfctx,
-                                     struct xrt_frame_sink *downstream_left,
-                                     struct xrt_frame_sink *downstream_right,
-                                     struct xrt_frame_sink **out_xfs);
+u_sink_stereo_sbs_split_create(struct xrt_frame_context *xfctx,
+                               struct xrt_frame_sink *downstream_left,
+                               struct xrt_frame_sink *downstream_right,
+                               struct xrt_frame_sink **out_xfs);
 
 /*!
  * Combines stereo frames.
- * Opposite of u_sink_stereo_sbs_to_slam_sbs_create
+ * Opposite of u_sink_stereo_sbs_split_create
  */
 bool
 u_sink_combiner_create(struct xrt_frame_context *xfctx,

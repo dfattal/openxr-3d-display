@@ -215,7 +215,7 @@ add_library(
 	u_sink_simple_queue.c
 	u_sink_quirk.c
 	u_sink_split.c
-	u_sink_stereo_sbs_to_slam_sbs.c
+	u_sink_stereo_sbs_split.c
 	)
 target_link_libraries(
 	aux_util_sink

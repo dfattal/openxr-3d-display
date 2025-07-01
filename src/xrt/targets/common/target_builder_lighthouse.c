@@ -419,17 +419,17 @@ valve_index_setup_visual_trackers(struct lighthouse_system *lhs,
 	if (slam_enabled && hand_enabled) {
 		u_sink_split_create(xfctx, slam_sinks->cams[0], hand_sinks->cams[0], &entry_left_sink);
 		u_sink_split_create(xfctx, slam_sinks->cams[1], hand_sinks->cams[1], &entry_right_sink);
-		u_sink_stereo_sbs_to_slam_sbs_create(xfctx, entry_left_sink, entry_right_sink, &entry_sbs_sink);
+		u_sink_stereo_sbs_split_create(xfctx, entry_left_sink, entry_right_sink, &entry_sbs_sink);
 		u_sink_create_format_converter(xfctx, XRT_FORMAT_L8, entry_sbs_sink, &entry_sbs_sink);
 	} else if (slam_enabled) {
 		entry_left_sink = slam_sinks->cams[0];
 		entry_right_sink = slam_sinks->cams[1];
-		u_sink_stereo_sbs_to_slam_sbs_create(xfctx, entry_left_sink, entry_right_sink, &entry_sbs_sink);
+		u_sink_stereo_sbs_split_create(xfctx, entry_left_sink, entry_right_sink, &entry_sbs_sink);
 		u_sink_create_format_converter(xfctx, XRT_FORMAT_L8, entry_sbs_sink, &entry_sbs_sink);
 	} else if (hand_enabled) {
 		entry_left_sink = hand_sinks->cams[0];
 		entry_right_sink = hand_sinks->cams[1];
-		u_sink_stereo_sbs_to_slam_sbs_create(xfctx, entry_left_sink, entry_right_sink, &entry_sbs_sink);
+		u_sink_stereo_sbs_split_create(xfctx, entry_left_sink, entry_right_sink, &entry_sbs_sink);
 		u_sink_create_format_converter(xfctx, XRT_FORMAT_L8, entry_sbs_sink, &entry_sbs_sink);
 	} else {
 		LH_WARN("No visual trackers were set");
