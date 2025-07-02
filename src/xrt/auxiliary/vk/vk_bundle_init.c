@@ -31,15 +31,6 @@
  *
  */
 
-static inline void
-append_to_pnext_chain(VkBaseInStructure *head, VkBaseInStructure *new_struct)
-{
-	assert(new_struct->pNext == NULL);
-	// Insert ourselves between head and its previous pNext
-	new_struct->pNext = head->pNext;
-	head->pNext = (void *)new_struct;
-}
-
 static bool
 should_skip_optional_instance_ext(struct vk_bundle *vk,
                                   struct u_string_list *required_instance_ext_list,
@@ -1093,36 +1084,36 @@ filter_device_features(struct vk_bundle *vk,
 
 #ifdef VK_EXT_robustness2
 	if (vk->has_EXT_robustness2) {
-		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
-		                      (VkBaseInStructure *)&robust_info);
+		vk_append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                         (VkBaseInStructure *)&robust_info);
 	}
 #endif
 
 #ifdef VK_KHR_8bit_storage
 	if (vk->has_KHR_8bit_storage) {
-		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
-		                      (VkBaseInStructure *)&storage_8bit);
+		vk_append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                         (VkBaseInStructure *)&storage_8bit);
 	}
 #endif
 
 #ifdef VK_KHR_timeline_semaphore
 	if (vk->has_KHR_timeline_semaphore) {
-		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
-		                      (VkBaseInStructure *)&timeline_semaphore_info);
+		vk_append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                         (VkBaseInStructure *)&timeline_semaphore_info);
 	}
 #endif
 
 #ifdef VK_KHR_synchronization2
 	if (vk->has_KHR_synchronization2) {
-		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
-		                      (VkBaseInStructure *)&synchronization_2_info);
+		vk_append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                         (VkBaseInStructure *)&synchronization_2_info);
 	}
 #endif
 
 #ifdef VK_ANDROID_external_format_resolve
 	if (vk->has_ANDROID_external_format_resolve) {
-		append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
-		                      (VkBaseInStructure *)&ext_fmt_resolve_info);
+		vk_append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                         (VkBaseInStructure *)&ext_fmt_resolve_info);
 	}
 #endif
 
@@ -1357,34 +1348,34 @@ vk_create_device(struct vk_bundle *vk,
 
 #ifdef VK_EXT_robustness2
 	if (vk->has_EXT_robustness2) {
-		append_to_pnext_chain((VkBaseInStructure *)&device_create_info, (VkBaseInStructure *)&robust_info);
+		vk_append_to_pnext_chain((VkBaseInStructure *)&device_create_info, (VkBaseInStructure *)&robust_info);
 	}
 #endif
 
 #ifdef VK_KHR_8bit_storage
 	if (vk->has_KHR_8bit_storage) {
-		append_to_pnext_chain((VkBaseInStructure *)&device_create_info, (VkBaseInStructure *)&storage_8bit);
+		vk_append_to_pnext_chain((VkBaseInStructure *)&device_create_info, (VkBaseInStructure *)&storage_8bit);
 	}
 #endif
 
 #ifdef VK_KHR_timeline_semaphore
 	if (vk->has_KHR_timeline_semaphore) {
-		append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
-		                      (VkBaseInStructure *)&timeline_semaphore_info);
+		vk_append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
+		                         (VkBaseInStructure *)&timeline_semaphore_info);
 	}
 #endif
 
 #ifdef VK_KHR_synchronization2
 	if (vk->has_KHR_synchronization2) {
-		append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
-		                      (VkBaseInStructure *)&synchronization_2_info);
+		vk_append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
+		                         (VkBaseInStructure *)&synchronization_2_info);
 	}
 #endif
 
 #ifdef VK_ANDROID_external_format_resolve
 	if (vk->has_ANDROID_external_format_resolve) {
-		append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
-		                      (VkBaseInStructure *)&ext_fmt_resolve_info);
+		vk_append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
+		                         (VkBaseInStructure *)&ext_fmt_resolve_info);
 	}
 #endif
 

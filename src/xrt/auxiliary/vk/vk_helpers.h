@@ -550,6 +550,15 @@ struct vk_buffer
 	} while (false)
 
 
+static inline void
+vk_append_to_pnext_chain(VkBaseInStructure *head, VkBaseInStructure *new_struct)
+{
+	assert(new_struct->pNext == NULL);
+	// Insert ourselves between head and its previous pNext
+	new_struct->pNext = head->pNext;
+	head->pNext = new_struct;
+}
+
 /*
  *
  * String helper functions.
