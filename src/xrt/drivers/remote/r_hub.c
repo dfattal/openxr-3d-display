@@ -473,8 +473,8 @@ r_create_devices(uint16_t port,
 	r->base.xdevs[r->base.xdev_count++] = right;
 
 	r->base.static_roles.head = head;
-	r->base.static_roles.hand_tracking.left = left;
-	r->base.static_roles.hand_tracking.right = right;
+	r->base.static_roles.hand_tracking.conforming.left = left;
+	r->base.static_roles.hand_tracking.conforming.right = right;
 
 
 	/*

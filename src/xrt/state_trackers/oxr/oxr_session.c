@@ -55,6 +55,7 @@
 DEBUG_GET_ONCE_NUM_OPTION(ipd, "OXR_DEBUG_IPD_MM", 63)
 DEBUG_GET_ONCE_NUM_OPTION(wait_frame_sleep, "OXR_DEBUG_WAIT_FRAME_EXTRA_SLEEP_MS", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(frame_timing_spew, "OXR_FRAME_TIMING_SPEW", false)
+DEBUG_GET_ONCE_BOOL_OPTION(hand_tracking_prioritize_conforming, "OXR_HAND_TRACKING_PRIORITIZE_CONFORMING", false)
 
 
 /*
@@ -1314,24 +1315,41 @@ oxr_session_hand_joints(struct oxr_logger *log,
 	XrHandJointVelocitiesEXT *vel =
 	    OXR_GET_OUTPUT_FROM_CHAIN(locations, XR_TYPE_HAND_JOINT_VELOCITIES_EXT, XrHandJointVelocitiesEXT);
 
-	if (hand_tracker->xdev == NULL) {
+	const XrTime at_time = locateInfo->time;
+
+	//! Convert at_time to monotonic and give to device.
+	const int64_t at_timestamp_ns = time_state_ts_to_monotonic_ns(inst->timekeeping, at_time);
+
+	const struct oxr_hand_tracking_data_source *data_sources[2] = {
+	    &hand_tracker->unobstructed,
+	    &hand_tracker->conforming,
+	};
+	if (debug_get_bool_option_hand_tracking_prioritize_conforming()) {
+		const struct oxr_hand_tracking_data_source *tmp = data_sources[0];
+		data_sources[0] = data_sources[1];
+		data_sources[1] = tmp;
+	}
+
+	struct xrt_hand_joint_set value;
+	const struct oxr_hand_tracking_data_source *data_source = NULL;
+	for (uint32_t i = 0; i < ARRAY_SIZE(data_sources); ++i) {
+		data_source = data_sources[i];
+		if (data_source->xdev == NULL)
+			continue;
+		int64_t ignored;
+		value = (struct xrt_hand_joint_set){0};
+		xrt_result_t xret = xrt_device_get_hand_tracking(data_source->xdev, data_source->input_name,
+		                                                 at_timestamp_ns, &value, &ignored);
+		OXR_CHECK_XRET(log, sess, xret, xrt_device_get_hand_tracking);
+		if (value.is_active) {
+			break;
+		}
+	}
+
+	if (data_source == NULL || data_source->xdev == NULL) {
 		locations->isActive = false;
 		return XR_SUCCESS;
 	}
-
-	struct xrt_device *xdev = hand_tracker->xdev;
-	enum xrt_input_name name = hand_tracker->input_name;
-
-	XrTime at_time = locateInfo->time;
-
-	//! Convert at_time to monotonic and give to device.
-	int64_t at_timestamp_ns = time_state_ts_to_monotonic_ns(inst->timekeeping, at_time);
-
-	struct xrt_hand_joint_set value;
-	int64_t ignored;
-
-	xrt_result_t xret = xrt_device_get_hand_tracking(xdev, name, at_timestamp_ns, &value, &ignored);
-	OXR_CHECK_XRET(log, sess, xret, xrt_device_get_hand_tracking);
 
 	// The hand pose is returned in the xdev's space.
 	struct xrt_space_relation T_xdev_hand = value.hand_pose;
@@ -1339,7 +1357,7 @@ oxr_session_hand_joints(struct oxr_logger *log,
 	// Get the xdev's pose in the base space.
 	struct xrt_space_relation T_base_xdev = XRT_SPACE_RELATION_ZERO;
 
-	XrResult ret = oxr_space_locate_device(log, xdev, baseSpc, at_time, &T_base_xdev);
+	XrResult ret = oxr_space_locate_device(log, data_source->xdev, baseSpc, at_time, &T_base_xdev);
 	if (ret != XR_SUCCESS) {
 		// Error printed logged oxr_space_locate_device
 		return ret;
@@ -1465,8 +1483,6 @@ oxr_session_apply_force_feedback(struct oxr_logger *log,
                                  struct oxr_hand_tracker *hand_tracker,
                                  const XrForceFeedbackCurlApplyLocationsMNDX *locations)
 {
-	struct xrt_device *xdev = hand_tracker->xdev;
-
 	struct xrt_output_value result = {0};
 	result.type = XRT_OUTPUT_VALUE_TYPE_FORCE_FEEDBACK;
 	result.force_feedback.force_feedback_location_count = locations->locationCount;
@@ -1476,9 +1492,19 @@ oxr_session_apply_force_feedback(struct oxr_logger *log,
 		result.force_feedback.force_feedback[i].value = locations->locations[i].value;
 	}
 
-	xrt_result_t xret = xrt_device_set_output(xdev, xr_hand_to_force_feedback_output(hand_tracker->hand), &result);
-	if (xret != XRT_SUCCESS) {
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "xr_device_set_output failed");
+	const struct oxr_hand_tracking_data_source *data_sources[2] = {
+	    &hand_tracker->unobstructed,
+	    &hand_tracker->conforming,
+	};
+	for (uint32_t i = 0; i < ARRAY_SIZE(data_sources); ++i) {
+		struct xrt_device *xdev = data_sources[i]->xdev;
+		if (xdev) {
+			xrt_result_t xret =
+			    xrt_device_set_output(xdev, xr_hand_to_force_feedback_output(hand_tracker->hand), &result);
+			if (xret != XRT_SUCCESS) {
+				return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "xr_device_set_output failed");
+			}
+		}
 	}
 
 	return XR_SUCCESS;

@@ -56,8 +56,10 @@ enum role_enum
 	ROLE_LEFT,
 	ROLE_RIGHT,
 	ROLE_GAMEPAD,
-	ROLE_HAND_LEFT,
-	ROLE_HAND_RIGHT,
+	ROLE_HAND_UNOBSTRUCTED_LEFT,
+	ROLE_HAND_UNOBSTRUCTED_RIGHT,
+	ROLE_HAND_CONFORMING_LEFT,
+	ROLE_HAND_CONFORMING_RIGHT,
 };
 
 #define CHECK_NOT_NULL(ARG)                                                                                            \
@@ -430,8 +432,10 @@ mnd_root_get_device_from_role(mnd_root_t *root, const char *role_name, int32_t *
 	TO_ENUM("left", ROLE_LEFT)
 	TO_ENUM("right", ROLE_RIGHT)
 	TO_ENUM("gamepad", ROLE_GAMEPAD)
-	TO_ENUM("hand-tracking-left", ROLE_HAND_LEFT)
-	TO_ENUM("hand-tracking-right", ROLE_HAND_RIGHT)
+	TO_ENUM("hand-tracking-unobstructed-left", ROLE_HAND_UNOBSTRUCTED_LEFT)
+	TO_ENUM("hand-tracking-unobstructed-right", ROLE_HAND_UNOBSTRUCTED_RIGHT)
+	TO_ENUM("hand-tracking-conforming-left", ROLE_HAND_CONFORMING_LEFT)
+	TO_ENUM("hand-tracking-conforming-right", ROLE_HAND_CONFORMING_RIGHT)
 	{
 		PE("Invalid role name (%s)", role_name);
 		return MND_ERROR_INVALID_VALUE;
@@ -441,8 +445,15 @@ mnd_root_get_device_from_role(mnd_root_t *root, const char *role_name, int32_t *
 	switch (role) {
 	case ROLE_HEAD: *out_index = root->ipc_c.ism->roles.head; return MND_SUCCESS;
 	case ROLE_EYES: *out_index = root->ipc_c.ism->roles.eyes; return MND_SUCCESS;
-	case ROLE_HAND_LEFT: *out_index = root->ipc_c.ism->roles.hand_tracking.left; return MND_SUCCESS;
-	case ROLE_HAND_RIGHT: *out_index = root->ipc_c.ism->roles.hand_tracking.right; return MND_SUCCESS;
+#define CASE_ROLE_HAND(UC_SRC, SRC)                                                                                    \
+	case ROLE_HAND_##UC_SRC##_LEFT: *out_index = root->ipc_c.ism->roles.hand_tracking.SRC.left;                    \
+	    return MND_SUCCESS;                                                                                        \
+	case ROLE_HAND_##UC_SRC##_RIGHT:                                                                               \
+		*out_index = root->ipc_c.ism->roles.hand_tracking.SRC.right;                                           \
+		return MND_SUCCESS;
+		CASE_ROLE_HAND(UNOBSTRUCTED, unobstructed)
+		CASE_ROLE_HAND(CONFORMING, conforming)
+#undef CASE_ROLE_HAND
 	case ROLE_LEFT:
 	case ROLE_RIGHT:
 	case ROLE_GAMEPAD: break;

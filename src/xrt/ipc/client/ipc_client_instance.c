@@ -175,8 +175,10 @@ ipc_client_instance_create_system(struct xrt_instance *xinst,
 	SET_ROLE(eyes);
 	SET_ROLE(face);
 	SET_ROLE(body);
-	SET_ROLE(hand_tracking.left);
-	SET_ROLE(hand_tracking.right);
+	SET_ROLE(hand_tracking.unobstructed.left);
+	SET_ROLE(hand_tracking.unobstructed.right);
+	SET_ROLE(hand_tracking.conforming.left);
+	SET_ROLE(hand_tracking.conforming.right);
 
 #undef SET_ROLE
 

@@ -300,8 +300,8 @@ wmr_open_system_impl(struct xrt_builder *xb,
 	ubrh->head = head;
 	ubrh->left = left;
 	ubrh->right = right;
-	ubrh->hand_tracking.left = ht_left;
-	ubrh->hand_tracking.right = ht_right;
+	ubrh->hand_tracking.unobstructed.left = ht_left;
+	ubrh->hand_tracking.unobstructed.right = ht_right;
 
 	return XRT_SUCCESS;
 

@@ -588,8 +588,8 @@ ns_open_system_impl(struct xrt_builder *xb,
 	ubrh->head = head_wrap;
 	ubrh->left = left;
 	ubrh->right = right;
-	ubrh->hand_tracking.left = left_ht;
-	ubrh->hand_tracking.right = right_ht;
+	ubrh->hand_tracking.unobstructed.left = left_ht;
+	ubrh->hand_tracking.unobstructed.right = right_ht;
 
 end:
 	if (nsb->config_json != NULL) {

@@ -55,6 +55,52 @@ type_to_small_string(enum xrt_device_feature_type type)
 	}
 }
 
+static inline void
+get_hand_tracking_devices(struct xrt_system_devices *xsysd, enum xrt_hand hand, struct xrt_device *out_ht_xdevs[2])
+{
+#define XRT_GET_U_HT(HAND) xsysd->static_roles.hand_tracking.unobstructed.HAND
+#define XRT_GET_C_HT(HAND) xsysd->static_roles.hand_tracking.conforming.HAND
+	if (hand == XRT_HAND_LEFT) {
+		out_ht_xdevs[0] = XRT_GET_U_HT(left);
+		out_ht_xdevs[1] = XRT_GET_C_HT(left);
+	} else {
+		out_ht_xdevs[0] = XRT_GET_U_HT(right);
+		out_ht_xdevs[1] = XRT_GET_C_HT(right);
+	}
+#undef XRT_GET_C_HT
+#undef XRT_GET_U_HT
+}
+
+static xrt_result_t
+set_hand_tracking_enabled(struct xrt_system_devices *xsysd, enum xrt_hand hand, bool enable)
+{
+	struct xrt_device *ht_sources[2] = {0};
+	get_hand_tracking_devices(xsysd, hand, ht_sources);
+
+	uint32_t ht_sources_size = ARRAY_SIZE(ht_sources);
+	// hand-tracking data-sources can all come from the same xrt-device instance
+	if (ht_sources[0] == ht_sources[1]) {
+		ht_sources_size = 1;
+	}
+
+	typedef xrt_result_t (*set_feature_t)(struct xrt_device *, enum xrt_device_feature_type);
+	const set_feature_t set_feature = enable ? xrt_device_begin_feature : xrt_device_end_feature;
+
+	const enum xrt_device_feature_type ht_feature =
+	    (hand == XRT_HAND_LEFT) ? XRT_DEVICE_FEATURE_HAND_TRACKING_LEFT : XRT_DEVICE_FEATURE_HAND_TRACKING_RIGHT;
+
+	xrt_result_t xret = XRT_SUCCESS;
+	for (uint32_t i = 0; i < ht_sources_size; ++i) {
+		if (ht_sources[i]) {
+			xret = set_feature(ht_sources[i], ht_feature);
+		}
+		if (xret != XRT_SUCCESS) {
+			break;
+		}
+	}
+	return xret;
+}
+
 
 /*
  *
@@ -95,11 +141,11 @@ feature_inc(struct xrt_system_devices *xsysd, enum xrt_device_feature_type type)
 		return XRT_SUCCESS;
 	}
 
-	xrt_result_t xret;
+	xrt_result_t xret = XRT_SUCCESS;
 	if (type == XRT_DEVICE_FEATURE_HAND_TRACKING_LEFT) {
-		xret = xrt_device_begin_feature(xsysd->static_roles.hand_tracking.left, type);
+		xret = set_hand_tracking_enabled(xsysd, XRT_HAND_LEFT, true);
 	} else if (type == XRT_DEVICE_FEATURE_HAND_TRACKING_RIGHT) {
-		xret = xrt_device_begin_feature(xsysd->static_roles.hand_tracking.right, type);
+		xret = set_hand_tracking_enabled(xsysd, XRT_HAND_RIGHT, true);
 	} else if (type == XRT_DEVICE_FEATURE_EYE_TRACKING) {
 		xret = xrt_device_begin_feature(xsysd->static_roles.eyes, type);
 	} else {
@@ -130,9 +176,9 @@ feature_dec(struct xrt_system_devices *xsysd, enum xrt_device_feature_type type)
 
 	xrt_result_t xret;
 	if (type == XRT_DEVICE_FEATURE_HAND_TRACKING_LEFT) {
-		xret = xrt_device_end_feature(xsysd->static_roles.hand_tracking.left, type);
+		xret = set_hand_tracking_enabled(xsysd, XRT_HAND_LEFT, false);
 	} else if (type == XRT_DEVICE_FEATURE_HAND_TRACKING_RIGHT) {
-		xret = xrt_device_end_feature(xsysd->static_roles.hand_tracking.right, type);
+		xret = set_hand_tracking_enabled(xsysd, XRT_HAND_RIGHT, false);
 	} else if (type == XRT_DEVICE_FEATURE_EYE_TRACKING) {
 		xret = xrt_device_end_feature(xsysd->static_roles.eyes, type);
 	} else {

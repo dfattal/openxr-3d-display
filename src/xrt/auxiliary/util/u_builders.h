@@ -89,8 +89,17 @@ struct u_builder_roles_helper
 
 	struct
 	{
-		struct xrt_device *left;
-		struct xrt_device *right;
+		struct
+		{
+			struct xrt_device *left;
+			struct xrt_device *right;
+		} unobstructed;
+
+		struct
+		{
+			struct xrt_device *left;
+			struct xrt_device *right;
+		} conforming;
 	} hand_tracking;
 };
 

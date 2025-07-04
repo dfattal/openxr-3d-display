@@ -138,9 +138,10 @@ cli_cmd_test(int argc, const char **argv)
 	PRINT_DYNR(left, "               ");
 	PRINT_DYNR(right, "              ");
 	PRINT_DYNR(gamepad, "            ");
-	PRINT_ROLE(hand_tracking.left, " ");
-	PRINT_ROLE(hand_tracking.right, "");
-
+	PRINT_ROLE(hand_tracking.unobstructed.left, " ");
+	PRINT_ROLE(hand_tracking.unobstructed.right, "");
+	PRINT_ROLE(hand_tracking.conforming.left, " ");
+	PRINT_ROLE(hand_tracking.conforming.right, "");
 
 	// End of program
 	printf(" :: All ok, shutting down.\n");

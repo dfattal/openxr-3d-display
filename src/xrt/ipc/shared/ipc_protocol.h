@@ -244,8 +244,17 @@ struct ipc_shared_memory
 
 		struct
 		{
-			int32_t left;
-			int32_t right;
+			struct
+			{
+				int32_t left;
+				int32_t right;
+			} unobstructed;
+
+			struct
+			{
+				int32_t left;
+				int32_t right;
+			} conforming;
 		} hand_tracking;
 	} roles;
 
@@ -291,7 +300,7 @@ struct ipc_shared_memory
 	struct xrt_plane_detector_begin_info_ext plane_begin_info_ext;
 };
 
-static_assert(sizeof(struct ipc_shared_memory) == 6500048,
+static_assert(sizeof(struct ipc_shared_memory) == 6500056,
               "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 /*!

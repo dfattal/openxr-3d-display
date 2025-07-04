@@ -185,49 +185,52 @@ struct xrt_device *
 u_system_devices_get_ht_device(struct xrt_system_devices *xsysd, enum xrt_input_name name);
 
 /*!
- * Helper to get the first left hand-tracking device,
+ * Helper to get the first left (unobstructed) hand-tracking device,
  * uses @ref u_system_devices_get_ht_device.
  *
  * @ingroup aux_util
  */
 static inline struct xrt_device *
-u_system_devices_get_ht_device_left(struct xrt_system_devices *xsysd)
+u_system_devices_get_ht_device_unobstructed_left(struct xrt_system_devices *xsysd)
 {
-	const enum xrt_input_name ht_input_names[2] = {
-	    XRT_INPUT_HT_UNOBSTRUCTED_LEFT,
-	    XRT_INPUT_HT_CONFORMING_LEFT,
-	};
-	for (uint32_t i = 0; i < ARRAY_SIZE(ht_input_names); ++i) {
-		struct xrt_device *xdev = u_system_devices_get_ht_device(xsysd, ht_input_names[i]);
-		if (xdev != NULL) {
-			return xdev;
-		}
-	}
-	return NULL;
+	return u_system_devices_get_ht_device(xsysd, XRT_INPUT_HT_UNOBSTRUCTED_LEFT);
 }
 
 /*!
- * Helper to get the first right hand-tracking device,
+ * Helper to get the first (unobstructed) right hand-tracking device,
  * uses @ref u_system_devices_get_ht_device.
  *
  * @ingroup aux_util
  */
 static inline struct xrt_device *
-u_system_devices_get_ht_device_right(struct xrt_system_devices *xsysd)
+u_system_devices_get_ht_device_unobstructed_right(struct xrt_system_devices *xsysd)
 {
-	const enum xrt_input_name ht_input_names[2] = {
-	    XRT_INPUT_HT_UNOBSTRUCTED_RIGHT,
-	    XRT_INPUT_HT_CONFORMING_RIGHT,
-	};
-	for (uint32_t i = 0; i < ARRAY_SIZE(ht_input_names); ++i) {
-		struct xrt_device *xdev = u_system_devices_get_ht_device(xsysd, ht_input_names[i]);
-		if (xdev != NULL) {
-			return xdev;
-		}
-	}
-	return NULL;
+	return u_system_devices_get_ht_device(xsysd, XRT_INPUT_HT_UNOBSTRUCTED_RIGHT);
 }
 
+/*!
+ * Helper to get the first left (conforming) hand-tracking device,
+ * uses @ref u_system_devices_get_ht_device.
+ *
+ * @ingroup aux_util
+ */
+static inline struct xrt_device *
+u_system_devices_get_ht_device_conforming_left(struct xrt_system_devices *xsysd)
+{
+	return u_system_devices_get_ht_device(xsysd, XRT_INPUT_HT_CONFORMING_LEFT);
+}
+
+/*!
+ * Helper to get the first (conforming) right hand-tracking device,
+ * uses @ref u_system_devices_get_ht_device.
+ *
+ * @ingroup aux_util
+ */
+static inline struct xrt_device *
+u_system_devices_get_ht_device_conforming_right(struct xrt_system_devices *xsysd)
+{
+	return u_system_devices_get_ht_device(xsysd, XRT_INPUT_HT_CONFORMING_RIGHT);
+}
 
 #ifdef __cplusplus
 }

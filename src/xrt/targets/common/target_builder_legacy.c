@@ -156,7 +156,8 @@ legacy_open_system_impl(struct xrt_builder *xb,
 
 	struct xrt_device *head = NULL;
 	struct xrt_device *left = NULL, *right = NULL, *gamepad = NULL;
-	struct xrt_device *left_ht = NULL, *right_ht = NULL;
+	struct xrt_device *unobstructed_left_ht = NULL, *unobstructed_right_ht = NULL;
+	struct xrt_device *conforming_left_ht = NULL, *conforming_right_ht = NULL;
 
 	if (head_idx >= 0) {
 		head = xsysd->xdevs[head_idx];
@@ -172,16 +173,21 @@ legacy_open_system_impl(struct xrt_builder *xb,
 	}
 
 	// Find hand tracking devices.
-	left_ht = u_system_devices_get_ht_device_left(xsysd);
-	right_ht = u_system_devices_get_ht_device_right(xsysd);
+	unobstructed_left_ht = u_system_devices_get_ht_device_unobstructed_left(xsysd);
+	unobstructed_right_ht = u_system_devices_get_ht_device_unobstructed_right(xsysd);
+
+	conforming_left_ht = u_system_devices_get_ht_device_conforming_left(xsysd);
+	conforming_right_ht = u_system_devices_get_ht_device_conforming_right(xsysd);
 
 	// Assign to role(s).
 	ubrh->head = head;
 	ubrh->left = left;
 	ubrh->right = right;
 	ubrh->gamepad = gamepad;
-	ubrh->hand_tracking.left = left_ht;
-	ubrh->hand_tracking.right = right_ht;
+	ubrh->hand_tracking.unobstructed.left = unobstructed_left_ht;
+	ubrh->hand_tracking.unobstructed.right = unobstructed_right_ht;
+	ubrh->hand_tracking.conforming.left = conforming_left_ht;
+	ubrh->hand_tracking.conforming.right = conforming_right_ht;
 
 	return XRT_SUCCESS;
 }

@@ -868,8 +868,10 @@ print_system_devices(u_pp_delegate_t dg, struct xrt_system_devices *xsysd)
 	PD(left);
 	PD(right);
 	PD(gamepad);
-	P(hand_tracking.left);
-	P(hand_tracking.right);
+	P(hand_tracking.unobstructed.left);
+	P(hand_tracking.unobstructed.right);
+	P(hand_tracking.conforming.left);
+	P(hand_tracking.conforming.right);
 
 #undef P
 #undef PD

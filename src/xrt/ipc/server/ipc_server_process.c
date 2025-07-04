@@ -430,8 +430,12 @@ init_shm(struct ipc_server *s)
 	ism->roles.eyes = find_xdev_index(s, s->xsysd->static_roles.eyes);
 	ism->roles.face = find_xdev_index(s, s->xsysd->static_roles.face);
 	ism->roles.body = find_xdev_index(s, s->xsysd->static_roles.body);
-	ism->roles.hand_tracking.left = find_xdev_index(s, s->xsysd->static_roles.hand_tracking.left);
-	ism->roles.hand_tracking.right = find_xdev_index(s, s->xsysd->static_roles.hand_tracking.right);
+#define SET_HT_ROLE(SRC)                                                                                               \
+	ism->roles.hand_tracking.SRC.left = find_xdev_index(s, s->xsysd->static_roles.hand_tracking.SRC.left);         \
+	ism->roles.hand_tracking.SRC.right = find_xdev_index(s, s->xsysd->static_roles.hand_tracking.SRC.right);
+	SET_HT_ROLE(unobstructed)
+	SET_HT_ROLE(conforming)
+#undef SET_HT_ROLE
 
 	// Fill out git version info.
 	snprintf(s->ism->u_git_tag, IPC_VERSION_NAME_LEN, "%s", u_git_tag);

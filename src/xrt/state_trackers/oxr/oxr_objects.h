@@ -1555,8 +1555,11 @@ static inline struct xrt_device *get_role_head(struct oxr_system *sys) {return s
 static inline struct xrt_device *get_role_eyes(struct oxr_system *sys) {return sys->xsysd->static_roles.eyes; }
 static inline struct xrt_device *get_role_face(struct oxr_system* sys) { return sys->xsysd->static_roles.face; }
 static inline struct xrt_device *get_role_body(struct oxr_system* sys) { return sys->xsysd->static_roles.body; }
-static inline struct xrt_device *get_role_hand_tracking_left(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.left; }
-static inline struct xrt_device *get_role_hand_tracking_right(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.right; }
+static inline struct xrt_device *get_role_hand_tracking_unobstructed_left(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.unobstructed.left; }
+static inline struct xrt_device *get_role_hand_tracking_unobstructed_right(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.unobstructed.right; }
+static inline struct xrt_device *get_role_hand_tracking_conforming_left(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.conforming.left; }
+static inline struct xrt_device *get_role_hand_tracking_conforming_right(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.conforming.right; }
+
 // clang-format on
 
 // dynamic roles
@@ -1601,12 +1604,23 @@ get_role_profile_body(struct oxr_system *sys)
 	return XRT_DEVICE_INVALID;
 }
 static inline enum xrt_device_name
-get_role_profile_hand_tracking_left(struct oxr_system *sys)
+get_role_profile_hand_tracking_unobstructed_left(struct oxr_system *sys)
 {
 	return XRT_DEVICE_INVALID;
 }
 static inline enum xrt_device_name
-get_role_profile_hand_tracking_right(struct oxr_system *sys)
+get_role_profile_hand_tracking_unobstructed_right(struct oxr_system *sys)
+{
+	return XRT_DEVICE_INVALID;
+}
+
+static inline enum xrt_device_name
+get_role_profile_hand_tracking_conforming_left(struct oxr_system *sys)
+{
+	return XRT_DEVICE_INVALID;
+}
+static inline enum xrt_device_name
+get_role_profile_hand_tracking_conforming_right(struct oxr_system *sys)
 {
 	return XRT_DEVICE_INVALID;
 }
@@ -2631,6 +2645,15 @@ struct oxr_debug_messenger
 	void *XR_MAY_ALIAS user_data;
 };
 
+struct oxr_hand_tracking_data_source
+{
+	//! xrt_device backing this hand tracker
+	struct xrt_device *xdev;
+
+	//! the input name associated with this hand tracker
+	enum xrt_input_name input_name;
+};
+
 /*!
  * A hand tracker.
  *
@@ -2648,11 +2671,8 @@ struct oxr_hand_tracker
 	//! Owner of this hand tracker.
 	struct oxr_session *sess;
 
-	//! xrt_device backing this hand tracker
-	struct xrt_device *xdev;
-
-	//! the input name associated with this hand tracker
-	enum xrt_input_name input_name;
+	struct oxr_hand_tracking_data_source unobstructed;
+	struct oxr_hand_tracking_data_source conforming;
 
 	XrHandEXT hand;
 	XrHandJointSetEXT hand_joint_set;

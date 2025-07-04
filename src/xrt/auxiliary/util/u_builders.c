@@ -243,8 +243,12 @@ u_builder_roles_helper_open_system(struct xrt_builder *xb,
 	 */
 
 	xsysd->static_roles.head = ubrh.head;
-	xsysd->static_roles.hand_tracking.left = ubrh.hand_tracking.left;
-	xsysd->static_roles.hand_tracking.right = ubrh.hand_tracking.right;
+#define U_SET_HT_ROLE(SRC)                                                                                             \
+	xsysd->static_roles.hand_tracking.SRC.left = ubrh.hand_tracking.SRC.left;                                      \
+	xsysd->static_roles.hand_tracking.SRC.right = ubrh.hand_tracking.SRC.right;
+	U_SET_HT_ROLE(unobstructed)
+	U_SET_HT_ROLE(conforming)
+#undef U_SET_HT_ROLE
 
 	u_system_devices_static_finalize( //
 	    usysds,                       // usysds

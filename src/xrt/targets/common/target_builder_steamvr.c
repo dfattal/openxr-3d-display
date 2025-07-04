@@ -74,7 +74,19 @@ struct steamvr_builder
 	struct xrt_builder base;
 
 	struct xrt_device *head;
-	struct xrt_device *left_ht, *right_ht;
+
+	struct
+	{
+		struct
+		{
+			struct xrt_device *left, *right;
+		} unobstructed;
+
+		struct
+		{
+			struct xrt_device *left, *right;
+		} conforming;
+	} hand_tracking;
 
 	bool is_valve_index;
 };
@@ -145,11 +157,14 @@ steamvr_open_system(struct xrt_builder *xb,
 
 	svrb->head = xsysd->static_roles.head;
 
-	svrb->left_ht = u_system_devices_get_ht_device_left(xsysd);
-	xsysd->static_roles.hand_tracking.left = svrb->left_ht;
-
-	svrb->right_ht = u_system_devices_get_ht_device_right(xsysd);
-	xsysd->static_roles.hand_tracking.right = svrb->right_ht;
+#define SET_HT_ROLES(SRC)                                                                                              \
+	svrb->hand_tracking.SRC.left = u_system_devices_get_ht_device_##SRC##_left(xsysd);                             \
+	svrb->hand_tracking.SRC.right = u_system_devices_get_ht_device_##SRC##_right(xsysd);                           \
+	xsysd->static_roles.hand_tracking.SRC.left = svrb->hand_tracking.SRC.left;                                     \
+	xsysd->static_roles.hand_tracking.SRC.right = svrb->hand_tracking.SRC.right;
+	SET_HT_ROLES(unobstructed)
+	SET_HT_ROLES(conforming)
+#undef SET_HT_ROLES
 
 	/*
 	 * Space overseer.

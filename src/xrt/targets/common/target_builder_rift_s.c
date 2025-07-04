@@ -204,8 +204,8 @@ rift_s_open_system_impl(struct xrt_builder *xb,
 	ubrh->head = hmd_xdev;
 	ubrh->left = left_xdev;
 	ubrh->right = right_xdev;
-	ubrh->hand_tracking.left = left_ht;
-	ubrh->hand_tracking.right = right_ht;
+	ubrh->hand_tracking.unobstructed.left = left_ht;
+	ubrh->hand_tracking.unobstructed.right = right_ht;
 
 	return XRT_SUCCESS;
 
