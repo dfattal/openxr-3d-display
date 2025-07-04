@@ -97,6 +97,12 @@ m_vec2_normalize(struct xrt_vec2 *inout)
 }
 
 static inline float
+m_vec2_cross(struct xrt_vec2 l, struct xrt_vec2 r)
+{
+	return l.x * r.y - r.x * l.y;
+}
+
+static inline float
 m_vec2_dot(struct xrt_vec2 l, struct xrt_vec2 r)
 {
 	return l.x * r.x + l.y * r.y;
