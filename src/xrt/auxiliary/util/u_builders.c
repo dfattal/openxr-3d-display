@@ -151,7 +151,7 @@ u_builder_setup_tracking_origins(struct xrt_device *head,
 	}
 	if (gamepad_origin && gamepad_origin != head_origin && gamepad_origin != right_origin &&
 	    gamepad_origin != left_origin) {
-		apply_offset(&right->tracking_origin->initial_offset.position, global_tracking_origin_offset);
+		apply_offset(&gamepad->tracking_origin->initial_offset.position, global_tracking_origin_offset);
 	}
 }
 
