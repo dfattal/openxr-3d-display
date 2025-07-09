@@ -2660,9 +2660,9 @@ oxr_hand_tracking_data_source_cmp(const void *p1, const void *p2)
 	const struct oxr_hand_tracking_data_source *lhs = (const struct oxr_hand_tracking_data_source *)p1;
 	const struct oxr_hand_tracking_data_source *rhs = (const struct oxr_hand_tracking_data_source *)p2;
 	assert(lhs && rhs);
-	if (lhs->input_name < rhs->input_name)
+	if (rhs->input_name < lhs->input_name)
 		return -1;
-	if (lhs->input_name > rhs->input_name)
+	if (rhs->input_name > lhs->input_name)
 		return 1;
 	return 0;
 }
