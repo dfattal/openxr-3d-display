@@ -711,13 +711,13 @@ lighthouse_open_system_impl(struct xrt_builder *xb,
 			if (hand_devices[0] != NULL) {
 				xsysd->xdevs[xsysd->xdev_count++] = hand_devices[0];
 				left = hand_devices[0];
-				conforming_left_ht = hand_devices[0];
+				unobstructed_left_ht = hand_devices[0];
 			}
 
 			if (hand_devices[1] != NULL) {
 				xsysd->xdevs[xsysd->xdev_count++] = hand_devices[1];
 				right = hand_devices[1];
-				conforming_right_ht = hand_devices[1];
+				unobstructed_right_ht = hand_devices[1];
 			}
 		}
 
