@@ -375,7 +375,7 @@ vive_controller_get_hand_tracking(struct xrt_device *xdev,
 
 	struct vive_controller_device *d = vive_controller_device(xdev);
 
-	if (name != XRT_INPUT_HT_CONFORMING_LEFT && name != XRT_INPUT_HT_CONFORMING_LEFT) {
+	if (name != XRT_INPUT_HT_CONFORMING_LEFT && name != XRT_INPUT_HT_CONFORMING_RIGHT) {
 		U_LOG_XDEV_UNSUPPORTED_INPUT(&d->base, d->log_level, name);
 		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
