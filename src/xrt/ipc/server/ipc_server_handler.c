@@ -50,6 +50,15 @@ validate_device_id(volatile struct ipc_client_state *ics, int64_t device_id, str
 	return XRT_SUCCESS;
 }
 
+#define GET_XDEV_OR_RETURN(ics, device_id, out_device)                                                                 \
+	do {                                                                                                           \
+		xrt_result_t res = validate_device_id(ics, device_id, &out_device);                                    \
+		if (res != XRT_SUCCESS) {                                                                              \
+			return res;                                                                                    \
+		}                                                                                                      \
+	} while (0)
+
+
 static xrt_result_t
 validate_origin_id(volatile struct ipc_client_state *ics, int64_t origin_id, struct xrt_tracking_origin **out_xtrack)
 {
@@ -546,14 +555,10 @@ ipc_handle_space_create_pose(volatile struct ipc_client_state *ics,
 	struct xrt_space_overseer *xso = ics->server->xso;
 
 	struct xrt_device *xdev = NULL;
-	xrt_result_t xret = validate_device_id(ics, xdev_id, &xdev);
-	if (xret != XRT_SUCCESS) {
-		U_LOG_E("Invalid device_id!");
-		return xret;
-	}
+	GET_XDEV_OR_RETURN(ics, xdev_id, xdev);
 
 	struct xrt_space *xs = NULL;
-	xret = xrt_space_overseer_create_pose_space(xso, xdev, name, &xs);
+	xrt_result_t xret = xrt_space_overseer_create_pose_space(xso, xdev, name, &xs);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
@@ -1025,7 +1030,8 @@ _update_projection_layer(struct xrt_compositor *xc,
 {
 	// xdev
 	uint32_t device_id = layer->xdev_id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	if (xdev == NULL) {
 		U_LOG_E("Invalid xdev for projection layer!");
@@ -1065,7 +1071,8 @@ _update_projection_layer_depth(struct xrt_compositor *xc,
 	// Cast away volatile.
 	struct xrt_layer_data *data = (struct xrt_layer_data *)&layer->data;
 
-	struct xrt_device *xdev = get_xdev(ics, xdevi);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, xdevi, xdev);
 	if (xdev == NULL) {
 		U_LOG_E("Invalid xdev for projection layer #%u!", i);
 		return false;
@@ -1104,7 +1111,8 @@ do_single(struct xrt_compositor *xc,
 	uint32_t device_id = layer->xdev_id;
 	uint32_t sci = layer->swapchain_ids[0];
 
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 	struct xrt_swapchain *xcs = ics->xscs[sci];
 
 	if (xcs == NULL) {
@@ -1231,7 +1239,8 @@ _update_passthrough_layer(struct xrt_compositor *xc,
 	// xdev
 	uint32_t xdevi = layer->xdev_id;
 
-	struct xrt_device *xdev = get_xdev(ics, xdevi);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, xdevi, xdev);
 
 	if (xdev == NULL) {
 		U_LOG_E("Invalid xdev for passthrough layer #%u!", i);
@@ -1952,7 +1961,8 @@ ipc_handle_device_get_hand_tracking(volatile struct ipc_client_state *ics,
 
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	// Get the pose.
 	return xrt_device_get_hand_tracking(xdev, name, at_timestamp, out_value, out_timestamp);
@@ -1972,7 +1982,8 @@ ipc_handle_device_get_view_poses(volatile struct ipc_client_state *ics,
 
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 
 	if (view_count == 0 || view_count > IPC_MAX_RAW_VIEWS) {
@@ -2041,7 +2052,8 @@ ipc_handle_device_get_view_poses_2(volatile struct ipc_client_state *ics,
 {
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 	return xrt_device_get_view_poses( //
 	    xdev,                         //
 	    default_eye_relation,         //
@@ -2063,7 +2075,8 @@ ipc_handle_device_compute_distortion(volatile struct ipc_client_state *ics,
 {
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	bool ret = xrt_device_compute_distortion(xdev, view, u, v, out_triplet);
 	*out_ret = ret;
@@ -2079,7 +2092,8 @@ ipc_handle_device_begin_plane_detection_ext(volatile struct ipc_client_state *ic
 {
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	uint64_t new_count = ics->plane_detection_count + 1;
 
@@ -2118,7 +2132,8 @@ ipc_handle_device_destroy_plane_detection_ext(volatile struct ipc_client_state *
 {
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	enum xrt_result xret = xrt_device_destroy_plane_detection_ext(xdev, plane_detection_id);
 
@@ -2156,7 +2171,8 @@ ipc_handle_device_get_plane_detection_state_ext(volatile struct ipc_client_state
 {
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	xrt_result_t xret = xrt_device_get_plane_detection_state_ext(xdev, plane_detection_id, out_state);
 	if (xret != XRT_SUCCESS) {
@@ -2179,7 +2195,8 @@ ipc_handle_device_get_plane_detections_ext(volatile struct ipc_client_state *ics
 
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	struct xrt_plane_detections_ext out = {0};
 
@@ -2244,7 +2261,8 @@ out:
 xrt_result_t
 ipc_handle_device_get_presence(volatile struct ipc_client_state *ics, uint32_t id, bool *presence)
 {
-	struct xrt_device *xdev = get_xdev(ics, id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, id, xdev);
 	return xrt_device_get_presence(xdev, presence);
 }
 
@@ -2256,7 +2274,8 @@ ipc_handle_device_set_output(volatile struct ipc_client_state *ics,
 {
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	// Set the output.
 	return xrt_device_set_output(xdev, name, value);
@@ -2276,7 +2295,8 @@ ipc_handle_device_set_haptic_output(volatile struct ipc_client_state *ics,
 
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	os_mutex_lock(&ics->server->global_state.lock);
 
@@ -2341,7 +2361,8 @@ ipc_handle_device_get_output_limits(volatile struct ipc_client_state *ics,
 {
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	// Set the output.
 	return xrt_device_get_output_limits(xdev, limits);
@@ -2359,7 +2380,8 @@ ipc_handle_device_get_visibility_mask(volatile struct ipc_client_state *ics,
 	xrt_result_t xret;
 
 	// @todo verify
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 	struct xrt_visibility_mask *mask = NULL;
 	if (xdev->get_visibility_mask) {
 		xret = xrt_device_get_visibility_mask(xdev, type, view_index, &mask);
@@ -2404,7 +2426,8 @@ ipc_handle_device_is_form_factor_available(volatile struct ipc_client_state *ics
 {
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 	*out_available = xrt_device_is_form_factor_available(xdev, form_factor);
 	return XRT_SUCCESS;
 }
@@ -2480,7 +2503,8 @@ ipc_handle_device_get_face_tracking(volatile struct ipc_client_state *ics,
                                     struct xrt_facial_expression_set *out_value)
 {
 	const uint32_t device_id = id;
-	struct xrt_device *xdev = get_xdev(ics, device_id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 	// Get facial expression data.
 	return xrt_device_get_face_tracking(xdev, facial_expression_type, at_timestamp_ns, out_value);
 }
@@ -2491,7 +2515,8 @@ ipc_handle_device_get_body_skeleton(volatile struct ipc_client_state *ics,
                                     enum xrt_input_name body_tracking_type,
                                     struct xrt_body_skeleton *out_value)
 {
-	struct xrt_device *xdev = get_xdev(ics, id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, id, xdev);
 	return xrt_device_get_body_skeleton(xdev, body_tracking_type, out_value);
 }
 
@@ -2502,7 +2527,8 @@ ipc_handle_device_get_body_joints(volatile struct ipc_client_state *ics,
                                   int64_t desired_timestamp_ns,
                                   struct xrt_body_joint_set *out_value)
 {
-	struct xrt_device *xdev = get_xdev(ics, id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, id, xdev);
 	return xrt_device_get_body_joints(xdev, body_tracking_type, desired_timestamp_ns, out_value);
 }
 
@@ -2510,7 +2536,8 @@ xrt_result_t
 ipc_handle_device_get_battery_status(
     volatile struct ipc_client_state *ics, uint32_t id, bool *out_present, bool *out_charging, float *out_charge)
 {
-	struct xrt_device *xdev = get_xdev(ics, id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, id, xdev);
 	return xrt_device_get_battery_status(xdev, out_present, out_charging, out_charge);
 }
 
@@ -2518,11 +2545,7 @@ xrt_result_t
 ipc_handle_device_get_brightness(volatile struct ipc_client_state *ics, uint32_t id, float *out_brightness)
 {
 	struct xrt_device *xdev = NULL;
-	xrt_result_t xret = validate_device_id(ics, id, &xdev);
-	if (xret != XRT_SUCCESS) {
-		U_LOG_E("Invalid device_id!");
-		return xret;
-	}
+	GET_XDEV_OR_RETURN(ics, id, xdev);
 
 	if (!xdev->supported.brightness_control) {
 		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
@@ -2535,11 +2558,7 @@ xrt_result_t
 ipc_handle_device_set_brightness(volatile struct ipc_client_state *ics, uint32_t id, float brightness, bool relative)
 {
 	struct xrt_device *xdev = NULL;
-	xrt_result_t xret = validate_device_id(ics, id, &xdev);
-	if (xret != XRT_SUCCESS) {
-		U_LOG_E("Invalid device_id!");
-		return xret;
-	}
+	GET_XDEV_OR_RETURN(ics, id, xdev);
 
 	if (!xdev->supported.brightness_control) {
 		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
