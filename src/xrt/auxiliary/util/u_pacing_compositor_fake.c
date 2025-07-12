@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <math.h>
 
 
 /*
@@ -31,6 +32,7 @@
 
 DEBUG_GET_ONCE_FLOAT_OPTION(present_to_display_offset_ms, "U_PACING_COMP_PRESENT_TO_DISPLAY_OFFSET_MS", 4.0f)
 DEBUG_GET_ONCE_FLOAT_OPTION(min_comp_time_ms, "U_PACING_COMP_MIN_TIME_MS", 3.0f)
+DEBUG_GET_ONCE_FLOAT_OPTION(comp_time_fraction_percent, "U_PACING_COMP_TIME_FRACTION_PERCENT", 20.0f)
 DEBUG_GET_ONCE_BOOL_OPTION(live_stats, "U_PACING_LIVE_STATS", false)
 
 // We keep track of this number of frames.
@@ -187,9 +189,9 @@ calc_display_time(struct fake_timing *ft, int64_t present_time_ns)
 }
 
 static int64_t
-get_percent_of_time(int64_t time_ns, uint32_t fraction_percent)
+get_percent_of_time(int64_t time_ns, double fraction_percent)
 {
-	double fraction = (double)fraction_percent / 100.0;
+	double fraction = fraction_percent / 100.0;
 	return time_s_to_ns(time_ns_to_s(time_ns) * fraction);
 }
 
@@ -471,11 +473,12 @@ u_pc_fake_create(int64_t estimated_frame_period_ns, int64_t now_ns, struct u_pac
 	    .max = +40.0,
 	};
 
-	// 20% of the frame time.
-	ft->comp_time_ns = get_percent_of_time(estimated_frame_period_ns, 20);
+	// Set comp_time_ms to a percentage of the frame time.
+	float comp_time_fraction_percent = fabs(debug_get_float_option_comp_time_fraction_percent());
+	ft->comp_time_ns = get_percent_of_time(estimated_frame_period_ns, comp_time_fraction_percent);
 
 	// Or at least a certain amount of time.
-	float min_comp_time_ms_f = debug_get_float_option_min_comp_time_ms();
+	double min_comp_time_ms_f = debug_get_float_option_min_comp_time_ms();
 	int64_t min_comp_time_ns = time_ms_f_to_ns(min_comp_time_ms_f);
 
 	if (ft->comp_time_ns < min_comp_time_ns) {
