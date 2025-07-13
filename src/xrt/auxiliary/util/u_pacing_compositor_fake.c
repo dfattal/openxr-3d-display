@@ -23,6 +23,14 @@
 #include <assert.h>
 #include <math.h>
 
+DEBUG_GET_ONCE_LOG_OPTION(log_level_fake, "U_PACING_COMPOSITOR_FAKE_LOG", U_LOGGING_INFO)
+
+#define UPC_LOG_T(...) U_LOG_IFL_T(debug_get_log_option_log_level_fake(), __VA_ARGS__)
+#define UPC_LOG_D(...) U_LOG_IFL_D(debug_get_log_option_log_level_fake(), __VA_ARGS__)
+#define UPC_LOG_I(...) U_LOG_IFL_I(debug_get_log_option_log_level_fake(), __VA_ARGS__)
+#define UPC_LOG_W(...) U_LOG_IFL_W(debug_get_log_option_log_level_fake(), __VA_ARGS__)
+#define UPC_LOG_E(...) U_LOG_IFL_E(debug_get_log_option_log_level_fake(), __VA_ARGS__)
+
 
 /*
  *
@@ -216,7 +224,7 @@ print_and_reset(struct fake_timing *ft)
 	u_pp(dg, "\n");
 	u_ls_ns_print_and_reset(&ft->total_frame, dg);
 
-	U_LOG_IFL_I(U_LOGGING_INFO, "%s", sink.buffer);
+	UPC_LOG_I("%s", sink.buffer);
 }
 
 static void
@@ -498,7 +506,7 @@ u_pc_fake_create(int64_t estimated_frame_period_ns, int64_t now_ns, struct u_pac
 	// Return value.
 	*out_upc = &ft->base;
 
-	U_LOG_I("Created fake timing");
+	UPC_LOG_I("Created fake timing");
 
 	return XRT_SUCCESS;
 }
