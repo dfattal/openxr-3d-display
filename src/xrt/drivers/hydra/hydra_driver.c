@@ -820,9 +820,9 @@ hydra_found(struct xrt_prober *xp,
 		hd->index = i;
 		hd->sys = hs;
 
-		const float fc_min = 1.0;
-		const float fc_min_d = 1.0;
-		const float beta = 0.007;
+		const float fc_min = 9.f;
+		const float fc_min_d = 9.f;
+		const float beta = 0.1f;
 
 		m_filter_euro_vec3_init(&hd->state.motion_vector_filters.position, fc_min, fc_min_d, beta);
 		m_filter_euro_quat_init(&hd->state.motion_vector_filters.orientation, fc_min, fc_min_d, beta);
