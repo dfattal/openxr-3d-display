@@ -164,6 +164,13 @@ handle_reference_space_change_pending(struct oxr_logger *log,
 void
 oxr_session_change_state(struct oxr_logger *log, struct oxr_session *sess, XrSessionState state, XrTime time)
 {
+	if (sess->state == state) {
+		oxr_warn(log,
+		         "Session state changed to the same state (%s), not sending XrEventDataSessionStateChanged",
+		         to_string(state));
+		return;
+	}
+
 	oxr_event_push_XrEventDataSessionStateChanged(log, sess, state, time);
 	sess->state = state;
 }
