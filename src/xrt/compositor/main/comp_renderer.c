@@ -29,6 +29,7 @@
 #include "util/u_sink.h"
 #include "util/u_var.h"
 #include "util/u_frame_times_widget.h"
+#include "util/u_debug.h"
 
 #include "util/comp_render.h"
 #include "util/comp_high_level_render.h"
@@ -50,6 +51,8 @@
 #include <assert.h>
 #include <math.h>
 
+DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_WARN)
+#define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
 /*
  *
@@ -805,7 +808,7 @@ renderer_wait_for_present(struct comp_renderer *r, uint64_t desired_present_time
 	    desired_present_time_ns + U_TIME_1MS_IN_NS < after_ns) {
 		uint64_t diff_ns = after_ns - desired_present_time_ns;
 		double diff_ms_f = time_ns_to_ms_f(diff_ns);
-		COMP_WARN(c, "Compositor probably missed frame by %.2fms", diff_ms_f);
+		LOG_FRAME_LAG("Compositor probably missed frame by %.2fms", diff_ms_f);
 	}
 }
 
