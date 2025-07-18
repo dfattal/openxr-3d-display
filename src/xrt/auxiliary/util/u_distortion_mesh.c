@@ -124,7 +124,7 @@ run_func(struct xrt_device *xdev, func_calc calc, struct xrt_hmd_parts *target, 
 	}
 }
 
-bool
+void
 u_compute_distortion_vive(struct u_vive_values *values, float u, float v, struct xrt_uv_triplet *result)
 {
 	// Reading the whole struct like this gives the compiler more opportunity to optimize.
@@ -181,8 +181,6 @@ u_compute_distortion_vive(struct u_vive_values *values, float u, float v, struct
 	result->r = tc[0];
 	result->g = tc[1];
 	result->b = tc[2];
-
-	return true;
 }
 
 
@@ -195,7 +193,7 @@ u_compute_distortion_vive(struct u_vive_values *values, float u, float v, struct
 #define len m_vec2_len
 #define len_sqrd m_vec2_len_sqrd
 
-bool
+void
 u_compute_distortion_panotools(struct u_panotools_values *values, float u, float v, struct xrt_uv_triplet *result)
 {
 	const struct u_panotools_values val = *values;
@@ -230,10 +228,9 @@ u_compute_distortion_panotools(struct u_panotools_values *values, float u, float
 	result->r = r_uv;
 	result->g = g_uv;
 	result->b = b_uv;
-	return true;
 }
 
-bool
+void
 u_compute_distortion_cardboard(struct u_cardboard_distortion_values *values,
                                float u,
                                float v,
@@ -266,7 +263,6 @@ u_compute_distortion_cardboard(struct u_cardboard_distortion_values *values,
 	result->g.y = uv.y;
 	result->b.x = uv.x;
 	result->b.y = uv.y;
-	return true;
 }
 
 /*
@@ -290,7 +286,7 @@ u_ns_polyval2d(float X, float Y, float C[16])
 }
 
 
-bool
+void
 u_compute_distortion_ns_p2d(struct u_ns_p2d_values *values, int view, float u, float v, struct xrt_uv_triplet *result)
 {
 	// I think that OpenCV and Monado have different definitions of v coordinates, but not sure. if not,
@@ -318,8 +314,6 @@ u_compute_distortion_ns_p2d(struct u_ns_p2d_values *values, int view, float u, f
 	result->g.y = v_eye;
 	result->b.x = u_eye;
 	result->b.y = v_eye;
-
-	return true;
 }
 
 
@@ -330,7 +324,7 @@ u_compute_distortion_ns_p2d(struct u_ns_p2d_values *values, int view, float u, f
  *
  */
 
-bool
+void
 u_compute_distortion_ns_meshgrid(
     struct u_ns_meshgrid_values *values, int view, float u, float v, struct xrt_uv_triplet *result)
 {
@@ -401,8 +395,6 @@ u_compute_distortion_ns_meshgrid(
 	result->g.y = v_eye;
 	result->b.x = u_eye;
 	result->b.y = v_eye;
-
-	return true;
 }
 
 

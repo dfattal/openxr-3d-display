@@ -905,7 +905,7 @@ static bool
 compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct survive_device *d = (struct survive_device *)xdev;
-	bool status = u_compute_distortion_vive(&d->hmd.config.distortion.values[view], u, v, result);
+	u_compute_distortion_vive(&d->hmd.config.distortion.values[view], u, v, result);
 
 	if (d->hmd.config.variant == VIVE_VARIANT_PRO2) {
 		// Flip Y coordinates
@@ -913,7 +913,7 @@ compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, str
 		result->g.y = 1.0f - result->g.y;
 		result->b.y = 1.0f - result->b.y;
 	}
-	return status;
+	return true;
 }
 
 static bool

@@ -1011,7 +1011,8 @@ psvr_compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v
 {
 	struct psvr_device *psvr = psvr_device(xdev);
 
-	return u_compute_distortion_panotools(&psvr->vals, u, v, result);
+	u_compute_distortion_panotools(&psvr->vals, u, v, result);
+	return true;
 }
 
 

@@ -51,7 +51,7 @@ struct u_panotools_values
  *
  * @ingroup aux_distortion
  */
-bool
+void
 u_compute_distortion_panotools(struct u_panotools_values *values, float u, float v, struct xrt_uv_triplet *result);
 
 
@@ -86,7 +86,7 @@ struct u_vive_values
  *
  * @ingroup aux_distortion
  */
-bool
+void
 u_compute_distortion_vive(struct u_vive_values *values, float u, float v, struct xrt_uv_triplet *result);
 
 
@@ -101,7 +101,7 @@ u_compute_distortion_vive(struct u_vive_values *values, float u, float v, struct
  *
  * @ingroup aux_distortion
  */
-bool
+void
 u_compute_distortion_cardboard(struct u_cardboard_distortion_values *values,
                                float u,
                                float v,
@@ -129,7 +129,7 @@ struct u_ns_p2d_values
  *
  * @ingroup aux_distortion
  */
-bool
+void
 u_compute_distortion_ns_p2d(struct u_ns_p2d_values *values, int view, float u, float v, struct xrt_uv_triplet *result);
 
 /*
@@ -153,7 +153,7 @@ struct u_ns_meshgrid_values
  *
  * @ingroup aux_distortion
  */
-bool
+void
 u_compute_distortion_ns_meshgrid(
     struct u_ns_meshgrid_values *values, int view, float u, float v, struct xrt_uv_triplet *result);
 

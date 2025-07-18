@@ -155,7 +155,8 @@ static bool
 rift_s_compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct rift_s_hmd *hmd = (struct rift_s_hmd *)(xdev);
-	return u_compute_distortion_panotools(&hmd->distortion_vals[view], u, v, result);
+	u_compute_distortion_panotools(&hmd->distortion_vals[view], u, v, result);
+	return true;
 }
 
 #if 0

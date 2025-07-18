@@ -683,7 +683,7 @@ get_info(ohmd_device *dev, const char *prod)
 #define len m_vec2_len
 
 // slightly different to u_compute_distortion_panotools in u_distortion_mesh
-static bool
+static void
 u_compute_distortion_openhmd(struct openhmd_values *values, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct openhmd_values val = *values;
@@ -717,21 +717,22 @@ u_compute_distortion_openhmd(struct openhmd_values *values, float u, float v, st
 	result->r = r_uv;
 	result->g = g_uv;
 	result->b = b_uv;
-	return true;
 }
 
 static bool
 compute_distortion_openhmd(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct oh_device *ohd = oh_device(xdev);
-	return u_compute_distortion_openhmd(&ohd->distortion.openhmd[view], u, v, result);
+	u_compute_distortion_openhmd(&ohd->distortion.openhmd[view], u, v, result);
+	return true;
 }
 
 static bool
 compute_distortion_vive(struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *result)
 {
 	struct oh_device *ohd = oh_device(xdev);
-	return u_compute_distortion_vive(&ohd->distortion.vive[view], u, v, result);
+	u_compute_distortion_vive(&ohd->distortion.vive[view], u, v, result);
+	return true;
 }
 
 static inline void

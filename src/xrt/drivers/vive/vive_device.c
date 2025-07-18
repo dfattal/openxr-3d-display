@@ -980,7 +980,7 @@ compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, str
 	XRT_TRACE_MARKER();
 
 	struct vive_device *d = vive_device(xdev);
-	bool status = u_compute_distortion_vive(&d->config.distortion.values[view], u, v, result);
+	u_compute_distortion_vive(&d->config.distortion.values[view], u, v, result);
 
 	if (d->config.variant == VIVE_VARIANT_PRO2) {
 		// Flip Y coordinates
@@ -988,7 +988,7 @@ compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, str
 		result->g.y = 1.0f - result->g.y;
 		result->b.y = 1.0f - result->b.y;
 	}
-	return status;
+	return true;
 }
 
 void
