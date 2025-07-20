@@ -27,7 +27,7 @@ extern "C" {
 //! Minor version of the API.
 #define MND_API_VERSION_MINOR 5
 //! Patch version of the API.
-#define MND_API_VERSION_PATCH 0
+#define MND_API_VERSION_PATCH 1
 
 /*!
  * Result codes for operations, negative are errors, zero or positives are
@@ -47,7 +47,7 @@ typedef enum mnd_result
 	//! Supported in version 1.3 and above.
 	MND_ERROR_INVALID_OPERATION = -7,
 	//! Supported in version 1.5 and above.
-	MND_ERROR_UNSUPPORTED_OPERATION = -7,
+	MND_ERROR_UNSUPPORTED_OPERATION = -8,
 } mnd_result_t;
 
 /*!
