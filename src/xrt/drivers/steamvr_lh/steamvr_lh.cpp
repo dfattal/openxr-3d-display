@@ -82,7 +82,10 @@ find_steamvr_install()
 		std::shared_ptr<vdf::object> apps = child->childs["apps"];
 		for (auto &[appid, _] : apps->attribs) {
 			if (appid == STEAMVR_APPID) {
-				return child->attribs["path"] + "/steamapps/common/SteamVR";
+				std::string path = child->attribs["path"] + "/steamapps/common/SteamVR";
+				if (std::filesystem::exists(path)) {
+					return path;
+				}
 			}
 		}
 	}
