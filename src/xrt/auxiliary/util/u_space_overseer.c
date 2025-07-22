@@ -605,7 +605,7 @@ locate_spaces(struct xrt_space_overseer *xso,
 	for (uint32_t i = 0; i < space_count; i++) {
 		// spaces are allowed to be NULL
 		if (spaces[i] == NULL) {
-			out_relations->relation_flags = XRT_SPACE_RELATION_BITMASK_NONE;
+			out_relations[i].relation_flags = XRT_SPACE_RELATION_BITMASK_NONE;
 			continue;
 		}
 
