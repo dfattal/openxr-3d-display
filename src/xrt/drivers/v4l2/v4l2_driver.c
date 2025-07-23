@@ -386,6 +386,7 @@ v4l2_list_modes_size(struct v4l2_fs *vid, const struct v4l2_fmtdesc *fmt, const 
 	case V4L2_PIX_FMT_YUYV: format = XRT_FORMAT_YUYV422; break;
 	case V4L2_PIX_FMT_UYVY: format = XRT_FORMAT_UYVY422; break;
 	case V4L2_PIX_FMT_MJPEG: format = XRT_FORMAT_MJPEG; break;
+	case V4L2_PIX_FMT_SGRBG8: format = XRT_FORMAT_BAYER_GR8; break;
 	default: V4L2_ERROR(vid, "error: Format not supported."); return;
 	}
 
@@ -419,6 +420,7 @@ v4l2_list_modes_fmt(struct v4l2_fs *vid, const struct v4l2_fmtdesc *fmt)
 	case V4L2_PIX_FMT_YUYV: break;
 	case V4L2_PIX_FMT_UYVY: break;
 	case V4L2_PIX_FMT_MJPEG: break;
+	case V4L2_PIX_FMT_SGRBG8: break;
 	default: V4L2_ERROR(vid, "error: Unknown pixelformat '%s' '%08x'", fmt->description, fmt->pixelformat); return;
 	}
 
