@@ -369,17 +369,18 @@ class ConditionalGenerator:
     def __init__(self):
         self.current_condition = None
 
-    def process_condition(self, new_condition: Optional[str]) -> Optional[str]:
+    def process_condition(self, new_condition: Optional[str], finish: bool = False) -> Optional[str]:
         """Return a line (or lines) to yield if required based on the new condition state."""
         lines = []
         if self.current_condition and new_condition != self.current_condition:
             # Close current condition if required.
             lines.append("#endif // {}".format(self.current_condition))
-            # empty line
-            lines.append("")
+            if not finish:
+                # empty line
+                lines.append("")
             self.current_condition = None
 
-        if new_condition != self.current_condition:
+        if not finish and new_condition != self.current_condition:
             # Open new condition if required
             lines.append("#if {}".format(new_condition))
             self.current_condition = new_condition
@@ -389,7 +390,7 @@ class ConditionalGenerator:
 
     def finish(self) -> Optional[str]:
         """Return a line (or lines) to yield if required at the end of the loop."""
-        return self.process_condition(None)
+        return self.process_condition(None, finish=True)
 
 
 def generate_per_command(
@@ -418,7 +419,8 @@ def generate_structure_members(commands: List[Cmd]):
     def per_command(cmd: Cmd):
         return "\tPFN_{} {};".format(cmd.name, cmd.member_name)
 
-    return generate_per_command(commands, per_command)
+    yield from generate_per_command(commands, per_command)
+    yield ''
 
 
 def generate_proc_macro(macro: str, commands: List[Cmd]):

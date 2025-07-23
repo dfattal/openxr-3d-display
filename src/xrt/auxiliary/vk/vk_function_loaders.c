@@ -339,6 +339,7 @@ vk_get_device_functions(struct vk_bundle *vk)
 #endif // defined(VK_EXT_debug_utils)
 
 	// end of GENERATED device loader code - do not modify - used by scripts
+
 	// clang-format on
 	return VK_SUCCESS;
 }
