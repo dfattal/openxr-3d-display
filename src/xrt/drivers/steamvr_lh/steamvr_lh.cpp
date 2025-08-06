@@ -142,6 +142,7 @@ Context::~Context()
 void *
 Context::GetGenericInterface(const char *pchInterfaceVersion, vr::EVRInitError *peError)
 {
+	CTX_DEBUG("Requested interface %s", pchInterfaceVersion);
 #define MATCH_INTERFACE(version, interface)                                                                            \
 	if (std::strcmp(pchInterfaceVersion, version) == 0) {                                                          \
 		return interface;                                                                                      \
@@ -151,6 +152,8 @@ Context::GetGenericInterface(const char *pchInterfaceVersion, vr::EVRInitError *
 	// Known interfaces
 	MATCH_INTERFACE_THIS(vr::IVRServerDriverHost);
 	MATCH_INTERFACE_THIS(vr::IVRDriverInput);
+	// This interface is not in a public header yet, but just passing IVRDriverInput_003 seems to work.
+	MATCH_INTERFACE("IVRDriverInput_004", static_cast<vr::IVRDriverInput *>(this));
 	MATCH_INTERFACE_THIS(vr::IVRProperties);
 	MATCH_INTERFACE_THIS(vr::IVRDriverLog);
 	MATCH_INTERFACE(vr::IVRSettings_Version, &settings);
