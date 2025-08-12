@@ -24,9 +24,9 @@
 		xrt_result_t check_ret = (RESULTS);                                                                    \
 		if (check_ret == XRT_ERROR_IPC_FAILURE) {                                                              \
 			(SESS)->has_lost = true;                                                                       \
-			return oxr_error(log, XR_ERROR_INSTANCE_LOST, "Call to " #FUNCTION " failed");                 \
+			return oxr_error(LOG, XR_ERROR_INSTANCE_LOST, "Call to " #FUNCTION " failed");                 \
 		}                                                                                                      \
 		if (check_ret != XRT_SUCCESS) {                                                                        \
-			return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Call to " #FUNCTION " failed");               \
+			return oxr_error(LOG, XR_ERROR_RUNTIME_FAILURE, "Call to " #FUNCTION " failed");               \
 		}                                                                                                      \
 	} while (false)
