@@ -30,6 +30,8 @@
 
 #include <xrt/xrt_handles.h>
 
+DEBUG_GET_ONCE_BOOL_OPTION(vk_ignore_memory_size_mismatch, "XRT_VK_IGNORE_MEMORY_SIZE_MISMATCH", false)
+
 
 /*
  *
@@ -1244,7 +1246,9 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	} else if (requirements.size > image_native->size) {
 		VK_ERROR(vk, "size mismatch, exported %" PRIu64 " but requires %" PRIu64, image_native->size,
 		         requirements.size);
-		return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+		if (!debug_get_bool_option_vk_ignore_memory_size_mismatch()) {
+			return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+		}
 	} else if (requirements.size < image_native->size) {
 		// it's OK if we have more memory than we need, APIs can round up
 	}
