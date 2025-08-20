@@ -839,6 +839,13 @@ vk_print_display_surface_create_info(struct vk_bundle *vk,
                                      enum u_logging_level log_level);
 #endif
 
+/*!
+ * Print queue info to the logger at the given logging level,
+ * if the vk_bundle has that level enabled.
+ */
+void
+vk_print_queues_info(const struct vk_bundle *vk, enum u_logging_level log_level);
+
 
 /*
  *

@@ -38,6 +38,13 @@
 		}                                                                                                      \
 	} while (false)
 
+static inline void
+print_queue(u_pp_delegate_t dg, const char *prefix, const struct vk_bundle_queue *queue)
+{
+	PNT("%squeue.queue: %p", prefix, (const void *)queue->queue);
+	PNT("%squeue.index: %d", prefix, (int32_t)queue->index);
+	PNT("%squeue.family_index: %d", prefix, (int32_t)queue->family_index);
+}
 
 /*
  *
@@ -277,3 +284,21 @@ vk_print_display_surface_create_info(struct vk_bundle *vk,
 	U_LOG_IFL(log_level, vk->log_level, "%s", sink.buffer);
 }
 #endif
+
+void
+vk_print_queues_info(const struct vk_bundle *vk, enum u_logging_level log_level)
+{
+	struct vk_bundle_queue encode_queue = VK_BUNDLE_NULL_QUEUE;
+#if defined(VK_KHR_video_encode_queue)
+	encode_queue = vk->encode_queue;
+#endif
+
+	struct u_pp_sink_stack_only sink;
+	u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+
+	P("Selected Queues/Families:");
+	print_queue(dg, "main_", &vk->main_queue);
+	print_queue(dg, "encode_", &encode_queue);
+
+	U_LOG_IFL(log_level, vk->log_level, "%s", sink.buffer);
+}

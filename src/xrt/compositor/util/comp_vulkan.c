@@ -328,6 +328,9 @@ create_device(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
 	// Print device information.
 	vk_print_opened_device_info(vk, U_LOGGING_INFO);
 
+	// Print selected queue(s) information.
+	vk_print_queues_info(vk, U_LOGGING_INFO);
+
 	// Print features enabled.
 	vk_print_features_info(vk, U_LOGGING_INFO);
 
