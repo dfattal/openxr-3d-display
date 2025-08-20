@@ -40,6 +40,22 @@ extern "C" {
  *
  */
 
+struct vk_bundle_queue
+{
+	//! The Vulkan queue handle
+	VkQueue queue;
+	//! The queue family index
+	uint32_t family_index;
+	//! The queue (instance) index
+	uint32_t index;
+};
+
+#define VK_BUNDLE_NULL_QUEUE                                                                                           \
+	XRT_C11_COMPOUND(struct vk_bundle_queue)                                                                       \
+	{                                                                                                              \
+		.queue = VK_NULL_HANDLE, .family_index = VK_QUEUE_FAMILY_IGNORED, .index = (uint32_t)-1,               \
+	}
+
 /*!
  * A bundle of Vulkan functions and objects, used by both @ref comp and @ref
  * comp_client. Note that they both have different instances of the object, and
@@ -56,13 +72,9 @@ struct vk_bundle
 	VkPhysicalDevice physical_device;
 	int physical_device_index;
 	VkDevice device;
-	uint32_t queue_family_index;
-	uint32_t queue_index;
-	VkQueue queue;
+	struct vk_bundle_queue main_queue;
 #if defined(VK_KHR_video_encode_queue)
-	uint32_t encode_queue_family_index;
-	uint32_t encode_queue_index;
-	VkQueue encode_queue;
+	struct vk_bundle_queue encode_queue;
 #endif
 
 	struct os_mutex queue_mutex;

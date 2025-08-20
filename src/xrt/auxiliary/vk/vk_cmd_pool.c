@@ -29,7 +29,7 @@ vk_cmd_pool_init(struct vk_bundle *vk, struct vk_cmd_pool *pool, VkCommandPoolCr
 	VkCommandPoolCreateInfo cmd_pool_info = {
 	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 	    .flags = flags,
-	    .queueFamilyIndex = vk->queue_family_index,
+	    .queueFamilyIndex = vk->main_queue.family_index,
 	};
 
 	ret = vk->vkCreateCommandPool(vk->device, &cmd_pool_info, NULL, &pool->pool);

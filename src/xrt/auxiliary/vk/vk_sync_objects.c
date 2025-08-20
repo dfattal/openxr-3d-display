@@ -144,11 +144,11 @@ vk_create_and_submit_fence_native(struct vk_bundle *vk, xrt_graphics_sync_handle
 
 	os_mutex_lock(&vk->queue_mutex);
 
-	ret = vk->vkQueueSubmit( //
-	    vk->queue,           // queue
-	    0,                   // submitCount
-	    NULL,                // pSubmits
-	    fence);              // fence
+	ret = vk->vkQueueSubmit(  //
+	    vk->main_queue.queue, // queue
+	    0,                    // submitCount
+	    NULL,                 // pSubmits
+	    fence);               // fence
 
 	os_mutex_unlock(&vk->queue_mutex);
 

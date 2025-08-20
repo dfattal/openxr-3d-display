@@ -457,7 +457,7 @@ comp_window_peek_blit(struct comp_window_peek *w, VkImage src, int32_t width, in
 	};
 
 	os_mutex_lock(&vk->queue_mutex);
-	ret = vk->vkQueuePresentKHR(vk->queue, &present);
+	ret = vk->vkQueuePresentKHR(vk->main_queue.queue, &present);
 	os_mutex_unlock(&vk->queue_mutex);
 
 	if (ret != VK_SUCCESS) {

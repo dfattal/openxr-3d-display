@@ -83,7 +83,7 @@ vk_cmd_submit_locked(struct vk_bundle *vk, uint32_t count, const VkSubmitInfo *i
 	VkResult ret;
 
 	os_mutex_lock(&vk->queue_mutex);
-	ret = vk->vkQueueSubmit(vk->queue, count, infos, fence);
+	ret = vk->vkQueueSubmit(vk->main_queue.queue, count, infos, fence);
 	os_mutex_unlock(&vk->queue_mutex);
 
 	if (ret != VK_SUCCESS) {

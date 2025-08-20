@@ -252,12 +252,12 @@ fill_in_device_features(struct vk_bundle *vk)
 	uint32_t count = 0;
 	vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physical_device, &count, NULL);
 	assert(count != 0);
-	assert(count > vk->queue_family_index);
+	assert(count > vk->main_queue.family_index);
 
 	VkQueueFamilyProperties *props = U_TYPED_ARRAY_CALLOC(VkQueueFamilyProperties, count);
 	vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physical_device, &count, props);
 
-	vk->features.timestamp_valid_bits = props[vk->queue_family_index].timestampValidBits;
+	vk->features.timestamp_valid_bits = props[vk->main_queue.family_index].timestampValidBits;
 	free(props);
 }
 
@@ -1297,9 +1297,9 @@ vk_create_device(struct vk_bundle *vk,
 	}
 
 	if (only_compute) {
-		ret = find_queue_family(vk, VK_QUEUE_COMPUTE_BIT, &vk->queue_family_index);
+		ret = find_queue_family(vk, VK_QUEUE_COMPUTE_BIT, &vk->main_queue.family_index);
 	} else {
-		ret = find_graphics_queue_family(vk, &vk->queue_family_index);
+		ret = find_graphics_queue_family(vk, &vk->main_queue.family_index);
 	}
 
 	if (ret != VK_SUCCESS) {
@@ -1320,22 +1320,22 @@ vk_create_device(struct vk_bundle *vk,
 	queue_create_info[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	queue_create_info[0].pNext = NULL;
 	queue_create_info[0].queueCount = 1;
-	queue_create_info[0].queueFamilyIndex = vk->queue_family_index;
+	queue_create_info[0].queueFamilyIndex = vk->main_queue.family_index;
 	queue_create_info[0].pQueuePriorities = &queue_priority;
 
 #ifdef VK_KHR_video_encode_queue
 	// Video encode queue
-	vk->encode_queue_family_index = VK_QUEUE_FAMILY_IGNORED;
+	vk->encode_queue = VK_BUNDLE_NULL_QUEUE;
 	if (u_string_list_contains(device_ext_list, VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME)) {
-		ret = find_queue_family(vk, VK_QUEUE_VIDEO_ENCODE_BIT_KHR, &vk->encode_queue_family_index);
+		ret = find_queue_family(vk, VK_QUEUE_VIDEO_ENCODE_BIT_KHR, &vk->encode_queue.family_index);
 		if (ret == VK_SUCCESS) {
 			queue_create_info[queue_create_info_count].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 			queue_create_info[queue_create_info_count].pNext = NULL;
 			queue_create_info[queue_create_info_count].queueCount = 1;
-			queue_create_info[queue_create_info_count].queueFamilyIndex = vk->encode_queue_family_index;
+			queue_create_info[queue_create_info_count].queueFamilyIndex = vk->encode_queue.family_index;
 			queue_create_info[queue_create_info_count].pQueuePriorities = &queue_priority;
 			queue_create_info_count++;
-			VK_DEBUG(vk, "Creating video encode queue, family index %d", vk->encode_queue_family_index);
+			VK_DEBUG(vk, "Creating video encode queue, family index %d", vk->encode_queue.family_index);
 		}
 	}
 #endif
@@ -1510,10 +1510,10 @@ vk_create_device(struct vk_bundle *vk,
 	if (ret != VK_SUCCESS) {
 		goto err_destroy;
 	}
-	vk->vkGetDeviceQueue(vk->device, vk->queue_family_index, 0, &vk->queue);
+	vk->vkGetDeviceQueue(vk->device, vk->main_queue.family_index, 0, &vk->main_queue.queue);
 #if defined(VK_KHR_video_encode_queue)
-	if (vk->encode_queue_family_index != VK_QUEUE_FAMILY_IGNORED) {
-		vk->vkGetDeviceQueue(vk->device, vk->encode_queue_family_index, 0, &vk->encode_queue);
+	if (vk->encode_queue.family_index != VK_QUEUE_FAMILY_IGNORED) {
+		vk->vkGetDeviceQueue(vk->device, vk->encode_queue.family_index, 0, &vk->encode_queue.queue);
 	}
 #endif
 
@@ -1582,8 +1582,11 @@ vk_init_from_given(struct vk_bundle *vk,
 	vk->instance = instance;
 	vk->physical_device = physical_device;
 	vk->device = device;
-	vk->queue_family_index = queue_family_index;
-	vk->queue_index = queue_index;
+	vk->main_queue.family_index = queue_family_index;
+	vk->main_queue.index = queue_index;
+#ifdef VK_KHR_video_encode_queue
+	vk->encode_queue = VK_BUNDLE_NULL_QUEUE;
+#endif
 
 	// Fill in all instance functions.
 	ret = vk_get_instance_functions(vk);
@@ -1633,7 +1636,7 @@ vk_init_from_given(struct vk_bundle *vk,
 		goto err_memset;
 	}
 
-	vk->vkGetDeviceQueue(vk->device, vk->queue_family_index, vk->queue_index, &vk->queue);
+	vk->vkGetDeviceQueue(vk->device, vk->main_queue.family_index, vk->main_queue.index, &vk->main_queue.queue);
 
 	vk->has_EXT_debug_utils = false;
 	if (debug_utils_enabled) {

@@ -160,7 +160,7 @@ renderer_wait_queue_idle(struct comp_renderer *r)
 	struct vk_bundle *vk = &r->c->base.vk;
 
 	os_mutex_lock(&vk->queue_mutex);
-	vk->vkQueueWaitIdle(vk->queue);
+	vk->vkQueueWaitIdle(vk->main_queue.queue);
 	os_mutex_unlock(&vk->queue_mutex);
 }
 
@@ -741,13 +741,13 @@ renderer_present_swapchain_image(struct comp_renderer *r, uint64_t desired_prese
 	assert(!comp_frame_is_invalid_locked(&r->c->frame.rendering));
 	uint64_t render_complete_signal_value = (uint64_t)r->c->frame.rendering.id;
 
-	ret = comp_target_present(        //
-	    r->c->target,                 //
-	    r->c->base.vk.queue,          //
-	    r->acquired_buffer,           //
-	    render_complete_signal_value, //
-	    desired_present_time_ns,      //
-	    present_slop_ns);             //
+	ret = comp_target_present(          //
+	    r->c->target,                   //
+	    r->c->base.vk.main_queue.queue, //
+	    r->acquired_buffer,             //
+	    render_complete_signal_value,   //
+	    desired_present_time_ns,        //
+	    present_slop_ns);               //
 	r->acquired_buffer = -1;
 
 	if (ret == VK_ERROR_OUT_OF_DATE_KHR || ret == VK_SUBOPTIMAL_KHR) {

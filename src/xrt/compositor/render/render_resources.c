@@ -595,7 +595,7 @@ render_resources_init(struct render_resources *r,
 	VkCommandPoolCreateInfo command_pool_info = {
 	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 	    .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-	    .queueFamilyIndex = vk->queue_family_index,
+	    .queueFamilyIndex = vk->main_queue.family_index,
 	};
 
 	ret = vk->vkCreateCommandPool(vk->device, &command_pool_info, NULL, &r->cmd_pool);

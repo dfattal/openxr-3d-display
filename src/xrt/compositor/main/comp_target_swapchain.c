@@ -682,7 +682,7 @@ comp_target_swapchain_create_images(struct comp_target *ct, const struct comp_ta
 	// Can we create swapchains from the surface on this device and queue.
 	ret = vk->vkGetPhysicalDeviceSurfaceSupportKHR( //
 	    vk->physical_device,                        // physicalDevice
-	    vk->queue_family_index,                     // queueFamilyIndex
+	    vk->main_queue.family_index,                // queueFamilyIndex
 	    cts->surface.handle,                        // surface
 	    &supported);                                // pSupported
 	if (ret != VK_SUCCESS) {
