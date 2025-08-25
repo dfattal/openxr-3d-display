@@ -15,6 +15,7 @@
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_results.h"
 
+#include <assert.h>
 #include <stdio.h>
 
 #ifdef __cplusplus
@@ -2019,20 +2020,29 @@ struct xrt_output_value_vibration
 	int64_t duration_ns;
 };
 
+static_assert(sizeof(struct xrt_output_value_vibration) == 16,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
+
 struct xrt_output_value_pcm_vibration
 {
 	uint32_t buffer_size;
-	const float *buffer;
-	float sample_rate;
+	XRT_ALIGNAS(8) const float *buffer;
+	XRT_ALIGNAS(8) float sample_rate;
 	bool append;
 	uint32_t *samples_consumed;
 };
+
+static_assert(sizeof(struct xrt_output_value_pcm_vibration) == 32,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 struct xrt_output_value_force_feedback
 {
 	struct xrt_output_force_feedback force_feedback[5];
 	uint64_t force_feedback_location_count;
 };
+
+static_assert(sizeof(struct xrt_output_value_force_feedback) == 48,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 /*!
  * A union of all output types.
@@ -2050,6 +2060,9 @@ struct xrt_output_value
 		struct xrt_output_value_force_feedback force_feedback;
 	};
 };
+
+static_assert(sizeof(struct xrt_output_value) == 56,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
 
 
 /*

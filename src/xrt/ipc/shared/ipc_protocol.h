@@ -379,3 +379,6 @@ struct ipc_pcm_haptic_buffer
 	float sample_rate;
 	bool append;
 };
+
+static_assert(sizeof(struct ipc_pcm_haptic_buffer) == 12,
+              "invalid structure size, maybe different 32/64 bits sizes or padding");
