@@ -1631,7 +1631,7 @@ enum xrt_facial_tracking_type_htc
 struct xrt_facial_base_expression_set_htc
 {
 	int64_t sample_time_ns;
-	bool is_active;
+	XRT_ALIGNAS(8) bool is_active;
 };
 
 struct xrt_facial_eye_expression_set_htc
@@ -1656,7 +1656,7 @@ struct xrt_facial_expression_set2_fb
 	enum xrt_face_tracking_data_source2_fb data_source;
 	uint64_t sample_time_ns;
 
-	bool is_valid;
+	XRT_ALIGNAS(8) bool is_valid;
 	bool is_eye_following_blendshapes_valid;
 };
 
@@ -1889,7 +1889,7 @@ struct xrt_base_body_joint_set_meta
 	int64_t sample_time_ns;
 	float confidence;
 	uint32_t skeleton_changed_count;
-	bool is_active;
+	XRT_ALIGNAS(8) bool is_active;
 };
 
 // XR_FB_body_tracking
@@ -2015,7 +2015,7 @@ enum xrt_output_value_type
 
 struct xrt_output_value_vibration
 {
-	float frequency;
+	XRT_ALIGNAS(8) float frequency;
 	float amplitude;
 	int64_t duration_ns;
 };

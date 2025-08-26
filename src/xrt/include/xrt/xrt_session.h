@@ -104,7 +104,7 @@ struct xrt_session_event_overlay
 struct xrt_session_event_loss_pending
 {
 	enum xrt_session_event_type type;
-	int64_t loss_time_ns;
+	XRT_ALIGNAS(8) int64_t loss_time_ns;
 };
 
 /*!
