@@ -49,6 +49,7 @@ include:
 stages:
   - container_prep
   - build
+  - check
   - package
   - reprepro
   - pages
@@ -138,6 +139,11 @@ reuse:
 {%- if "cmake" in job.name or "ndk" in job.name %}
 
     - .gitlab-ci/ci-cmake-build.sh {{- make_cmake_args(job.cmake_defines) }}
+{%- if job.pahole %}
+
+    - src/xrt/ipc/shared/proto.py src/xrt/ipc/shared/proto.json structs.txt
+    - mkdir -p "{{ job.name}}"
+    - pahole --sizes --class_name file://structs.txt build/src/xrt/targets/openxr/libopenxr_monado.so > "{{ job.name}}/ipc-sizes.txt"{% endif %}
 
 {#- gradle builds -#}
 {%- elif "android" in job.name %}
@@ -159,11 +165,18 @@ reuse:
     - cd build && ctest --output-on-failure
 {%- endif %}
 
-{%- if job.artifact_path %}
+{%- if job.artifact_path or job.pahole %}
 
   artifacts:
     paths:
+{%- if job.artifact_path%}
+
       - {{ job.artifact_path }}
+{%- endif %}
+{%- if job.pahole%}
+
+      - {{ job.name }}/ipc-sizes.txt
+{%- endif %}
 {%- endif %}
 
 {% endfor -%} {%- endfor -%} {%- endfor %}
@@ -184,6 +197,14 @@ windows:
 {% macro packaging_job_name(distro, image) -%}
 {{ image_name(distro, image) }}:package
 {%- endmacro %}
+
+# Check compatibility of IPC protocol between 32 and 64 bits
+ipc-32-64-compatibility:
+  stage: check
+  dependencies: ["debian:cmake-no-opencv", "debian:cmake:32bit"]
+  script:
+    - diff -du "debian:cmake-no-opencv/ipc-sizes.txt" "debian:cmake:32bit/ipc-sizes.txt"
+    - cmp "debian:cmake-no-opencv/ipc-sizes.txt" "debian:cmake:32bit/ipc-sizes.txt"
 
 {% for distro in distributions -%} {%- for image in distro.images if "deb_version_suffix" in image %}
 

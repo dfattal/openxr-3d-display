@@ -34,6 +34,7 @@ include:
 stages:
   - container_prep
   - build
+  - check
   - package
   - reprepro
   - pages
@@ -129,7 +130,7 @@ win:container_prep:
 .monado.variables.debian:bookworm:
   variables:
     FDO_DISTRIBUTION_VERSION: "bookworm"
-    FDO_DISTRIBUTION_TAG: "2025-04-18"
+    FDO_DISTRIBUTION_TAG: "2025-08-26"
 
 # Variables for build and usage of Debian bullseye image
 .monado.variables.debian:bullseye:
@@ -178,7 +179,7 @@ debian:bookworm:container_prep:
     - .fdo.container-build@debian # from ci-templates
 
   variables:
-    FDO_DISTRIBUTION_PACKAGES: 'build-essential ca-certificates clang-format cmake codespell curl debhelper devscripts doxygen dput-ng gettext-base git glslang-tools graphviz libbluetooth-dev libbsd-dev libcjson-dev libdbus-1-dev libdistro-info-perl libegl1-mesa-dev libeigen3-dev libgl1-mesa-dev libglvnd-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev libhidapi-dev libopencv-dev libsdl2-dev libsystemd-dev libudev-dev libusb-1.0-0-dev libuvc-dev libv4l-dev libvulkan-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev ninja-build pandoc patch pipx pkg-config python3 python3-click python3-pip reprepro unzip wayland-protocols wget'
+    FDO_DISTRIBUTION_PACKAGES: 'build-essential ca-certificates clang-format cmake codespell curl debhelper devscripts doxygen dput-ng gettext-base git glslang-tools graphviz libbluetooth-dev libbsd-dev libcjson-dev libdbus-1-dev libdistro-info-perl libegl1-mesa-dev libeigen3-dev libgl1-mesa-dev libglvnd-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev libhidapi-dev libopencv-dev libsdl2-dev libsystemd-dev libudev-dev libusb-1.0-0-dev libuvc-dev libv4l-dev libvulkan-dev libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxrandr-dev libxxf86vm-dev ninja-build pahole pandoc patch pipx pkg-config python3 python3-click python3-pip reprepro unzip wayland-protocols wget'
     FDO_DISTRIBUTION_EXEC: 'env FDO_CI_CONCURRENT=${FDO_CI_CONCURRENT} bash .gitlab-ci/i386_and_proclamation_container_prep.sh'
 
 # Make Debian bullseye image
@@ -365,8 +366,14 @@ debian:cmake-no-opencv:
   script:
 
     - .gitlab-ci/prebuild.sh
-    - .gitlab-ci/ci-cmake-build.sh -DXRT_HAVE_OPENCV=OFF
+    - .gitlab-ci/ci-cmake-build.sh -DCMAKE_BUILD_TYPE=Debug -DXRT_HAVE_OPENCV=OFF
+    - src/xrt/ipc/shared/proto.py src/xrt/ipc/shared/proto.json structs.txt
+    - mkdir -p "debian:cmake-no-opencv"
+    - pahole --sizes --class_name file://structs.txt build/src/xrt/targets/openxr/libopenxr_monado.so > "debian:cmake-no-opencv/ipc-sizes.txt"
     - cd build && ctest --output-on-failure
+  artifacts:
+    paths:
+      - debian:cmake-no-opencv/ipc-sizes.txt
 
 debian:cmake-no-sdl2:
   stage: build
@@ -398,8 +405,14 @@ debian:cmake:32bit:
   script:
 
     - .gitlab-ci/prebuild.sh
-    - .gitlab-ci/ci-cmake-build.sh -DCMAKE_TOOLCHAIN_FILE=.gitlab-ci/i386.cmake -DXRT_HAVE_OPENCV=OFF
+    - .gitlab-ci/ci-cmake-build.sh -DCMAKE_BUILD_TYPE=Debug -DCMAKE_TOOLCHAIN_FILE=.gitlab-ci/i386.cmake -DXRT_HAVE_OPENCV=OFF
+    - src/xrt/ipc/shared/proto.py src/xrt/ipc/shared/proto.json structs.txt
+    - mkdir -p "debian:cmake:32bit"
+    - pahole --sizes --class_name file://structs.txt build/src/xrt/targets/openxr/libopenxr_monado.so > "debian:cmake:32bit/ipc-sizes.txt"
     - cd build && ctest --output-on-failure
+  artifacts:
+    paths:
+      - debian:cmake:32bit/ipc-sizes.txt
 
 debian:bullseye:cmake:
   stage: build
@@ -621,6 +634,14 @@ windows:
       - install
       - build/Testing/Temporary
 
+
+# Check compatibility of IPC protocol between 32 and 64 bits
+ipc-32-64-compatibility:
+  stage: check
+  dependencies: ["debian:cmake-no-opencv", "debian:cmake:32bit"]
+  script:
+    - diff -du "debian:cmake-no-opencv/ipc-sizes.txt" "debian:cmake:32bit/ipc-sizes.txt"
+    - cmp "debian:cmake-no-opencv/ipc-sizes.txt" "debian:cmake:32bit/ipc-sizes.txt"
 
 
 debian:bookworm:package:
