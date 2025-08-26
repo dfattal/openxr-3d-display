@@ -489,6 +489,23 @@ def generate_server_header(file, p):
     write_cpp_header_guard_end(f)
     f.close()
 
+def generate_struct_names(file, p):
+    """Generate list of structures names.
+
+    Lists the structures used in the IPC protocol, this can be
+    used for tools such as pahole.
+    """
+    f = open(file, "w")
+    f.write("ipc_shared_memory\n")
+    types = set()
+    for call in p.calls:
+        for i in call.in_args + call.out_args:
+            if i.is_aggregate:
+                types.add(i.typename.split(" ")[-1])
+    for t in sorted(types):
+        f.write(t)
+        f.write("\n")
+    f.close()
 
 def main():
     """Handle command line and generate a file."""
@@ -513,6 +530,8 @@ def main():
             generate_server_c(output, p)
         if output.endswith("ipc_server_generated.h"):
             generate_server_header(output, p)
+        if output.endswith("structs.txt"):
+            generate_struct_names(output, p)
 
 
 if __name__ == "__main__":
