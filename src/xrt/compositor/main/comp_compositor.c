@@ -1216,7 +1216,10 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 		}
 	}
 
-	return comp_multi_create_system_compositor(&c->base.base, upaf, sys_info, !c->deferred_surface, out_xsysc);
+	xret = comp_multi_create_system_compositor(&c->base.base, upaf, sys_info, !c->deferred_surface, out_xsysc);
+	if (xret == XRT_SUCCESS) {
+		return xret;
+	}
 
 error:
 	if (c != NULL) {
