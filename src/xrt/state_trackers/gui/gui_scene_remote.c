@@ -461,5 +461,8 @@ gui_scene_remote(struct gui_program *p, const char *address)
 	}
 	gr->port = 4242;
 
+	gr->reset.header = R_HEADER_VALUE;
+	gr->data.header = R_HEADER_VALUE;
+
 	gui_scene_push_front(p, &gr->base);
 }
