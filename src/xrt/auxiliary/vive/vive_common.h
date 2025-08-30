@@ -33,6 +33,20 @@ extern "C" {
  */
 
 
+/*!
+ * Headset variant.
+ *
+ * @ingroup aux_vive
+ */
+enum VIVE_VARIANT
+{
+	VIVE_UNKNOWN = 0,
+	VIVE_VARIANT_VIVE,
+	VIVE_VARIANT_PRO,
+	VIVE_VARIANT_INDEX,
+	VIVE_VARIANT_PRO2,
+};
+
 #define HTC_VID 0x0bb4
 #define VALVE_VID 0x28de
 
@@ -45,6 +59,9 @@ extern "C" {
 
 #define VIVE_WATCHMAN_DONGLE 0x2101
 #define VIVE_WATCHMAN_DONGLE_GEN2 0x2102
+
+enum VIVE_VARIANT
+vive_determine_variant(const char *model_number);
 
 
 #ifdef __cplusplus

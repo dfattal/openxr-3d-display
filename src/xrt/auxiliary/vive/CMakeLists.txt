@@ -9,6 +9,8 @@ add_library(
 	vive_builder.h
 	vive_calibration.c
 	vive_calibration.h
+	vive_common.h
+	vive_common.c
 	vive_config.h
 	vive_config.c
 	vive_poses.h

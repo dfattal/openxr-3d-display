@@ -429,26 +429,7 @@ vive_config_parse(struct vive_config *d, char *json_string, enum u_logging_level
 
 	VIVE_DEBUG(d, "Parsing model number: %s", d->firmware.model_number);
 
-	if (strcmp(d->firmware.model_number, "Utah MP") == 0) {
-		d->variant = VIVE_VARIANT_INDEX;
-		VIVE_DEBUG(d, "Found Valve Index HMD");
-	} else if (strcmp(d->firmware.model_number, "Vive MV") == 0 ||
-	           strcmp(d->firmware.model_number, "Vive MV.") == 0 ||
-	           strcmp(d->firmware.model_number, "Vive. MV") == 0) {
-		d->variant = VIVE_VARIANT_VIVE;
-		VIVE_DEBUG(d, "Found HTC Vive HMD");
-	} else if (strcmp(d->firmware.model_number, "Vive_Pro MV") == 0 ||
-	           strcmp(d->firmware.model_number, "VIVE_Pro MV") == 0) {
-		d->variant = VIVE_VARIANT_PRO;
-		VIVE_DEBUG(d, "Found HTC Vive Pro HMD");
-	} else if (strcmp(d->firmware.model_number, "Vive_Pro 2 MV") == 0 ||
-	           strcmp(d->firmware.model_number, "VIVE_Pro 2 MV") == 0) {
-		d->variant = VIVE_VARIANT_PRO2;
-		VIVE_DEBUG(d, "Found HTC Vive Pro 2 HMD");
-	} else {
-		VIVE_ERROR(d, "Failed to parse Vive HMD variant!\n\tfirmware.model_[number|name]: '%s'",
-		           d->firmware.model_number);
-	}
+	d->variant = vive_determine_variant(d->firmware.model_number);
 
 	switch (d->variant) {
 	case VIVE_VARIANT_VIVE:

@@ -15,6 +15,7 @@
 
 #include "util/u_logging.h"
 #include "util/u_distortion_mesh.h"
+#include "vive/vive_common.h"
 
 
 // public documentation
@@ -37,20 +38,6 @@
 extern "C" {
 #endif
 
-
-/*!
- * Headset variant.
- *
- * @ingroup aux_vive
- */
-enum VIVE_VARIANT
-{
-	VIVE_UNKNOWN = 0,
-	VIVE_VARIANT_VIVE,
-	VIVE_VARIANT_PRO,
-	VIVE_VARIANT_INDEX,
-	VIVE_VARIANT_PRO2,
-};
 
 /*!
  * Controller variant.
