@@ -630,6 +630,11 @@ HmdDevice::get_view_poses(const xrt_vec3 *default_eye_relation,
 xrt_result_t
 HmdDevice::compute_distortion(uint32_t view, float u, float v, xrt_uv_triplet *out_result)
 {
+	// Vive Pro 2 has a vertically flipped distortion map.
+	if (this->variant == VIVE_VARIANT_PRO2) {
+		v = 1.0f - v;
+	}
+
 	vr::EVREye eye = (view == 0) ? vr::Eye_Left : vr::Eye_Right;
 	vr::DistortionCoordinates_t coords = this->hmd_parts->display->ComputeDistortion(eye, u, v);
 	out_result->r = {coords.rfRed[0], coords.rfRed[1]};
@@ -929,6 +934,13 @@ vr::ETrackedPropertyError
 HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 {
 	switch (prop.prop) {
+	case vr::Prop_ModelNumber_String: {
+		auto model_number = std::string(static_cast<char *>(prop.pvBuffer), prop.unBufferSize);
+
+		this->variant = vive_determine_variant(model_number.c_str());
+
+		return Device::handle_property_write(prop);
+	}
 	case vr::Prop_DisplayFrequency_Float: {
 		assert(prop.unBufferSize == sizeof(float));
 		float freq = *static_cast<float *>(prop.pvBuffer);

@@ -19,6 +19,7 @@
 #include "math/m_relation_history.h"
 #include "xrt/xrt_device.h"
 #include "openvr_driver.h"
+#include "vive/vive_common.h"
 
 class Context;
 struct InputClass;
@@ -186,6 +187,7 @@ private:
 	std::mutex hmd_parts_mut;
 	float brightness{1.0f};
 	AnalogGainRange analog_gain_range{};
+	VIVE_VARIANT variant{VIVE_UNKNOWN};
 };
 
 class ControllerDevice : public Device
