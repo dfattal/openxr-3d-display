@@ -1296,6 +1296,7 @@ vk_create_device(struct vk_bundle *vk,
 		return VK_ERROR_NOT_PERMITTED_EXT;
 	}
 
+	vk->main_queue = VK_BUNDLE_NULL_QUEUE;
 	if (only_compute) {
 		ret = find_queue_family(vk, VK_QUEUE_COMPUTE_BIT, &vk->main_queue.family_index);
 	} else {
@@ -1317,6 +1318,7 @@ vk_create_device(struct vk_bundle *vk,
 	uint32_t queue_create_info_count = 1;
 
 	// Compute or Graphics queue
+	vk->main_queue.index = 0;
 	queue_create_info[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	queue_create_info[0].pNext = NULL;
 	queue_create_info[0].queueCount = 1;
@@ -1329,6 +1331,7 @@ vk_create_device(struct vk_bundle *vk,
 	if (u_string_list_contains(device_ext_list, VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME)) {
 		ret = find_queue_family(vk, VK_QUEUE_VIDEO_ENCODE_BIT_KHR, &vk->encode_queue.family_index);
 		if (ret == VK_SUCCESS) {
+			vk->encode_queue.index = 0;
 			queue_create_info[queue_create_info_count].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 			queue_create_info[queue_create_info_count].pNext = NULL;
 			queue_create_info[queue_create_info_count].queueCount = 1;
@@ -1510,10 +1513,11 @@ vk_create_device(struct vk_bundle *vk,
 	if (ret != VK_SUCCESS) {
 		goto err_destroy;
 	}
-	vk->vkGetDeviceQueue(vk->device, vk->main_queue.family_index, 0, &vk->main_queue.queue);
+	vk->vkGetDeviceQueue(vk->device, vk->main_queue.family_index, vk->main_queue.index, &vk->main_queue.queue);
 #if defined(VK_KHR_video_encode_queue)
 	if (vk->encode_queue.family_index != VK_QUEUE_FAMILY_IGNORED) {
-		vk->vkGetDeviceQueue(vk->device, vk->encode_queue.family_index, 0, &vk->encode_queue.queue);
+		vk->vkGetDeviceQueue(vk->device, vk->encode_queue.family_index, vk->encode_queue.index,
+		                     &vk->encode_queue.queue);
 	}
 #endif
 
