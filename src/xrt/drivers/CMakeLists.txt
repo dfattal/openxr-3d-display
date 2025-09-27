@@ -21,6 +21,15 @@ add_library(drv_cemu STATIC ht_ctrl_emu/ht_ctrl_emu.cpp ht_ctrl_emu/ht_ctrl_emu_
 target_link_libraries(drv_cemu PRIVATE xrt-interfaces aux_generated_bindings_helpers aux_util)
 list(APPEND ENABLED_HEADSET_DRIVERS drv_cemu)
 
+if(XRT_BUILD_DRIVER_BLUBUR_S1)
+	add_library(
+		drv_blubur_s1 STATIC blubur_s1/blubur_s1_hmd.c blubur_s1/blubur_s1_interface.h
+				     blubur_s1/blubur_s1_prober.c
+		)
+	target_link_libraries(drv_blubur_s1 PRIVATE xrt-interfaces aux_util aux_os)
+	list(APPEND ENABLED_DRIVERS blubur_s1)
+endif()
+
 if(XRT_BUILD_DRIVER_DAYDREAM)
 	add_library(
 		drv_daydream STATIC daydream/daydream_device.c daydream/daydream_device.h
