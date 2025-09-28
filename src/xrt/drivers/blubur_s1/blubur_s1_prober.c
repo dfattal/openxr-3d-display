@@ -29,8 +29,12 @@ blubur_s1_found(struct xrt_prober *xp,
 
 	// TODO: figure out how to get the actual serial number of the device, since the official driver has multiple
 	// methods, and the string descriptor doesn't work on the unit used for development.
-	char serial[32] = {0};
-	snprintf(serial, sizeof(serial), "%04x:%04x", dev->vendor_id, dev->product_id);
+	char serial[41] = {0};
+	result = xrt_prober_get_string_descriptor(xp, dev, XRT_PROBER_STRING_SERIAL_NUMBER, (unsigned char *)serial,
+	                                          sizeof(serial));
+	if (result <= 0 || strlen(serial) == 0) {
+		snprintf(serial, sizeof(serial), "%04x:%04x", dev->vendor_id, dev->product_id);
+	}
 
 	struct blubur_s1_hmd *hmd = blubur_s1_hmd_create(hid, serial);
 	if (hmd == NULL) {
