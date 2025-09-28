@@ -692,6 +692,7 @@ on_elem(struct u_var_info *info, void *priv)
 	case U_VAR_KIND_RO_FTEXT: igText(ptr ? (char *)ptr : "%s", name); break;
 	case U_VAR_KIND_RO_I16: igInputScalar(name, ImGuiDataType_S16, ptr, NULL, NULL, NULL, ro_i_flags); break;
 	case U_VAR_KIND_RO_I32: igInputScalar(name, ImGuiDataType_S32, ptr, NULL, NULL, NULL, ro_i_flags); break;
+	case U_VAR_KIND_RO_U16: igInputScalar(name, ImGuiDataType_U16, ptr, NULL, NULL, NULL, ro_i_flags); break;
 	case U_VAR_KIND_RO_U32: igInputScalar(name, ImGuiDataType_U32, ptr, NULL, NULL, NULL, ro_i_flags); break;
 	case U_VAR_KIND_RO_F32: igInputScalar(name, ImGuiDataType_Float, ptr, NULL, NULL, "%+f", ro_i_flags); break;
 	case U_VAR_KIND_RO_I64: igInputScalar(name, ImGuiDataType_S64, ptr, NULL, NULL, NULL, ro_i_flags); break;

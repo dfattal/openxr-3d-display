@@ -232,6 +232,7 @@ enum u_var_kind
 	U_VAR_KIND_RO_FTEXT,
 	U_VAR_KIND_RO_I16,
 	U_VAR_KIND_RO_I32,
+	U_VAR_KIND_RO_U16,
 	U_VAR_KIND_RO_U32,
 	U_VAR_KIND_RO_F32,
 	U_VAR_KIND_RO_I64,
@@ -391,7 +392,8 @@ u_var_force_on(void);
 	ADD_FUNC(ro_ftext, const char, RO_FTEXT)                                                                       \
 	ADD_FUNC(ro_i16, int16_t, RO_I16)                                                                              \
 	ADD_FUNC(ro_i32, int32_t, RO_I32)                                                                              \
-	ADD_FUNC(ro_u32, uint32_t, RO_I32)                                                                             \
+	ADD_FUNC(ro_u16, uint16_t, RO_U16)                                                                             \
+	ADD_FUNC(ro_u32, uint32_t, RO_U32)                                                                             \
 	ADD_FUNC(ro_f32, float, RO_F32)                                                                                \
 	ADD_FUNC(ro_i64, int64_t, RO_I64)                                                                              \
 	ADD_FUNC(ro_u64, uint64_t, RO_U64)                                                                             \
