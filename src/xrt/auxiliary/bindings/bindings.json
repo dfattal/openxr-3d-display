@@ -3741,6 +3741,26 @@
 					}
 				}
 			}
+		},
+
+		"/interaction_profiles/mndx/blubur_s1_mndx": {
+			"title": "Blubur S1",
+			"type": "tracked_hmd",
+			"monado_device": "XRT_DEVICE_BLUBUR_S1",
+			"extended_by": [],
+			"subaction_paths": [
+				"/user/head"
+			],
+			"subpaths": {
+				"/input/menu": {
+					"type": "button",
+					"localized_name": "Menu",
+					"components": ["click"],
+					"monado_bindings": {
+						"click": "XRT_INPUT_BLUBUR_S1_MENU_CLICK"
+					}
+				}
+			}
 		}
 
 	}

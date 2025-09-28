@@ -775,6 +775,17 @@
 
 
 /*
+ * XR_MNDX_blubur_s1
+ */
+#if defined(XR_MNDX_blubur_s1) && defined(XRT_FEATURE_OPENXR_INTERACTION_MNDX)
+#define OXR_HAVE_MNDX_blubur_s1
+#define OXR_EXTENSION_SUPPORT_MNDX_blubur_s1(_) _(MNDX_blubur_s1, MNDX_BLUBUR_S1)
+#else
+#define OXR_EXTENSION_SUPPORT_MNDX_blubur_s1(_)
+#endif
+
+
+/*
  * XR_MNDX_oculus_remote
  */
 #if defined(XR_MNDX_oculus_remote) && defined(XRT_FEATURE_OPENXR_INTERACTION_MNDX)
@@ -929,6 +940,7 @@
     OXR_EXTENSION_SUPPORT_EXTX_overlay(_) \
     OXR_EXTENSION_SUPPORT_HTCX_vive_tracker_interaction(_) \
     OXR_EXTENSION_SUPPORT_MNDX_ball_on_a_stick_controller(_) \
+    OXR_EXTENSION_SUPPORT_MNDX_blubur_s1(_) \
     OXR_EXTENSION_SUPPORT_MNDX_oculus_remote(_) \
     OXR_EXTENSION_SUPPORT_MNDX_egl_enable(_) \
     OXR_EXTENSION_SUPPORT_MNDX_force_feedback_curl(_) \

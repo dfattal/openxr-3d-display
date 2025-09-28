@@ -109,6 +109,15 @@ blubur_s1_hmd_compute_test_distortion(
 static xrt_result_t
 blubur_s1_hmd_update_inputs(struct xrt_device *xdev)
 {
+	struct blubur_s1_hmd *hmd = blubur_s1_hmd(xdev);
+
+	os_mutex_lock(&hmd->input_mutex);
+	bool menu = hmd->input.status & BLUBUR_S1_STATUS_BUTTON;
+	os_mutex_unlock(&hmd->input_mutex);
+
+	xdev->inputs[1].value = (union xrt_input_value){.boolean = menu};
+	xdev->inputs[1].timestamp = os_monotonic_get_ns();
+
 	return XRT_SUCCESS;
 }
 
@@ -496,7 +505,7 @@ blubur_s1_hmd_create(struct os_hid_device *dev, const char *serial)
 	int ret;
 
 	struct blubur_s1_hmd *hmd =
-	    U_DEVICE_ALLOCATE(struct blubur_s1_hmd, U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE, 1, 0);
+	    U_DEVICE_ALLOCATE(struct blubur_s1_hmd, U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE, 2, 0);
 	if (hmd == NULL) {
 		return NULL;
 	}
@@ -512,7 +521,7 @@ blubur_s1_hmd_create(struct os_hid_device *dev, const char *serial)
 	}
 
 	hmd->base.destroy = blubur_s1_hmd_destroy;
-	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
+	hmd->base.name = XRT_DEVICE_BLUBUR_S1;
 	hmd->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	hmd->base.hmd->screens[0].w_pixels = PANEL_WIDTH;
@@ -570,6 +579,7 @@ blubur_s1_hmd_create(struct os_hid_device *dev, const char *serial)
 	hmd->base.supported.presence = true;
 
 	hmd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
+	hmd->base.inputs[1].name = XRT_INPUT_BLUBUR_S1_MENU_CLICK;
 
 	hmd->base.update_inputs = blubur_s1_hmd_update_inputs;
 	hmd->base.get_tracked_pose = blubur_s1_hmd_get_tracked_pose;
