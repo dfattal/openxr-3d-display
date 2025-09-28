@@ -18,6 +18,7 @@
 #include "util/u_debug.h"
 #include "util/u_trace_marker.h"
 #include "util/u_linux.h"
+#include "util/u_var.h"
 
 #include "blubur_s1_interface.h"
 #include "blubur_s1_internal.h"
@@ -64,6 +65,8 @@ blubur_s1_hmd_destroy(struct xrt_device *xdev)
 	}
 
 	os_mutex_destroy(&hmd->input_mutex);
+
+	u_var_remove_root(hmd);
 
 	free(hmd);
 }
@@ -625,6 +628,19 @@ blubur_s1_hmd_create(struct os_hid_device *dev, const char *serial)
 		blubur_s1_hmd_destroy(&hmd->base);
 		return NULL;
 	}
+
+	u_var_add_root(hmd, "Blubur S1", true);
+	u_var_add_log_level(hmd, &hmd->log_level, "Log Level");
+
+	m_imu_3dof_add_vars(&hmd->fusion_3dof, hmd, "3dof IMU Fusion");
+
+	u_var_add_ro_u16(hmd, &hmd->last_remote_timestamp_ms, "Last Remote Timestamp (ms)");
+	u_var_add_ro_i64_ns(hmd, &hmd->last_remote_timestamp_ns, "Last Remote Timestamp (ns)");
+
+	u_var_add_ro_i64_ns(hmd, &hmd->hw2mono, "HW to Monotonic (ns)");
+	u_var_add_ro_i32(hmd, &hmd->hw2mono_samples, "HW to Monotonic Samples");
+
+	u_var_add_ro_i32(hmd, (int32_t *)&hmd->input.status, "Status");
 
 	return hmd;
 }
