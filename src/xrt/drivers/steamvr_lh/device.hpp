@@ -145,7 +145,7 @@ class HmdDevice : public Device
 {
 public:
 	VIVE_VARIANT variant{VIVE_UNKNOWN};
-	xrt_pose eye[2];
+	xrt_pose eye[2] = {XRT_POSE_IDENTITY, XRT_POSE_IDENTITY};
 	float ipd{0.063}; // meters
 	struct Parts
 	{
