@@ -33,6 +33,7 @@ include:
 
 stages:
   - container_prep
+  - verify
   - build
   - check
   - package
@@ -317,7 +318,7 @@ format-and-spellcheck:
   extends:
     - .monado.image.debian:bookworm
 
-  stage: build
+  stage: verify
   script:
     - scripts/format-and-spellcheck.sh
   artifacts:
@@ -330,7 +331,7 @@ format-and-spellcheck:
 reuse:
   extends:
     - .build-rules
-  stage: build
+  stage: verify
   image:
     name: fsfe/reuse:latest
     entrypoint: [""]

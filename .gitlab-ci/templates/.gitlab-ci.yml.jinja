@@ -48,6 +48,7 @@ include:
 
 stages:
   - container_prep
+  - verify
   - build
   - check
   - package
@@ -72,7 +73,7 @@ stages:
 format-and-spellcheck:
   extends:
     - {{base_job_to_use_image_containing("codespell")}}
-  stage: build
+  stage: verify
   script:
     - scripts/format-and-spellcheck.sh
   artifacts:
@@ -85,7 +86,7 @@ format-and-spellcheck:
 reuse:
   extends:
     - .build-rules
-  stage: build
+  stage: verify
   image:
     name: fsfe/reuse:latest
     entrypoint: [""]
