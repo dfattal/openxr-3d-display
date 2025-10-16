@@ -631,8 +631,14 @@ select_physical_device(struct vk_bundle *vk, int forced_index)
 	return VK_SUCCESS;
 }
 
+struct vk_queue_family
+{
+	VkQueueFamilyProperties queue_family;
+	uint32_t family_index;
+};
+
 static VkResult
-find_graphics_queue_family(struct vk_bundle *vk, uint32_t *out_graphics_queue_family)
+find_graphics_queue_family(struct vk_bundle *vk, struct vk_queue_family *out_graphics_queue_family)
 {
 	/* Find the first graphics queue */
 	uint32_t queue_family_count = 0;
@@ -659,7 +665,10 @@ find_graphics_queue_family(struct vk_bundle *vk, uint32_t *out_graphics_queue_fa
 		goto err_free;
 	}
 
-	*out_graphics_queue_family = i;
+	*out_graphics_queue_family = (struct vk_queue_family){
+	    .queue_family = queue_family_props[i],
+	    .family_index = i,
+	};
 
 	free(queue_family_props);
 
@@ -671,7 +680,7 @@ err_free:
 }
 
 static VkResult
-find_queue_family(struct vk_bundle *vk, VkQueueFlags required_flags, uint32_t *out_queue_family)
+find_queue_family(struct vk_bundle *vk, VkQueueFlags required_flags, struct vk_queue_family *out_queue_family)
 {
 	/* Find the "best" queue with the requested flags (prefer queues without graphics) */
 	uint32_t queue_family_count = 0;
@@ -711,7 +720,10 @@ find_queue_family(struct vk_bundle *vk, VkQueueFlags required_flags, uint32_t *o
 		}
 	}
 
-	*out_queue_family = i;
+	*out_queue_family = (struct vk_queue_family){
+	    .queue_family = queue_family_props[i],
+	    .family_index = i,
+	};
 
 	free(queue_family_props);
 
@@ -1352,16 +1364,23 @@ vk_create_device(struct vk_bundle *vk,
 
 	vk_reset_queues(vk);
 
-	struct vk_queue_pair main_queue = VK_NULL_QUEUE_PAIR;
+	struct vk_queue_family main_queue_family = {0};
 	if (only_compute) {
-		ret = find_queue_family(vk, VK_QUEUE_COMPUTE_BIT, &main_queue.family_index);
+		ret = find_queue_family(vk, VK_QUEUE_COMPUTE_BIT, &main_queue_family);
 	} else {
-		ret = find_graphics_queue_family(vk, &main_queue.family_index);
+		ret = find_graphics_queue_family(vk, &main_queue_family);
 	}
 
 	if (ret != VK_SUCCESS) {
 		return ret;
 	}
+
+	assert(main_queue_family.queue_family.queueCount > 0);
+
+	const struct vk_queue_pair main_queue = {
+	    .family_index = main_queue_family.family_index,
+	    .index = 0,
+	};
 
 	VkDeviceQueueGlobalPriorityCreateInfoEXT priority_info = {
 	    .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT,
@@ -1369,31 +1388,40 @@ vk_create_device(struct vk_bundle *vk,
 	    .globalPriority = global_priority,
 	};
 
-	float queue_priority = 0.0f;
-	VkDeviceQueueCreateInfo queue_create_info[2] = {0};
+	const float queue_priority[VK_BUNDLE_MAX_QUEUES] = {
+	    0.f,
+	    0.f,
+	};
+	VkDeviceQueueCreateInfo queue_create_info[VK_BUNDLE_MAX_QUEUES] = {0};
 	uint32_t queue_create_info_count = 1;
 
 	// Compute or Graphics queue
-	main_queue.index = 0;
-	queue_create_info[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	queue_create_info[0].pNext = NULL;
-	queue_create_info[0].queueCount = 1;
-	queue_create_info[0].queueFamilyIndex = main_queue.family_index;
-	queue_create_info[0].pQueuePriorities = &queue_priority;
+	queue_create_info[0] = (VkDeviceQueueCreateInfo){
+	    .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+	    .pNext = NULL,
+	    .queueCount = 1,
+	    .queueFamilyIndex = main_queue.family_index,
+	    .pQueuePriorities = queue_priority,
+	};
 
 #ifdef VK_KHR_video_encode_queue
 	// Video encode queue
 	struct vk_queue_pair encode_queue = VK_NULL_QUEUE_PAIR;
 	if (u_string_list_contains(device_ext_list, VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME)) {
-		ret = find_queue_family(vk, VK_QUEUE_VIDEO_ENCODE_BIT_KHR, &encode_queue.family_index);
+		struct vk_queue_family encode_queue_family = {0};
+		ret = find_queue_family(vk, VK_QUEUE_VIDEO_ENCODE_BIT_KHR, &encode_queue_family);
 		if (ret == VK_SUCCESS) {
-			encode_queue.index = 0;
-			queue_create_info[queue_create_info_count].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-			queue_create_info[queue_create_info_count].pNext = NULL;
-			queue_create_info[queue_create_info_count].queueCount = 1;
-			queue_create_info[queue_create_info_count].queueFamilyIndex = encode_queue.family_index;
-			queue_create_info[queue_create_info_count].pQueuePriorities = &queue_priority;
-			queue_create_info_count++;
+			encode_queue = (struct vk_queue_pair){
+			    .family_index = encode_queue_family.family_index,
+			    .index = 0,
+			};
+			queue_create_info[queue_create_info_count++] = (VkDeviceQueueCreateInfo){
+			    .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+			    .pNext = NULL,
+			    .queueCount = 1,
+			    .queueFamilyIndex = encode_queue.family_index,
+			    .pQueuePriorities = queue_priority,
+			};
 			VK_DEBUG(vk, "Creating video encode queue, family index %d", encode_queue.family_index);
 		}
 	}
