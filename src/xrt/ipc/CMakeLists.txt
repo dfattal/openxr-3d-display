@@ -1,5 +1,5 @@
 # Copyright 2020-2021, Collabora, Ltd.
-# Copyright 2025, NVIDIA CORPORATION.
+# Copyright 2025-2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 
 ###
@@ -100,6 +100,8 @@ add_library(
 	client/ipc_client_space_overseer.c
 	client/ipc_client_system.c
 	client/ipc_client_system_devices.c
+	client/ipc_client_tracking_origin.c
+	client/ipc_client_tracking_origin.h
 	client/ipc_client_xdev.c
 	client/ipc_client_xdev.h
 	)
@@ -133,6 +135,8 @@ add_library(
 	server/ipc_server_handler.c
 	server/ipc_server_per_client_thread.c
 	server/ipc_server_process.c
+	server/ipc_server_objects.c
+	server/ipc_server_objects.h
 	)
 target_include_directories(
 	ipc_server

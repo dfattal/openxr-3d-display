@@ -1,5 +1,5 @@
 // Copyright 2020-2024, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -31,6 +31,7 @@
 #include "client/ipc_client.h"
 #include "client/ipc_client_interface.h"
 #include "client/ipc_client_connection.h"
+#include "client/ipc_client_tracking_origin.h"
 
 #include "ipc_client_generated.h"
 
@@ -163,32 +164,27 @@ ipc_client_instance_create_system(struct xrt_instance *xinst,
 
 	struct xrt_system_devices *xsysd = &icsd->base.base;
 
-	uint32_t count = 0;
-	struct xrt_tracking_origin *xtrack = NULL;
 	struct ipc_shared_memory *ism = ii->ipc_c.ism;
 
-	// Query the server for how many tracking origins it has.
-	count = 0;
-	for (uint32_t i = 0; i < ism->itrack_count; i++) {
-		xtrack = U_TYPED_CALLOC(struct xrt_tracking_origin);
-
-		memcpy(xtrack->name, ism->itracks[i].name, sizeof(xtrack->name));
-
-		xtrack->type = ism->itracks[i].type;
-		xtrack->initial_offset = ism->itracks[i].offset;
-		icsd->xtracks[count++] = xtrack;
-
-		u_var_add_root(xtrack, "Tracking origin", true);
-		u_var_add_ro_text(xtrack, xtrack->name, "name");
-		u_var_add_pose(xtrack, &xtrack->initial_offset, "offset");
-	}
-	icsd->xtrack_count = count;
-
-	// Query the server for how many devices it has.
-	count = 0;
+	// Query the server for how many devices it has and create them.
+	uint32_t count = 0;
 	for (uint32_t i = 0; i < ism->isdev_count; i++) {
 		struct ipc_shared_device *isdev = &ism->isdevs[i];
-		xtrack = icsd->xtracks[isdev->tracking_origin_index];
+
+		// Get tracking origin from manager (fetches on-demand)
+		struct xrt_tracking_origin *xtrack = NULL;
+		xret = ipc_client_tracking_origin_manager_get(&icsd->tracking_origin_manager, isdev->tracking_origin_id,
+		                                              &xtrack);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(&ii->ipc_c, "Failed to get tracking origin for device %u (id %u)", i,
+			          isdev->tracking_origin_id);
+			continue;
+		}
+		if (xtrack == NULL) {
+			IPC_ERROR(&ii->ipc_c, "Tracking origin for device %u (id %u) is NULL", i,
+			          isdev->tracking_origin_id);
+			continue;
+		}
 
 		if (isdev->device_type == XRT_DEVICE_TYPE_HMD) {
 			xsysd->xdevs[count++] = ipc_client_hmd_create(&ii->ipc_c, xtrack, i);

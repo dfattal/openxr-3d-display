@@ -1,5 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -35,6 +35,12 @@ struct mnd_root
 
 	//! List of clients.
 	struct ipc_client_list clients;
+
+	//! The retrieved list of tracking origins.
+	struct ipc_tracking_origin_list tracking_origin_list;
+
+	//! Cached infos about tracking origins.
+	struct ipc_tracking_origin_info origin_infos[XRT_SYSTEM_MAX_DEVICES];
 
 	/// State of most recent app asked about
 	struct ipc_app_state app_state;
@@ -87,6 +93,14 @@ enum role_enum
 		}                                                                                                      \
 	} while (false)
 
+#define CHECK_ORIGIN_INDEX(INDEX)                                                                                      \
+	do {                                                                                                           \
+		if (INDEX >= root->tracking_origin_list.origin_count) {                                                \
+			PE("Invalid itrack index (%u)\n", INDEX);                                                      \
+			return MND_ERROR_INVALID_VALUE;                                                                \
+		}                                                                                                      \
+	} while (false)
+
 #define CHECK_DEVICE_INDEX(INDEX)                                                                                      \
 	do {                                                                                                           \
 		if (INDEX >= root->ipc_c.ism->isdev_count) {                                                           \
@@ -94,6 +108,7 @@ enum role_enum
 			return MND_ERROR_INVALID_VALUE;                                                                \
 		}                                                                                                      \
 	} while (false)
+
 
 static int
 get_client_info(mnd_root_t *root, uint32_t client_id)
@@ -104,6 +119,28 @@ get_client_info(mnd_root_t *root, uint32_t client_id)
 	if (r != XRT_SUCCESS) {
 		PE("Failed to get client info for client id: %u.\n", client_id);
 		return MND_ERROR_INVALID_VALUE;
+	}
+
+	return MND_SUCCESS;
+}
+
+static mnd_result_t
+update_tracking_origin_list_and_infos(mnd_root_t *root)
+{
+	xrt_result_t xret = ipc_call_tracking_origin_get_list(&root->ipc_c, &root->tracking_origin_list);
+	if (xret != XRT_SUCCESS) {
+		PE("Failed ipc_call_tracking_origin_get_list '%i'", xret);
+		return MND_ERROR_OPERATION_FAILED;
+	}
+
+	for (uint32_t i = 0; i < root->tracking_origin_list.origin_count; i++) {
+		uint32_t id = root->tracking_origin_list.origins[i].id;
+
+		xret = ipc_call_tracking_origin_get_info(&root->ipc_c, id, &root->origin_infos[i]);
+		if (xret != XRT_SUCCESS) {
+			PE("Failed ipc_call_tracking_origin_get_list '%i'", xret);
+			return MND_ERROR_OPERATION_FAILED;
+		}
 	}
 
 	return MND_SUCCESS;
@@ -156,6 +193,12 @@ mnd_root_create(mnd_root_t **out_root)
 	}
 	if (!is_system_available) {
 		PE("System isn't available, devices won't be available!");
+	}
+
+	mnd_result_t mret = update_tracking_origin_list_and_infos(r);
+	if (mret != MND_SUCCESS) {
+		mnd_root_destroy(&r);
+		return mret;
 	}
 
 	*out_root = r;
@@ -369,7 +412,15 @@ mnd_root_get_device_info_u32(mnd_root_t *root, uint32_t device_index, mnd_proper
 	const struct ipc_shared_device *shared_device = &root->ipc_c.ism->isdevs[device_index];
 
 	switch (prop) {
-	case MND_PROPERTY_TRACKING_ORIGIN_U32: *out_u32 = shared_device->tracking_origin_index; break;
+	case MND_PROPERTY_TRACKING_ORIGIN_U32:
+		for (uint32_t i = 0; i < root->tracking_origin_list.origin_count; i++) {
+			if (shared_device->tracking_origin_id == root->tracking_origin_list.origins[i].id) {
+				*out_u32 = i;
+				return MND_SUCCESS;
+			}
+		}
+		PE("Could not find tracking origin id in origins list '%u'!\n", shared_device->tracking_origin_id);
+		return MND_ERROR_INVALID_VALUE;
 	default: PE("Is not a valid u32 property (%u)", prop); return MND_ERROR_INVALID_PROPERTY;
 	}
 
@@ -538,8 +589,14 @@ mnd_root_set_reference_space_offset(mnd_root_t *root, mnd_reference_space_type_t
 }
 
 mnd_result_t
-mnd_root_get_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, mnd_pose_t *out_offset)
+mnd_root_get_tracking_origin_offset(mnd_root_t *root, uint32_t origin_index, mnd_pose_t *out_offset)
 {
+	CHECK_NOT_NULL(root);
+	CHECK_NOT_NULL(out_offset);
+	CHECK_ORIGIN_INDEX(origin_index);
+
+	uint32_t origin_id = root->tracking_origin_list.origins[origin_index].id;
+
 	xrt_result_t xret =
 	    ipc_call_space_get_tracking_origin_offset(&root->ipc_c, origin_id, (struct xrt_pose *)out_offset);
 	switch (xret) {
@@ -551,8 +608,14 @@ mnd_root_get_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, mnd_po
 }
 
 mnd_result_t
-mnd_root_set_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, const mnd_pose_t *offset)
+mnd_root_set_tracking_origin_offset(mnd_root_t *root, uint32_t origin_index, const mnd_pose_t *offset)
 {
+	CHECK_NOT_NULL(root);
+	CHECK_NOT_NULL(offset);
+	CHECK_ORIGIN_INDEX(origin_index);
+
+	uint32_t origin_id = root->tracking_origin_list.origins[origin_index].id;
+
 	xrt_result_t xret =
 	    ipc_call_space_set_tracking_origin_offset(&root->ipc_c, origin_id, (struct xrt_pose *)offset);
 	switch (xret) {
@@ -569,25 +632,21 @@ mnd_root_get_tracking_origin_count(mnd_root_t *root, uint32_t *out_track_count)
 	CHECK_NOT_NULL(root);
 	CHECK_NOT_NULL(out_track_count);
 
-	*out_track_count = root->ipc_c.ism->itrack_count;
+	*out_track_count = root->tracking_origin_list.origin_count;
 
 	return MND_SUCCESS;
 }
 
 mnd_result_t
-mnd_root_get_tracking_origin_name(mnd_root_t *root, uint32_t origin_id, const char **out_string)
+mnd_root_get_tracking_origin_name(mnd_root_t *root, uint32_t origin_index, const char **out_string)
 {
 	CHECK_NOT_NULL(root);
 	CHECK_NOT_NULL(out_string);
+	CHECK_ORIGIN_INDEX(origin_index);
 
-	if (origin_id >= root->ipc_c.ism->itrack_count) {
-		PE("Invalid itrack index (%u)", origin_id);
-		return MND_ERROR_INVALID_VALUE;
-	}
+	const struct ipc_tracking_origin_info *itoi = &root->origin_infos[origin_index];
 
-	const struct ipc_shared_tracking_origin *ipcsto = &root->ipc_c.ism->itracks[origin_id];
-
-	*out_string = ipcsto->name;
+	*out_string = itoi->name;
 
 	return MND_SUCCESS;
 }

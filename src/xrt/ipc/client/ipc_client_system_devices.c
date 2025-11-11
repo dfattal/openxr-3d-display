@@ -1,5 +1,5 @@
 // Copyright 2023, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -10,6 +10,7 @@
  */
 
 #include "ipc_client.h"
+#include "ipc_client_tracking_origin.h"
 #include "ipc_client_generated.h"
 
 #include "util/u_system_helpers.h"
@@ -83,12 +84,8 @@ ipc_client_system_devices_destroy(struct xrt_system_devices *xsysd)
 {
 	struct ipc_client_system_devices *usysd = ipc_system_devices(xsysd);
 
-	for (size_t i = 0; i < usysd->xtrack_count; i++) {
-		u_var_remove_root(usysd->xtracks[i]);
-		free(usysd->xtracks[i]);
-		usysd->xtracks[i] = NULL;
-	}
-	usysd->xtrack_count = 0;
+	// Finalize the tracking origin manager (which cleans up all cached tracking origins)
+	ipc_client_tracking_origin_manager_fini(&usysd->tracking_origin_manager);
 
 	u_system_devices_close(&usysd->base.base);
 
@@ -112,7 +109,16 @@ ipc_client_system_devices_create(struct ipc_connection *ipc_c, struct ipc_client
 	icsd->base.base.feature_dec = ipc_client_system_devices_feature_dec;
 	icsd->ipc_c = ipc_c;
 
+	// Initialize tracking origin manager
+	xrt_result_t xret = ipc_client_tracking_origin_manager_init(&icsd->tracking_origin_manager, ipc_c);
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_client_tracking_origin_manager_init", err_free);
+
 	*out_icsd = icsd;
 
 	return XRT_SUCCESS;
+
+err_free:
+	free(icsd);
+
+	return xret;
 }

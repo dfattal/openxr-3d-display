@@ -1,5 +1,5 @@
 // Copyright 2020-2023, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -22,6 +22,8 @@
 #include "shared/ipc_utils.h"
 #include "shared/ipc_protocol.h"
 #include "shared/ipc_message_channel.h"
+
+#include "ipc_client_tracking_origin.h"
 
 #include <stdio.h>
 
@@ -82,9 +84,8 @@ struct ipc_client_system_devices
 	//! Connection to service.
 	struct ipc_connection *ipc_c;
 
-	struct xrt_tracking_origin *xtracks[XRT_SYSTEM_MAX_DEVICES];
-
-	size_t xtrack_count;
+	//! Tracking origin manager for on-demand fetching
+	struct ipc_client_tracking_origin_manager tracking_origin_manager;
 
 	struct xrt_reference feature_use[XRT_DEVICE_FEATURE_MAX_ENUM];
 };

@@ -1,5 +1,5 @@
 // Copyright 2020-2023, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -20,6 +20,7 @@
 #include "os/os_threading.h"
 
 #include "util/u_logging.h"
+#include "util/u_hashmap.h"
 
 #include "shared/ipc_protocol.h"
 #include "shared/ipc_message_channel.h"
@@ -95,6 +96,18 @@ struct ipc_client_state
 
 	//! Has the system part of the shm initialized.
 	bool has_init_shm_system;
+
+	struct
+	{
+		/*!
+		 * Array of tracking origins.
+		 *
+		 * We don't control the lifetime of the tracking origins,
+		 * and we only access it from the per client thread,
+		 * so we don't need to lock it.
+		 */
+		struct xrt_tracking_origin *xtracks[XRT_SYSTEM_MAX_DEVICES];
+	} objects;
 
 	//! Session for this client.
 	struct xrt_session *xs;
@@ -370,7 +383,6 @@ struct ipc_server
 	struct xrt_system_compositor *xsysc;
 
 	struct ipc_device idevs[XRT_SYSTEM_MAX_DEVICES];
-	struct xrt_tracking_origin *xtracks[XRT_SYSTEM_MAX_DEVICES];
 
 	struct ipc_shared_memory *isms[IPC_MAX_CLIENTS];
 

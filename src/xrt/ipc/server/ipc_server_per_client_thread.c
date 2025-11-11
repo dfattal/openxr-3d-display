@@ -1,5 +1,5 @@
 // Copyright 2020-2023, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -131,6 +131,15 @@ common_shutdown(volatile struct ipc_client_state *ics)
 
 		xrt_system_devices_feature_dec(ics->server->xsysd, (enum xrt_device_feature_type)i);
 		ics->device_feature_used[i] = false;
+	}
+
+	// Clear the tracking origins array.
+	for (uint32_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
+		/*
+		 * We don't control the lifetime of the tracking origins,
+		 * so we just set the pointer to NULL.
+		 */
+		ics->objects.xtracks[i] = NULL;
 	}
 
 	// Make sure undestroyed plane detections are cleaned up

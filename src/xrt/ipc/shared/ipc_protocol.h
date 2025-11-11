@@ -1,5 +1,5 @@
 // Copyright 2020-2024 Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -60,11 +60,36 @@ typedef int pid_t;
  */
 
 /*!
+ * Information about a device in the device list.
+ *
+ * @ingroup ipc
+ */
+struct ipc_tracking_origin_list_entry
+{
+	//! Tracking origin ID
+	uint32_t id;
+};
+
+/*!
+ * A list of the current tracking origins.
+ *
+ * @ingroup ipc
+ */
+struct ipc_tracking_origin_list
+{
+	//! Number of tracking origins.
+	uint32_t origin_count;
+
+	//! Compact list of tracking origins.
+	struct ipc_tracking_origin_list_entry origins[XRT_SYSTEM_MAX_DEVICES];
+};
+
+/*!
  * A tracking in the shared memory area.
  *
  * @ingroup ipc
  */
-struct ipc_shared_tracking_origin
+struct ipc_tracking_origin_info
 {
 	//! For debugging.
 	char name[XRT_TRACKING_NAME_LEN];
@@ -108,7 +133,7 @@ struct ipc_shared_device
 	enum xrt_device_type device_type;
 
 	//! Which tracking system origin is this device attached to.
-	uint32_t tracking_origin_index;
+	uint32_t tracking_origin_id;
 
 	//! A string describing the device.
 	char str[XRT_DEVICE_NAME_LEN];
@@ -194,18 +219,6 @@ struct ipc_shared_memory
 	 * The git revision of the service, used by clients to detect version mismatches.
 	 */
 	char u_git_tag[IPC_VERSION_NAME_LEN];
-
-	/*!
-	 * Number of elements in @ref itracks that are populated/valid.
-	 */
-	uint32_t itrack_count;
-
-	/*!
-	 * @brief Array of shared tracking origin data.
-	 *
-	 * Only @ref itrack_count elements are populated/valid.
-	 */
-	struct ipc_shared_tracking_origin itracks[XRT_SYSTEM_MAX_DEVICES];
 
 	/*!
 	 * Number of elements in @ref isdevs that are populated/valid.

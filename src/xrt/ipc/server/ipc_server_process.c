@@ -1,5 +1,5 @@
 // Copyright 2020-2024, Collabora, Ltd.
-// Copyright 2024-2025, NVIDIA CORPORATION.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -33,6 +33,7 @@
 #include "shared/ipc_protocol.h"
 #include "shared/ipc_shmem.h"
 #include "server/ipc_server.h"
+#include "server/ipc_server_objects.h"
 #include "server/ipc_server_interface.h"
 
 #include <stdlib.h>
@@ -218,8 +219,10 @@ teardown_all(struct ipc_server *s)
 }
 
 static void
-init_tracking_origins(struct ipc_server *s)
+init_tracking_origins(volatile struct ipc_client_state *ics)
 {
+	struct ipc_server *s = ics->server;
+
 	for (size_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
 		struct xrt_device *xdev = s->idevs[i].xdev;
 		if (xdev == NULL) {
@@ -228,16 +231,13 @@ init_tracking_origins(struct ipc_server *s)
 
 		struct xrt_tracking_origin *xtrack = xdev->tracking_origin;
 		assert(xtrack != NULL);
-		size_t index = 0;
 
-		for (; index < XRT_SYSTEM_MAX_DEVICES; index++) {
-			if (s->xtracks[index] == NULL) {
-				s->xtracks[index] = xtrack;
-				break;
-			}
-			if (s->xtracks[index] == xtrack) {
-				break;
-			}
+		// Get or add tracking origin ID
+		uint32_t tracking_origin_id = 0;
+		xrt_result_t xret = ipc_server_objects_get_xtrack_id_or_add(ics, xtrack, &tracking_origin_id);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(s, "Failed to get/add tracking origin ID for: '%s'", xtrack->name);
+			continue;
 		}
 	}
 }
@@ -318,25 +318,8 @@ init_system_shm_state(struct ipc_server *s, volatile struct ipc_client_state *cs
 	uint32_t count = 0;
 	struct ipc_shared_memory *ism = s->isms[cs->server_thread_index];
 
-	// Setup the tracking origins.
-	count = 0;
-	for (size_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
-		struct xrt_tracking_origin *xtrack = s->xtracks[i];
-		if (xtrack == NULL) {
-			continue;
-		}
-
-		// The position of the tracking origin matches that in the
-		// server's memory.
-		assert(i < XRT_SYSTEM_MAX_DEVICES);
-
-		struct ipc_shared_tracking_origin *itrack = &ism->itracks[count++];
-		memcpy(itrack->name, xtrack->name, sizeof(itrack->name));
-		itrack->type = xtrack->type;
-		itrack->offset = xtrack->initial_offset;
-	}
-
-	ism->itrack_count = count;
+	// Tracking origins are no longer copied to shared memory.
+	// They are fetched on-demand via IPC calls.
 
 	count = 0;
 	uint32_t input_index = 0;
@@ -361,18 +344,13 @@ init_system_shm_state(struct ipc_server *s, volatile struct ipc_client_state *cs
 		isdev->device_type = xdev->device_type;
 		isdev->supported = xdev->supported;
 
-		// Setup the tracking origin.
-		isdev->tracking_origin_index = (uint32_t)-1;
-		for (uint32_t k = 0; k < XRT_SYSTEM_MAX_DEVICES; k++) {
-			if (xdev->tracking_origin != s->xtracks[k]) {
-				continue;
-			}
+		// Setup the tracking origin ID.
+		uint32_t tracking_origin_id = UINT32_MAX;
+		xrt_result_t xret =
+		    ipc_server_objects_get_xtrack_id_or_add(cs, xdev->tracking_origin, &tracking_origin_id);
+		assert(xret == XRT_SUCCESS);
 
-			isdev->tracking_origin_index = k;
-			break;
-		}
-
-		assert(isdev->tracking_origin_index != (uint32_t)-1);
+		isdev->tracking_origin_id = tracking_origin_id;
 
 		// Initial update.
 		xrt_device_update_inputs(xdev);
@@ -843,11 +821,11 @@ ipc_server_init_system_if_available_locked(struct ipc_server *s,
 
 			// Always succeeds.
 			init_idevs(s);
-			init_tracking_origins(s);
 		}
 	}
 
 	if (available && ics != NULL && !ics->has_init_shm_system) {
+		init_tracking_origins(ics);
 		init_system_shm_state(s, ics);
 		ics->has_init_shm_system = true;
 	}

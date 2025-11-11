@@ -1,5 +1,5 @@
 // Copyright 2020-2024, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -17,6 +17,7 @@
 #include "util/u_trace_marker.h"
 
 #include "server/ipc_server.h"
+#include "server/ipc_server_objects.h"
 #include "ipc_server_generated.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_results.h"
@@ -31,6 +32,12 @@
  * Helper functions.
  *
  */
+
+#define GET_XTRACK_OR_RETURN(ICS, ID, XTRACK)                                                                          \
+	do {                                                                                                           \
+		xrt_result_t xret = ipc_server_objects_get_xtrack_and_validate((ICS), ID, &(XTRACK));                  \
+		IPC_CHK_AND_RET((ICS)->server, xret, "ipc_server_objects_get_xtrack_and_validate");                    \
+	} while (0)
 
 static xrt_result_t
 validate_device_id(volatile struct ipc_client_state *ics, int64_t device_id, struct xrt_device **out_device)
@@ -58,26 +65,6 @@ validate_device_id(volatile struct ipc_client_state *ics, int64_t device_id, str
 			return res;                                                                                    \
 		}                                                                                                      \
 	} while (0)
-
-
-static xrt_result_t
-validate_origin_id(volatile struct ipc_client_state *ics, int64_t origin_id, struct xrt_tracking_origin **out_xtrack)
-{
-	if (origin_id >= XRT_SYSTEM_MAX_DEVICES) {
-		IPC_ERROR(ics->server, "Invalid origin ID (origin_id >= XRT_SYSTEM_MAX_DEVICES)!");
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	struct xrt_tracking_origin *xtrack = ics->server->xtracks[origin_id];
-	if (xtrack == NULL) {
-		IPC_ERROR(ics->server, "Invalid origin ID (xtrack is NULL)!");
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	*out_xtrack = xtrack;
-
-	return XRT_SUCCESS;
-}
 
 static xrt_result_t
 validate_swapchain_state(volatile struct ipc_client_state *ics, uint32_t *out_index)
@@ -946,11 +933,9 @@ ipc_handle_space_get_tracking_origin_offset(volatile struct ipc_client_state *ic
                                             struct xrt_pose *out_offset)
 {
 	struct xrt_space_overseer *xso = ics->server->xso;
-	struct xrt_tracking_origin *xto;
-	xrt_result_t xret = validate_origin_id(ics, origin_id, &xto);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
+	struct xrt_tracking_origin *xto = NULL;
+	GET_XTRACK_OR_RETURN(ics, origin_id, xto);
+
 	return xrt_space_overseer_get_tracking_origin_offset(xso, xto, out_offset);
 }
 
@@ -960,11 +945,9 @@ ipc_handle_space_set_tracking_origin_offset(volatile struct ipc_client_state *ic
                                             const struct xrt_pose *offset)
 {
 	struct xrt_space_overseer *xso = ics->server->xso;
-	struct xrt_tracking_origin *xto;
-	xrt_result_t xret = validate_origin_id(ics, origin_id, &xto);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
+	struct xrt_tracking_origin *xto = NULL;
+	GET_XTRACK_OR_RETURN(ics, origin_id, xto);
+
 	return xrt_space_overseer_set_tracking_origin_offset(xso, xto, offset);
 }
 
@@ -1917,6 +1900,48 @@ ipc_handle_compositor_semaphore_destroy(volatile struct ipc_client_state *ics, u
 
 	// Drop our reference, does NULL checking. Cast away volatile.
 	xrt_compositor_semaphore_reference((struct xrt_compositor_semaphore **)&ics->xcsems[id], NULL);
+
+	return XRT_SUCCESS;
+}
+
+
+/*
+ *
+ * Tracking origin functions.
+ *
+ */
+
+xrt_result_t
+ipc_handle_tracking_origin_get_list(volatile struct ipc_client_state *ics, struct ipc_tracking_origin_list *out_list)
+{
+	// Count and collect origin IDs.
+	uint32_t count = 0;
+	for (uint32_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
+		struct xrt_tracking_origin *xtrack = ics->objects.xtracks[i];
+		if (xtrack != NULL) {
+			out_list->origins[count].id = i;
+			count++;
+		}
+	}
+
+	out_list->origin_count = count;
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_tracking_origin_get_info(volatile struct ipc_client_state *ics,
+                                    uint32_t tracking_origin_id,
+                                    struct ipc_tracking_origin_info *out_info)
+{
+	// Validate the tracking origin ID and get the tracking origin
+	struct xrt_tracking_origin *xtrack = NULL;
+	GET_XTRACK_OR_RETURN(ics, tracking_origin_id, xtrack);
+
+	// Copy tracking origin info to output
+	memcpy(out_info->name, xtrack->name, sizeof(out_info->name));
+	out_info->type = xtrack->type;
+	out_info->offset = xtrack->initial_offset;
 
 	return XRT_SUCCESS;
 }

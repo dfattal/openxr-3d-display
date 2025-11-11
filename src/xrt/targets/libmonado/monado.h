@@ -1,4 +1,5 @@
 // Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -433,13 +434,13 @@ mnd_root_set_reference_space_offset(mnd_root_t *root, mnd_reference_space_type_t
  * Supported in version 1.3 and above.
  *
  * @param root The libmonado state.
- * @param origin_id The ID of the tracking origin.
+ * @param origin_index The index of the tracking origin into the internal list.
  * @param[out] out_offset A pointer to where the offset should be written.
  *
  * @return MND_SUCCESS on success
  */
 mnd_result_t
-mnd_root_get_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, mnd_pose_t *out_offset);
+mnd_root_get_tracking_origin_offset(mnd_root_t *root, uint32_t origin_index, mnd_pose_t *out_offset);
 
 /*!
  * Apply an offset to the specified tracking origin.
@@ -447,13 +448,13 @@ mnd_root_get_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, mnd_po
  * Supported in version 1.3 and above.
  *
  * @param root The libmonado state.
- * @param origin_id The ID of the tracking origin.
+ * @param origin_index The index of the tracking origin into the internal list.
  * @param offset A pointer to valid xrt_pose.
  *
  * @return MND_SUCCESS on success
  */
 mnd_result_t
-mnd_root_set_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, const mnd_pose_t *offset);
+mnd_root_set_tracking_origin_offset(mnd_root_t *root, uint32_t origin_index, const mnd_pose_t *offset);
 
 /*!
  * Retrieve the number of tracking origins available.
@@ -474,13 +475,13 @@ mnd_root_get_tracking_origin_count(mnd_root_t *root, uint32_t *out_track_count);
  * Supported in version 1.3 and above.
  *
  * @param root The libmonado state.
- * @param origin_id The ID of a tracking origin.
+ * @param origin_index The index of the tracking origin into the internal list.
  * @param out_string The pointer to write the name's pointer to.
  *
  * @return MND_SUCCESS on success
  */
 mnd_result_t
-mnd_root_get_tracking_origin_name(mnd_root_t *root, uint32_t origin_id, const char **out_string);
+mnd_root_get_tracking_origin_name(mnd_root_t *root, uint32_t origin_index, const char **out_string);
 
 /*!
  * Get battery status of a device.
