@@ -1,5 +1,5 @@
 # Copyright 2018-2024, Collabora, Ltd.
-# Copyright 2024-2025, NVIDIA CORPORATION.
+# Copyright 2024-2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 
 cmake_minimum_required(VERSION 3.22)
@@ -65,6 +65,7 @@ include(OptionWithDeps)
 include(SPIR-V)
 include(GNUInstallDirs)
 include(MergeJSON)
+include(GenerateMacroLists)
 if(NOT GIT_DESC)
 	include(GetGitRevisionDescription)
 	git_describe(GIT_DESC "--always")
