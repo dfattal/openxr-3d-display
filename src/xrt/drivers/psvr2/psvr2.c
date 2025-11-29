@@ -26,6 +26,7 @@
 #include "math/m_clock_tracking.h"
 #include "math/m_mathinclude.h"
 #include "math/m_relation_history.h"
+#include "math/m_vec3.h"
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
@@ -577,6 +578,8 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read)
 		hmd->last_slam_ns += (timepoint_ns)slam_ts_delta_us * U_TIME_1US_IN_NS;
 	}
 
+	const struct xrt_quat old_pose_orientation = hmd->last_slam_pose.orientation;
+
 	//@todo: Manual axis correction should come from calibration somewhere I think
 	hmd->last_slam_ts_us = slam.ts_us;
 	hmd->last_slam_pose.position.x = slam.pos[2];
@@ -586,6 +589,16 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read)
 	hmd->last_slam_pose.orientation.x = -slam.orient[2];
 	hmd->last_slam_pose.orientation.y = -slam.orient[1];
 	hmd->last_slam_pose.orientation.z = slam.orient[3];
+
+	// Always choose nearest quaternion to last slam pose. This prevents the motion estimation from thinking the
+	// device has rotated nearly 360 degrees when the SLAM tracker gives us the 2nd poled quaternion for the
+	// orientation, since it does not appear to do any kind of continuity checking itself.
+	if (math_quat_dot(&old_pose_orientation, &hmd->last_slam_pose.orientation) < 0.0f) {
+		hmd->last_slam_pose.orientation.w = -hmd->last_slam_pose.orientation.w;
+		hmd->last_slam_pose.orientation.x = -hmd->last_slam_pose.orientation.x;
+		hmd->last_slam_pose.orientation.y = -hmd->last_slam_pose.orientation.y;
+		hmd->last_slam_pose.orientation.z = -hmd->last_slam_pose.orientation.z;
+	}
 
 	struct xrt_pose tmp = hmd->slam_correction_pose;
 	math_quat_normalize(&tmp.orientation);
