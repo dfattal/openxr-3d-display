@@ -1546,10 +1546,6 @@ struct oxr_system
 	XrReferenceSpaceType reference_spaces[5];
 	uint32_t reference_space_count;
 
-	//! Cache of the last known system roles, see @ref xrt_system_roles::generation_id
-	struct xrt_system_roles dynamic_roles_cache;
-	struct os_mutex sync_actions_mutex;
-
 	struct xrt_visibility_mask *visibility_mask[2];
 
 #ifdef OXR_HAVE_MNDX_xdev_space
@@ -1859,6 +1855,12 @@ struct oxr_session
 	 */
 	size_t profiles_on_attachment_size;
 	struct oxr_interaction_profile **profiles_on_attachment;
+
+	//! Cache of the last known system roles, see @ref xrt_system_roles::generation_id
+	struct xrt_system_roles dynamic_roles_cache;
+
+	//! Protects access to dynamic_roles_cache during sync actions
+	struct os_mutex sync_actions_mutex;
 
 	/*!
 	 * Currently bound interaction profile.

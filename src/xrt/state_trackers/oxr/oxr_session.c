@@ -1105,6 +1105,7 @@ oxr_session_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 	os_precise_sleeper_deinit(&sess->sleeper);
 	oxr_frame_sync_fini(&sess->frame_sync);
 	os_mutex_destroy(&sess->active_wait_frames_lock);
+	os_mutex_destroy(&sess->sync_actions_mutex);
 
 	free(sess);
 
@@ -1134,6 +1135,10 @@ oxr_session_allocate_and_init(struct oxr_logger *log,
 
 	sess->active_wait_frames = 0;
 	os_mutex_init(&sess->active_wait_frames_lock);
+
+	// Initialize dynamic roles cache and mutex
+	sess->dynamic_roles_cache = (struct xrt_system_roles)XRT_SYSTEM_ROLES_INIT;
+	os_mutex_init(&sess->sync_actions_mutex);
 
 	// Debug and user options.
 	sess->ipd_meters = debug_get_num_option_ipd() / 1000.0f;

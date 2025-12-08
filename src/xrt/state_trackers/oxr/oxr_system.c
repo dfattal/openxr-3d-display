@@ -252,7 +252,6 @@ oxr_system_fill_in(
 
 	sys->inst = inst;
 	sys->systemId = systemId;
-	sys->dynamic_roles_cache = (struct xrt_system_roles)XRT_SYSTEM_ROLES_INIT;
 
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 	sys->vulkan_enable2_instance = VK_NULL_HANDLE;

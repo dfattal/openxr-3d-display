@@ -61,10 +61,10 @@ STATIC_WRAP(hand_tracking_conforming_right)
 #define MAKE_GET_DYN_ROLES_FN(ROLE)                                                                                    \
 	static inline struct xrt_device *get_role_##ROLE(struct oxr_session *sess)                                     \
 	{                                                                                                              \
-		const bool is_locked = 0 == os_mutex_trylock(&sess->sys->sync_actions_mutex);                          \
-		const int32_t xdev_idx = sess->sys->dynamic_roles_cache.ROLE;                                          \
+		const bool is_locked = 0 == os_mutex_trylock(&sess->sync_actions_mutex);                               \
+		const int32_t xdev_idx = sess->dynamic_roles_cache.ROLE;                                               \
 		if (is_locked) {                                                                                       \
-			os_mutex_unlock(&sess->sys->sync_actions_mutex);                                               \
+			os_mutex_unlock(&sess->sync_actions_mutex);                                                    \
 		}                                                                                                      \
 		struct xrt_system_devices *xsysd = sess->sys->xsysd;                                                   \
 		if (xdev_idx < 0 || xdev_idx >= (int32_t)xsysd->xdev_count) {                                          \
@@ -131,10 +131,10 @@ get_role_profile_hand_tracking_conforming_right(struct oxr_session *sess)
 #define MAKE_GET_DYN_ROLE_PROFILE_FN(ROLE)                                                                             \
 	static inline enum xrt_device_name get_role_profile_##ROLE(struct oxr_session *sess)                           \
 	{                                                                                                              \
-		const bool is_locked = 0 == os_mutex_trylock(&sess->sys->sync_actions_mutex);                          \
-		const enum xrt_device_name profile_name = sess->sys->dynamic_roles_cache.ROLE##_profile;               \
+		const bool is_locked = 0 == os_mutex_trylock(&sess->sync_actions_mutex);                               \
+		const enum xrt_device_name profile_name = sess->dynamic_roles_cache.ROLE##_profile;                    \
 		if (is_locked) {                                                                                       \
-			os_mutex_unlock(&sess->sys->sync_actions_mutex);                                               \
+			os_mutex_unlock(&sess->sync_actions_mutex);                                                    \
 		}                                                                                                      \
 		return profile_name;                                                                                   \
 	}
