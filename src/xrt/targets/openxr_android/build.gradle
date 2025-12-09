@@ -233,25 +233,32 @@ android {
         }
     }
 
+    // Base configuration closures for flavor reuse
+    def inProcessBaseConfig = { flavor, appName ->
+        flavor.dimension 'deployment'
+        flavor.applicationIdSuffix '.in_process'
+        flavor.externalNativeBuild.cmake.arguments += "-DXRT_FEATURE_SERVICE=OFF"
+        flavor.externalNativeBuild.cmake.targets "openxr_monado"
+        flavor.buildConfigField "boolean", "inProcess", "true"
+        flavor.resValue "string", "app_name", appName
+    }
+
+    def outOfProcessBaseConfig = { flavor, appName ->
+        flavor.dimension 'deployment'
+        flavor.applicationIdSuffix '.out_of_process'
+        flavor.externalNativeBuild.cmake.arguments += "-DXRT_FEATURE_SERVICE=ON"
+        flavor.externalNativeBuild.cmake.targets "openxr_monado", "monado-service"
+        flavor.buildConfigField "boolean", "inProcess", "false"
+        flavor.resValue "string", "app_name", appName
+    }
+
     flavorDimensions = ['deployment']
     productFlavors {
         inProcess {
-            dimension 'deployment'
-            applicationIdSuffix '.in_process'
-            externalNativeBuild.cmake.arguments += "-DXRT_FEATURE_SERVICE=OFF"
-            externalNativeBuild.cmake.targets "openxr_monado"
-
-            buildConfigField "boolean", "inProcess", "true"
-            resValue "string", "app_name", "Monado In Process (Debugging)"
+            inProcessBaseConfig(it, "Monado In Process (Debugging)")
         }
         outOfProcess {
-            dimension 'deployment'
-            applicationIdSuffix '.out_of_process'
-            externalNativeBuild.cmake.arguments += "-DXRT_FEATURE_SERVICE=ON"
-            externalNativeBuild.cmake.targets "openxr_monado", "monado-service"
-
-            buildConfigField "boolean", "inProcess", "false"
-            resValue "string", "app_name", "Monado XR"
+            outOfProcessBaseConfig(it, "Monado XR")
         }
     }
     hilt {
@@ -299,7 +306,6 @@ aboutLibraries {
 
 dependencies {
     implementation project(':src:xrt:auxiliary:cardboard')
-    outOfProcessImplementation project(':src:xrt:ipc')
     implementation project(':src:xrt:auxiliary')
     implementation project(':src:xrt:targets:android_common')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
@@ -318,6 +324,13 @@ dependencies {
     implementation "com.google.dagger:hilt-android:$hiltVersion"
     kapt "com.google.dagger:hilt-compiler:$hiltVersion"
 
+}
+
+// Automatically add IPC dependency to all out-of-process flavors
+android.productFlavors.configureEach { flavor ->
+    if (flavor.name.startsWith("outOfProcess")) {
+        dependencies.add("${flavor.name}Implementation", project(':src:xrt:ipc'))
+    }
 }
 
 // For signing of release binaries - env var must contain an absolute path
