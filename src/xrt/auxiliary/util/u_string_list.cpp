@@ -13,6 +13,10 @@
 #include "u_string_list.h"
 #include "u_string_list.hpp"
 
+#include <algorithm>
+#include <cstring>
+#include <string>
+
 
 /*
  *
@@ -29,6 +33,122 @@ struct u_string_list
 
 	StringList list;
 };
+
+
+/*
+ *
+ * Helpers
+ *
+ */
+
+enum class ExtensionType
+{
+	KHR = 0,         // Khronos extensions
+	EXT = 1,         // Multi-vendor extensions
+	VENDOR = 2,      // Vendor-specific extensions (AMD, NV, INTEL, etc.)
+	EXPERIMENTAL = 3 // Experimental extensions
+};
+
+/*!
+ * @brief Helper class for sorting extension names.
+ *
+ * Encapsulates the sort key with comparison operators for cleaner sorting.
+ */
+struct ExtensionSortKey
+{
+	std::string api_prefix;
+	ExtensionType type;
+	std::string name;
+
+	/*!
+	 * Sorts in field declaration order:
+	 *
+	 * 1. API prefix (VK, XR, etc.)
+	 * 2. Extension type (KHR < EXT < VENDOR < EXPERIMENTAL)
+	 * 3. Alphabetically by full name
+	 */
+	auto
+	operator<=>(const ExtensionSortKey &other) const = default;
+};
+
+/*!
+ * @brief Check if a vendor string represents an experimental extension.
+ *
+ * Experimental extensions have vendor codes ending with 'X' optionally followed
+ * by digits.
+ *
+ * Examples: NVX, AMDX, NVX1, NVX2, INTELX
+ *
+ * Special case: QNX is a legitimate vendor (QNX operating system), not
+ * experimental.
+ */
+static bool
+is_experimental_vendor(const std::string &vendor)
+{
+	// Special case: QNX is a legitimate vendor, not experimental
+	if (vendor == "QNX") {
+		return false;
+	}
+
+	// Check if vendor ends with 'X' optionally followed by digits
+	if (vendor.empty()) {
+		return false;
+	}
+
+	size_t len = vendor.length();
+	size_t i = len - 1;
+
+	// Skip trailing digits
+	while (i > 0 && std::isdigit(vendor[i])) {
+		i--;
+	}
+
+	// Check if we found an 'X' and there's something before it
+	return (vendor[i] == 'X' && i > 0);
+}
+
+/*!
+ * @brief Get the extension type and API prefix for sorting purposes.
+ *
+ * Returns an ExtensionSortKey for comparison.
+ */
+static ExtensionSortKey
+get_extension_sort_key(const char *ext)
+{
+	std::string name(ext);
+
+	// Find the first underscore to separate API prefix (e.g., "VK", "XR")
+	size_t first_underscore = name.find('_');
+	if (first_underscore == std::string::npos) {
+		// No underscore, treat as is
+		return {name, ExtensionType::VENDOR, name};
+	}
+
+	std::string api_prefix = name.substr(0, first_underscore);
+
+	// Find the second underscore to get the vendor/type part
+	size_t second_underscore = name.find('_', first_underscore + 1);
+	if (second_underscore == std::string::npos) {
+		// Only one underscore, treat as vendor
+		return {api_prefix, ExtensionType::VENDOR, name};
+	}
+
+	std::string vendor = name.substr(first_underscore + 1, second_underscore - first_underscore - 1);
+
+	// Determine extension type based on vendor string
+	ExtensionType type;
+	if (vendor == "KHR") {
+		type = ExtensionType::KHR;
+	} else if (vendor == "EXT") {
+		type = ExtensionType::EXT;
+	} else if (is_experimental_vendor(vendor)) {
+		type = ExtensionType::EXPERIMENTAL;
+	} else {
+		type = ExtensionType::VENDOR;
+	}
+
+	return {api_prefix, type, name};
+}
 
 
 /*
@@ -157,6 +277,23 @@ bool
 u_string_list_contains(struct u_string_list *usl, const char *str)
 {
 	return usl->list.contains(str);
+}
+
+void
+u_string_list_sort_extensions(struct u_string_list *usl)
+{
+	if (usl == nullptr || usl->list.size() == 0) {
+		return;
+	}
+
+	// Get the data pointer and size from the StringList
+	// We need to const_cast because std::sort needs non-const iterators
+	auto data_ptr = const_cast<const char **>(usl->list.data());
+	auto count = usl->list.size();
+	auto cmp = [](const char *a, const char *b) { return get_extension_sort_key(a) < get_extension_sort_key(b); };
+
+	// Sort using our custom comparison function
+	std::sort(data_ptr, data_ptr + count, cmp);
 }
 
 void

@@ -135,6 +135,18 @@ bool
 u_string_list_contains(struct u_string_list *usl, const char *str);
 
 /*!
+ * @brief Sort the list of strings suitable for extension lists.
+ *
+ * The list will be sorted first by API (VK, XR, etc.), then all KHR extensions,
+ * then all EXT extensions, then all Vendor extensions, then all experimental
+ * extensions. (Alphabetical within each group.)
+ *
+ * @param usl self pointer
+ */
+void
+u_string_list_sort_extensions(struct u_string_list *usl);
+
+/*!
  * @brief Destroy a string list.
  *
  * Performs null checks and sets your pointer to zero.
