@@ -1,4 +1,5 @@
 // Copyright 2020-2023, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -251,7 +252,7 @@ struct xrt_session_event_sink
  *
  * @public @memberof xrt_session_event_sink
  */
-XRT_CHECK_RESULT static inline xrt_result_t
+XRT_CHECK_RESULT XRT_NONNULL_ALL static inline xrt_result_t
 xrt_session_event_sink_push(struct xrt_session_event_sink *xses, const union xrt_session_event *xse)
 {
 	return xses->push_event(xses, xse);
@@ -307,7 +308,7 @@ struct xrt_session
  *
  * @public @memberof xrt_session
  */
-XRT_CHECK_RESULT static inline xrt_result_t
+XRT_CHECK_RESULT XRT_NONNULL_ALL static inline xrt_result_t
 xrt_session_poll_events(struct xrt_session *xs, union xrt_session_event *out_xse)
 {
 	return xs->poll_events(xs, out_xse);
@@ -336,7 +337,7 @@ xrt_session_request_exit(struct xrt_session *xs)
  *
  * @public @memberof xrt_session
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_session_destroy(struct xrt_session **xs_ptr)
 {
 	struct xrt_session *xs = *xs_ptr;

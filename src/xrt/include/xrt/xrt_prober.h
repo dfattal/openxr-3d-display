@@ -1,4 +1,5 @@
 // Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -325,7 +326,7 @@ struct xrt_prober
  *
  * @public @memberof xrt_prober
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_prober_probe(struct xrt_prober *xp)
 {
 	return xp->probe(xp);
@@ -338,7 +339,7 @@ xrt_prober_probe(struct xrt_prober *xp)
  *
  * @public @memberof xrt_prober
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_prober_lock_list(struct xrt_prober *xp, struct xrt_prober_device ***out_devices, size_t *out_device_count)
 {
 	return xp->lock_list(xp, out_devices, out_device_count);
@@ -351,7 +352,7 @@ xrt_prober_lock_list(struct xrt_prober *xp, struct xrt_prober_device ***out_devi
  *
  * @public @memberof xrt_prober
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_prober_unlock_list(struct xrt_prober *xp, struct xrt_prober_device ***devices)
 {
 	return xp->unlock_list(xp, devices);
@@ -364,7 +365,7 @@ xrt_prober_unlock_list(struct xrt_prober *xp, struct xrt_prober_device ***device
  *
  * @public @memberof xrt_prober
  */
-static inline int
+XRT_NONNULL_ALL static inline int
 xrt_prober_dump(struct xrt_prober *xp, bool use_stdout)
 {
 	return xp->dump(xp, use_stdout);
@@ -377,7 +378,7 @@ xrt_prober_dump(struct xrt_prober *xp, bool use_stdout)
  *
  * @public @memberof xrt_prober
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_prober_create_system(struct xrt_prober *xp,
                          struct xrt_session_event_sink *broadcast,
                          struct xrt_system_devices **out_xsysd,
@@ -393,7 +394,7 @@ xrt_prober_create_system(struct xrt_prober *xp,
  *
  * @public @memberof xrt_prober
  */
-static inline int
+XRT_NONNULL_ALL static inline int
 xrt_prober_select(struct xrt_prober *xp, struct xrt_device **xdevs, size_t xdev_capacity)
 {
 	return xp->select(xp, xdevs, xdev_capacity);
@@ -406,7 +407,7 @@ xrt_prober_select(struct xrt_prober *xp, struct xrt_device **xdevs, size_t xdev_
  *
  * @public @memberof xrt_prober
  */
-static inline int
+XRT_NONNULL_ALL static inline int
 xrt_prober_open_hid_interface(struct xrt_prober *xp,
                               struct xrt_prober_device *xpdev,
                               int iface,
@@ -422,7 +423,7 @@ xrt_prober_open_hid_interface(struct xrt_prober *xp,
  *
  * @public @memberof xrt_prober
  */
-static inline int
+XRT_NONNULL_ALL static inline int
 xrt_prober_get_string_descriptor(struct xrt_prober *xp,
                                  struct xrt_prober_device *xpdev,
                                  enum xrt_prober_string which_string,
@@ -439,7 +440,7 @@ xrt_prober_get_string_descriptor(struct xrt_prober *xp,
  *
  * @public @memberof xrt_prober
  */
-static inline bool
+XRT_NONNULL_ALL static inline bool
 xrt_prober_can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 {
 	return xp->can_open(xp, xpdev);
@@ -453,7 +454,7 @@ xrt_prober_can_open(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
  *
  * @public @memberof xrt_prober
  */
-static inline int
+XRT_NONNULL_FIRST static inline int
 xrt_prober_open_video_device(struct xrt_prober *xp,
                              struct xrt_prober_device *xpdev,
                              struct xrt_frame_context *xfctx,
@@ -482,7 +483,7 @@ xrt_prober_list_video_devices(struct xrt_prober *xp, xrt_prober_list_video_func_
  *
  * @public @memberof xrt_prober
  */
-static inline int
+XRT_NONNULL_ALL static inline int
 xrt_prober_get_builders(struct xrt_prober *xp,
                         size_t *out_builder_count,
                         struct xrt_builder ***out_builders,
@@ -501,7 +502,7 @@ xrt_prober_get_builders(struct xrt_prober *xp,
  *
  * @public @memberof xrt_prober
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_prober_destroy(struct xrt_prober **xp_ptr)
 {
 	struct xrt_prober *xp = *xp_ptr;
@@ -623,7 +624,7 @@ struct xrt_builder
  *
  * @public @memberof xrt_builder
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_builder_estimate_system(struct xrt_builder *xb,
                             cJSON *config,
                             struct xrt_prober *xp,
@@ -639,7 +640,7 @@ xrt_builder_estimate_system(struct xrt_builder *xb,
  *
  * @public @memberof xrt_builder
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_builder_open_system(struct xrt_builder *xb,
                         cJSON *config,
                         struct xrt_prober *xp,
@@ -658,7 +659,7 @@ xrt_builder_open_system(struct xrt_builder *xb,
  *
  * @public @memberof xrt_builder
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_builder_destroy(struct xrt_builder **xb_ptr)
 {
 	struct xrt_builder *xb = *xb_ptr;
@@ -841,7 +842,7 @@ struct xrt_prober_entry_lists
  *
  * @public @memberof xrt_prober
  */
-int
+XRT_NONNULL_ALL int
 xrt_prober_create_with_lists(struct xrt_prober **out_xp, struct xrt_prober_entry_lists *list);
 
 

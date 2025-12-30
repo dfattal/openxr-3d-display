@@ -1,4 +1,5 @@
 // Copyright 2025, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -222,10 +223,10 @@ xrt_future_reference(struct xrt_future **dst, struct xrt_future *src)
  *
  * @public @memberof xrt_future
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_future_get_result(const struct xrt_future *xft, struct xrt_future_result *out_result)
 {
-	assert(xft && xft->get_result);
+	assert(xft->get_result);
 	return xft->get_result(xft, out_result);
 }
 
@@ -236,10 +237,10 @@ xrt_future_get_result(const struct xrt_future *xft, struct xrt_future_result *ou
  *
  * @public @memberof xrt_future
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_future_get_state(const struct xrt_future *xft, enum xrt_future_state *out_state)
 {
-	assert(xft && xft->get_state);
+	assert(xft->get_state);
 	return xft->get_state(xft, out_state);
 }
 
@@ -250,10 +251,10 @@ xrt_future_get_state(const struct xrt_future *xft, enum xrt_future_state *out_st
  *
  * @public @memberof xrt_future
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_future_cancel(struct xrt_future *xft)
 {
-	assert(xft && xft->cancel);
+	assert(xft->cancel);
 	return xft->cancel(xft);
 }
 
@@ -264,10 +265,10 @@ xrt_future_cancel(struct xrt_future *xft)
  *
  * @public @memberof xrt_future
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_future_wait(struct xrt_future *xft, int64_t timeout_ns)
 {
-	assert(xft && xft->wait);
+	assert(xft->wait);
 	return xft->wait(xft, timeout_ns);
 }
 
@@ -278,10 +279,10 @@ xrt_future_wait(struct xrt_future *xft, int64_t timeout_ns)
  *
  * @public @memberof xrt_future
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_future_is_cancel_requested(const struct xrt_future *xft, bool *out_request_cancel)
 {
-	assert(xft && xft->is_cancel_requested);
+	assert(xft->is_cancel_requested);
 	return xft->is_cancel_requested(xft, out_request_cancel);
 }
 
@@ -292,10 +293,10 @@ xrt_future_is_cancel_requested(const struct xrt_future *xft, bool *out_request_c
  *
  * @public @memberof xrt_future
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_future_complete(struct xrt_future *xft, const struct xrt_future_result *ft_result)
 {
-	assert(xft && xft->complete);
+	assert(xft->complete);
 	return xft->complete(xft, ft_result);
 }
 

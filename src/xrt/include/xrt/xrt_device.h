@@ -1,5 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
-// Copyright 2024-2025, NVIDIA CORPORATION.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -749,7 +749,7 @@ struct xrt_device
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_update_inputs(struct xrt_device *xdev)
 {
 	return xdev->update_inputs(xdev);
@@ -762,7 +762,7 @@ xrt_device_update_inputs(struct xrt_device *xdev)
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_tracked_pose(struct xrt_device *xdev,
                             enum xrt_input_name name,
                             int64_t at_timestamp_ns,
@@ -778,7 +778,7 @@ xrt_device_get_tracked_pose(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_hand_tracking(struct xrt_device *xdev,
                              enum xrt_input_name name,
                              int64_t desired_timestamp_ns,
@@ -795,7 +795,7 @@ xrt_device_get_hand_tracking(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_face_tracking(struct xrt_device *xdev,
                              enum xrt_input_name facial_expression_type,
                              int64_t at_timestamp_ns,
@@ -811,7 +811,7 @@ xrt_device_get_face_tracking(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_face_calibration_state_android(struct xrt_device *xdev, bool *out_face_is_calibrated)
 {
 	return xdev->get_face_calibration_state_android(xdev, out_face_is_calibrated);
@@ -824,7 +824,7 @@ xrt_device_get_face_calibration_state_android(struct xrt_device *xdev, bool *out
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_body_skeleton(struct xrt_device *xdev,
                              enum xrt_input_name body_tracking_type,
                              struct xrt_body_skeleton *out_value)
@@ -839,7 +839,7 @@ xrt_device_get_body_skeleton(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_body_joints(struct xrt_device *xdev,
                            enum xrt_input_name body_tracking_type,
                            int64_t desired_timestamp_ns,
@@ -855,7 +855,7 @@ xrt_device_get_body_joints(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_reset_body_tracking_calibration_meta(struct xrt_device *xdev)
 {
 	if (xdev->reset_body_tracking_calibration_meta == NULL) {
@@ -871,7 +871,7 @@ xrt_device_reset_body_tracking_calibration_meta(struct xrt_device *xdev)
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_set_body_tracking_calibration_override_meta(struct xrt_device *xdev, float new_body_height)
 {
 	if (xdev->set_body_tracking_calibration_override_meta == NULL) {
@@ -887,14 +887,14 @@ xrt_device_set_body_tracking_calibration_override_meta(struct xrt_device *xdev, 
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_set_output(struct xrt_device *xdev, enum xrt_output_name name, const struct xrt_output_value *value)
 {
 	xdev->set_output(xdev, name, value);
 	return XRT_SUCCESS;
 }
 
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_output_limits(struct xrt_device *xdev, struct xrt_output_limits *limits)
 {
 	if (xdev->get_output_limits) {
@@ -911,7 +911,7 @@ xrt_device_get_output_limits(struct xrt_device *xdev, struct xrt_output_limits *
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_presence(struct xrt_device *xdev, bool *presence)
 {
 	if (xdev->get_presence) {
@@ -926,7 +926,7 @@ xrt_device_get_presence(struct xrt_device *xdev, bool *presence)
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_begin_plane_detection_ext(struct xrt_device *xdev,
                                      const struct xrt_plane_detector_begin_info_ext *begin_info,
                                      uint64_t plane_detection_id,
@@ -940,7 +940,7 @@ xrt_device_begin_plane_detection_ext(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_destroy_plane_detection_ext(struct xrt_device *xdev, uint64_t plane_detection_id)
 {
 	return xdev->destroy_plane_detection_ext(xdev, plane_detection_id);
@@ -951,7 +951,7 @@ xrt_device_destroy_plane_detection_ext(struct xrt_device *xdev, uint64_t plane_d
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_plane_detection_state_ext(struct xrt_device *xdev,
                                          uint64_t plane_detection_id,
                                          enum xrt_plane_detector_state_ext *out_state)
@@ -964,7 +964,7 @@ xrt_device_get_plane_detection_state_ext(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_plane_detections_ext(struct xrt_device *xdev,
                                     uint64_t plane_detection_id,
                                     struct xrt_plane_detections_ext *out_detections)
@@ -978,7 +978,7 @@ xrt_device_get_plane_detections_ext(struct xrt_device *xdev,
  * @copydoc xrt_device::get_view_poses
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_view_poses(struct xrt_device *xdev,
                           const struct xrt_vec3 *default_eye_relation,
                           int64_t at_timestamp_ns,
@@ -1006,7 +1006,7 @@ xrt_device_get_view_poses(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_compute_distortion(
     struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *out_result)
 {
@@ -1020,7 +1020,7 @@ xrt_device_compute_distortion(
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_visibility_mask(struct xrt_device *xdev,
                                enum xrt_visibility_mask_type type,
                                uint32_t view_index,
@@ -1036,7 +1036,7 @@ xrt_device_get_visibility_mask(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_ref_space_usage(struct xrt_device *xdev,
                            enum xrt_reference_space_type type,
                            enum xrt_input_name name,
@@ -1052,7 +1052,7 @@ xrt_device_ref_space_usage(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline bool
+XRT_NONNULL_ALL static inline bool
 xrt_device_is_form_factor_available(struct xrt_device *xdev, enum xrt_form_factor form_factor)
 {
 	return xdev->is_form_factor_available(xdev, form_factor);
@@ -1065,7 +1065,7 @@ xrt_device_is_form_factor_available(struct xrt_device *xdev, enum xrt_form_facto
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_battery_status(struct xrt_device *xdev, bool *out_present, bool *out_charging, float *out_charge)
 {
 	return xdev->get_battery_status(xdev, out_present, out_charging, out_charge);
@@ -1077,7 +1077,7 @@ xrt_device_get_battery_status(struct xrt_device *xdev, bool *out_present, bool *
  * @copydoc xrt_device::get_brightness
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_brightness(struct xrt_device *xdev, float *out_brightness)
 {
 	return xdev->get_brightness(xdev, out_brightness);
@@ -1089,7 +1089,7 @@ xrt_device_get_brightness(struct xrt_device *xdev, float *out_brightness)
  * @copydoc xrt_device::set_brightness
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_set_brightness(struct xrt_device *xdev, float brightness, bool relative)
 {
 	return xdev->set_brightness(xdev, brightness, relative);
@@ -1102,7 +1102,7 @@ xrt_device_set_brightness(struct xrt_device *xdev, float brightness, bool relati
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_get_compositor_info(struct xrt_device *xdev,
                                const struct xrt_device_compositor_mode *mode,
                                struct xrt_device_compositor_info *out_info)
@@ -1117,7 +1117,7 @@ xrt_device_get_compositor_info(struct xrt_device *xdev,
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_begin_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
 {
 	return xdev->begin_feature(xdev, type);
@@ -1130,7 +1130,7 @@ xrt_device_begin_feature(struct xrt_device *xdev, enum xrt_device_feature_type t
  *
  * @public @memberof xrt_device
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_end_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
 {
 	return xdev->end_feature(xdev, type);
@@ -1143,7 +1143,7 @@ xrt_device_end_feature(struct xrt_device *xdev, enum xrt_device_feature_type typ
  *
  * @public @memberof xrt_device
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_device_destroy(struct xrt_device **xdev_ptr)
 {
 	struct xrt_device *xdev = *xdev_ptr;

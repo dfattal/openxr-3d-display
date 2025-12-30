@@ -113,7 +113,7 @@ xrt_system_create_session(struct xrt_system *xsys,
  *
  * @public @memberof xrt_system
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_system_destroy(struct xrt_system **xsys_ptr)
 {
 	struct xrt_system *xsys = *xsys_ptr;
@@ -362,7 +362,7 @@ struct xrt_system_devices
  *
  * @public @memberof xrt_system_devices
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_system_devices_get_roles(struct xrt_system_devices *xsysd, struct xrt_system_roles *out_roles)
 {
 	return xsysd->get_roles(xsysd, out_roles);
@@ -375,7 +375,7 @@ xrt_system_devices_get_roles(struct xrt_system_devices *xsysd, struct xrt_system
  *
  * @public @memberof xrt_system_devices
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_system_devices_feature_inc(struct xrt_system_devices *xsysd, enum xrt_device_feature_type type)
 {
 	return xsysd->feature_inc(xsysd, type);
@@ -388,7 +388,7 @@ xrt_system_devices_feature_inc(struct xrt_system_devices *xsysd, enum xrt_device
  *
  * @public @memberof xrt_system_devices
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_system_devices_feature_dec(struct xrt_system_devices *xsysd, enum xrt_device_feature_type type)
 {
 	return xsysd->feature_dec(xsysd, type);
@@ -404,7 +404,7 @@ xrt_system_devices_feature_dec(struct xrt_system_devices *xsysd, enum xrt_device
  *
  * @public @memberof xrt_system_devices
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_system_devices_destroy(struct xrt_system_devices **xsysd_ptr)
 {
 	struct xrt_system_devices *xsysd = *xsysd_ptr;

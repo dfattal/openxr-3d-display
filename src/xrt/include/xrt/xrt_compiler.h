@@ -1,4 +1,5 @@
 // Copyright 2019, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -83,6 +84,32 @@
 #define XRT_MAYBE_UNUSED [[maybe_unused]]
 #else
 #define XRT_MAYBE_UNUSED
+#endif
+
+
+/*
+ * To indicate that all pointer parameters must not be null.
+ *
+ * Note: MSVC does not have a function-level equivalent. To get similar checking
+ * on MSVC, individual parameters would need SAL annotations like _In_, _Out_, etc.
+ */
+#if defined(__GNUC__)
+#define XRT_NONNULL_ALL __attribute__((nonnull))
+#else
+#define XRT_NONNULL_ALL
+#endif
+
+
+/*
+ * To indicate that the first parameter must not be null.
+ *
+ * Note: MSVC does not have a function-level equivalent. To get similar checking
+ * on MSVC, individual parameters would need SAL annotations like _In_, _Out_, etc.
+ */
+#if defined(__GNUC__)
+#define XRT_NONNULL_FIRST __attribute__((nonnull(1)))
+#else
+#define XRT_NONNULL_FIRST
 #endif
 
 
