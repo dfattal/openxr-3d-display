@@ -660,6 +660,20 @@ vk_enumerate_physical_device_extension_properties(struct vk_bundle *vk,
                                                   uint32_t *out_prop_count,
                                                   VkExtensionProperties **out_props);
 
+/*!
+ * Get the queue family properties of the given @p VkPhysicalDevice, note this
+ * function does not return a result, it will assert if it can not allocate the
+ * array of properties. If there are no queue family properties, the function
+ * will return a count of 0 and set the output pointer to NULL.
+ *
+ * @ingroup aux_vk
+ */
+void
+vk_get_physical_device_queue_family_properties(struct vk_bundle *vk,
+                                               VkPhysicalDevice physical_device,
+                                               uint32_t *out_prop_count,
+                                               VkQueueFamilyProperties **out_props);
+
 #if defined(VK_KHR_surface) || defined(XRT_DOXYGEN)
 /*!
  * Enumerate the surface formats of the given @p VkSurfaceKHR,

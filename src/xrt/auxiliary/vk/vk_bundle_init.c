@@ -164,13 +164,16 @@ fill_in_device_features(struct vk_bundle *vk, const uint32_t queue_family_index)
 	 * Queue properties.
 	 */
 
+	VkQueueFamilyProperties *props = NULL;
 	uint32_t count = 0;
-	vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physical_device, &count, NULL);
+
+	vk_get_physical_device_queue_family_properties( //
+	    vk,                                         //
+	    vk->physical_device,                        //
+	    &count,                                     //
+	    &props);                                    //
 	assert(count != 0);
 	assert(count > queue_family_index);
-
-	VkQueueFamilyProperties *props = U_TYPED_ARRAY_CALLOC(VkQueueFamilyProperties, count);
-	vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physical_device, &count, props);
 
 	vk->features.timestamp_valid_bits = props[queue_family_index].timestampValidBits;
 	free(props);
@@ -556,14 +559,15 @@ static VkResult
 find_graphics_queue_family(struct vk_bundle *vk, struct vk_queue_family *out_graphics_queue_family)
 {
 	/* Find the first graphics queue */
+	VkQueueFamilyProperties *queue_family_props = NULL;
 	uint32_t queue_family_count = 0;
 	uint32_t i = 0;
-	vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physical_device, &queue_family_count, NULL);
 
-	VkQueueFamilyProperties *queue_family_props = U_TYPED_ARRAY_CALLOC(VkQueueFamilyProperties, queue_family_count);
-
-	vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physical_device, &queue_family_count, queue_family_props);
-
+	vk_get_physical_device_queue_family_properties( //
+	    vk,                                         //
+	    vk->physical_device,                        //
+	    &queue_family_count,                        //
+	    &queue_family_props);                       //
 	if (queue_family_count == 0) {
 		VK_DEBUG(vk, "Failed to get queue properties");
 		goto err_free;
@@ -598,14 +602,15 @@ static VkResult
 find_queue_family(struct vk_bundle *vk, VkQueueFlags required_flags, struct vk_queue_family *out_queue_family)
 {
 	/* Find the "best" queue with the requested flags (prefer queues without graphics) */
+	VkQueueFamilyProperties *queue_family_props = NULL;
 	uint32_t queue_family_count = 0;
 	uint32_t i = 0;
-	vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physical_device, &queue_family_count, NULL);
 
-	VkQueueFamilyProperties *queue_family_props = U_TYPED_ARRAY_CALLOC(VkQueueFamilyProperties, queue_family_count);
-
-	vk->vkGetPhysicalDeviceQueueFamilyProperties(vk->physical_device, &queue_family_count, queue_family_props);
-
+	vk_get_physical_device_queue_family_properties( //
+	    vk,                                         //
+	    vk->physical_device,                        //
+	    &queue_family_count,                        //
+	    &queue_family_props);                       //
 	if (queue_family_count == 0) {
 		VK_DEBUG(vk, "Failed to get queue properties");
 		goto err_free;
