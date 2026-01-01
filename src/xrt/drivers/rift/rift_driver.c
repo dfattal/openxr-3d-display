@@ -538,7 +538,6 @@ rift_devices_create(struct os_hid_device *dev,
 	hmd->base.compute_distortion = rift_hmd_compute_distortion;
 	u_distortion_mesh_fill_in_compute(&hmd->base);
 
-	hmd->pose = (struct xrt_pose)XRT_POSE_IDENTITY;
 	hmd->log_level = debug_get_log_option_rift_log();
 
 	// Print name.
@@ -673,12 +672,18 @@ rift_devices_create(struct os_hid_device *dev,
 	// Setup variable tracker: Optional but useful for debugging
 	u_var_add_root(hmd, "Rift HMD", true);
 	u_var_add_log_level(hmd, &hmd->log_level, "log_level");
+	u_var_add_ro_i32(hmd, (int32_t *)&hmd->variant, "variant");
 	u_var_add_f32(hmd, &hmd->extra_display_info.icd, "ICD");
-	m_imu_3dof_add_vars(&hmd->fusion, hmd, "3dof_");
+	u_var_add_ro_i64_ns(hmd, &hmd->last_remote_sample_time_ns, "last_remote_sample_time_ns");
+	u_var_add_ro_i64_ns(hmd, &hmd->last_sample_local_timestamp_ns, "last_sample_local_timestamp_ns");
+	u_var_add_f32(hmd, &hmd->icd_override_m, "icd_override_m");
 	u_var_add_bool(hmd, &hmd->presence, "presence");
 
-	u_var_add_bool(hmd, &hmd->imu_needs_calibration, "imu_needs_calibration");
+	u_var_add_gui_header(hmd, NULL, "IMU Fusion");
+	m_imu_3dof_add_vars(&hmd->fusion, hmd, "3dof_");
+
 	u_var_add_gui_header(hmd, NULL, "IMU Calibration");
+	u_var_add_bool(hmd, &hmd->imu_needs_calibration, "imu_needs_calibration");
 	u_var_add_vec3_f32(hmd, &hmd->imu_calibration.gyro_offset, "gyro_offset");
 	u_var_add_vec3_f32(hmd, &hmd->imu_calibration.accel_offset, "accel_offset");
 	u_var_add_vec3_f32(hmd, (struct xrt_vec3 *)&hmd->imu_calibration.gyro_matrix.v[0], "gyro_matrix[0..3]");

@@ -430,8 +430,6 @@ struct rift_hmd
 {
 	struct xrt_device base;
 
-	struct xrt_pose pose;
-
 	enum u_logging_level log_level;
 
 	// has built-in mutex so thread safe
