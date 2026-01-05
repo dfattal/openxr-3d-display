@@ -259,6 +259,8 @@ if(XRT_BUILD_DRIVER_RIFT)
 		rift/rift_prober.c
 		rift/rift_usb.c
 		rift/rift_usb.h
+		rift/rift_radio.c
+		rift/rift_radio.h
 		)
 	target_include_directories(drv_rift SYSTEM PRIVATE)
 	target_link_libraries(

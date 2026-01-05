@@ -42,6 +42,7 @@
 #include "rift_distortion.h"
 #include "rift_internal.h"
 #include "rift_usb.h"
+#include "rift_radio.h"
 
 
 /*
@@ -256,7 +257,25 @@ rift_sensor_thread(void *ptr)
 	return NULL;
 }
 
-void *
+static int
+rift_usb_thread_radio_tick(struct rift_hmd *hmd)
+{
+	int result;
+
+	result = rift_radio_handle_read(hmd);
+	if (result < 0) {
+		return result;
+	}
+
+	result = rift_radio_handle_command(hmd);
+	if (result < 0) {
+		return result;
+	}
+
+	return 0;
+}
+
+static void *
 rift_radio_thread(void *ptr)
 {
 	struct rift_hmd *hmd = (struct rift_hmd *)ptr;
@@ -281,8 +300,7 @@ rift_radio_thread(void *ptr)
 	while (os_thread_helper_is_running_locked(&hmd->radio_state.thread) && result >= 0) {
 		os_thread_helper_unlock(&hmd->radio_state.thread);
 
-		// result = rift_usb_thread_radio_tick(hmd);
-		os_nanosleep(OS_NS_PER_USEC * 1000 * 10); // TODO: replace with actual work
+		result = rift_usb_thread_radio_tick(hmd);
 
 		os_thread_helper_lock(&hmd->radio_state.thread);
 #if 0
@@ -328,6 +346,17 @@ rift_hmd_destroy(struct xrt_device *xdev)
 		}
 
 		os_hid_destroy(hmd->radio_dev);
+	}
+
+	if (hmd->device_count >= 0) {
+		os_mutex_destroy(&hmd->device_mutex);
+
+		// Free any sub-devices we created that weren't returned to the caller
+		if (hmd->added_devices > 1) {
+			for (int i = (hmd->added_devices - 1); i < hmd->device_count; i++) {
+				u_device_free(hmd->devices[i]);
+			}
+		}
 	}
 
 	u_device_free(&hmd->base);
@@ -437,6 +466,9 @@ rift_devices_create(struct os_hid_device *hmd_dev,
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 
 	struct rift_hmd *hmd = U_DEVICE_ALLOCATE(struct rift_hmd, flags, 1, 0);
+
+	// Mark mutex as not initialized yet
+	hmd->device_count = -1;
 
 	hmd->variant = variant;
 	hmd->hmd_dev = hmd_dev;
@@ -735,6 +767,13 @@ rift_devices_create(struct os_hid_device *hmd_dev,
 		goto error;
 	}
 
+	result = os_mutex_init(&hmd->device_mutex);
+	if (result < 0) {
+		HMD_ERROR(hmd, "Failed to init radio mutex");
+		goto error;
+	}
+	hmd->device_count = 0;
+
 	if (hmd->radio_dev != NULL) {
 		result = os_thread_helper_init(&hmd->radio_state.thread);
 
@@ -781,9 +820,15 @@ rift_devices_create(struct os_hid_device *hmd_dev,
 	os_nanosleep(time_s_to_ns(debug_get_float_option_rift_startup_wait_time()));
 
 	*out_hmd = hmd;
-	*out_xdevs = &hmd->base;
 
-	return 1;
+	os_mutex_lock(&hmd->device_mutex);
+	out_xdevs[hmd->added_devices++] = &hmd->base;
+	for (int i = 0; i < hmd->device_count; i++) {
+		out_xdevs[hmd->added_devices++] = hmd->devices[i];
+	}
+	os_mutex_unlock(&hmd->device_mutex);
+
+	return hmd->added_devices;
 error:
 	rift_hmd_destroy(&hmd->base);
 	return -1;

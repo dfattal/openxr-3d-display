@@ -44,8 +44,11 @@
 // value taken from LibOVR 0.4.4
 #define DEFAULT_EXTRA_EYE_ROTATION DEG_TO_RAD(30.0f)
 
-#define IN_REPORT_DK2 11
-#define IN_REPORT_CV1_RADIO_KEEPALIVE 13
+#define IN_REPORT_DK2 11                 // sent on the HMD HID interface
+#define IN_REPORT_RADIO_DATA 12          // sent on the radio HID interface
+#define IN_REPORT_CV1_RADIO_KEEPALIVE 13 // sent on the HMD HID interface when no devices are connected
+
+#define IN_REPORT_RADIO_DATA_SIZE 64
 
 // asserts the size of a type is equal to the byte size provided
 #define SIZE_ASSERT(type, size)                                                                                        \
@@ -373,6 +376,55 @@ struct rift_radio_address_radio_report
 
 SIZE_ASSERT(struct rift_radio_address_radio_report, 7);
 
+struct rift_radio_report_remote_message
+{
+	// the button state of the controller, see rift_radio_report_remote_buttons
+	uint16_t buttons;
+};
+
+SIZE_ASSERT(struct rift_radio_report_remote_message, 2);
+
+struct rift_radio_report_touch_message
+{
+	uint32_t timestamp;
+	int16_t accel[3];
+	int16_t gyro[3];
+	uint8_t buttons;
+	uint8_t touch_grip_stick_state[5];
+	// see rift_radio_report_adc_channel
+	uint8_t adc_channel;
+	uint16_t adc_value;
+};
+
+SIZE_ASSERT(struct rift_radio_report_touch_message, 25);
+
+enum rift_radio_device_type
+{
+	RIFT_RADIO_DEVICE_REMOTE = 1,
+	RIFT_RADIO_DEVICE_LEFT_TOUCH = 2,
+	RIFT_RADIO_DEVICE_RIGHT_TOUCH = 3,
+	RIFT_RADIO_DEVICE_TRACKED_OBJECT = 6,
+};
+
+struct rift_radio_report_message
+{
+	uint16_t flags;
+	// the type of device sending the message, see rift_radio_device_type
+	uint8_t device_type;
+	union {
+		struct rift_radio_report_remote_message remote;
+		struct rift_radio_report_touch_message touch;
+	};
+};
+
+SIZE_ASSERT(struct rift_radio_report_message, 3 + sizeof(struct rift_radio_report_touch_message));
+
+struct rift_radio_report
+{
+	uint16_t command_id;
+	struct rift_radio_report_message messages[2];
+};
+
 #pragma pack(pop)
 
 /*
@@ -441,6 +493,32 @@ struct rift_imu_calibration
 	float temperature;
 };
 
+enum rift_touch_controller_input
+{
+	RIFT_TOUCH_CONTROLLER_INPUT_X_CLICK = 0,
+	RIFT_TOUCH_CONTROLLER_INPUT_X_TOUCH,
+	RIFT_TOUCH_CONTROLLER_INPUT_Y_CLICK,
+	RIFT_TOUCH_CONTROLLER_INPUT_Y_TOUCH,
+	RIFT_TOUCH_CONTROLLER_INPUT_MENU_CLICK,
+	RIFT_TOUCH_CONTROLLER_INPUT_A_CLICK,
+	RIFT_TOUCH_CONTROLLER_INPUT_A_TOUCH,
+	RIFT_TOUCH_CONTROLLER_INPUT_B_CLICK,
+	RIFT_TOUCH_CONTROLLER_INPUT_B_TOUCH,
+	RIFT_TOUCH_CONTROLLER_INPUT_SYSTEM_CLICK,
+	RIFT_TOUCH_CONTROLLER_INPUT_SQUEEZE_VALUE,
+	RIFT_TOUCH_CONTROLLER_INPUT_TRIGGER_TOUCH,
+	RIFT_TOUCH_CONTROLLER_INPUT_TRIGGER_VALUE,
+	RIFT_TOUCH_CONTROLLER_INPUT_THUMBSTICK_CLICK,
+	RIFT_TOUCH_CONTROLLER_INPUT_THUMBSTICK_TOUCH,
+	RIFT_TOUCH_CONTROLLER_INPUT_THUMBSTICK,
+	RIFT_TOUCH_CONTROLLER_INPUT_THUMBREST_TOUCH,
+	RIFT_TOUCH_CONTROLLER_INPUT_GRIP_POSE,
+	RIFT_TOUCH_CONTROLLER_INPUT_AIM_POSE,
+	RIFT_TOUCH_CONTROLLER_INPUT_TRIGGER_PROXIMITY,
+	RIFT_TOUCH_CONTROLLER_INPUT_THUMB_PROXIMITY,
+	RIFT_TOUCH_CONTROLLER_INPUT_COUNT,
+};
+
 /*!
  * A Rift Touch controller device.
  *
@@ -496,12 +574,19 @@ struct rift_hmd
 
 	uint8_t radio_address[5];
 
+	//! Mutex to protect access to the device array, device count == -1 means uninitialized
+	struct os_mutex device_mutex;
+
+	int device_count;
+	int added_devices;
+	struct xrt_device *devices[4]; // left touch, right touch, tracked object, remote
+
 	//! Generic state for the radio state machine
 	struct
 	{
 		struct os_thread_helper thread;
 
-		struct rift_touch_controller touch_controllers[3];
+		struct rift_touch_controller *touch_controllers[3];
 	} radio_state;
 };
 
@@ -510,4 +595,30 @@ static inline struct rift_hmd *
 rift_hmd(struct xrt_device *xdev)
 {
 	return (struct rift_hmd *)xdev;
+}
+
+static inline size_t
+rift_radio_device_type_to_touch_index(enum rift_radio_device_type device_type)
+{
+	switch (device_type) {
+	case RIFT_RADIO_DEVICE_LEFT_TOUCH: return 0;
+	case RIFT_RADIO_DEVICE_RIGHT_TOUCH: return 1;
+	case RIFT_RADIO_DEVICE_TRACKED_OBJECT: return 2;
+	default: assert(false);
+	}
+
+	return -1;
+}
+
+static inline enum rift_radio_device_type
+rift_radio_touch_index_to_device_type(size_t index)
+{
+	switch (index) {
+	case 0: return RIFT_RADIO_DEVICE_LEFT_TOUCH;
+	case 1: return RIFT_RADIO_DEVICE_RIGHT_TOUCH;
+	case 2: return RIFT_RADIO_DEVICE_TRACKED_OBJECT;
+	default: assert(false);
+	}
+
+	return 0;
 }
