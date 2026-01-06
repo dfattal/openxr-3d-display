@@ -1,4 +1,4 @@
-// Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2019-2026, Collabora, Ltd.
 // Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -684,12 +684,8 @@ comp_target_swapchain_create_images(struct comp_target *ct,
 	}
 
 	// Can we create swapchains from the surface on this device and queue.
-	ret = vk->vkGetPhysicalDeviceSurfaceSupportKHR( //
-	    vk->physical_device,                        // physicalDevice
-	    present_queue->family_index,                // queueFamilyIndex
-	    cts->surface.handle,                        // surface
-	    &supported);                                // pSupported
-	VK_CHK_WITH_GOTO(ret, "vkGetPhysicalDeviceSurfaceSupportKHR", error_print_and_free);
+	ret = comp_target_queue_supports_present(ct, present_queue, &supported);
+	VK_CHK_WITH_GOTO(ret, "comp_target_queue_supports_present", error_print_and_free);
 	if (!supported) {
 		/*
 		 * As the code is written now this won't actually fail in this
@@ -876,7 +872,7 @@ comp_target_swapchain_acquire_next_image(struct comp_target *ct, uint32_t *out_i
 
 static VkResult
 comp_target_swapchain_present(struct comp_target *ct,
-                              VkQueue queue,
+                              struct vk_bundle_queue *present_queue,
                               uint32_t index,
                               uint64_t timeline_semaphore_value,
                               int64_t desired_present_time_ns,
@@ -885,6 +881,7 @@ comp_target_swapchain_present(struct comp_target *ct,
 	struct comp_target_swapchain *cts = (struct comp_target_swapchain *)ct;
 	struct vk_bundle *vk = get_vk(cts);
 
+	assert(present_queue != NULL);
 	assert(cts->current_frame_id > 0);
 	assert(cts->current_frame_id <= UINT32_MAX);
 
@@ -931,9 +928,9 @@ comp_target_swapchain_present(struct comp_target *ct,
 
 
 	// Need to take the queue lock for present.
-	vk_queue_lock(vk->main_queue);
-	VkResult ret = vk->vkQueuePresentKHR(queue, &present_info);
-	vk_queue_unlock(vk->main_queue);
+	vk_queue_lock(present_queue);
+	VkResult ret = vk->vkQueuePresentKHR(present_queue->queue, &present_info);
+	vk_queue_unlock(present_queue);
 
 
 #ifdef VK_EXT_display_control
@@ -1131,6 +1128,26 @@ comp_target_swapchain_cleanup(struct comp_target_swapchain *cts)
 	u_pc_destroy(&cts->upc);
 }
 
+static VkResult
+comp_target_swapchain_queue_supports_present(struct comp_target *ct,
+                                             struct vk_bundle_queue *queue,
+                                             VkBool32 *out_supported)
+{
+	COMP_TRACE_MARKER();
+
+	struct comp_target_swapchain *cts = (struct comp_target_swapchain *)ct;
+	struct vk_bundle *vk = get_vk(cts);
+
+	VkResult ret = vk->vkGetPhysicalDeviceSurfaceSupportKHR( //
+	    vk->physical_device,                                 // physicalDevice
+	    queue->family_index,                                 // queueFamilyIndex
+	    cts->surface.handle,                                 // surface
+	    out_supported);                                      // pSupported
+
+	VK_CHK_AND_RET(ret, "vkGetPhysicalDeviceSurfaceSupportKHR");
+	return VK_SUCCESS;
+}
+
 void
 comp_target_swapchain_init_and_set_fnptrs(struct comp_target_swapchain *cts,
                                           enum comp_target_display_timing_usage timing_usage)
@@ -1146,6 +1163,7 @@ comp_target_swapchain_init_and_set_fnptrs(struct comp_target_swapchain *cts,
 	cts->base.mark_timing_point = comp_target_swapchain_mark_timing_point;
 	cts->base.update_timings = comp_target_swapchain_update_timings;
 	cts->base.info_gpu = comp_target_swapchain_info_gpu;
+	cts->base.queue_supports_present = comp_target_swapchain_queue_supports_present;
 
 	os_thread_helper_init(&cts->vblank.event_thread);
 }

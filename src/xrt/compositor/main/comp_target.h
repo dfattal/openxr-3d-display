@@ -1,4 +1,4 @@
-// Copyright 2020, Collabora, Ltd.
+// Copyright 2020-2026, Collabora, Ltd.
 // Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -223,7 +223,7 @@ struct comp_target
 	 * @pre @ref acquire succeeded for the same @p semaphore and @p index you are passing
 	 *
 	 * @param ct self
-	 * @param queue The Vulkan queue being used
+	 * @param present_queue The Vulkan queue bundle being used for presentation (must not be NULL)
 	 * @param index The swapchain image index to present
 	 * @param timeline_semaphore_value The value to await on @ref comp_target_semaphores::render_complete
 	 *                                 if @ref comp_target_semaphores::render_complete_is_timeline is true.
@@ -231,7 +231,7 @@ struct comp_target
 	 * @param present_slop_ns TODO
 	 */
 	VkResult (*present)(struct comp_target *ct,
-	                    VkQueue queue,
+	                    struct vk_bundle_queue *present_queue,
 	                    uint32_t index,
 	                    uint64_t timeline_semaphore_value,
 	                    int64_t desired_present_time_ns,
@@ -341,6 +341,17 @@ struct comp_target
 	 */
 	xrt_result_t (*request_refresh_rate)(struct comp_target *ct, float display_refresh_rate_hz);
 
+	/*!
+	 * Queries if a particular queue supports presentation ops/cmds for the compositor target
+	 *
+	 * @param ct            The compositor target.
+	 * @param queue         The vulkan queue to query
+	 * @param out_supported If the @ref queue supports presentation ops/cmds
+	 *                      for @ref ct present surface.
+	 */
+	VkResult (*queue_supports_present)(struct comp_target *ct,
+	                                   struct vk_bundle_queue *queue,
+	                                   VkBool32 *out_supported);
 
 	/*!
 	 * Destroys this target.
@@ -442,7 +453,7 @@ comp_target_acquire(struct comp_target *ct, uint32_t *out_index)
  */
 static inline VkResult
 comp_target_present(struct comp_target *ct,
-                    VkQueue queue,
+                    struct vk_bundle_queue *present_queue,
                     uint32_t index,
                     uint64_t timeline_semaphore_value,
                     int64_t desired_present_time_ns,
@@ -453,7 +464,7 @@ comp_target_present(struct comp_target *ct,
 
 	return ct->present(           //
 	    ct,                       //
-	    queue,                    //
+	    present_queue,            //
 	    index,                    //
 	    timeline_semaphore_value, //
 	    desired_present_time_ns,  //
@@ -658,6 +669,19 @@ comp_target_request_refresh_rate(struct comp_target *ct, float ratedisplay_refre
 	COMP_TRACE_MARKER();
 
 	return ct->request_refresh_rate(ct, ratedisplay_refresh_rate_hz);
+}
+
+/*!
+ * @copydoc comp_target::queue_supports_present
+ *
+ * @public @memberof comp_target
+ * @ingroup comp_main
+ */
+static inline VkResult
+comp_target_queue_supports_present(struct comp_target *ct, struct vk_bundle_queue *queue, VkBool32 *out_supported)
+{
+	COMP_TRACE_MARKER();
+	return ct->queue_supports_present(ct, queue, out_supported);
 }
 
 /*!

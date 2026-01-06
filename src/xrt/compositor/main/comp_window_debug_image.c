@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2026, Collabora, Ltd.
 // Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -200,13 +200,17 @@ target_acquire(struct comp_target *ct, uint32_t *out_index)
 
 static VkResult
 target_present(struct comp_target *ct,
-               VkQueue queue,
+               struct vk_bundle_queue *present_queue,
                uint32_t index,
                uint64_t timeline_semaphore_value,
                int64_t desired_present_time_ns,
                int64_t present_slop_ns)
 {
 	struct debug_image_target *dit = (struct debug_image_target *)ct;
+
+	// Debug image target doesn't use the present_queue parameter, but it must not be NULL
+	assert(present_queue != NULL);
+	(void)present_queue;
 
 	assert(index == dit->index);
 
@@ -302,6 +306,15 @@ target_info_gpu(struct comp_target *ct, int64_t frame_id, int64_t gpu_start_ns, 
 	u_pc_info_gpu(dit->upc, frame_id, gpu_start_ns, gpu_end_ns, when_ns);
 }
 
+static VkResult
+target_queue_supports_present(struct comp_target *ct, struct vk_bundle_queue *queue, VkBool32 *out_supported)
+{
+	// Debug image target doesn't use real presentation, so all queues are "supported"
+	(void)queue;
+	*out_supported = VK_TRUE;
+	return VK_SUCCESS;
+}
+
 static void
 target_set_title(struct comp_target *ct, const char *title)
 {
@@ -359,6 +372,7 @@ target_create(struct comp_compositor *c)
 	dit->base.update_timings = target_update_timings;
 	dit->base.info_gpu = target_info_gpu;
 	dit->base.set_title = target_set_title;
+	dit->base.queue_supports_present = target_queue_supports_present;
 	dit->base.destroy = target_destroy;
 	dit->base.c = c;
 

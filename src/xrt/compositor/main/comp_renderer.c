@@ -1,4 +1,4 @@
-// Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2019-2026, Collabora, Ltd.
 // Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -784,13 +784,13 @@ renderer_present_swapchain_image(struct comp_renderer *r, uint64_t desired_prese
 	assert(!comp_frame_is_invalid_locked(&r->c->frame.rendering));
 	uint64_t render_complete_signal_value = (uint64_t)r->c->frame.rendering.id;
 
-	ret = comp_target_present(           //
-	    r->c->target,                    //
-	    r->c->base.vk.main_queue->queue, //
-	    r->acquired_buffer,              //
-	    render_complete_signal_value,    //
-	    desired_present_time_ns,         //
-	    present_slop_ns);                //
+	ret = comp_target_present(        //
+	    r->c->target,                 //
+	    r->c->base.vk.main_queue,     //
+	    r->acquired_buffer,           //
+	    render_complete_signal_value, //
+	    desired_present_time_ns,      //
+	    present_slop_ns);             //
 	r->acquired_buffer = -1;
 
 	if (ret == VK_ERROR_OUT_OF_DATE_KHR || ret == VK_SUBOPTIMAL_KHR) {
