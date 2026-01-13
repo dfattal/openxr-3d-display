@@ -228,7 +228,7 @@ vec4 do_cylinder(vec2 view_uv, uint layer)
 	const float chan = central_angle / (PI * 2.f);
 
 	// height in radii, radius only matters for determining intersection
-	const float height = central_angle * aspect_ratio;
+	const float height = central_angle / aspect_ratio;
 
 	// Normalize [0, 2π] to [0, 1]
 	const float uhan = 0.5 + chan / 2.f;
