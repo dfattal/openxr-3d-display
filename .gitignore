@@ -109,5 +109,12 @@ vk_layer_settings.txt
 # Ignore local pyenv version file
 .python-version
 
+# Ignore Nix files
+result/
+.direnv/
+
+# Ignore direnv file (if you need this, create it yourself)
+.envrc
+
 # Kotlin
 .kotlin
