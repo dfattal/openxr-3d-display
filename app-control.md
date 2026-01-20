@@ -2,14 +2,20 @@
 
 ## Executive Summary
 
-This document describes the architectural approach for implementing an OpenXR runtime for 3D light field displays (e.g., Leia displays).
+This document describes the architectural approach for implementing an OpenXR runtime for 3D light field displays (e.g., Leia displays) using **SR Runtime** (Simulated Reality SDK) for eye tracking and interlacing.
 
 **Key insights:**
 1. OpenXR already supports UI composition via Quad/Cylinder layers - no special extension needed for UI
 2. Monado already supports multiple sessions (up to 64 clients) with layer compositing
-3. The runtime can composite all layers and write directly to framebuffer - no intermediate texture needed
+3. SR Runtime integration already exists in Monado (PR #4 merged) for weaving/interlacing
 4. The main extension needed is **per-session window targeting** for multi-app support
 5. Locomotion uses standard OpenXR APIs once input routing is solved
+
+**Technology Stack:**
+- **OpenXR Runtime:** Monado (modified)
+- **3D Interlacing:** SR Runtime (`SR::IVulkanWeaver1`)
+- **Eye Tracking:** SR Runtime (`SR::SRContext`)
+- **Graphics API:** Vulkan
 
 ---
 
@@ -143,49 +149,75 @@ Current Architecture (VR-centric):
 
 ## Proposed Solution: Per-Session Window Targeting
 
-### Architecture Overview
+### Architecture Overview (Simplified by SR Windowed Mode)
 
-Extend Monado to support per-session output targets (windows):
+SR Runtime's **windowed mode** (runtime >= 1.34) makes this straightforward:
 
 ```
-Proposed Architecture (Multi-Window):
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Application                                     │
+│                                                                             │
+│   1. App creates its own window (HWND)                                      │
+│   2. App passes HWND to xrCreateSession via XR_EXT_session_target           │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼ HWND
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         OpenXR Runtime (Monado)                             │
+│                                                                             │
+│   HWND ──┬──► comp_target (VkSwapchain from HWND)                          │
+│          │                                                                  │
+│          └──► SR Weaver (CreateSRWeaver with HWND = windowed mode)         │
+│                                                                             │
+│   Render Pipeline:                                                          │
+│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌────────────┐  │
+│   │ App submits │ ─► │ Compositor  │ ─► │ SR Weaver   │ ─► │ Present to │  │
+│   │ layers      │    │ composites  │    │ interlaces  │    │ app window │  │
+│   └─────────────┘    └─────────────┘    └─────────────┘    └────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           App's Window                                       │
+│                                                                             │
+│   ✓ Displays interlaced 3D content                                         │
+│   ✓ App receives all input (owns window)                                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│ App 1 (Unity)    │    │ App 2 (WebXR)    │    │ App 3 (Native)   │
-│                  │    │                  │    │                  │
-│ ┌──────────────┐ │    │ ┌──────────────┐ │    │ ┌──────────────┐ │
-│ │ Projection   │ │    │ │ Projection   │ │    │ │ Projection   │ │
-│ │ layer        │ │    │ │ layer        │ │    │ │ layer        │ │
-│ ├──────────────┤ │    │ ├──────────────┤ │    │ └──────────────┘ │
-│ │ Quad UI      │ │    │ │ Cylinder UI  │ │    │                  │
-│ │ layers       │ │    │ │ layers       │ │    │                  │
-│ └──────────────┘ │    │ └──────────────┘ │    │                  │
-│        │         │    │        │         │    │        │         │
-│        ▼         │    │        ▼         │    │        ▼         │
-│ ┌──────────────┐ │    │ ┌──────────────┐ │    │ ┌──────────────┐ │
-│ │ Session 1    │ │    │ │ Session 2    │ │    │ │ Session 3    │ │
-│ │ Compositor   │ │    │ │ Compositor   │ │    │ │ Compositor   │ │
-│ │ + Interlacer │ │    │ │ + Interlacer │ │    │ │ + Interlacer │ │
-│ └──────┬───────┘ │    │ └──────┬───────┘ │    │ └──────┬───────┘ │
-│        │         │    │        │         │    │        │         │
-│        ▼         │    │        ▼         │    │        ▼         │
-│   [Window 1]     │    │   [Window 2]     │    │   [Window 3]     │
-│   (App owns)     │    │   (Browser owns) │    │   (App owns)     │
-└──────────────────┘    └──────────────────┘    └──────────────────┘
-        │                       │                       │
-        └───────────────────────┴───────────────────────┘
-                                │
-                    App receives input directly!
-                    (keyboard/mouse/gamepad)
+### Multi-App Support
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Desktop                                         │
+│                                                                             │
+│   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐        │
+│   │ App 1 Window    │    │ App 2 Window    │    │ Other Windows   │        │
+│   │ (Unity game)    │    │ (WebXR browser) │    │ (non-XR apps)   │        │
+│   │                 │    │                 │    │                 │        │
+│   │ Session 1       │    │ Session 2       │    │                 │        │
+│   │ SR Weaver 1     │    │ SR Weaver 2     │    │                 │        │
+│   │ (windowed)      │    │ (windowed)      │    │                 │        │
+│   │                 │    │                 │    │                 │        │
+│   └─────────────────┘    └─────────────────┘    └─────────────────┘        │
+│         │                       │                                           │
+│         ▼                       ▼                                           │
+│   App 1 gets input        App 2 gets input                                 │
+│   (keyboard/mouse)        (DOM events)                                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Benefits
 
-1. **App owns window** → App receives all input directly
-2. **Runtime composites layers** → UI overlay works via standard OpenXR layers
-3. **Runtime writes to framebuffer** → No intermediate texture, minimal latency
-4. **Multiple sessions** → Each app gets its own window
-5. **Standard OpenXR for UI** → Unity/WebXR Quad/Cylinder layers work as-is
+1. **App owns window** → App receives all input directly (keyboard/mouse/gamepad)
+2. **SR windowed mode** → Each session has its own SR weaver bound to its window
+3. **No fullscreen takeover** → Multiple XR apps can run alongside regular apps
+4. **Standard OpenXR layers** → UI overlay works via Quad/Cylinder layers
+5. **Minimal changes** → Just pass HWND to SR weaver and Vulkan surface
 
 ---
 
@@ -292,7 +324,7 @@ For WebXR, the architecture is straightforward:
 │  │                      <canvas> element                         │  │
 │  │                                                               │  │
 │  │            OpenXR runtime renders HERE directly               │  │
-│  │                   (with CNSDK interlacing)                    │  │
+│  │                   (with SR Runtime interlacing)               │  │
 │  │                                                               │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                                                                     │
@@ -406,58 +438,107 @@ app.whenReady().then(() => {
 |-----------|---------------|---------------|
 | Multi-session support | ✓ Up to 64 clients | No change |
 | Layer compositing | ✓ Quad, Cylinder, etc. | No change |
-| CNSDK interlacing | ✓ In compositor | No change |
+| SR Runtime interlacing | ✓ `leiasr_weave()` in compositor | Pass window handle to weaver |
 | Output target | Single `comp_target` | **Per-session targets** |
 | Session creation | No target param | **Accept target in create info** |
 
-### Modified comp_target Architecture
+### SR Runtime Integration (Already Merged - PR #4)
+
+The SR Runtime weaver is already integrated:
 
 ```c
-// Current: Single target for all sessions
-struct comp_compositor {
-    struct comp_target *target;  // One for everyone
-};
+// src/xrt/drivers/leiasr/leiasr.cpp
 
-// Proposed: Per-session targets
-struct multi_compositor {
-    struct xrt_compositor_native base;
-    struct multi_system_compositor *msc;
+// Current: Window handle passed as NULL (fullscreen mode)
+CreateSRWeaver(sr->context, device, physicalDevice, graphicsQueue,
+               commandPool, NULL, sr);  // <-- NULL = fullscreen mode
+                           ^^^^
 
-    // NEW: This session's output target
-    struct comp_target *session_target;
-
-    // Existing layer slots
-    struct multi_layer_slot progress;
-    struct multi_layer_slot scheduled;
-    struct multi_layer_slot delivered;
-};
+// Weaving function accepts framebuffer as parameter
+void leiasr_weave(struct leiasr* leiasr,
+                  VkCommandBuffer commandBuffer,
+                  VkImageView leftImageView,
+                  VkImageView rightImageView,
+                  VkRect2D viewport,
+                  int imageWidth, int imageHeight, VkFormat imageFormat,
+                  VkFramebuffer framebuffer,      // <-- Output target
+                  int framebufferWidth, int framebufferHeight,
+                  VkFormat framebufferFormat);
 ```
 
-### Render Loop Changes
+### SR Runtime Windowed Mode (Key Enabler)
+
+**Critical capability:** SR Runtime supports **windowed mode** weaving (runtime >= 1.34), not just fullscreen:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Desktop                                            │
+│                                                                             │
+│   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐        │
+│   │ App 1 Window    │    │ App 2 Window    │    │ Other Windows   │        │
+│   │                 │    │                 │    │ (non-XR)        │        │
+│   │ SR Weaver 1     │    │ SR Weaver 2     │    │                 │        │
+│   │ (windowed)      │    │ (windowed)      │    │                 │        │
+│   │                 │    │                 │    │                 │        │
+│   │ 3D interlaced   │    │ 3D interlaced   │    │ 2D normal       │        │
+│   └─────────────────┘    └─────────────────┘    └─────────────────┘        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Feature | Fullscreen (HWND=NULL) | Windowed (HWND=window) |
+|---------|------------------------|------------------------|
+| Multiple XR apps | ✗ One at a time | ✓ Multiple simultaneous |
+| Input routing | Runtime captures | ✓ App receives directly |
+| Desktop integration | ✗ Exclusive | ✓ Works with other windows |
+
+**This solves our core problems:**
+1. **Input routing** - App owns window → app receives keyboard/mouse/gamepad
+2. **Multi-app** - Each app has its own SR weaver instance in windowed mode
+3. **No complex extension** - Just pass HWND to `CreateSRWeaver()`
+
+**What we need to change:**
+1. Pass the window handle during weaver creation (currently NULL)
+2. Create `comp_target` from external window handle (for Vulkan swapchain)
+
+### comp_target: Accept External Window
+
+The `comp_target` abstraction already exists - we just need to add a path for external windows:
 
 ```c
-// Current: All sessions render to single target
-void multi_system_compositor_render(struct multi_system_compositor *msc) {
-    for (int i = 0; i < MULTI_MAX_CLIENTS; i++) {
-        if (msc->clients[i]) {
-            composite_client_layers(msc->xcn, msc->clients[i]);
-        }
-    }
-    present_to_single_target(msc->xcn);
-}
+// comp_window_mswin.c - Add external window support
 
-// Proposed: Each session renders to its own target
-void multi_system_compositor_render(struct multi_system_compositor *msc) {
-    for (int i = 0; i < MULTI_MAX_CLIENTS; i++) {
-        struct multi_compositor *mc = msc->clients[i];
-        if (mc && mc->session_target) {
-            composite_client_layers(mc);      // Composite this session's layers
-            interlace_with_cnsdk(mc);         // Apply 3D effect
-            present_to_target(mc->session_target);  // Output to session's window
-        }
-    }
+struct comp_window_mswin {
+    struct comp_target_swapchain base;
+    HWND window;
+    bool owns_window;         // NEW: false if external
+    // ...
+};
+
+// New function to create from external HWND
+bool comp_window_mswin_create_from_external(
+    struct comp_compositor *c,
+    HWND external_hwnd,
+    struct comp_target **out_ct)
+{
+    struct comp_window_mswin *cwm = U_TYPED_CALLOC(struct comp_window_mswin);
+    cwm->window = external_hwnd;
+    cwm->owns_window = false;  // Don't destroy on cleanup
+
+    // Create VkSurfaceKHR from HWND (standard Vulkan)
+    VkWin32SurfaceCreateInfoKHR info = {
+        .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+        .hwnd = external_hwnd,
+        .hinstance = GetModuleHandle(NULL),
+    };
+    vkCreateWin32SurfaceKHR(instance, &info, NULL, &surface);
+
+    // Rest of swapchain setup is unchanged
+    // ...
 }
 ```
+
+**Key insight:** The Vulkan swapchain creation doesn't care who created the window - it just needs a valid HWND. We're not changing Vulkan, just where the HWND comes from.
 
 ---
 
@@ -481,9 +562,9 @@ void multi_system_compositor_render(struct multi_system_compositor *msc) {
 │                         OpenXR Runtime (Monado)                             │
 │                                                                             │
 │  1. Receive layers from app                                                │
-│  2. Get VIEW pose from eye tracking (CNSDK)                                │
+│  2. Get VIEW pose from eye tracking (SR Runtime: SR::SRContext)            │
 │  3. Composite all layers with correct z-ordering                           │
-│  4. Apply CNSDK interlacing for 3D effect                                  │
+│  4. Apply SR Runtime interlacing (SR::IVulkanWeaver1::weave())             │
 │  5. Write final output to app's window                                     │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -517,73 +598,199 @@ void multi_system_compositor_render(struct multi_system_compositor *msc) {
 
 ## Implementation Roadmap
 
-### Phase 1: Per-Session Targets
-1. Define `XR_EXT_session_target` extension
-2. Modify `comp_target` to be per-session instead of global
-3. Update session creation to accept target info
-4. Test with single native app
+### Phase 1: Single App with External Window (Windows)
+**Goal:** Accept external HWND, SR weaver in windowed mode
 
-### Phase 2: Multi-Window Support
-1. Enable multiple simultaneous sessions with different targets
-2. Each session gets independent compositor pipeline
-3. Shared CNSDK resources where possible
-4. Test with multiple native apps
+**Changes to leiasr driver:**
+```c
+// leiasr.h - Add HWND parameter
+xrt_result_t leiasr_create(
+    double maxTime,
+    VkDevice device, VkPhysicalDevice physicalDevice,
+    VkQueue graphicsQueue, VkCommandPool commandPool,
+    HWND windowHandle,        // NEW: for windowed mode
+    struct leiasr **out);
 
-### Phase 3: Platform Integration
-1. Windows: Win32 HWND support
-2. Linux: XCB and Wayland surface support
-3. Test with native OpenXR apps (C++, Rust)
+// leiasr.cpp - Pass to SR weaver
+CreateSRWeaver(sr->context, ..., windowHandle, sr);  // Not NULL anymore
+```
 
-### Phase 4: Framework Integration
-1. Unity XR Plugin modifications (pass window handle from Unity)
-2. Electron wrapper for WebXR prototyping
-3. Documentation and samples
+**Changes to comp_window_mswin.c:**
+```c
+// Accept external HWND instead of creating window
+static bool comp_window_mswin_create_from_external(
+    struct comp_compositor *c,
+    HWND external_hwnd,
+    struct comp_target **out_ct)
+{
+    struct comp_window_mswin *cwm = U_TYPED_CALLOC(...);
+    cwm->window = external_hwnd;
+    cwm->owns_window = false;  // Don't destroy on cleanup
+    // Create VkWin32SurfaceKHR from external_hwnd
+    // ... rest of setup
+}
+```
 
-### Phase 5: WebXR Browser Support
-1. Engage with browser vendors (Google, Mozilla)
-2. Propose `XR_EXT_session_target` for WebXR backend
-3. Browser passes canvas handle → OpenXR renders to it
+**Changes to oxr_session.c:**
+```c
+// Parse XR_EXT_session_target extension
+const XrSessionTargetCreateInfoEXT *target_info =
+    find_in_chain(createInfo->next, XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT);
+
+if (target_info && target_info->windowHandle) {
+    // Use external window path
+    comp_window_mswin_create_from_external(c, target_info->windowHandle, &target);
+    leiasr_create(..., target_info->windowHandle, &leiasr);  // Windowed mode
+}
+```
+
+**Files to modify:**
+| File | Change |
+|------|--------|
+| `src/xrt/drivers/leiasr/leiasr.h` | Add HWND parameter |
+| `src/xrt/drivers/leiasr/leiasr.cpp` | Pass HWND to CreateSRWeaver |
+| `src/xrt/compositor/main/comp_window_mswin.c` | Accept external HWND |
+| `src/xrt/state_trackers/oxr/oxr_session.c` | Parse extension, route HWND |
+
+**Test:** Native Win32 app creates window, passes to OpenXR, receives input, sees 3D
+
+---
+
+### Phase 2: Per-Session SR Weaver
+**Goal:** Multiple apps, each with own window and SR weaver
+
+**Move SR weaver to per-session:**
+```c
+// comp_multi_private.h
+struct multi_compositor {
+    struct xrt_compositor_native base;
+    struct multi_system_compositor *msc;
+
+    // NEW: Per-session resources
+    struct comp_target *session_target;
+    struct leiasr *session_weaver;  // SR weaver for this session's window
+
+    // Existing
+    struct multi_layer_slot progress, scheduled, delivered;
+};
+```
+
+**Update render loop:**
+```c
+// Each session renders to its own target with its own weaver
+for (int i = 0; i < MULTI_MAX_CLIENTS; i++) {
+    struct multi_compositor *mc = msc->clients[i];
+    if (mc && mc->session_target) {
+        composite_client_layers(mc);
+        leiasr_weave(mc->session_weaver, ...);  // Per-session weaver
+        present_to_target(mc->session_target);
+    }
+}
+```
+
+**Test:** Two native apps running simultaneously, each with 3D in their window
+
+---
+
+### Phase 3: Framework Integration
+**Goal:** Unity and Electron support
+
+**Unity XR Plugin:**
+- Modify OpenXR plugin to expose window handle
+- Pass Unity's HWND via `XR_EXT_session_target`
+- Test with Unity sample project
+
+**Electron wrapper:**
+```javascript
+// leia-openxr-binding npm package
+const { BrowserWindow } = require('electron');
+const win = new BrowserWindow({...});
+const hwnd = win.getNativeWindowHandle();
+
+// Pass to OpenXR session
+initLeiaOpenXR(hwnd);
+```
+
+**Test:** Unity game and Electron WebXR app both working
+
+---
+
+### Phase 4: Linux Platform Support (Optional)
+**Goal:** XCB/Wayland external window support
+
+- Extend `comp_window_xcb.c` to accept external window
+- Note: SR Runtime may have different Linux support - verify first
+
+---
+
+### Phase 5: WebXR Browser Support (Future)
+**Goal:** Browser vendor cooperation
+
+- Propose `XR_EXT_session_target` to Khronos/browser vendors
+- Browser passes canvas backing surface as window handle
+- Same architecture, just different source of HWND equivalent
 
 ---
 
 ## Conclusion
 
-The 3D light field display use case is well-served by extending Monado's existing architecture:
+### The Key Insight: SR Windowed Mode
 
-| Requirement | Solution |
-|-------------|----------|
-| Eye tracking → VIEW pose | ✓ CNSDK integration (exists) |
-| Interlacing for 3D | ✓ CNSDK interlacer (exists) |
-| UI overlay | ✓ Standard OpenXR Quad/Cylinder layers (exists) |
-| Layer compositing | ✓ Multi-compositor (exists) |
-| Multiple sessions | ✓ Up to 64 clients (exists) |
-| Input to app | **Per-session window targeting (new)** |
-| Multiple windows | **Per-session output targets (new)** |
-| Locomotion | ✓ Standard OpenXR offset spaces (exists) |
+SR Runtime's **windowed mode** (passing HWND to `CreateSRWeaver`) is the key enabler:
 
-**Primary extension needed:** `XR_EXT_session_target` to allow apps to specify their output window.
+| Without Windowed Mode | With Windowed Mode |
+|-----------------------|-------------------|
+| SR weaver takes fullscreen | SR weaver renders to specific window |
+| One XR app at a time | Multiple XR apps simultaneously |
+| Runtime owns display | App owns its window |
+| Complex input routing needed | App receives input directly |
 
-### Native Apps (Unity, Unreal, Custom)
+### What's Already Done
 
-Works with the extension directly:
-- App creates window, passes handle via `XR_EXT_session_target`
-- App receives input from its window (keyboard/mouse/gamepad)
-- App submits Projection + Quad/Cylinder layers
-- Runtime composites, interlaces, writes to app's window
+| Component | Status |
+|-----------|--------|
+| SR Runtime integration | ✓ Merged (PR #4) |
+| Vulkan weaver (`IVulkanWeaver1`) | ✓ Working |
+| Eye tracking (`SR::SRContext`) | ✓ Working |
+| Layer compositing | ✓ Monado multi-compositor |
+| OpenXR layers (Quad/Cylinder) | ✓ Standard OpenXR |
 
-### WebXR Apps
+### What Needs Implementation
 
-Same architecture, browser passes canvas handle:
-- Browser owns window → input works via DOM events (automatic)
-- Browser passes canvas handle to OpenXR via `XR_EXT_session_target`
-- Runtime renders directly to browser's canvas
-- **Requires:** Browser vendor to modify WebXR backend
+| Change | Effort | Files |
+|--------|--------|-------|
+| Add HWND param to `leiasr_create()` | Small | `leiasr.h`, `leiasr.cpp` |
+| Accept external HWND in `comp_window_mswin` | Medium | `comp_window_mswin.c` |
+| Parse `XR_EXT_session_target` extension | Medium | `oxr_session.c` |
+| Per-session SR weaver (Phase 2) | Medium | `comp_multi_private.h`, render loop |
 
-**Prototype path:** Electron wrapper while waiting for browser support
+### Phase 1 Deliverable
 
-### Priority Order
+**Single native app with external window:**
+```
+App creates HWND → passes to xrCreateSession → SR weaver in windowed mode → 3D output
+     ↑                                                                           │
+     └─────────────── App receives keyboard/mouse input ←────────────────────────┘
+```
 
-1. **Native app support first** - Direct path, proves architecture
-2. **Unity integration** - Large ecosystem
-3. **Electron WebXR** - Enables web content without browser changes
-4. **Browser WebXR** - Requires browser vendor cooperation (Google, Mozilla)
+### Architecture Summary
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ App creates window (HWND)                                           │
+│         │                                                           │
+│         ▼                                                           │
+│ xrCreateSession + XR_EXT_session_target(HWND)                       │
+│         │                                                           │
+│         ├──► comp_target (VkSwapchain from HWND)                    │
+│         │                                                           │
+│         └──► SR Weaver (windowed mode, bound to HWND)               │
+│                    │                                                │
+│                    ▼                                                │
+│         Interlaced 3D output to app's window                        │
+│                                                                     │
+│ App receives input ◄─── Window message pump (app owns window)       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**This is a minimal, clean solution** that leverages SR Runtime's existing windowed mode capability rather than fighting against a fullscreen-only architecture.
