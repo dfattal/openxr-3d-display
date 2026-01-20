@@ -13,11 +13,16 @@
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_limits.h"
 #include "xrt/xrt_compositor.h"
+#include "xrt/xrt_config_have.h"
 
 #include "os/os_time.h"
 #include "os/os_threading.h"
 
 #include "util/u_pacing.h"
+
+// Forward declarations for per-session rendering
+struct comp_target;
+struct leiasr;
 
 #ifdef __cplusplus
 extern "C" {
@@ -186,6 +191,27 @@ struct multi_compositor
 	struct u_pacing_app *upa;
 
 	float current_refresh_rate_hz;
+
+	/*!
+	 * Per-session rendering resources for XR_EXT_session_target.
+	 * When external_window_handle is set, this session renders to its own window.
+	 */
+	struct
+	{
+		//! External window handle (HWND on Windows), NULL for shared rendering
+		void *external_window_handle;
+
+		//! Per-session render target (VkSwapchain from external HWND)
+		struct comp_target *target;
+
+#ifdef XRT_HAVE_LEIA_SR
+		//! Per-session SR weaver for this session's window
+		struct leiasr *weaver;
+#endif
+
+		//! True if per-session resources are initialized
+		bool initialized;
+	} session_render;
 };
 
 /*!
@@ -394,6 +420,34 @@ multi_system_compositor(struct xrt_system_compositor *xsc)
  */
 void
 multi_system_compositor_update_session_status(struct multi_system_compositor *msc, bool active);
+
+/*!
+ * Initialize per-session render resources for a multi_compositor with external window.
+ * Called lazily on first frame if session has external_window_handle set.
+ *
+ * @param mc The multi_compositor to initialize resources for
+ * @return true on success, false on failure
+ *
+ * @ingroup comp_multi
+ * @private @memberof multi_compositor
+ */
+bool
+multi_compositor_init_session_render(struct multi_compositor *mc);
+
+/*!
+ * Check if a multi_compositor has per-session rendering enabled.
+ *
+ * @param mc The multi_compositor to check
+ * @return true if session has its own render target
+ *
+ * @ingroup comp_multi
+ * @private @memberof multi_compositor
+ */
+static inline bool
+multi_compositor_has_session_render(struct multi_compositor *mc)
+{
+	return mc->session_render.external_window_handle != NULL;
+}
 
 
 #ifdef __cplusplus

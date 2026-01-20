@@ -10,6 +10,7 @@
  */
 
 #include "xrt/xrt_config_os.h"
+#include "xrt/xrt_config_have.h"
 #include "xrt/xrt_session.h"
 
 #include "os/os_time.h"
@@ -29,6 +30,10 @@
 
 #include "multi/comp_multi_private.h"
 #include "multi/comp_multi_interface.h"
+
+#ifdef XRT_HAVE_LEIA_SR
+#include "leiasr/leiasr.h"
+#endif
 
 #include <math.h>
 #include <stdio.h>
@@ -269,6 +274,12 @@ transfer_layers_locked(struct multi_system_compositor *msc, int64_t display_time
 		// Array can be empty
 		if (mc == NULL) {
 			continue;
+		}
+
+		// Lazily initialize per-session render resources if session has external HWND
+		// This creates the per-session comp_target and SR weaver for multi-app support
+		if (multi_compositor_has_session_render(mc) && !mc->session_render.initialized) {
+			multi_compositor_init_session_render(mc);
 		}
 
 		// Even if it's not shown, make sure that frames are delivered.
