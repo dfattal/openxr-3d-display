@@ -160,3 +160,4 @@ Phase 2 will implement **per-session SR Weaver** for true multi-app support:
 
 - [app-control.md](app-control.md) - Full architectural design document
 - SR Runtime documentation for windowed mode (runtime >= 1.34)
+
