@@ -12,6 +12,7 @@
 #include "util/u_logging.h"
 #include "xrt/xrt_session.h"
 #include "xrt/xrt_config_os.h"
+#include "xrt/xrt_config_have.h"
 
 #include "os/os_time.h"
 
@@ -26,6 +27,12 @@
 
 #include "multi/comp_multi_private.h"
 #include "main/comp_compositor.h"
+#include "main/comp_window.h"
+#include "main/comp_target.h"
+
+#ifdef XRT_HAVE_LEIA_SR
+#include "leiasr/leiasr.h"
+#endif
 
 #include <math.h>
 #include <stdio.h>
@@ -482,17 +489,22 @@ multi_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin
 	assert(!mc->state.session_active);
 	if (!mc->state.session_active) {
 #ifdef XRT_OS_WINDOWS
-		// Pass external window handle to native compositor on first session with HWND
-		if (mc->xsi.external_window_handle != NULL &&
-		    mc->msc->external_window_handle == NULL) {
-			mc->msc->external_window_handle = mc->xsi.external_window_handle;
+		// Store external window handle for per-session rendering (Phase 2)
+		if (mc->xsi.external_window_handle != NULL) {
+			mc->session_render.external_window_handle = mc->xsi.external_window_handle;
+			U_LOG_I("Session has external HWND %p, will use per-session rendering",
+			        mc->session_render.external_window_handle);
 
-			// If native compositor uses deferred surface, pass the HWND to it
-			struct comp_compositor *c = comp_compositor(&mc->msc->xcn->base);
-			if (c->deferred_surface) {
-				c->external_window_handle = mc->xsi.external_window_handle;
-				// The native compositor's begin_session will use this HWND
-				// when creating the window target
+			// Also pass to native compositor for backward compatibility (Phase 1)
+			// This ensures single-app case still works even if per-session rendering
+			// isn't fully set up yet
+			if (mc->msc->external_window_handle == NULL) {
+				mc->msc->external_window_handle = mc->xsi.external_window_handle;
+
+				struct comp_compositor *c = comp_compositor(&mc->msc->xcn->base);
+				if (c->deferred_surface) {
+					c->external_window_handle = mc->xsi.external_window_handle;
+				}
 			}
 		}
 #endif
@@ -512,6 +524,22 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 
 	assert(mc->state.session_active);
 	if (mc->state.session_active) {
+		// Clean up per-session render resources
+		if (mc->session_render.initialized) {
+#ifdef XRT_HAVE_LEIA_SR
+			if (mc->session_render.weaver != NULL) {
+				leiasr_destroy(mc->session_render.weaver);
+				mc->session_render.weaver = NULL;
+			}
+#endif
+			if (mc->session_render.target != NULL) {
+				comp_target_destroy(&mc->session_render.target);
+			}
+			mc->session_render.initialized = false;
+			U_LOG_I("Cleaned up per-session render resources");
+		}
+		mc->session_render.external_window_handle = NULL;
+
 		multi_system_compositor_update_session_status(mc->msc, false);
 		mc->state.session_active = false;
 	}
@@ -980,6 +1008,85 @@ void
 multi_compositor_retire_delivered_locked(struct multi_compositor *mc, int64_t when_ns)
 {
 	slot_clear_locked(mc, &mc->delivered);
+}
+
+bool
+multi_compositor_init_session_render(struct multi_compositor *mc)
+{
+	// Already initialized
+	if (mc->session_render.initialized) {
+		return true;
+	}
+
+	// No external window handle - use shared native compositor
+	if (mc->session_render.external_window_handle == NULL) {
+		return false;
+	}
+
+#ifdef XRT_OS_WINDOWS
+	// Get Vulkan resources from native compositor
+	struct comp_compositor *c = comp_compositor(&mc->msc->xcn->base);
+	struct vk_bundle *vk = &c->base.vk;
+
+	// Create per-session comp_target from external HWND
+	if (!comp_window_mswin_create_from_external(c,
+	                                            mc->session_render.external_window_handle,
+	                                            &mc->session_render.target)) {
+		U_LOG_E("Failed to create per-session target from external HWND");
+		return false;
+	}
+
+	// Initialize the target's Vulkan resources
+	if (!comp_target_init_post_vulkan(mc->session_render.target,
+	                                  c->settings.preferred.width,
+	                                  c->settings.preferred.height)) {
+		U_LOG_E("Failed to init per-session target post vulkan");
+		comp_target_destroy(&mc->session_render.target);
+		return false;
+	}
+
+#ifdef XRT_HAVE_LEIA_SR
+	// Create per-session SR weaver with the external HWND
+	// Note: We need a command pool for the weaver. For now, we create a simple one.
+	VkCommandPoolCreateInfo pool_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+	    .queueFamilyIndex = vk->main_queue->queue_index,
+	    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+	};
+	VkCommandPool cmd_pool;
+	VkResult ret = vk->vkCreateCommandPool(vk->device, &pool_info, NULL, &cmd_pool);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("Failed to create command pool for per-session weaver");
+		comp_target_destroy(&mc->session_render.target);
+		return false;
+	}
+
+	xrt_result_t xret = leiasr_create(
+	    1000.0,
+	    vk->device,
+	    vk->physical_device,
+	    vk->main_queue->queue,
+	    cmd_pool,
+	    mc->session_render.external_window_handle,
+	    &mc->session_render.weaver);
+
+	if (xret != XRT_SUCCESS) {
+		U_LOG_E("Failed to create per-session SR weaver");
+		vk->vkDestroyCommandPool(vk->device, cmd_pool, NULL);
+		comp_target_destroy(&mc->session_render.target);
+		return false;
+	}
+
+	U_LOG_I("Created per-session SR weaver for HWND %p", mc->session_render.external_window_handle);
+#endif // XRT_HAVE_LEIA_SR
+
+	mc->session_render.initialized = true;
+	U_LOG_I("Initialized per-session render resources for HWND %p", mc->session_render.external_window_handle);
+	return true;
+#else
+	// Per-session rendering only supported on Windows for now
+	return false;
+#endif // XRT_OS_WINDOWS
 }
 
 xrt_result_t
