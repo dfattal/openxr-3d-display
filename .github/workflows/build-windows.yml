@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - '*with-ci-build'
+      - 'XR_EXT_session_target' 
     tags:
       - 'v*'
   pull_request:
