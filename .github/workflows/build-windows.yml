@@ -75,9 +75,14 @@ jobs:
         with:
           name: SRMonado
           if-no-files-found: error
-          path: |
-            _package
-            build/SRMonadoSetup-*.exe 
+          path: _package
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SRMonado-Installer
+          if-no-files-found: error
+          path: _package/SRMonadoSetup-*.exe
 
       # - name: Create GitHub Release
       #   if: startsWith(github.ref, 'refs/tags/')
