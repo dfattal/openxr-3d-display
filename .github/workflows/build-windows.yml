@@ -183,7 +183,51 @@ jobs:
           status: starting
 
           message: ':thumbsdown: ${{ github.event.head_commit.message }}
-            
+
             FAILED
-            
+
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+
+  # Test app build - toggle by changing 'if: false' to 'if: true'
+  TestApp:
+    if: false  # <-- Change to 'true' to enable test app build
+    runs-on: windows-2022
+    needs: Runtime  # Wait for runtime build to get artifacts
+
+    env:
+      GH_TOKEN: ${{ secrets.LEIALOFT_GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.LEIALOFT_GITHUB_TOKEN }}
+
+      - name: Download runtime artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: SRMonado
+          path: runtime
+
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.3.283.0
+          cache: true
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build test app
+        run: |
+          cd test_apps/session_target_test
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DOpenXR_ROOT="${{ github.workspace }}/runtime"
+          cmake --build build
+
+      - name: Upload test app
+        uses: actions/upload-artifact@v4
+        with:
+          name: SessionTargetTest
+          if-no-files-found: error
+          path: test_apps/session_target_test/build/session_target_test.exe
