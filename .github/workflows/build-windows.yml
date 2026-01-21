@@ -61,7 +61,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
             -DX_VCPKG_APPLOCAL_DEPS_INSTALL=ON `
             -DCMAKE_INSTALL_PREFIX=_package `                                                                                                                                                                                                                                                                     
-            -DXRT_BUILD_INSTALLER=ON        
+            -DXRT_BUILD_INSTALLER=ON      
 
       - name: Build
         run: cmake --build build --config Release --target install
