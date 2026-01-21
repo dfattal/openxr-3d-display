@@ -19,6 +19,11 @@
 #include "os/os_threading.h"
 
 #include "util/u_pacing.h"
+#include "util/comp_target_service.h"
+
+#ifdef XRT_HAVE_LEIA_SR
+#include <vulkan/vulkan.h>
+#endif
 
 // Forward declarations for per-session rendering
 struct comp_target;
@@ -207,6 +212,9 @@ struct multi_compositor
 #ifdef XRT_HAVE_LEIA_SR
 		//! Per-session SR weaver for this session's window
 		struct leiasr *weaver;
+
+		//! Command pool for the per-session weaver (must be destroyed on cleanup)
+		VkCommandPool weaver_cmd_pool;
 #endif
 
 		//! True if per-session resources are initialized
@@ -397,6 +405,9 @@ struct multi_system_compositor
 
 	//! External window handle from first session with HWND (for windowed mode)
 	void *external_window_handle;
+
+	//! Service for creating per-session render targets (provided by comp_main)
+	struct comp_target_service *target_service;
 };
 
 /*!

@@ -168,6 +168,88 @@ compositor_init_window_from_external(struct comp_compositor *c, void *hwnd)
 }
 #endif
 
+
+/*
+ *
+ * Target service callbacks for per-session rendering (Phase 3).
+ *
+ */
+
+/*!
+ * Service callback: create a comp_target from an external window handle.
+ * This is called by comp_multi when a session needs its own render target.
+ */
+static xrt_result_t
+target_service_create_from_window(struct comp_target_service *service,
+                                  void *external_window_handle,
+                                  struct comp_target **out_target)
+{
+	struct comp_compositor *c = (struct comp_compositor *)service->context;
+
+#ifdef XRT_OS_WINDOWS
+	if (external_window_handle == NULL) {
+		COMP_ERROR(c, "Cannot create target from NULL window handle");
+		return XRT_ERROR_DEVICE_NOT_FOUND;
+	}
+
+	struct comp_target *ct = NULL;
+	if (!comp_window_mswin_create_from_external(c, external_window_handle, &ct)) {
+		COMP_ERROR(c, "Failed to create per-session target from HWND %p", external_window_handle);
+		return XRT_ERROR_VULKAN;
+	}
+
+	// Initialize post-Vulkan (creates swapchain)
+	if (!comp_target_init_post_vulkan(ct, c->settings.preferred.width, c->settings.preferred.height)) {
+		COMP_ERROR(c, "Failed to init post vulkan for per-session target");
+		comp_target_destroy(&ct);
+		return XRT_ERROR_VULKAN;
+	}
+
+	COMP_INFO(c, "Created per-session target from HWND %p", external_window_handle);
+	*out_target = ct;
+	return XRT_SUCCESS;
+#else
+	(void)c;
+	(void)external_window_handle;
+	(void)out_target;
+	return XRT_ERROR_DEVICE_NOT_FOUND;
+#endif
+}
+
+/*!
+ * Service callback: destroy a comp_target created by this service.
+ */
+static void
+target_service_destroy_target(struct comp_target_service *service, struct comp_target **target)
+{
+	(void)service;
+	comp_target_destroy(target);
+}
+
+/*!
+ * Service callback: get the Vulkan bundle from the compositor.
+ */
+static struct vk_bundle *
+target_service_get_vk(struct comp_target_service *service)
+{
+	struct comp_compositor *c = (struct comp_compositor *)service->context;
+	return get_vk(c);
+}
+
+/*!
+ * Initialize the target service on a compositor.
+ * Called during compositor creation.
+ */
+static void
+compositor_init_target_service(struct comp_compositor *c)
+{
+	c->target_service.create_from_window = target_service_create_from_window;
+	c->target_service.destroy_target = target_service_destroy_target;
+	c->target_service.get_vk = target_service_get_vk;
+	c->target_service.context = c;
+}
+
+
 static xrt_result_t
 compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
 {
@@ -1129,6 +1211,9 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 		xret = XRT_ERROR_VULKAN;
 		goto error;
 	}
+
+	// Initialize target service for per-session rendering (Phase 3)
+	compositor_init_target_service(c);
 
 	if (!c->deferred_surface) {
 		if (!compositor_init_window_post_vulkan(c) ||

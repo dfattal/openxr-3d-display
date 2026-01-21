@@ -13,6 +13,8 @@ This skill automates the complete build workflow for CNSDK-OpenXR (Monado): comm
 ```
 Local: commit → push
 GitHub Actions: build-windows.yml → CMake/Ninja → Upload artifact → Slack notification
+                      ↓ (on failure)
+Local: analyze logs → apply fix → commit fix → push → re-monitor (up to 3 attempts)
 ```
 
 **Build Configuration:**
@@ -35,7 +37,7 @@ When this skill is triggered, immediately call:
 Task(
   subagent_type="general-purpose",
   description="Build monitor workflow",
-  prompt="[Full workflow prompt below]"
+  prompt="[Full workflow prompt below, with USER_MESSAGE replaced]"
 )
 ```
 
@@ -43,106 +45,300 @@ Task(
 
 ## Subagent Prompt Template
 
-Pass this complete prompt to the subagent:
+Pass this complete prompt to the subagent (replace `[USER_MESSAGE]` with the user's commit message or "auto-generate"):
 
 ```
-Execute the CNSDK-OpenXR ci-monitor workflow:
+Execute the CNSDK-OpenXR ci-monitor workflow. You have access to Edit and Write tools to fix build errors.
 
 ## Configuration
 - Repository: CNSDK-OpenXR (Monado fork with Leia SDK)
 - Workflow: build-windows.yml
 - Artifact Name: SRMonado
 - Build: CMake + Ninja Multi-Config (Release)
+- Max Fix Attempts: 3
 
 ## Commit Message
-[USER PROVIDED MESSAGE OR auto-generate from git diff --stat]
+[USER_MESSAGE]
 
-## Workflow Steps
+---
 
-### Step 1: Pre-flight Check
-Run `git status` to see changes. If no changes, report "Nothing to commit" and stop.
+## PHASE 1: COMMIT AND PUSH
 
-### Step 2: Commit
-- Run `git add -A` to stage all changes
-- Create commit with provided message (or auto-generate from changes)
-- Use this format:
-  git commit -m "$(cat <<'EOF'
-  [MESSAGE]
+### Step 1.1: Pre-flight Check
+Run: `git status`
+- If no changes to commit, report "Nothing to commit" and STOP.
+- Otherwise, continue to Step 1.2.
 
-  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
-  EOF
-  )"
+### Step 1.2: Stage Changes
+Run: `git add -A`
 
-### Step 3: Push
-- Run `git push origin HEAD`
+### Step 1.3: Generate Commit Message (if needed)
+If commit message is "auto-generate":
+- Run: `git diff --cached --stat`
+- Examine the changes and create a descriptive message summarizing what changed
+
+### Step 1.4: Create Commit
+Run:
+```bash
+git commit -m "$(cat <<'EOF'
+[YOUR COMMIT MESSAGE HERE]
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+Note the commit hash from output.
+
+### Step 1.5: Push to Remote
+Run: `git push origin HEAD`
 - Note the branch name from output
+- If push fails, report the error and STOP
 
-### Step 4: Monitor Build
-- Wait 5 seconds for run to start: `sleep 5`
-- Get run ID: `gh run list --limit 1 --json databaseId,status,headBranch --jq '.[0]'`
-- Verify the run is for our branch
-- Watch build: `gh run watch <id> --interval 15` (timeout 600000ms = 10 min)
-- If build succeeds: Report success and artifact URL
-- If build fails: Go to Step 5
+---
 
-### Step 5: Diagnose Failure
-- Get failed logs: `gh run view <id> --log-failed | tail -200`
-- Identify the error pattern
-- Check if it matches known fixable errors (see table below)
-- If fixable: Go to Step 6
-- If not fixable: Report error and stop
+## PHASE 2: MONITOR BUILD
 
-### Step 6: Auto-Fix (if applicable)
-- Apply the fix using Edit tool
-- Commit with message: "Fix: [description of fix]"
-- Push and return to Step 4
-- Maximum 3 fix attempts before giving up
+### Step 2.1: Wait for Workflow
+Run: `sleep 5`
 
-## Common Build Errors and Auto-Fixes
+### Step 2.2: Get Run ID
+Run: `gh run list --limit 1 --json databaseId,status,headBranch,event --jq '.[0]'`
+- Verify the run is for our branch (check headBranch)
+- Store the databaseId as RUN_ID
 
-| Error Pattern | Likely Cause | Auto-Fix |
-|--------------|--------------|----------|
-| `'XYZ' file not found` | Missing include | Check if file exists, fix include path |
-| `error C2039: 'X' is not a member of 'Y'` | Wrong struct member | Read struct definition, fix member name |
-| `error C2065: 'X': undeclared identifier` | Missing declaration | Add missing declaration or include |
-| `error LNK2019: unresolved external symbol` | Missing library or implementation | Check CMakeLists.txt, add missing source |
-| `undefined reference to` | Missing implementation | Add function implementation |
-| `redefinition of 'X'` | Duplicate definition | Remove duplicate or add include guard |
-| `implicit declaration of function` | Missing include | Add the correct header include |
+### Step 2.3: Watch Build
+Run: `gh run watch RUN_ID --interval 15` (use timeout 600000ms = 10 min)
 
-## Files to Check for Fixes
+### Step 2.4: Check Result
+- If status is "success": Go to PHASE 4 (Report Success)
+- If status is "failure": Go to PHASE 3 (Diagnose and Fix)
 
-- `src/xrt/include/xrt/*.h` - Core interface headers
-- `src/xrt/compositor/main/*.c` - Compositor implementation
-- `src/xrt/compositor/multi/*.c` - Multi-client compositor
-- `src/xrt/drivers/leiasr/*.cpp` - Leia SR driver
-- `src/xrt/state_trackers/oxr/*.c` - OpenXR state tracker
-- `CMakeLists.txt` files - Build configuration
+---
 
-## Return Format
+## PHASE 3: DIAGNOSE AND FIX (Loop up to 3 times)
 
-SUCCESS:
-"Build completed successfully!
+Track: fix_attempt = 1
+
+### Step 3.1: Get Error Logs
+Run: `gh run view RUN_ID --log-failed | tail -200`
+Save the output for analysis.
+
+### Step 3.2: Identify Error Type
+Parse the logs and look for these patterns (in order of priority):
+
+**Pattern A: Missing include file**
+```
+fatal error C1083: Cannot open include file: 'XYZ.h'
+```
+→ Go to Fix A
+
+**Pattern B: Undeclared identifier**
+```
+error C2065: 'XYZ': undeclared identifier
+```
+→ Go to Fix B
+
+**Pattern C: Not a member of struct/class**
+```
+error C2039: 'member_name': is not a member of 'StructName'
+```
+→ Go to Fix C
+
+**Pattern D: Unresolved external symbol (linker)**
+```
+error LNK2019: unresolved external symbol "function_name"
+```
+→ Go to Fix D
+
+**Pattern E: Redefinition error**
+```
+error C2084: function 'X' already has a body
+error C2011: 'X': 'struct' type redefinition
+```
+→ Go to Fix E
+
+**Pattern F: Implicit function declaration (C)**
+```
+warning: implicit declaration of function 'XYZ'
+```
+→ Go to Fix F
+
+**No match found**: Report error with logs and STOP (manual intervention needed)
+
+---
+
+### FIX A: Missing Include File
+
+1. Extract the missing filename from error (e.g., 'xrt_session_target.h')
+2. Search for the file:
+   ```bash
+   find src/xrt -name "FILENAME" 2>/dev/null
+   ```
+3. If file exists:
+   - Check the include path in the failing file
+   - Use Edit tool to fix the include path to match where the file actually is
+4. If file doesn't exist:
+   - Check if it should be generated or if it's a typo
+   - Look for similar files that might be the intended include
+5. Go to Step 3.5
+
+### FIX B: Undeclared Identifier
+
+1. Extract the identifier name from error
+2. Search for where it's defined:
+   ```bash
+   grep -rn "IDENTIFIER" src/xrt/include/ --include="*.h"
+   grep -rn "#define IDENTIFIER" src/xrt/ --include="*.h"
+   grep -rn "enum.*IDENTIFIER" src/xrt/ --include="*.h"
+   ```
+3. If found in a header:
+   - Use Edit tool to add the missing #include to the failing file
+4. If it's a new identifier that should be defined:
+   - Check surrounding code for context
+   - Add the definition or declaration where appropriate
+5. Go to Step 3.5
+
+### FIX C: Not a Member of Struct
+
+1. Extract struct/class name and member name from error
+2. Find the struct definition:
+   ```bash
+   grep -rn "struct StructName" src/xrt/include/ --include="*.h" -A 50
+   ```
+3. Check what members actually exist
+4. Use Edit tool to:
+   - Fix the member name to the correct one, OR
+   - Add the missing member to the struct (if this is a new field you added)
+5. Go to Step 3.5
+
+### FIX D: Unresolved External Symbol (Linker Error)
+
+1. Extract the function name from error
+2. Check if function is declared but not implemented:
+   ```bash
+   grep -rn "function_name" src/xrt/ --include="*.c" --include="*.cpp"
+   ```
+3. If implementation is missing:
+   - Find where it should be implemented (look at similar functions)
+   - Use Write or Edit tool to add the implementation
+4. If it's a library linking issue:
+   - Check CMakeLists.txt for missing target_link_libraries
+   - Add the missing library
+5. Go to Step 3.5
+
+### FIX E: Redefinition Error
+
+1. Find all definitions:
+   ```bash
+   grep -rn "SYMBOL_NAME" src/xrt/ --include="*.h" --include="*.c"
+   ```
+2. Identify the duplicate
+3. Use Edit tool to:
+   - Remove the duplicate definition, OR
+   - Add include guards if missing, OR
+   - Use #pragma once
+5. Go to Step 3.5
+
+### FIX F: Implicit Function Declaration
+
+1. Extract function name
+2. Find where it's declared:
+   ```bash
+   grep -rn "function_name" src/xrt/include/ --include="*.h"
+   ```
+3. Use Edit tool to add the missing #include to the source file
+4. Go to Step 3.5
+
+---
+
+### Step 3.5: Commit the Fix
+
+Run:
+```bash
+git add -A
+git commit -m "$(cat <<'EOF'
+Fix: [brief description of what was fixed]
+
+Auto-fix attempt fix_attempt/3
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+### Step 3.6: Push the Fix
+Run: `git push origin HEAD`
+
+### Step 3.7: Re-monitor
+- Increment fix_attempt
+- If fix_attempt > 3: Go to PHASE 5 (Report Fix Failure)
+- Otherwise: Return to Step 2.1 (wait for new workflow)
+
+---
+
+## PHASE 4: REPORT SUCCESS
+
+Run: `gh run view RUN_ID --json conclusion,databaseId,url,updatedAt`
+
+Report:
+```
+Build completed successfully!
 - Committed: '[message]' ([N] files changed)
 - Pushed to: [branch]
-- Build: SUCCEEDED (run #[id], [duration])
-- Artifact: [artifact URL from gh run view]"
+- Build: SUCCEEDED (run #RUN_ID)
+- URL: [workflow URL]
+- Artifact: Available at Actions → SRMonado
+```
 
-FAILURE (unfixable):
-"Build FAILED
-- Committed: '[message]' ([N] files changed)
-- Pushed to: [branch]
-- Build: FAILED (run #[id])
-- Error: [key error message]
-- File: [file:line if identifiable]
-- Suggestion: [what to investigate]"
+If there were fix attempts, add:
+```
+- Auto-fixes applied: [N] (see commit history)
+```
 
-FAILURE (after fix attempts):
-"Build FAILED after [N] fix attempts
-- Original error: [error]
-- Fixes attempted: [list of fixes]
-- Current error: [remaining error]
-- Manual intervention needed"
+STOP.
+
+---
+
+## PHASE 5: REPORT FIX FAILURE
+
+Report:
+```
+Build FAILED after [N] fix attempts
+
+Original error: [first error encountered]
+Fixes attempted:
+1. [description of fix 1]
+2. [description of fix 2]
+3. [description of fix 3]
+
+Current error: [remaining error from logs]
+Build URL: [workflow URL]
+
+Manual intervention required.
+```
+
+STOP.
+
+---
+
+## Key Files Reference
+
+When looking for fixes, check these locations:
+
+**Headers (struct definitions, declarations):**
+- src/xrt/include/xrt/*.h - Core interfaces
+- src/xrt/compositor/main/comp_*.h - Compositor headers
+
+**Implementations:**
+- src/xrt/compositor/main/*.c - Compositor code
+- src/xrt/compositor/multi/*.c - Multi-client compositor
+- src/xrt/state_trackers/oxr/*.c - OpenXR bindings
+- src/xrt/drivers/leiasr/*.cpp - Leia SR driver
+
+**Build configuration:**
+- src/xrt/CMakeLists.txt - Main build file
+- src/xrt/compositor/CMakeLists.txt - Compositor build
+- src/xrt/drivers/CMakeLists.txt - Drivers build
 ```
 
 ---
@@ -180,29 +376,8 @@ The workflow (`build-windows.yml`) does:
 /ci-monitor
 ```
 
-### Just monitor current PR:
+### Just monitor current build (no commit):
 ```
 /ci-monitor --watch-only
 ```
-
-The skill will find the latest run for the current branch and monitor it.
-
----
-
-## Local Build Commands (for reference)
-
-If you need to debug locally:
-
-```bash
-# Configure
-cmake -S . -B build -G "Ninja Multi-Config" \
-  -DXRT_HAVE_LEIA_SR=ON \
-  -DCMAKE_PREFIX_PATH="/path/to/LeiaSR-SDK" \
-  -DCMAKE_TOOLCHAIN_FILE="/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake"
-
-# Build
-cmake --build build --config Release
-
-# Install
-cmake --build build --config Release --target install
-```
+For watch-only mode, skip PHASE 1 and start at PHASE 2, using the latest run for the current branch.
