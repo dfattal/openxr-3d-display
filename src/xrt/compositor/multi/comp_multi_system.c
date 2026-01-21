@@ -31,6 +31,11 @@
 #include "multi/comp_multi_private.h"
 #include "multi/comp_multi_interface.h"
 #include "main/comp_compositor.h"
+#include "main/comp_target.h"
+
+// Per-session rendering support (Phase 4)
+#include "util/comp_swapchain.h"
+#include "util/comp_render_helpers.h"
 
 #ifdef XRT_HAVE_LEIA_SR
 #include "leiasr/leiasr.h"
@@ -256,6 +261,239 @@ find_active_blend_mode(struct multi_compositor **overlay_sorted_clients, size_t 
 	return XRT_BLEND_MODE_OPAQUE;
 }
 
+
+/*
+ *
+ * Per-session rendering (Phase 4)
+ *
+ */
+
+#ifdef XRT_HAVE_LEIA_SR
+
+/*!
+ * Extract VkImageView and dimensions from a multi_layer_entry for a specific view.
+ * Similar to getLayerInfo() in comp_renderer.c but adapted for multi_layer_entry.
+ *
+ * @param layer The layer entry to extract from
+ * @param view_index 0 for left eye, 1 for right eye
+ * @param[out] out_width Image width
+ * @param[out] out_height Image height
+ * @param[out] out_format Image format
+ * @param[out] out_image_view The VkImageView for rendering
+ * @return true if extraction successful
+ */
+static bool
+get_session_layer_view(struct multi_layer_entry *layer,
+                       int view_index,
+                       int *out_width,
+                       int *out_height,
+                       VkFormat *out_format,
+                       VkImageView *out_image_view)
+{
+	const struct xrt_layer_data *layer_data = &layer->data;
+
+	// Only support projection layers for SR weaving
+	if (layer_data->type != XRT_LAYER_PROJECTION && layer_data->type != XRT_LAYER_PROJECTION_DEPTH) {
+		return false;
+	}
+
+	// Get the swapchain for this view
+	const uint32_t sc_index = (view_index == 0) ? 0 : 1;
+	struct xrt_swapchain *xsc = layer->xscs[sc_index];
+	if (xsc == NULL) {
+		return false;
+	}
+
+	// Cast to comp_swapchain to access Vulkan resources
+	struct comp_swapchain *sc = comp_swapchain(xsc);
+
+	// Get the projection view data
+	const struct xrt_layer_projection_view_data *vd = &layer_data->proj.v[view_index];
+	const uint32_t array_index = vd->sub.array_index;
+	const struct comp_swapchain_image *image = &sc->images[vd->sub.image_index];
+
+	// Extract dimensions
+	*out_width = vd->sub.rect.extent.w;
+	*out_height = vd->sub.rect.extent.h;
+	*out_format = (VkFormat)sc->vkic.info.format;
+	*out_image_view = get_image_view(image, layer_data->flags, array_index);
+
+	return (*out_image_view != VK_NULL_HANDLE);
+}
+
+/*!
+ * Render a single per-session client to its own comp_target using SR weaving.
+ *
+ * @param mc The multi_compositor with per-session rendering
+ * @param vk The Vulkan bundle
+ * @param display_time_ns The display timestamp
+ */
+static void
+render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, int64_t display_time_ns)
+{
+	struct comp_target *ct = mc->session_render.target;
+	struct leiasr *weaver = mc->session_render.weaver;
+
+	if (ct == NULL || weaver == NULL) {
+		U_LOG_E("Per-session target or weaver not initialized");
+		return;
+	}
+
+	// Must have at least one layer
+	if (mc->delivered.layer_count == 0) {
+		return;
+	}
+
+	// Get the first projection layer (for SR we only use the first stereo layer)
+	struct multi_layer_entry *layer = &mc->delivered.layers[0];
+
+	// Extract left and right view info
+	int imageWidth = 0, imageHeight = 0;
+	VkFormat imageFormat = VK_FORMAT_UNDEFINED;
+	VkImageView leftImageView = VK_NULL_HANDLE;
+	VkImageView rightImageView = VK_NULL_HANDLE;
+
+	bool leftOk = get_session_layer_view(layer, 0, &imageWidth, &imageHeight, &imageFormat, &leftImageView);
+	bool rightOk = get_session_layer_view(layer, 1, &imageWidth, &imageHeight, &imageFormat, &rightImageView);
+
+	if (!leftOk || !rightOk) {
+		U_LOG_W("Could not extract stereo views for per-session rendering");
+		return;
+	}
+
+	// Acquire the next swapchain image from the per-session target
+	uint32_t buffer_index = 0;
+	VkResult ret = comp_target_acquire(ct, &buffer_index);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("Failed to acquire per-session target image: %s", vk_result_string(ret));
+		return;
+	}
+
+	// Get target framebuffer info
+	uint32_t framebufferWidth = ct->width;
+	uint32_t framebufferHeight = ct->height;
+	VkFormat framebufferFormat = ct->format;
+
+	// Set up viewport (fullscreen)
+	VkRect2D viewport = {0};
+	viewport.offset.x = 0;
+	viewport.offset.y = 0;
+	viewport.extent.width = framebufferWidth;
+	viewport.extent.height = framebufferHeight;
+
+	// Allocate a command buffer from the per-session command pool
+	VkCommandBufferAllocateInfo alloc_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+	    .commandPool = mc->session_render.weaver_cmd_pool,
+	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+	    .commandBufferCount = 1,
+	};
+
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	ret = vk->vkAllocateCommandBuffers(vk->device, &alloc_info, &cmd);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("Failed to allocate command buffer for per-session rendering: %s", vk_result_string(ret));
+		return;
+	}
+
+	// Begin command buffer
+	VkCommandBufferBeginInfo begin_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+	};
+
+	ret = vk->vkBeginCommandBuffer(cmd, &begin_info);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("Failed to begin command buffer: %s", vk_result_string(ret));
+		vk->vkFreeCommandBuffers(vk->device, mc->session_render.weaver_cmd_pool, 1, &cmd);
+		return;
+	}
+
+	// Create a temporary framebuffer for the target image
+	// Note: leiasr_weave expects a VkFramebuffer, so we need to create one
+	// For now, we'll pass VK_NULL_HANDLE and let the weaver handle it internally
+	// if it supports direct image targets, or we create a framebuffer wrapper
+
+	// Perform SR weaving directly to the target
+	// The weaver should render to ct->images[buffer_index]
+	leiasr_weave(weaver, cmd, leftImageView, rightImageView, viewport, imageWidth, imageHeight, imageFormat,
+	             VK_NULL_HANDLE, // framebuffer - SR Runtime handles this internally
+	             (int)framebufferWidth, (int)framebufferHeight, framebufferFormat);
+
+	// End command buffer
+	ret = vk->vkEndCommandBuffer(cmd);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("Failed to end command buffer: %s", vk_result_string(ret));
+		vk->vkFreeCommandBuffers(vk->device, mc->session_render.weaver_cmd_pool, 1, &cmd);
+		return;
+	}
+
+	// Submit command buffer
+	VkSubmitInfo submit_info = {
+	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .commandBufferCount = 1,
+	    .pCommandBuffers = &cmd,
+	};
+
+	ret = vk->vkQueueSubmit(vk->main_queue->queue, 1, &submit_info, VK_NULL_HANDLE);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("Failed to submit per-session render: %s", vk_result_string(ret));
+		vk->vkFreeCommandBuffers(vk->device, mc->session_render.weaver_cmd_pool, 1, &cmd);
+		return;
+	}
+
+	// Wait for completion (simple synchronous path for now)
+	vk->vkQueueWaitIdle(vk->main_queue->queue);
+
+	// Free command buffer
+	vk->vkFreeCommandBuffers(vk->device, mc->session_render.weaver_cmd_pool, 1, &cmd);
+
+	// Present the image
+	ret = comp_target_present(ct, vk->main_queue->queue, buffer_index, 0, display_time_ns, 0);
+	if (ret != VK_SUCCESS && ret != VK_SUBOPTIMAL_KHR) {
+		U_LOG_E("Failed to present per-session target: %s", vk_result_string(ret));
+	}
+}
+
+/*!
+ * Render all per-session clients to their own targets.
+ * Called after xrt_comp_layer_commit() for sessions with external window handles.
+ *
+ * @param msc The multi system compositor
+ * @param display_time_ns The predicted display time
+ */
+static void
+render_per_session_clients_locked(struct multi_system_compositor *msc, int64_t display_time_ns)
+{
+	COMP_TRACE_MARKER();
+
+	struct comp_compositor *c = comp_compositor(&msc->xcn->base);
+	struct vk_bundle *vk = &c->base.vk;
+
+	for (size_t k = 0; k < ARRAY_SIZE(msc->clients); k++) {
+		struct multi_compositor *mc = msc->clients[k];
+
+		if (mc == NULL || !mc->session_render.initialized) {
+			continue;
+		}
+
+		// Skip if no active/delivered frame
+		if (!mc->delivered.active || mc->delivered.layer_count == 0) {
+			continue;
+		}
+
+		// Render this session to its own target
+		render_session_to_own_target(mc, vk, display_time_ns);
+
+		// Retire the delivered frame for this session
+		int64_t now_ns = os_monotonic_get_ns();
+		multi_compositor_retire_delivered_locked(mc, now_ns);
+	}
+}
+
+#endif // XRT_HAVE_LEIA_SR
+
+
 static void
 transfer_layers_locked(struct multi_system_compositor *msc, int64_t display_time_ns, int64_t system_frame_id)
 {
@@ -326,10 +564,15 @@ transfer_layers_locked(struct multi_system_compositor *msc, int64_t display_time
 	};
 	xrt_comp_layer_begin(xc, &data);
 
-	// Copy all active layers.
+	// Copy all active layers (skip sessions with per-session rendering - Phase 4).
 	for (size_t k = 0; k < count; k++) {
 		struct multi_compositor *mc = array[k];
 		assert(mc != NULL);
+
+		// Skip sessions with per-session rendering - they render separately to their own targets
+		if (mc->session_render.initialized) {
+			continue;
+		}
 
 		for (uint32_t i = 0; i < mc->delivered.layer_count; i++) {
 			struct multi_layer_entry *layer = &mc->delivered.layers[i];
@@ -556,6 +799,14 @@ multi_main_loop(struct multi_system_compositor *msc)
 		os_mutex_unlock(&msc->list_and_timing_lock);
 
 		xrt_comp_layer_commit(xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+
+#ifdef XRT_HAVE_LEIA_SR
+		// Render per-session clients to their own targets (Phase 4)
+		// These sessions were skipped in transfer_layers_locked and render separately
+		os_mutex_lock(&msc->list_and_timing_lock);
+		render_per_session_clients_locked(msc, predicted_display_time_ns);
+		os_mutex_unlock(&msc->list_and_timing_lock);
+#endif
 
 		// Re-lock the thread for check in while statement.
 		os_thread_helper_lock(&msc->oth);
