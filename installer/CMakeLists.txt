@@ -36,8 +36,8 @@ configure_file(
 	@ONLY
 )
 
-# Paths to build artifacts
-set(SRMONADO_BIN_DIR "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}")
+# Paths to build artifacts (use install prefix, not build dir)
+set(SRMONADO_BIN_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
 
 # Create installer target
 add_custom_target(installer
@@ -48,7 +48,7 @@ add_custom_target(installer
 		"/DVERSION_PATCH=${SRMONADO_VERSION_PATCH}"
 		"/DBIN_DIR=${SRMONADO_BIN_DIR}"
 		"/DSOURCE_DIR=${CMAKE_SOURCE_DIR}"
-		"/DOUTPUT_DIR=${CMAKE_BINARY_DIR}"
+		"/DOUTPUT_DIR=${CMAKE_INSTALL_PREFIX}"
 		"${CMAKE_CURRENT_SOURCE_DIR}/SRMonadoInstaller.nsi"
 	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 	COMMENT "Building SRMonado installer..."
