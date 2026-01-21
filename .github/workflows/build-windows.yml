@@ -79,6 +79,7 @@ jobs:
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
+        id: installer-upload-step
         with:
           name: SRMonado-Installer
           if-no-files-found: error
@@ -133,10 +134,10 @@ jobs:
         with:
           status: starting
           message: ':thumbsup: ${{ github.event.head_commit.message }}
-            
+
             READY
-            
-            ${{ steps.artifact-upload-step.outputs.artifact-url }}'
+
+            ${{ steps.installer-upload-step.outputs.artifact-url }}'
 
       - name: Post failure to Slack
         if: failure() && !contains(github.event.head_commit.message, '[skip slack]')
