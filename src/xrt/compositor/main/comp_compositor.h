@@ -32,6 +32,7 @@
 #include "main/comp_window.h"
 #include "main/comp_settings.h"
 #include "main/comp_renderer.h"
+#include "util/comp_target_service.h"
 
 struct comp_window_peek;
 struct comp_target_factory;
@@ -164,6 +165,9 @@ struct comp_compositor
 
 	//! External window handle from session (for windowed mode on Windows)
 	void *external_window_handle;
+
+	//! Service for creating per-session render targets (provided to comp_multi)
+	struct comp_target_service target_service;
 };
 
 

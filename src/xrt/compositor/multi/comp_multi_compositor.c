@@ -28,6 +28,10 @@
 #include "multi/comp_multi_private.h"
 #include "main/comp_compositor.h"
 
+#ifdef XRT_HAVE_LEIA_SR
+#include "leiasr/leiasr.h"
+#endif
+
 #include <math.h>
 #include <stdio.h>
 #include <assert.h>
@@ -518,9 +522,33 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 
 	assert(mc->state.session_active);
 	if (mc->state.session_active) {
-		// Clean up per-session render resources (Phase 2 infrastructure)
+		// Clean up per-session render resources (Phase 3)
 		if (mc->session_render.initialized) {
-			// Phase 3 will add cleanup for per-session target and weaver here
+#ifdef XRT_HAVE_LEIA_SR
+			// Destroy per-session SR weaver
+			if (mc->session_render.weaver != NULL) {
+				leiasr_destroy(mc->session_render.weaver);
+				mc->session_render.weaver = NULL;
+				U_LOG_I("Destroyed per-session SR weaver for HWND %p",
+				        mc->session_render.external_window_handle);
+			}
+
+			// Destroy the command pool used by the weaver
+			if (mc->session_render.weaver_cmd_pool != VK_NULL_HANDLE) {
+				struct vk_bundle *vk = comp_target_service_get_vk(mc->msc->target_service);
+				if (vk != NULL) {
+					vk->vkDestroyCommandPool(vk->device, mc->session_render.weaver_cmd_pool, NULL);
+				}
+				mc->session_render.weaver_cmd_pool = VK_NULL_HANDLE;
+			}
+#endif
+			// Destroy per-session target using the service
+			if (mc->session_render.target != NULL && mc->msc->target_service != NULL) {
+				comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
+				U_LOG_I("Destroyed per-session target for HWND %p",
+				        mc->session_render.external_window_handle);
+			}
+
 			mc->session_render.initialized = false;
 			U_LOG_I("Cleaned up per-session render resources for HWND %p",
 			        mc->session_render.external_window_handle);
@@ -918,6 +946,27 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 		mc->state.session_active = false;
 	}
 
+	// Clean up per-session render resources if still initialized
+	if (mc->session_render.initialized) {
+#ifdef XRT_HAVE_LEIA_SR
+		if (mc->session_render.weaver != NULL) {
+			leiasr_destroy(mc->session_render.weaver);
+			mc->session_render.weaver = NULL;
+		}
+		if (mc->session_render.weaver_cmd_pool != VK_NULL_HANDLE) {
+			struct vk_bundle *vk = comp_target_service_get_vk(mc->msc->target_service);
+			if (vk != NULL) {
+				vk->vkDestroyCommandPool(vk->device, mc->session_render.weaver_cmd_pool, NULL);
+			}
+			mc->session_render.weaver_cmd_pool = VK_NULL_HANDLE;
+		}
+#endif
+		if (mc->session_render.target != NULL && mc->msc->target_service != NULL) {
+			comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
+		}
+		mc->session_render.initialized = false;
+	}
+
 	os_mutex_lock(&mc->msc->list_and_timing_lock);
 
 	// Remove it from the list of clients.
@@ -1010,23 +1059,71 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 		return false;
 	}
 
-	/*
-	 * Phase 2: Mark session as having per-session render capability.
-	 *
-	 * The external window handle (HWND) is stored in the session_render struct.
-	 * For Phase 1, this HWND is passed through to the native compositor for
-	 * shared rendering (all sessions render to first session's window).
-	 *
-	 * Phase 3 will add actual per-session target and weaver creation here,
-	 * which requires architectural changes to avoid circular library dependencies
-	 * between comp_multi and comp_main.
-	 *
-	 * For now, we just mark the session as ready for per-session rendering
-	 * when the pipeline is complete.
-	 */
+	// Check if target service is available
+	if (mc->msc->target_service == NULL) {
+		U_LOG_E("No target service available for per-session rendering");
+		return false;
+	}
+
+	// Create per-session comp_target using the target service
+	xrt_result_t ret = comp_target_service_create(mc->msc->target_service,
+	                                              mc->session_render.external_window_handle,
+	                                              &mc->session_render.target);
+
+	if (ret != XRT_SUCCESS) {
+		U_LOG_E("Failed to create per-session target: %d", ret);
+		return false;
+	}
+
+	U_LOG_I("Created per-session comp_target for HWND %p", mc->session_render.external_window_handle);
+
+#ifdef XRT_HAVE_LEIA_SR
+	// Create per-session SR weaver
+	struct vk_bundle *vk = comp_target_service_get_vk(mc->msc->target_service);
+	if (vk == NULL) {
+		U_LOG_E("Failed to get Vulkan bundle for per-session weaver");
+		comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
+		return false;
+	}
+
+	// Create command pool for weaver
+	VkCommandPoolCreateInfo pool_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+	    .queueFamilyIndex = vk->main_queue->family_index,
+	    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+	};
+
+	VkCommandPool cmd_pool;
+	VkResult vk_ret = vk->vkCreateCommandPool(vk->device, &pool_info, NULL, &cmd_pool);
+	if (vk_ret != VK_SUCCESS) {
+		U_LOG_E("Failed to create command pool for per-session weaver: %d", vk_ret);
+		comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
+		return false;
+	}
+
+	ret = leiasr_create(1000.0,                                     // maxTime
+	                    vk->device,                                 // Vulkan device
+	                    vk->physical_device,                        // Physical device
+	                    vk->main_queue->queue,                      // Graphics queue
+	                    cmd_pool,                                   // Command pool
+	                    mc->session_render.external_window_handle,  // Window handle
+	                    &mc->session_render.weaver);                // Output weaver
+
+	if (ret != XRT_SUCCESS) {
+		U_LOG_E("Failed to create per-session SR weaver: %d", ret);
+		vk->vkDestroyCommandPool(vk->device, cmd_pool, NULL);
+		comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
+		return false;
+	}
+
+	// Store command pool for cleanup
+	mc->session_render.weaver_cmd_pool = cmd_pool;
+
+	U_LOG_I("Created per-session SR weaver for HWND %p", mc->session_render.external_window_handle);
+#endif
+
 	mc->session_render.initialized = true;
-	U_LOG_I("Session registered for per-session rendering with HWND %p (Phase 2 infrastructure)",
-	        mc->session_render.external_window_handle);
+	U_LOG_I("Initialized per-session render resources for HWND %p", mc->session_render.external_window_handle);
 
 	return true;
 }

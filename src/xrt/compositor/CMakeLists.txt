@@ -164,6 +164,7 @@ if(XRT_HAVE_VULKAN)
 		util/comp_swapchain.c
 		util/comp_sync.h
 		util/comp_sync.c
+		util/comp_target_service.h
 		util/comp_vulkan.h
 		util/comp_vulkan.c
 		)
@@ -339,9 +340,15 @@ add_library(
 target_link_libraries(
 	comp_multi
 	PUBLIC xrt-interfaces
-	PRIVATE aux_util aux_os
+	PRIVATE aux_util aux_os aux_vk
 	)
 target_include_directories(comp_multi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Link comp_multi to leiasr driver for per-session SR weaver creation
+if(XRT_HAVE_LEIA_SR)
+	target_compile_definitions(comp_multi PRIVATE XRT_HAVE_LEIA_SR)
+	target_link_libraries(comp_multi PRIVATE drv_leiasr)
+endif()
 
 if(XRT_MODULE_COMPOSITOR_MAIN)
 	target_link_libraries(comp_main PRIVATE comp_multi)

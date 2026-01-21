@@ -30,6 +30,7 @@
 
 #include "multi/comp_multi_private.h"
 #include "multi/comp_multi_interface.h"
+#include "main/comp_compositor.h"
 
 #ifdef XRT_HAVE_LEIA_SR
 #include "leiasr/leiasr.h"
@@ -769,6 +770,11 @@ comp_multi_create_system_compositor(struct xrt_compositor_native *xcn,
 	msc->base.info = *xsci;
 	msc->upaf = upaf;
 	msc->xcn = xcn;
+
+	// Get the target service from the native compositor for per-session rendering (Phase 3)
+	struct comp_compositor *c = comp_compositor(&xcn->base);
+	msc->target_service = &c->target_service;
+
 	msc->sessions.active_count = 0;
 	msc->sessions.state = do_warm_start ? MULTI_SYSTEM_STATE_INIT_WARM_START : MULTI_SYSTEM_STATE_STOPPED;
 
