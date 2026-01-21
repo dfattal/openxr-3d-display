@@ -13,6 +13,7 @@
  */
 
 #include <windows.h>
+#include <shlobj.h>
 #include <shlwapi.h>
 #include <string>
 #include <memory>
