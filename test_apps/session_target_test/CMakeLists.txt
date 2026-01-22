@@ -22,9 +22,18 @@ endif()
 
 # Strategy 2: Look in OpenXR_ROOT for the loader library (CI scenario)
 if(NOT OPENXR_FOUND AND DEFINED OpenXR_ROOT)
+    # Debug: show what we're looking for
+    message(STATUS "Looking for OpenXR loader in OpenXR_ROOT: ${OpenXR_ROOT}")
+    file(GLOB_RECURSE _all_files "${OpenXR_ROOT}/*")
+    message(STATUS "Files found under OpenXR_ROOT:")
+    foreach(_f ${_all_files})
+        message(STATUS "  ${_f}")
+    endforeach()
+
     # Look for the loader library in various locations
+    # Note: OpenXR loader may have versioned names like openxr_loader-1_0
     find_library(OPENXR_LOADER_LIB
-        NAMES openxr_loader
+        NAMES openxr_loader openxr_loader-1_0
         PATHS
             "${OpenXR_ROOT}/bin"
             "${OpenXR_ROOT}/lib"
@@ -40,7 +49,7 @@ if(NOT OPENXR_FOUND AND DEFINED OpenXR_ROOT)
 
         # Find the DLL for runtime
         find_file(OPENXR_LOADER_DLL
-            NAMES openxr_loader.dll
+            NAMES openxr_loader.dll openxr_loader-1_0.dll
             PATHS
                 "${OpenXR_ROOT}/bin"
                 "${OpenXR_ROOT}/lib"
