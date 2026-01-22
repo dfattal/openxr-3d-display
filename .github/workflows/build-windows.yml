@@ -222,7 +222,7 @@ jobs:
           cd test_apps/session_target_test
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
-            -DOpenXR_ROOT="${{ github.workspace }}/runtime/bin"
+            -DOpenXR_ROOT="${{ github.workspace }}/runtime"
           cmake --build build
 
       - name: Upload test app
