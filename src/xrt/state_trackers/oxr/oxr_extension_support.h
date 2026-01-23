@@ -453,6 +453,17 @@
 
 
 /*
+ * XR_EXT_session_target
+ */
+#if defined(XR_EXT_session_target) && defined(XR_USE_PLATFORM_WIN32)
+#define OXR_HAVE_EXT_session_target
+#define OXR_EXTENSION_SUPPORT_EXT_session_target(_) _(EXT_session_target, EXT_SESSION_TARGET)
+#else
+#define OXR_EXTENSION_SUPPORT_EXT_session_target(_)
+#endif
+
+
+/*
  * XR_EXT_user_presence
  */
 #if defined(XR_EXT_user_presence) && defined(XRT_FEATURE_OPENXR_USER_PRESENCE)
@@ -912,6 +923,7 @@
     OXR_EXTENSION_SUPPORT_EXT_performance_settings(_) \
     OXR_EXTENSION_SUPPORT_EXT_plane_detection(_) \
     OXR_EXTENSION_SUPPORT_EXT_samsung_odyssey_controller(_) \
+    OXR_EXTENSION_SUPPORT_EXT_session_target(_) \
     OXR_EXTENSION_SUPPORT_EXT_user_presence(_) \
     OXR_EXTENSION_SUPPORT_BD_controller_interaction(_) \
     OXR_EXTENSION_SUPPORT_FB_body_tracking(_) \
