@@ -284,6 +284,12 @@ jobs:
           Write-Host "`nDependencies of EXE:"
           dumpbin /dependents $exe
 
+          Write-Host "`nDependencies of openxr_loader.dll:"
+          dumpbin /dependents $dll
+
+          Write-Host "`nAll DLLs in build directory:"
+          Get-ChildItem test_apps/session_target_test/build/*.dll | ForEach-Object { Write-Host "  $($_.Name)" }
+
       - name: Upload test app
         uses: actions/upload-artifact@v4
         with:
