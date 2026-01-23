@@ -1,7 +1,7 @@
 # Copyright 2025, Leia Inc.
 # SPDX-License-Identifier: BSL-1.0
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 project(session_target_test LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -147,3 +147,12 @@ if(TARGET OpenXR::openxr_loader)
         )
     endif()
 endif()
+
+# Use CMake 3.21+ TARGET_RUNTIME_DLLS to automatically copy all required runtime DLLs
+add_custom_command(TARGET session_target_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_RUNTIME_DLLS:session_target_test>
+        $<TARGET_FILE_DIR:session_target_test>
+    COMMAND_EXPAND_LISTS
+    COMMENT "Copying runtime DLLs"
+)
