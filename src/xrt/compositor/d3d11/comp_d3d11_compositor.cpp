@@ -98,7 +98,7 @@ struct comp_d3d11_compositor
  */
 
 static inline struct comp_d3d11_compositor *
-comp_d3d11_compositor(struct xrt_compositor *xc)
+d3d11_comp(struct xrt_compositor *xc)
 {
 	return reinterpret_cast<struct comp_d3d11_compositor *>(xc);
 }
@@ -126,7 +126,7 @@ d3d11_compositor_create_swapchain(struct xrt_compositor *xc,
                                    const struct xrt_swapchain_create_info *info,
                                    struct xrt_swapchain **out_xsc)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	return comp_d3d11_swapchain_create(c, info, out_xsc);
 }
@@ -164,7 +164,7 @@ d3d11_compositor_create_semaphore(struct xrt_compositor *xc,
 static xrt_result_t
 d3d11_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 	(void)c;
 
 	U_LOG_I("D3D11 compositor session begin");
@@ -175,7 +175,7 @@ d3d11_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin
 static xrt_result_t
 d3d11_compositor_end_session(struct xrt_compositor *xc)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 	(void)c;
 
 	U_LOG_I("D3D11 compositor session end");
@@ -191,7 +191,7 @@ d3d11_compositor_predict_frame(struct xrt_compositor *xc,
                                 uint64_t *out_predicted_display_time_ns,
                                 uint64_t *out_predicted_display_period_ns)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -227,7 +227,7 @@ d3d11_compositor_mark_frame(struct xrt_compositor *xc,
 static xrt_result_t
 d3d11_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -240,7 +240,7 @@ d3d11_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 static xrt_result_t
 d3d11_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -253,7 +253,7 @@ d3d11_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 static xrt_result_t
 d3d11_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -268,7 +268,7 @@ d3d11_compositor_layer_projection(struct xrt_compositor *xc,
                                    struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
                                    const struct xrt_layer_data *data)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -285,7 +285,7 @@ d3d11_compositor_layer_projection_depth(struct xrt_compositor *xc,
                                          struct xrt_swapchain *d_xsc[XRT_MAX_VIEWS],
                                          const struct xrt_layer_data *data)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -301,7 +301,7 @@ d3d11_compositor_layer_quad(struct xrt_compositor *xc,
                              struct xrt_swapchain *xsc,
                              const struct xrt_layer_data *data)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -316,7 +316,7 @@ d3d11_compositor_layer_cube(struct xrt_compositor *xc,
                              struct xrt_swapchain *xsc,
                              const struct xrt_layer_data *data)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -331,7 +331,7 @@ d3d11_compositor_layer_cylinder(struct xrt_compositor *xc,
                                  struct xrt_swapchain *xsc,
                                  const struct xrt_layer_data *data)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -346,7 +346,7 @@ d3d11_compositor_layer_equirect1(struct xrt_compositor *xc,
                                   struct xrt_swapchain *xsc,
                                   const struct xrt_layer_data *data)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -361,7 +361,7 @@ d3d11_compositor_layer_equirect2(struct xrt_compositor *xc,
                                   struct xrt_swapchain *xsc,
                                   const struct xrt_layer_data *data)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -382,7 +382,7 @@ d3d11_compositor_layer_passthrough(struct xrt_compositor *xc,
 static xrt_result_t
 d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -476,7 +476,7 @@ d3d11_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 static void
 d3d11_compositor_destroy(struct xrt_compositor *xc)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	U_LOG_I("Destroying D3D11 compositor");
 
@@ -677,7 +677,7 @@ comp_d3d11_compositor_get_predicted_eye_positions(struct xrt_compositor *xc,
                                                   struct xrt_vec3 *out_left_eye,
                                                   struct xrt_vec3 *out_right_eye)
 {
-	struct comp_d3d11_compositor *c = comp_d3d11_compositor(xc);
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 #ifdef XRT_HAVE_LEIA_SR
 	if (c->weaver != nullptr) {

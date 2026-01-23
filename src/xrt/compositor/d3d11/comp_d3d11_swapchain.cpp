@@ -79,7 +79,7 @@ get_internals(struct comp_d3d11_compositor *c)
 }
 
 static inline struct comp_d3d11_swapchain *
-comp_d3d11_swapchain(struct xrt_swapchain *xsc)
+d3d11_sc(struct xrt_swapchain *xsc)
 {
 	return reinterpret_cast<struct comp_d3d11_swapchain *>(xsc);
 }
@@ -121,7 +121,7 @@ xrt_format_to_dxgi(int64_t format)
 static xrt_result_t
 d3d11_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 {
-	struct comp_d3d11_swapchain *sc = comp_d3d11_swapchain(xsc);
+	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 
 	if (sc->acquired_index >= 0) {
 		U_LOG_E("Image already acquired");
@@ -142,7 +142,7 @@ d3d11_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 static xrt_result_t
 d3d11_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t index)
 {
-	struct comp_d3d11_swapchain *sc = comp_d3d11_swapchain(xsc);
+	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 	(void)timeout_ns;
 
 	if (sc->acquired_index < 0) {
@@ -164,7 +164,7 @@ d3d11_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32
 static xrt_result_t
 d3d11_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 {
-	struct comp_d3d11_swapchain *sc = comp_d3d11_swapchain(xsc);
+	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 
 	if (sc->waited_index < 0) {
 		U_LOG_E("No image to release");
@@ -184,7 +184,7 @@ d3d11_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 static void
 d3d11_swapchain_destroy(struct xrt_swapchain *xsc)
 {
-	struct comp_d3d11_swapchain *sc = comp_d3d11_swapchain(xsc);
+	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 
 	for (uint32_t i = 0; i < sc->image_count; i++) {
 		if (sc->rtvs[i] != nullptr) {
@@ -346,7 +346,7 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
 extern "C" void *
 comp_d3d11_swapchain_get_srv(struct xrt_swapchain *xsc, uint32_t index)
 {
-	struct comp_d3d11_swapchain *sc = comp_d3d11_swapchain(xsc);
+	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 
 	if (index >= sc->image_count) {
 		return nullptr;
@@ -365,7 +365,7 @@ comp_d3d11_swapchain_get_srv(struct xrt_swapchain *xsc, uint32_t index)
 extern "C" void *
 comp_d3d11_swapchain_get_rtv(struct xrt_swapchain *xsc, uint32_t index)
 {
-	struct comp_d3d11_swapchain *sc = comp_d3d11_swapchain(xsc);
+	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 
 	if (index >= sc->image_count) {
 		return nullptr;
@@ -384,7 +384,7 @@ comp_d3d11_swapchain_get_rtv(struct xrt_swapchain *xsc, uint32_t index)
 extern "C" void *
 comp_d3d11_swapchain_get_texture(struct xrt_swapchain *xsc, uint32_t index)
 {
-	struct comp_d3d11_swapchain *sc = comp_d3d11_swapchain(xsc);
+	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 
 	if (index >= sc->image_count) {
 		return nullptr;
