@@ -1,0 +1,63 @@
+// Copyright 2024-2025, Leia Inc.
+// SPDX-License-Identifier: BSL-1.0
+/*!
+ * @file
+ * @brief  Native D3D11 compositor that bypasses Vulkan entirely.
+ * @author David Fattal
+ * @ingroup comp_d3d11
+ */
+
+#pragma once
+
+#include "xrt/xrt_compositor.h"
+#include "xrt/xrt_defines.h"
+#include "xrt/xrt_device.h"
+#include "xrt/xrt_results.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct comp_d3d11_compositor;
+
+/*!
+ * Create a native D3D11 compositor.
+ *
+ * This compositor renders directly using D3D11 without any Vulkan involvement,
+ * solving interop issues on Intel integrated GPUs where importing D3D11 textures
+ * into Vulkan fails with VK_ERROR_FORMAT_NOT_SUPPORTED.
+ *
+ * @param xdev The device we are displaying to.
+ * @param hwnd The window handle from XR_EXT_session_target (or NULL for fullscreen).
+ * @param d3d11_device The D3D11 device from the application's graphics binding.
+ * @param out_xc Pointer to receive the created compositor.
+ *
+ * @return XRT_SUCCESS on success, error code otherwise.
+ *
+ * @ingroup comp_d3d11
+ */
+xrt_result_t
+comp_d3d11_compositor_create(struct xrt_device *xdev,
+                             void *hwnd,
+                             void *d3d11_device,
+                             struct xrt_compositor_native **out_xc);
+
+/*!
+ * Get the predicted eye positions from the SR SDK weaver.
+ *
+ * @param xc The compositor.
+ * @param out_left_eye Pointer to receive left eye position (x, y, z in meters).
+ * @param out_right_eye Pointer to receive right eye position (x, y, z in meters).
+ *
+ * @return true if eye tracking is available and positions were retrieved.
+ *
+ * @ingroup comp_d3d11
+ */
+bool
+comp_d3d11_compositor_get_predicted_eye_positions(struct xrt_compositor *xc,
+                                                  struct xrt_vec3 *out_left_eye,
+                                                  struct xrt_vec3 *out_right_eye);
+
+#ifdef __cplusplus
+}
+#endif
