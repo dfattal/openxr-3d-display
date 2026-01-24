@@ -11,6 +11,7 @@
 #include "comp_d3d11_swapchain.h"
 #include "comp_d3d11_target.h"
 #include "comp_d3d11_renderer.h"
+#include "comp_d3d11_window.h"
 
 #include "main/comp_settings.h"
 #include "util/comp_layer_accum.h"
@@ -70,8 +71,14 @@ struct comp_d3d11_compositor
 	//! Compositor settings.
 	struct comp_settings settings;
 
-	//! Window handle from XR_EXT_session_target.
+	//! Window handle (either from app or self-created).
 	HWND hwnd;
+
+	//! Self-created window (NULL if app provided window).
+	struct comp_d3d11_window *own_window;
+
+	//! True if we created the window ourselves.
+	bool owns_window;
 
 #ifdef XRT_HAVE_LEIA_SR
 	//! SR weaver for light field display.
@@ -510,6 +517,11 @@ d3d11_compositor_destroy(struct xrt_compositor *xc)
 		c->device->Release();
 	}
 
+	// Destroy self-created window if we own it
+	if (c->owns_window && c->own_window != nullptr) {
+		comp_d3d11_window_destroy(&c->own_window);
+	}
+
 	// layer_accum doesn't need special cleanup - it's just a struct
 
 	delete c;
@@ -539,7 +551,27 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 	memset(&c->base, 0, sizeof(c->base));
 
 	c->xdev = xdev;
-	c->hwnd = static_cast<HWND>(hwnd);
+	c->own_window = nullptr;
+	c->owns_window = false;
+
+	// Handle window: use provided HWND or create our own
+	if (hwnd != nullptr) {
+		// App provided window via XR_EXT_session_target
+		c->hwnd = static_cast<HWND>(hwnd);
+		U_LOG_I("Using app-provided window handle: %p", hwnd);
+	} else {
+		// No window provided - create our own
+		U_LOG_I("No window handle provided, creating self-owned window");
+		xrt_result_t xret = comp_d3d11_window_create(1920, 1080, &c->own_window);
+		if (xret != XRT_SUCCESS) {
+			U_LOG_E("Failed to create self-owned window");
+			delete c;
+			return xret;
+		}
+		c->hwnd = static_cast<HWND>(comp_d3d11_window_get_hwnd(c->own_window));
+		c->owns_window = true;
+		U_LOG_I("Created self-owned window: %p", (void *)c->hwnd);
+	}
 
 	// Get D3D11.5 device interface
 	ID3D11Device *device = static_cast<ID3D11Device *>(d3d11_device);

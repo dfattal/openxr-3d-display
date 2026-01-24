@@ -41,18 +41,21 @@ DEBUG_GET_ONCE_BOOL_OPTION(enable_d3d11_native_compositor, "OXR_ENABLE_D3D11_NAT
  * Check if D3D11 native compositor should be used.
  *
  * The D3D11 native compositor is preferred when:
- * - We have a window handle from XR_EXT_session_target
  * - The D3D11 native compositor is built
  * - We're using a D3D11 graphics binding
  * - We're NOT running in IPC/service mode (compositor must be in same process)
  * - The OXR_ENABLE_D3D11_NATIVE_COMPOSITOR environment variable is set
  *
+ * Window handle is OPTIONAL:
+ * - If provided via XR_EXT_session_target, compositor uses app's window
+ * - If NULL, compositor creates its own window (for apps like Blender)
+ *
  * This bypasses Vulkan entirely and solves interop issues on Intel GPUs.
  *
  * NOTE: The D3D11 native compositor only works in in-process mode because it
- * needs direct access to the app's D3D11 device and window. In IPC mode
- * (when monado-service is running), the Vulkan compositor handles the
- * external window via its own external_window_handle support.
+ * needs direct access to the app's D3D11 device. In IPC mode (when
+ * monado-service is running), the Vulkan compositor in the server process
+ * handles compositing.
  *
  * Default is DISABLED because most setups use IPC/service mode.
  * Set OXR_ENABLE_D3D11_NATIVE_COMPOSITOR=1 for in-process testing.
@@ -61,21 +64,23 @@ bool
 oxr_d3d11_native_compositor_supported(struct oxr_system *sys, void *window_handle)
 {
 #ifdef XRT_HAVE_D3D11_NATIVE_COMPOSITOR
-	// We need a window handle to use the D3D11 native compositor
-	if (window_handle == NULL) {
-		return false;
-	}
+	// Window handle is now OPTIONAL - compositor will create its own window if NULL
+	(void)window_handle;
 
 	// D3D11 native compositor is disabled by default because it only works
 	// in in-process mode. When using IPC/service mode (monado-service),
-	// the Vulkan compositor in the server process handles the external
-	// window handle properly. Enable explicitly for in-process testing.
+	// the Vulkan compositor in the server process handles compositing.
+	// Enable explicitly for in-process testing.
 	if (!debug_get_bool_option_enable_d3d11_native_compositor()) {
 		U_LOG_D("D3D11 native compositor disabled (set OXR_ENABLE_D3D11_NATIVE_COMPOSITOR=1 to enable)");
 		return false;
 	}
 
-	U_LOG_I("D3D11 native compositor enabled via OXR_ENABLE_D3D11_NATIVE_COMPOSITOR");
+	if (window_handle != NULL) {
+		U_LOG_I("D3D11 native compositor enabled with app-provided window");
+	} else {
+		U_LOG_I("D3D11 native compositor enabled, will create own window");
+	}
 	return true;
 #else
 	(void)sys;
