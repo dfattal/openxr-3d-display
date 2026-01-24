@@ -136,44 +136,31 @@ FunctionEnd
 ; Based on NSIS Wiki and SR Platform installer
 
 ; AddToPath - Adds a directory to the system PATH
+; Based on LeiaSR runtime installer approach (simple and reliable)
 ; Usage: Push "C:\path\to\add"
 ;        Call AddToPath
 Function AddToPath
 	Exch $0  ; Path to add
 	Push $1  ; Current PATH
-	Push $2  ; Result
-	Push $3  ; Length
 
 	; Read current PATH
 	ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
 
-	; Check if already in PATH (case insensitive)
-	Push $1
-	Push $0
-	Call StrStr
-	Pop $2
-	StrCmp $2 "" 0 done  ; Already in PATH
+	; Check if PATH is empty
+	StrCmp $1 "" empty_path
 
-	; Append to PATH
-	StrLen $3 $1
-	StrCmp $3 0 fresh  ; PATH is empty
-	StrCpy $1 "$1;$0"
-	Goto update
-fresh:
-	StrCpy $1 $0
+	; Append to existing PATH
+	StrCpy $0 "$1;$0"
+	Goto write_path
 
-update:
+empty_path:
+	; PATH is empty, just use our path (already in $0)
+
+write_path:
 	; Write new PATH
-	WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$1"
+	WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$0"
+	DetailPrint "Added to system PATH"
 
-	; Broadcast WM_SETTINGCHANGE so running apps see the change
-	SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-
-	DetailPrint "Added $0 to system PATH"
-
-done:
-	Pop $3
-	Pop $2
 	Pop $1
 	Pop $0
 FunctionEnd
