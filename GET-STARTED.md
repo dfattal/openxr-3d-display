@@ -15,9 +15,9 @@ Run the installer (`SRMonadoSetup-X.X.X.exe`). It will:
 
 ## Common Questions
 
-### Do I need to run the service (monado-service.exe)?
+### Do I need to run a service?
 
-**No.** SRMonado uses **in-process mode** by default. The runtime library (`SRMonadoClient.dll`) loads directly into your application's process. There's no separate service to start.
+**No.** SRMonado is built in **in-process mode**. The runtime library (`SRMonadoClient.dll`) loads directly into your application's process. There's no separate service to start or manage.
 
 #### What is in-process mode?
 
@@ -38,9 +38,9 @@ Run the installer (`SRMonadoSetup-X.X.X.exe`). It will:
 Everything runs in ONE process. No service needed.
 ```
 
-#### What is monado-service for then?
+#### Why no service mode?
 
-The `monado-service.exe` exists because SRMonado is built from Monado's codebase, which was designed for **VR headsets**. Service mode solves VR-specific problems:
+SRMonado is built from Monado's codebase, which was designed for **VR headsets** where a service helps manage shared hardware. But for Leia SR, service mode isn't needed:
 
 | VR Headset Need | Leia SR Reality |
 |-----------------|-----------------|
@@ -67,7 +67,7 @@ For Leia SR, tracking state is already shared via **Leia's SR Tracker Service** 
 └─────────────────────────────────┘
 ```
 
-**Bottom line:** You don't need `monado-service.exe` for Leia SR workflows.
+**Bottom line:** SRMonado is built without service mode - just install and use.
 
 ### Do I need to add SRMonado to PATH?
 

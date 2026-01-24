@@ -378,13 +378,8 @@ Section "SRMonado Runtime" SecRuntime
 
 	SetOutPath "$INSTDIR"
 
-	; Stop any running service before installing
-	nsExec::ExecToLog 'taskkill /F /IM monado-service.exe'
-	Sleep 500
-
-	; Install runtime files
+	; Install runtime files (in-process mode, no service needed)
 	File "${BIN_DIR}\SRMonadoClient.dll"
-	File "${BIN_DIR}\monado-service.exe"
 
 	; Install manifest
 	File "${OUTPUT_DIR}\SRMonado_win64.json"
@@ -466,13 +461,8 @@ SectionEnd
 ; Uninstaller Section
 
 Section "Uninstall"
-	; Stop running processes
-	nsExec::ExecToLog 'taskkill /F /IM monado-service.exe'
-	Sleep 500
-
 	; Remove files
 	Delete "$INSTDIR\SRMonadoClient.dll"
-	Delete "$INSTDIR\monado-service.exe"
 	Delete "$INSTDIR\LeiaXRSwitcher.exe"
 	Delete "$INSTDIR\SRMonado_win64.json"
 	Delete "$INSTDIR\install.log"
