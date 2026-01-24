@@ -87,11 +87,12 @@ oxr_d3d11_native_compositor_supported(struct oxr_system *sys, void *window_handl
 #ifdef XRT_HAVE_D3D11_NATIVE_COMPOSITOR
 
 // Forward declaration - defined in oxr_swapchain_d3d11.c
+// Use the native version that correctly handles xrt_swapchain_native structure
 extern XrResult
-oxr_swapchain_d3d11_create(struct oxr_logger *log,
-                           struct oxr_session *sess,
-                           const XrSwapchainCreateInfo *createInfo,
-                           struct oxr_swapchain **out_swapchain);
+oxr_swapchain_d3d11_native_create(struct oxr_logger *log,
+                                  struct oxr_session *sess,
+                                  const XrSwapchainCreateInfo *createInfo,
+                                  struct oxr_swapchain **out_swapchain);
 
 XrResult
 oxr_session_populate_d3d11_native(struct oxr_logger *log,
@@ -113,7 +114,8 @@ oxr_session_populate_d3d11_native(struct oxr_logger *log,
 	// Set the compositor directly - no client wrapper needed
 	sess->xcn = xcn;
 	sess->compositor = &xcn->base;
-	sess->create_swapchain = oxr_swapchain_d3d11_create;
+	// Use native swapchain create that handles xrt_swapchain_native layout
+	sess->create_swapchain = oxr_swapchain_d3d11_native_create;
 
 	U_LOG_I("Using D3D11 native compositor (bypassing Vulkan)");
 
