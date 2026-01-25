@@ -1142,18 +1142,6 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 	return true;
 }
 
-#ifdef XRT_HAVE_LEIA_SR_SENSE
-struct leiasr *
-multi_compositor_get_eye_tracker(struct multi_compositor *mc)
-{
-	if (mc == NULL || mc->msc == NULL) {
-		return NULL;
-	}
-
-	return mc->msc->eye_tracker;
-}
-#endif
-
 #ifdef XRT_HAVE_LEIA_SR
 bool
 multi_compositor_get_predicted_eye_positions(struct multi_compositor *mc, struct leiasr_eye_pair *out_eye_pair)
