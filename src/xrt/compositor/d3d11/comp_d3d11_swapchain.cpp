@@ -58,6 +58,9 @@ struct comp_d3d11_swapchain
 
 	//! Currently waited image index (-1 if none).
 	int32_t waited_index;
+
+	//! Last released image index (for round-robin).
+	uint32_t last_released_index;
 };
 
 // Access compositor internals
@@ -84,10 +87,34 @@ d3d11_sc(struct xrt_swapchain *xsc)
 	return reinterpret_cast<struct comp_d3d11_swapchain *>(xsc);
 }
 
+/*!
+ * Convert format to DXGI format.
+ *
+ * The D3D11 native compositor enumerates DXGI formats directly, so apps using
+ * XR_KHR_D3D11_enable will pass DXGI format values. We detect these and pass
+ * them through. For Vulkan format values (used when going through the Vulkan
+ * compositor path), we convert to the equivalent DXGI format.
+ */
 static DXGI_FORMAT
 xrt_format_to_dxgi(int64_t format)
 {
+	// Check if this is already a DXGI format (common D3D11 formats are < 130)
+	// DXGI formats we enumerate: 28, 29, 87, 91, 10, 11, 45, 40, 55
 	switch (format) {
+	// Pass through DXGI formats directly
+	case DXGI_FORMAT_R8G8B8A8_UNORM:        // 28
+	case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:   // 29
+	case DXGI_FORMAT_B8G8R8A8_UNORM:        // 87
+	case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:   // 91
+	case DXGI_FORMAT_R16G16B16A16_FLOAT:    // 10
+	case DXGI_FORMAT_R16G16B16A16_UNORM:    // 11
+	case DXGI_FORMAT_D24_UNORM_S8_UINT:     // 45
+	case DXGI_FORMAT_D32_FLOAT:             // 40
+	case DXGI_FORMAT_D16_UNORM:             // 55
+	case DXGI_FORMAT_R10G10B10A2_UNORM:     // 24
+		return static_cast<DXGI_FORMAT>(format);
+
+	// Convert VK_FORMAT values to DXGI (for Vulkan compositor interop)
 	case 37: // VK_FORMAT_R8G8B8A8_UNORM
 		return DXGI_FORMAT_R8G8B8A8_UNORM;
 	case 43: // VK_FORMAT_R8G8B8A8_SRGB
@@ -106,6 +133,7 @@ xrt_format_to_dxgi(int64_t format)
 		return DXGI_FORMAT_D24_UNORM_S8_UINT;
 	case 130: // VK_FORMAT_D32_SFLOAT
 		return DXGI_FORMAT_D32_FLOAT;
+
 	default:
 		U_LOG_W("Unknown format %ld, using RGBA8", format);
 		return DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -128,10 +156,9 @@ d3d11_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	// Simple round-robin acquisition
-	static uint32_t next_index = 0;
-	uint32_t index = next_index;
-	next_index = (next_index + 1) % sc->image_count;
+	// Round-robin acquisition using per-swapchain counter
+	// Find next available index (start from last released + 1)
+	uint32_t index = (sc->last_released_index + 1) % sc->image_count;
 
 	sc->acquired_index = static_cast<int32_t>(index);
 	*out_index = index;
@@ -176,6 +203,8 @@ d3d11_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
+	// Track the last released index for round-robin acquisition
+	sc->last_released_index = index;
 	sc->waited_index = -1;
 
 	return XRT_SUCCESS;
@@ -229,6 +258,7 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
 	sc->image_count = image_count;
 	sc->acquired_index = -1;
 	sc->waited_index = -1;
+	sc->last_released_index = image_count - 1; // Start so first acquire returns index 0
 
 	// Convert format
 	DXGI_FORMAT dxgi_format = xrt_format_to_dxgi(info->format);
