@@ -11,6 +11,21 @@
 #include <cmath>
 #include <cstring>
 
+// Get directory containing the executable
+static std::string GetExecutableDirectory() {
+    char path[MAX_PATH];
+    DWORD len = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        return ".";
+    }
+    // Find last backslash
+    char* lastSlash = strrchr(path, '\\');
+    if (lastSlash) {
+        *lastSlash = '\0';
+    }
+    return path;
+}
+
 // Math implementation
 Mat4 Mat4::Identity() {
     Mat4 result = {};
@@ -729,17 +744,15 @@ static bool CreateUniformBuffers(VulkanRenderer& renderer) {
 bool CreateRenderingResources(VulkanRenderer& renderer) {
     LOG_INFO("Creating rendering resources...");
 
-    // Set shader directory - try multiple paths
-    // First try the CMake-defined path
-    #ifdef SHADER_DIR
-    renderer.shaderDir = SHADER_DIR;
-    #else
-    renderer.shaderDir = "shaders";
-    #endif
+    // Set shader directory - look for shaders next to the executable
+    std::string exeDir = GetExecutableDirectory();
+    renderer.shaderDir = exeDir + "\\shaders";
+    LOG_INFO("Executable directory: %s", exeDir.c_str());
 
-    // Check if shaders exist, if not try relative path
+    // Check if shaders exist at executable path
     std::ifstream testFile(renderer.shaderDir + "/cube.vert.spv");
     if (!testFile.is_open()) {
+        // Fallback to relative "shaders" directory
         renderer.shaderDir = "shaders";
         testFile.open(renderer.shaderDir + "/cube.vert.spv");
         if (!testFile.is_open()) {
