@@ -30,6 +30,21 @@ static UINT g_windowWidth = 1280;
 static UINT g_windowHeight = 720;
 static bool g_windowResized = false;
 
+// Get directory containing the executable
+static std::string GetExecutableDirectory() {
+    char path[MAX_PATH];
+    DWORD len = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        return ".";
+    }
+    // Find last backslash
+    char* lastSlash = strrchr(path, '\\');
+    if (lastSlash) {
+        *lastSlash = '\0';
+    }
+    return path;
+}
+
 // Math types
 struct Vec3 { float x, y, z; };
 struct Vec4 { float x, y, z, w; };
@@ -780,14 +795,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     VulkanApp app = {};
 
-    // Set shader directory
-    #ifdef SHADER_DIR
-    app.shaderDir = SHADER_DIR;
-    LOG_INFO("Shader directory (from CMake): %s", app.shaderDir.c_str());
-    #else
-    app.shaderDir = "shaders";
-    LOG_INFO("Shader directory (default): %s", app.shaderDir.c_str());
-    #endif
+    // Set shader directory - look for shaders next to the executable
+    std::string exeDir = GetExecutableDirectory();
+    app.shaderDir = exeDir + "\\shaders";
+    LOG_INFO("Executable directory: %s", exeDir.c_str());
+    LOG_INFO("Shader directory: %s", app.shaderDir.c_str());
 
     LOG_INFO("Initializing Vulkan...");
     if (!InitVulkan(app, hwnd, hInstance)) {
