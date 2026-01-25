@@ -38,6 +38,18 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
                             const struct xrt_swapchain_create_info *info,
                             struct xrt_swapchain **out_xsc);
 
+/*!
+ * Get the shader resource view for a swapchain image.
+ *
+ * @param xsc The swapchain.
+ * @param index Image index.
+ * @return The SRV as void pointer, or NULL if not available.
+ *
+ * @ingroup comp_d3d11
+ */
+void *
+comp_d3d11_swapchain_get_srv(struct xrt_swapchain *xsc, uint32_t index);
+
 #ifdef __cplusplus
 }
 #endif

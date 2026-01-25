@@ -406,12 +406,29 @@ render_projection_layer(struct comp_d3d11_renderer *r,
 	// Get swapchain for this view
 	struct xrt_swapchain *xsc = layer->sc_array[view_index];
 	if (xsc == nullptr) {
+		U_LOG_W("render_projection_layer: swapchain is null for view %u", view_index);
 		return;
 	}
 
-	// Get the D3D11 swapchain's SRV
-	// For now, we'll assume the swapchain provides access to its texture
-	// This needs to be implemented in comp_d3d11_swapchain
+	// Get the image index from the layer data
+	struct xrt_layer_projection_view_data *view_data = &layer->data.proj.v[view_index];
+	uint32_t image_index = view_data->sub.image_index;
+
+	// Get the D3D11 swapchain's SRV for this image
+	ID3D11ShaderResourceView *srv = static_cast<ID3D11ShaderResourceView *>(
+	    comp_d3d11_swapchain_get_srv(xsc, image_index));
+	if (srv == nullptr) {
+		U_LOG_W("render_projection_layer: SRV is null for swapchain image %u", image_index);
+		return;
+	}
+
+	// Debug: Log successful SRV binding on first few draws
+	static int srv_log_count = 0;
+	if (srv_log_count < 5) {
+		U_LOG_IFL_I(U_LOGGING_INFO, "render_projection_layer: Drawing view %u with image_index %u, srv=%p",
+		            view_index, image_index, (void *)srv);
+		srv_log_count++;
+	}
 
 	// Update constant buffer
 	LayerConstants constants = {};
@@ -423,9 +440,7 @@ render_projection_layer(struct comp_d3d11_renderer *r,
 	constants.mvp[10] = 1.0f;
 	constants.mvp[15] = 1.0f;
 
-	// Get UV transform from layer data
-	struct xrt_layer_projection_view_data *view_data = &layer->data.proj.v[view_index];
-	// Use normalized rect for UV transform
+	// Use normalized rect for UV transform (view_data already obtained above)
 	constants.post_transform[0] = view_data->sub.norm_rect.x;
 	constants.post_transform[1] = view_data->sub.norm_rect.y;
 	constants.post_transform[2] = view_data->sub.norm_rect.w;
@@ -454,8 +469,15 @@ render_projection_layer(struct comp_d3d11_renderer *r,
 	internals->context->PSSetConstantBuffers(0, 1, &r->constant_buffer);
 	internals->context->PSSetSamplers(0, 1, &r->sampler_linear);
 
+	// Bind the swapchain texture as shader resource
+	internals->context->PSSetShaderResources(0, 1, &srv);
+
 	// Draw fullscreen quad (triangle strip, 4 vertices)
 	internals->context->Draw(4, 0);
+
+	// Unbind SRV to avoid resource hazards
+	ID3D11ShaderResourceView *null_srv = nullptr;
+	internals->context->PSSetShaderResources(0, 1, &null_srv);
 }
 
 extern "C" xrt_result_t
@@ -534,6 +556,14 @@ comp_d3d11_renderer_draw(struct comp_d3d11_renderer *renderer,
                          struct xrt_vec3 *right_eye)
 {
 	auto internals = get_internals(renderer->c);
+
+	// Debug: Log layer count on first few frames
+	static int draw_count = 0;
+	if (draw_count < 10) {
+		U_LOG_IFL_I(U_LOGGING_INFO, "comp_d3d11_renderer_draw: layer_count=%u, view_size=%ux%u",
+		            layers->layer_count, renderer->view_width, renderer->view_height);
+		draw_count++;
+	}
 
 	// Set render target to stereo texture
 	internals->context->OMSetRenderTargets(1, &renderer->stereo_rtv, renderer->depth_dsv);

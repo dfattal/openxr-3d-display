@@ -395,7 +395,13 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
-	U_LOG_D("D3D11 compositor: layer_commit called (layers=%u)", c->layer_accum.layer_count);
+	// Use INFO level for debugging (first few frames only to avoid log spam)
+	static int frame_count = 0;
+	if (frame_count < 10) {
+		U_LOG_IFL_I(U_LOGGING_INFO, "D3D11 compositor: layer_commit called (layers=%u, frame=%d)",
+		            c->layer_accum.layer_count, frame_count);
+		frame_count++;
+	}
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
