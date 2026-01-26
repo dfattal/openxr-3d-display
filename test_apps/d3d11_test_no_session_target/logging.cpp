@@ -45,16 +45,16 @@ bool InitializeLogging() {
         return false;
     }
 
-    // Build log directory path: %LOCALAPPDATA%/LeiaSR/session_target_test/
+    // Build log directory path: %LOCALAPPDATA%/LeiaSR/d3d11_test_no_session_target/
     std::wstring logDir = localAppData;
     logDir += L"\\LeiaSR";
     CreateDirectoryW(logDir.c_str(), nullptr);
-    logDir += L"\\session_target_test";
+    logDir += L"\\d3d11_test_no_session_target";
     CreateDirectoryW(logDir.c_str(), nullptr);
 
     // Build log file path with timestamp
     std::string timestamp = GetFilenameTimestamp();
-    std::wstring logFileName = logDir + L"\\session_target_test_" +
+    std::wstring logFileName = logDir + L"\\d3d11_test_no_session_target_" +
         std::wstring(timestamp.begin(), timestamp.end()) + L".txt";
 
     // Convert to narrow string for storage
@@ -69,7 +69,7 @@ bool InitializeLogging() {
     }
 
     // Write header
-    LOG_INFO("=== Session Target Test Application Log ===");
+    LOG_INFO("=== D3D11 Test (NO Session Target) Application Log ===");
     LOG_INFO("Log file: %s", g_logFilePath.c_str());
     LOG_INFO("Application starting...");
     LOG_INFO("");
