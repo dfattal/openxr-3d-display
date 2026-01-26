@@ -684,9 +684,11 @@ oxr_session_locate_views(struct oxr_logger *log,
 #ifdef XRT_HAVE_LEIA_SR
 	// Try to get dynamic eye positions from the session's SR weaver (Phase 5)
 	// Uses the weaver's LookaroundFilter which adapts to application-specific latency
+	struct leiasr_eye_pair eye_pair = {0};
+	bool have_eye_tracking = false;
 	{
-		struct leiasr_eye_pair eye_pair;
 		if (oxr_session_get_predicted_eye_positions(sess, &eye_pair)) {
+			have_eye_tracking = true;
 			// Calculate eye relation as vector from left to right eye
 			// This replaces the static IPD with actual tracked eye positions
 			default_eye_relation.x = eye_pair.right.x - eye_pair.left.x;
@@ -768,6 +770,28 @@ oxr_session_locate_views(struct oxr_logger *log,
 		m_relation_chain_resolve(&xrc, &result);
 		OXR_XRT_POSE_TO_XRPOSEF(result.pose, views[i].pose);
 
+#ifdef XRT_HAVE_LEIA_SR
+		// Override view positions with tracked eye positions from Leia SR
+		// eye_pair contains positions in meters (driver converts from mm)
+		if (have_eye_tracking && view_count == 2) {
+			if (i == 0) {
+				// Left eye
+				views[i].pose.position.x = eye_pair.left.x;
+				views[i].pose.position.y = eye_pair.left.y;
+				views[i].pose.position.z = eye_pair.left.z;
+			} else {
+				// Right eye
+				views[i].pose.position.x = eye_pair.right.x;
+				views[i].pose.position.y = eye_pair.right.y;
+				views[i].pose.position.z = eye_pair.right.z;
+			}
+			// Keep orientation at identity for now (looking straight ahead)
+			views[i].pose.orientation.x = 0.0f;
+			views[i].pose.orientation.y = 0.0f;
+			views[i].pose.orientation.z = 0.0f;
+			views[i].pose.orientation.w = 1.0f;
+		}
+#endif
 
 		/*
 		 * Fov
@@ -778,6 +802,19 @@ oxr_session_locate_views(struct oxr_logger *log,
 		if (sess->sys->inst->quirks.parallel_views) {
 			adjust_fov(&fovs[i], &poses[i].orientation, &fov);
 		}
+
+#ifdef XRT_HAVE_LEIA_SR
+		// Override FOV with symmetric values for Leia SR display
+		// Default: ~90° horizontal, ~60° vertical (typical for 3:2 aspect ratio)
+		// TODO: Compute FOV dynamically based on eye position and virtual display plane
+		if (have_eye_tracking) {
+			// Symmetric FOV: ±45° horizontal (0.785 rad), ±30° vertical (0.524 rad)
+			fov.angle_left = -0.785398f;   // -45 degrees
+			fov.angle_right = 0.785398f;   //  45 degrees
+			fov.angle_up = 0.523599f;      //  30 degrees
+			fov.angle_down = -0.523599f;   // -30 degrees
+		}
+#endif
 
 		OXR_XRT_FOV_TO_XRFOVF(fov, views[i].fov);
 
