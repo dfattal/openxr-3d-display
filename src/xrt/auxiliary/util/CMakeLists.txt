@@ -83,6 +83,8 @@ add_library(
 	u_prober.h
 	u_resampler.c
 	u_resampler.h
+	u_sandbox.c
+	u_sandbox.h
 	u_session.c
 	u_session.h
 	u_space_overseer.c

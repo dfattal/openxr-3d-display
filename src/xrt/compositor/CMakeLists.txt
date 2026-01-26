@@ -370,3 +370,10 @@ target_link_libraries(
 if(WIN32 AND XRT_HAVE_D3D11)
 	add_subdirectory(d3d11)
 endif()
+
+###
+# D3D11 Service compositor (for hybrid mode)
+#
+if(WIN32 AND XRT_FEATURE_HYBRID_MODE)
+	add_subdirectory(d3d11_service)
+endif()

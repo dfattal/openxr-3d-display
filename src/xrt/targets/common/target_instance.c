@@ -1,10 +1,12 @@
 // Copyright 2020-2024, Collabora, Ltd.
+// Copyright 2025, Leia Inc.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Shared default implementation of the instance with compositor.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Rylie Pavlik <rylie.pavlik@collabora.com>
+ * @author David Fattal
  */
 
 #include "xrt/xrt_space.h"
@@ -24,6 +26,10 @@
 #include "main/comp_main_interface.h"
 #endif
 
+#ifdef XRT_FEATURE_HYBRID_MODE
+#include "d3d11_service/comp_d3d11_service.h"
+#endif
+
 #include "target_instance_parts.h"
 
 #include <assert.h>
@@ -39,6 +45,11 @@
 #endif
 
 DEBUG_GET_ONCE_BOOL_OPTION(use_null, "XRT_COMPOSITOR_NULL", USE_NULL_DEFAULT)
+
+#ifdef XRT_FEATURE_HYBRID_MODE
+// When hybrid mode is enabled, service can use D3D11 compositor to avoid Vulkan
+DEBUG_GET_ONCE_BOOL_OPTION(use_d3d11_service, "XRT_SERVICE_USE_D3D11", true)
+#endif
 
 xrt_result_t
 null_compositor_create_system(struct xrt_device *xdev, struct xrt_system_compositor **out_xsysc);
@@ -107,6 +118,18 @@ t_instance_create_system(struct xrt_instance *xinst,
 	}
 #endif
 
+#ifdef XRT_FEATURE_HYBRID_MODE
+	// In hybrid mode, prefer D3D11 service compositor to avoid Vulkan-D3D11 interop issues
+	if (xret == XRT_SUCCESS && xsysc == NULL && debug_get_bool_option_use_d3d11_service()) {
+		U_LOG_I("Using D3D11 service compositor (hybrid mode)");
+		xret = comp_d3d11_service_create_system(head, &xsysc);
+		if (xret != XRT_SUCCESS) {
+			U_LOG_W("D3D11 service compositor creation failed, falling back to Vulkan");
+			xret = XRT_SUCCESS; // Reset to allow fallback
+		}
+	}
+#endif
+
 #ifdef XRT_MODULE_COMPOSITOR_MAIN
 	if (xret == XRT_SUCCESS && xsysc == NULL) {
 		xret = comp_main_create_system_compositor(head, NULL, NULL, &xsysc);
@@ -153,8 +176,15 @@ err_destroy:
  *
  */
 
+#ifdef XRT_FEATURE_HYBRID_MODE
+// In hybrid mode, export as native_instance_create to avoid symbol conflict
+// with ipc_instance_create from the IPC client library
+xrt_result_t
+native_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xinst)
+#else
 xrt_result_t
 xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xinst)
+#endif
 {
 	struct xrt_prober *xp = NULL;
 

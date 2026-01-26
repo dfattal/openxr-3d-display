@@ -305,6 +305,7 @@ option_with_deps(XRT_FEATURE_STEAMVR_PLUGIN "Build SteamVR plugin" DEPENDS "NOT 
 option_with_deps(XRT_FEATURE_TRACING "Enable debug tracing on supported platforms" DEFAULT OFF DEPENDS "XRT_HAVE_PERCETTO OR XRT_HAVE_TRACY")
 option_with_deps(XRT_FEATURE_WINDOW_PEEK "Enable a window that displays the content of the HMD on screen" DEPENDS XRT_HAVE_SDL2)
 option_with_deps(XRT_FEATURE_DEBUG_GUI "Enable debug window to be used" DEPENDS XRT_HAVE_SDL2)
+option_with_deps(XRT_FEATURE_HYBRID_MODE "Enable hybrid in-process/IPC mode for Windows (native for D3D11, IPC for sandboxed apps)" DEFAULT OFF DEPENDS WIN32 XRT_MODULE_IPC XRT_FEATURE_OPENXR XRT_HAVE_D3D11)
 
 if (XRT_FEATURE_SERVICE)
 	# Disable the client debug gui by default for out-of-proc -
@@ -688,6 +689,7 @@ message(STATUS "#    FEATURE_OPENXR_XDEV_SPACE:                     ${XRT_FEATUR
 message(STATUS "#    FEATURE_RENDERDOC:                             ${XRT_FEATURE_RENDERDOC}")
 message(STATUS "#    FEATURE_SERVICE:                               ${XRT_FEATURE_SERVICE}")
 message(STATUS "#    FEATURE_SERVICE_SYSTEMD:                       ${XRT_FEATURE_SERVICE_SYSTEMD}")
+message(STATUS "#    FEATURE_HYBRID_MODE:                           ${XRT_FEATURE_HYBRID_MODE}")
 message(STATUS "#    FEATURE_SLAM:                                  ${XRT_FEATURE_SLAM}")
 message(STATUS "#    FEATURE_SSE2:                                  ${XRT_FEATURE_SSE2}")
 message(STATUS "#    FEATURE_STEAMVR_PLUGIN:                        ${XRT_FEATURE_STEAMVR_PLUGIN}")

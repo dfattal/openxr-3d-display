@@ -233,6 +233,34 @@ if(XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL)
 	if(XRT_MODULE_COMPOSITOR_NULL)
 		target_link_libraries(target_instance PRIVATE comp_null)
 	endif()
+
+	# Hybrid mode: create a separate library that exports native_instance_create
+	# instead of xrt_instance_create to avoid symbol conflict with IPC client
+	if(XRT_FEATURE_HYBRID_MODE)
+		add_library(target_instance_hybrid STATIC target_instance.c)
+		target_link_libraries(
+			target_instance_hybrid
+			PRIVATE
+				xrt-interfaces
+				aux_util
+				st_prober
+				target_lists
+				drv_includes
+				comp_d3d11_service  # D3D11 service compositor for hybrid mode
+			)
+		target_include_directories(target_instance_hybrid PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+		# Add compositor include path for d3d11_service headers
+		target_include_directories(target_instance_hybrid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../compositor)
+		target_compile_definitions(target_instance_hybrid PRIVATE XRT_FEATURE_HYBRID_MODE)
+
+		if(XRT_MODULE_COMPOSITOR_MAIN)
+			target_link_libraries(target_instance_hybrid PRIVATE comp_main)
+		endif()
+
+		if(XRT_MODULE_COMPOSITOR_NULL)
+			target_link_libraries(target_instance_hybrid PRIVATE comp_null)
+		endif()
+	endif()
 endif()
 
 ####
@@ -258,4 +286,8 @@ if(ANDROID)
 	target_link_libraries(target_instance PRIVATE aux_android)
 
 	target_link_libraries(target_instance_no_comp PRIVATE aux_android)
+
+	if(XRT_FEATURE_HYBRID_MODE)
+		target_link_libraries(target_instance_hybrid PRIVATE aux_android)
+	endif()
 endif()

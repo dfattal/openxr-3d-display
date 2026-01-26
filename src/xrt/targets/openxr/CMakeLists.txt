@@ -24,7 +24,22 @@ endif()
 # Note: Order may matter in these lists!
 target_link_libraries(${RUNTIME_TARGET} PUBLIC aux_vk aux_os aux_util aux_math)
 
-if(XRT_FEATURE_IPC_CLIENT)
+if(XRT_FEATURE_HYBRID_MODE)
+	# Hybrid mode: link both native compositor and IPC client
+	# Runtime auto-selects based on sandbox detection
+	target_link_libraries(
+		${RUNTIME_TARGET}
+		PUBLIC
+			st_oxr
+			st_prober
+			target_lists
+			target_instance_hybrid  # Native compositor (renamed to avoid symbol conflict)
+			ipc_client              # IPC client for sandboxed apps
+			comp_main
+			comp_client
+		)
+	target_compile_definitions(${RUNTIME_TARGET} PRIVATE XRT_FEATURE_HYBRID_MODE)
+elseif(XRT_FEATURE_IPC_CLIENT)
 	target_link_libraries(${RUNTIME_TARGET} PUBLIC st_oxr ipc_client comp_client)
 else()
 	target_link_libraries(
