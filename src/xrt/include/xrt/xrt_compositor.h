@@ -2355,6 +2355,10 @@ struct xrt_system_compositor_info
 
 	//! Whether submitting projection layers of a differing FOV from the target FOV is supported.
 	bool supports_fov_mutable;
+
+	//! Whether this compositor is running in service/IPC mode (compositor in separate process).
+	//! When true, in-process compositors like D3D11 native cannot be used.
+	bool is_service_mode;
 };
 
 struct xrt_system_compositor;

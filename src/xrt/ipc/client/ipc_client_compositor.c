@@ -1128,6 +1128,10 @@ ipc_client_create_system_compositor(struct ipc_connection *ipc_c,
 	// Fetch info from the system compositor.
 	get_system_info(c, &c->system.info);
 
+	// Mark that we're running in service mode (IPC client)
+	// This flag is used to prevent in-process compositors (like D3D11 native) from being used
+	c->system.info.is_service_mode = true;
+
 	*out_xcs = &c->system;
 
 	return XRT_SUCCESS;
