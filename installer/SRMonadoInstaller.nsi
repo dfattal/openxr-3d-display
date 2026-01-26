@@ -365,8 +365,11 @@ Section "SRMonado Runtime" SecRuntime
 
 	SetOutPath "$INSTDIR"
 
-	; Install runtime files (in-process mode, no service needed)
+	; Install runtime files
 	File "${BIN_DIR}\SRMonadoClient.dll"
+
+	; Install service (needed for Chrome WebXR and other sandboxed apps)
+	File /nonfatal "${BIN_DIR}\monado-service.exe"
 
 	; Install manifest
 	File "${OUTPUT_DIR}\SRMonado_win64.json"
@@ -458,6 +461,7 @@ SectionEnd
 Section "Uninstall"
 	; Remove files
 	Delete "$INSTDIR\SRMonadoClient.dll"
+	Delete "$INSTDIR\monado-service.exe"
 	Delete "$INSTDIR\LeiaXRSwitcher.exe"
 	Delete "$INSTDIR\SRMonado_win64.json"
 	Delete "$INSTDIR\install.log"
