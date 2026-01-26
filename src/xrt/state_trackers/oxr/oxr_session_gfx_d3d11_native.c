@@ -67,11 +67,24 @@ oxr_d3d11_native_compositor_supported(struct oxr_system *sys, void *window_handl
 	// Window handle is now OPTIONAL - compositor will create its own window if NULL
 	(void)window_handle;
 
+	// Check if we're running in service/IPC mode
+	// D3D11 native compositor requires direct access to the app's D3D11 device,
+	// which is not possible when the compositor is in a separate process
+	bool is_service_mode = sys->xsysc != NULL && sys->xsysc->info.is_service_mode;
+
 	// Always log the env var check result at INFO level for debugging
 	bool env_enabled = debug_get_bool_option_enable_d3d11_native_compositor();
 	U_LOG_IFL_I(U_LOGGING_INFO,"D3D11 native compositor check: XRT_HAVE_D3D11_NATIVE_COMPOSITOR=defined, "
-	        "OXR_ENABLE_D3D11_NATIVE_COMPOSITOR=%s, window_handle=%p",
-	        env_enabled ? "1 (enabled)" : "0 (disabled)", window_handle);
+	        "OXR_ENABLE_D3D11_NATIVE_COMPOSITOR=%s, window_handle=%p, is_service_mode=%s",
+	        env_enabled ? "1 (enabled)" : "0 (disabled)", window_handle,
+	        is_service_mode ? "true" : "false");
+
+	// D3D11 native compositor cannot work in service/IPC mode
+	// because it needs direct access to the app's D3D11 device
+	if (is_service_mode) {
+		U_LOG_IFL_I(U_LOGGING_INFO,"D3D11 native compositor DISABLED - running in service mode (WebXR/IPC), using Vulkan compositor");
+		return false;
+	}
 
 	// D3D11 native compositor is disabled by default because it only works
 	// in in-process mode. When using IPC/service mode (monado-service),
