@@ -369,6 +369,18 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	U_LOG_W("[per-session] Got stereo views: %dx%d, left=%p, right=%p",
 	        imageWidth, imageHeight, (void *)leftImageView, (void *)rightImageView);
 
+	// Wait for pending fence if exists (from previous frame using same buffer)
+	if (mc->session_render.fenced_buffer >= 0) {
+		U_LOG_W("[per-session] Waiting for pending fence (buffer %d)...", mc->session_render.fenced_buffer);
+		VkResult fence_ret = vk->vkWaitForFences(vk->device, 1,
+		                                         &mc->session_render.fences[mc->session_render.fenced_buffer],
+		                                         VK_TRUE, UINT64_MAX);
+		if (fence_ret != VK_SUCCESS) {
+			U_LOG_E("[per-session] Failed to wait for fence: %s", vk_result_string(fence_ret));
+		}
+		mc->session_render.fenced_buffer = -1;
+	}
+
 	// Acquire the next swapchain image from the per-session target
 	U_LOG_W("[per-session] Acquiring target swapchain image...");
 	uint32_t buffer_index = 0;
@@ -378,6 +390,19 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		return;
 	}
 	U_LOG_W("[per-session] Acquired buffer_index=%u", buffer_index);
+
+	// Validate buffer_index is in range
+	if (buffer_index >= mc->session_render.buffer_count) {
+		U_LOG_E("[per-session] buffer_index %u out of range (max %u)", buffer_index, mc->session_render.buffer_count);
+		return;
+	}
+
+	// Reset fence for current buffer
+	ret = vk->vkResetFences(vk->device, 1, &mc->session_render.fences[buffer_index]);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("[per-session] Failed to reset fence: %s", vk_result_string(ret));
+		return;
+	}
 
 	// Get target framebuffer info
 	uint32_t framebufferWidth = ct->width;
@@ -391,18 +416,11 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	viewport.extent.width = framebufferWidth;
 	viewport.extent.height = framebufferHeight;
 
-	// Allocate a command buffer from the per-session command pool
-	VkCommandBufferAllocateInfo alloc_info = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-	    .commandPool = mc->session_render.weaver_cmd_pool,
-	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-	    .commandBufferCount = 1,
-	};
-
-	VkCommandBuffer cmd = VK_NULL_HANDLE;
-	ret = vk->vkAllocateCommandBuffers(vk->device, &alloc_info, &cmd);
+	// Use pre-allocated command buffer for this swapchain image
+	VkCommandBuffer cmd = mc->session_render.cmd_buffers[buffer_index];
+	ret = vk->vkResetCommandBuffer(cmd, 0);
 	if (ret != VK_SUCCESS) {
-		U_LOG_E("Failed to allocate command buffer for per-session rendering: %s", vk_result_string(ret));
+		U_LOG_E("[per-session] Failed to reset command buffer: %s", vk_result_string(ret));
 		return;
 	}
 
@@ -415,7 +433,6 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	ret = vk->vkBeginCommandBuffer(cmd, &begin_info);
 	if (ret != VK_SUCCESS) {
 		U_LOG_E("[per-session] Failed to begin command buffer: %s", vk_result_string(ret));
-		vk->vkFreeCommandBuffers(vk->device, mc->session_render.weaver_cmd_pool, 1, &cmd);
 		return;
 	}
 	U_LOG_W("[per-session] Command buffer started");
@@ -433,37 +450,27 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	ret = vk->vkEndCommandBuffer(cmd);
 	if (ret != VK_SUCCESS) {
 		U_LOG_E("[per-session] Failed to end command buffer: %s", vk_result_string(ret));
-		vk->vkFreeCommandBuffers(vk->device, mc->session_render.weaver_cmd_pool, 1, &cmd);
 		return;
 	}
 	U_LOG_W("[per-session] Command buffer ended");
 
-	// Submit command buffer
+	// Submit command buffer with fence for async completion
 	VkSubmitInfo submit_info = {
 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 	    .commandBufferCount = 1,
 	    .pCommandBuffers = &cmd,
 	};
 
-	U_LOG_W("[per-session] Submitting command buffer to queue...");
-	ret = vk->vkQueueSubmit(vk->main_queue->queue, 1, &submit_info, VK_NULL_HANDLE);
+	U_LOG_W("[per-session] Submitting command buffer with fence...");
+	ret = vk->vkQueueSubmit(vk->main_queue->queue, 1, &submit_info, mc->session_render.fences[buffer_index]);
 	if (ret != VK_SUCCESS) {
 		U_LOG_E("[per-session] Failed to submit per-session render: %s", vk_result_string(ret));
-		vk->vkFreeCommandBuffers(vk->device, mc->session_render.weaver_cmd_pool, 1, &cmd);
 		return;
 	}
-	U_LOG_W("[per-session] Queue submit succeeded");
+	mc->session_render.fenced_buffer = (int32_t)buffer_index;
+	U_LOG_W("[per-session] Queue submit succeeded, fenced_buffer=%d", mc->session_render.fenced_buffer);
 
-	// Wait for completion (simple synchronous path for now)
-	U_LOG_W("[per-session] Waiting for queue idle...");
-	vk->vkQueueWaitIdle(vk->main_queue->queue);
-	U_LOG_W("[per-session] Queue is idle");
-
-	// Free command buffer
-	vk->vkFreeCommandBuffers(vk->device, mc->session_render.weaver_cmd_pool, 1, &cmd);
-	U_LOG_W("[per-session] Command buffer freed");
-
-	// Present the image
+	// Present the image (fence handles GPU sync - no vkQueueWaitIdle needed)
 	U_LOG_W("[per-session] Presenting image (buffer_index=%u)...", buffer_index);
 	ret = comp_target_present(ct, vk->main_queue->queue, buffer_index, 0, display_time_ns, 0);
 	if (ret != VK_SUCCESS && ret != VK_SUBOPTIMAL_KHR) {

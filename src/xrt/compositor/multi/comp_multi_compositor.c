@@ -525,6 +525,32 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 		// Clean up per-session render resources (Phase 3)
 		if (mc->session_render.initialized) {
 #ifdef XRT_HAVE_LEIA_SR
+			struct vk_bundle *vk = comp_target_service_get_vk(mc->msc->target_service);
+
+			// Wait for any pending GPU work to complete before cleanup
+			if (vk != NULL && mc->session_render.fenced_buffer >= 0) {
+				vk->vkWaitForFences(vk->device, 1,
+				                    &mc->session_render.fences[mc->session_render.fenced_buffer],
+				                    VK_TRUE, UINT64_MAX);
+				mc->session_render.fenced_buffer = -1;
+			}
+
+			// Destroy fences
+			if (vk != NULL && mc->session_render.fences != NULL) {
+				for (uint32_t i = 0; i < mc->session_render.buffer_count; i++) {
+					if (mc->session_render.fences[i] != VK_NULL_HANDLE) {
+						vk->vkDestroyFence(vk->device, mc->session_render.fences[i], NULL);
+					}
+				}
+			}
+			free(mc->session_render.fences);
+			mc->session_render.fences = NULL;
+
+			// Free command buffer array (command buffers destroyed with pool)
+			free(mc->session_render.cmd_buffers);
+			mc->session_render.cmd_buffers = NULL;
+			mc->session_render.buffer_count = 0;
+
 			// Destroy per-session SR weaver
 			if (mc->session_render.weaver != NULL) {
 				leiasr_destroy(mc->session_render.weaver);
@@ -535,7 +561,6 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 
 			// Destroy the command pool used by the weaver
 			if (mc->session_render.weaver_cmd_pool != VK_NULL_HANDLE) {
-				struct vk_bundle *vk = comp_target_service_get_vk(mc->msc->target_service);
 				if (vk != NULL) {
 					vk->vkDestroyCommandPool(vk->device, mc->session_render.weaver_cmd_pool, NULL);
 				}
@@ -949,12 +974,37 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 	// Clean up per-session render resources if still initialized
 	if (mc->session_render.initialized) {
 #ifdef XRT_HAVE_LEIA_SR
+		struct vk_bundle *vk = comp_target_service_get_vk(mc->msc->target_service);
+
+		// Wait for any pending GPU work to complete before cleanup
+		if (vk != NULL && mc->session_render.fenced_buffer >= 0) {
+			vk->vkWaitForFences(vk->device, 1,
+			                    &mc->session_render.fences[mc->session_render.fenced_buffer],
+			                    VK_TRUE, UINT64_MAX);
+			mc->session_render.fenced_buffer = -1;
+		}
+
+		// Destroy fences
+		if (vk != NULL && mc->session_render.fences != NULL) {
+			for (uint32_t i = 0; i < mc->session_render.buffer_count; i++) {
+				if (mc->session_render.fences[i] != VK_NULL_HANDLE) {
+					vk->vkDestroyFence(vk->device, mc->session_render.fences[i], NULL);
+				}
+			}
+		}
+		free(mc->session_render.fences);
+		mc->session_render.fences = NULL;
+
+		// Free command buffer array (command buffers destroyed with pool)
+		free(mc->session_render.cmd_buffers);
+		mc->session_render.cmd_buffers = NULL;
+		mc->session_render.buffer_count = 0;
+
 		if (mc->session_render.weaver != NULL) {
 			leiasr_destroy(mc->session_render.weaver);
 			mc->session_render.weaver = NULL;
 		}
 		if (mc->session_render.weaver_cmd_pool != VK_NULL_HANDLE) {
-			struct vk_bundle *vk = comp_target_service_get_vk(mc->msc->target_service);
 			if (vk != NULL) {
 				vk->vkDestroyCommandPool(vk->device, mc->session_render.weaver_cmd_pool, NULL);
 			}
@@ -1133,6 +1183,80 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 	U_LOG_W("Command pool stored, weaver init complete");
 
 	U_LOG_W("Created per-session SR weaver for HWND %p", mc->session_render.external_window_handle);
+
+	// Allocate command buffer ring and fences (one per swapchain image)
+	uint32_t image_count = mc->session_render.target->image_count;
+	U_LOG_W("Allocating command buffer ring: %u buffers", image_count);
+
+	mc->session_render.cmd_buffers = U_TYPED_ARRAY_CALLOC(VkCommandBuffer, image_count);
+	mc->session_render.fences = U_TYPED_ARRAY_CALLOC(VkFence, image_count);
+	if (mc->session_render.cmd_buffers == NULL || mc->session_render.fences == NULL) {
+		U_LOG_E("Failed to allocate command buffer/fence arrays");
+		leiasr_destroy(mc->session_render.weaver);
+		mc->session_render.weaver = NULL;
+		vk->vkDestroyCommandPool(vk->device, cmd_pool, NULL);
+		mc->session_render.weaver_cmd_pool = VK_NULL_HANDLE;
+		comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
+		free(mc->session_render.cmd_buffers);
+		free(mc->session_render.fences);
+		mc->session_render.cmd_buffers = NULL;
+		mc->session_render.fences = NULL;
+		return false;
+	}
+
+	// Allocate command buffers
+	VkCommandBufferAllocateInfo cb_alloc_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+	    .commandPool = cmd_pool,
+	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+	    .commandBufferCount = image_count,
+	};
+
+	vk_ret = vk->vkAllocateCommandBuffers(vk->device, &cb_alloc_info, mc->session_render.cmd_buffers);
+	if (vk_ret != VK_SUCCESS) {
+		U_LOG_E("Failed to allocate command buffers: %d", vk_ret);
+		leiasr_destroy(mc->session_render.weaver);
+		mc->session_render.weaver = NULL;
+		vk->vkDestroyCommandPool(vk->device, cmd_pool, NULL);
+		mc->session_render.weaver_cmd_pool = VK_NULL_HANDLE;
+		comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
+		free(mc->session_render.cmd_buffers);
+		free(mc->session_render.fences);
+		mc->session_render.cmd_buffers = NULL;
+		mc->session_render.fences = NULL;
+		return false;
+	}
+
+	// Create fences (signaled so first wait succeeds)
+	VkFenceCreateInfo fence_info = {
+	    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+	    .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+	};
+
+	for (uint32_t i = 0; i < image_count; i++) {
+		vk_ret = vk->vkCreateFence(vk->device, &fence_info, NULL, &mc->session_render.fences[i]);
+		if (vk_ret != VK_SUCCESS) {
+			U_LOG_E("Failed to create fence %u: %d", i, vk_ret);
+			// Clean up already-created fences
+			for (uint32_t j = 0; j < i; j++) {
+				vk->vkDestroyFence(vk->device, mc->session_render.fences[j], NULL);
+			}
+			leiasr_destroy(mc->session_render.weaver);
+			mc->session_render.weaver = NULL;
+			vk->vkDestroyCommandPool(vk->device, cmd_pool, NULL);
+			mc->session_render.weaver_cmd_pool = VK_NULL_HANDLE;
+			comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
+			free(mc->session_render.cmd_buffers);
+			free(mc->session_render.fences);
+			mc->session_render.cmd_buffers = NULL;
+			mc->session_render.fences = NULL;
+			return false;
+		}
+	}
+
+	mc->session_render.buffer_count = image_count;
+	mc->session_render.fenced_buffer = -1;
+	U_LOG_W("Created %u command buffers and fences for per-session rendering", image_count);
 #endif
 
 	U_LOG_W("Setting session_render.initialized = true...");

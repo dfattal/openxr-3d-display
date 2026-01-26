@@ -217,6 +217,18 @@ struct multi_compositor
 
 		//! Command pool for the per-session weaver (must be destroyed on cleanup)
 		VkCommandPool weaver_cmd_pool;
+
+		//! Pre-allocated command buffers (one per swapchain image)
+		VkCommandBuffer *cmd_buffers;
+
+		//! Per-frame completion fences (one per swapchain image)
+		VkFence *fences;
+
+		//! Size of cmd_buffers and fences arrays
+		uint32_t buffer_count;
+
+		//! Index of buffer with pending fence (-1 = none)
+		int32_t fenced_buffer;
 #endif
 
 		//! True if per-session resources are initialized
