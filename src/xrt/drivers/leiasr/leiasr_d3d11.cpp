@@ -103,18 +103,13 @@ create_sr_context(double max_time, leiasr_d3d11 &sr)
 				display_ready = true;
 
 				// Cache display dimensions in meters for Kooima FOV calculation
-				// Get DPI from Windows and convert pixels to meters: meters = pixels * 25.4 / dpi / 1000
-				HDC hdc = GetDC(NULL);
-				float dpiX = (float)GetDeviceCaps(hdc, LOGPIXELSX);
-				float dpiY = (float)GetDeviceCaps(hdc, LOGPIXELSY);
-				ReleaseDC(NULL, hdc);
-
-				sr.display_width_m = (float)width * 25.4f / dpiX / 1000.0f;
-				sr.display_height_m = (float)height * 25.4f / dpiY / 1000.0f;
+				// Use SR SDK's physical size API (returns cm, convert to meters)
+				sr.display_width_m = display->getPhysicalSizeWidth() / 100.0f;
+				sr.display_height_m = display->getPhysicalSizeHeight() / 100.0f;
 				sr.display_dims_valid = true;
 
-				U_LOG_I("SR D3D11 display dimensions: %ldx%ld px, DPI %.1fx%.1f, %.3fx%.3f m",
-				        (long)width, (long)height, dpiX, dpiY,
+				U_LOG_I("SR D3D11 display dimensions: %ldx%ld px, physical %.3fx%.3f m",
+				        (long)width, (long)height,
 				        sr.display_width_m, sr.display_height_m);
 
 				break;

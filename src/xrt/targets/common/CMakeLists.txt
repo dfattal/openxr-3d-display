@@ -234,6 +234,14 @@ if(XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL)
 		target_link_libraries(target_instance PRIVATE comp_null)
 	endif()
 
+	# When hybrid mode is enabled, the service (which uses target_instance) should
+	# prefer D3D11 compositor to avoid Vulkan-D3D11 interop issues
+	if(XRT_FEATURE_HYBRID_MODE)
+		target_link_libraries(target_instance PRIVATE comp_d3d11_service)
+		target_include_directories(target_instance PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../compositor)
+		target_compile_definitions(target_instance PRIVATE XRT_USE_D3D11_SERVICE_COMPOSITOR)
+	endif()
+
 	# Hybrid mode: create a separate library that exports native_instance_create
 	# instead of xrt_instance_create to avoid symbol conflict with IPC client
 	if(XRT_FEATURE_HYBRID_MODE)
@@ -251,7 +259,9 @@ if(XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL)
 		target_include_directories(target_instance_hybrid PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 		# Add compositor include path for d3d11_service headers
 		target_include_directories(target_instance_hybrid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../compositor)
-		target_compile_definitions(target_instance_hybrid PRIVATE XRT_FEATURE_HYBRID_MODE)
+		# XRT_FEATURE_HYBRID_MODE renames xrt_instance_create to native_instance_create
+		# XRT_USE_D3D11_SERVICE_COMPOSITOR enables D3D11 compositor selection
+		target_compile_definitions(target_instance_hybrid PRIVATE XRT_FEATURE_HYBRID_MODE XRT_USE_D3D11_SERVICE_COMPOSITOR)
 
 		if(XRT_MODULE_COMPOSITOR_MAIN)
 			target_link_libraries(target_instance_hybrid PRIVATE comp_main)
