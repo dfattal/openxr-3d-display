@@ -347,11 +347,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
         // Only render if session is running
         if (xr.sessionRunning) {
+            if (frameNumber <= 3) {
+                LOG_INFO("Frame %d: Session running, calling BeginFrame...", frameNumber);
+            }
             XrFrameState frameState;
             if (BeginFrame(xr, frameState)) {
+                if (frameNumber <= 3) {
+                    LOG_INFO("Frame %d: BeginFrame succeeded, shouldRender=%d", frameNumber, frameState.shouldRender);
+                }
                 XrCompositionLayerProjectionView projectionViews[2] = {};
 
                 if (frameState.shouldRender) {
+                    if (frameNumber <= 3) {
+                        LOG_INFO("Frame %d: LocateViews...", frameNumber);
+                    }
                     // Get view matrices
                     XMMATRIX leftViewMatrix, leftProjMatrix;
                     XMMATRIX rightViewMatrix, rightProjMatrix;
@@ -359,23 +368,72 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                     if (LocateViews(xr, frameState.predictedDisplayTime,
                         leftViewMatrix, leftProjMatrix,
                         rightViewMatrix, rightProjMatrix)) {
+                        if (frameNumber <= 3) {
+                            LOG_INFO("Frame %d: LocateViews succeeded, rendering...", frameNumber);
+                        }
 
                         // Render each eye
                         for (int eye = 0; eye < 2; eye++) {
                             uint32_t imageIndex;
+                            if (frameNumber <= 3) {
+                                LOG_INFO("Frame %d, Eye %d: Acquiring swapchain image...", frameNumber, eye);
+                            }
                             if (AcquireSwapchainImage(xr, eye, imageIndex)) {
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: Acquired image index %u", frameNumber, eye, imageIndex);
+                                }
+
                                 // Get swapchain texture
                                 ID3D11Texture2D* swapchainTexture = xr.swapchains[eye].images[imageIndex].texture;
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: Swapchain texture pointer: 0x%p", frameNumber, eye, swapchainTexture);
+                                }
+
+                                if (!swapchainTexture) {
+                                    LOG_ERROR("Frame %d, Eye %d: SWAPCHAIN TEXTURE IS NULL!", frameNumber, eye);
+                                    ReleaseSwapchainImage(xr, eye);
+                                    continue;
+                                }
+
+                                // Query texture info for debugging
+                                if (frameNumber <= 3) {
+                                    D3D11_TEXTURE2D_DESC texDesc;
+                                    swapchainTexture->GetDesc(&texDesc);
+                                    LOG_INFO("Frame %d, Eye %d: Texture desc: %ux%u, format=%u, bind=0x%X, usage=%d, misc=0x%X",
+                                        frameNumber, eye, texDesc.Width, texDesc.Height, texDesc.Format,
+                                        texDesc.BindFlags, texDesc.Usage, texDesc.MiscFlags);
+
+                                    // Check if texture is from same device
+                                    ComPtr<ID3D11Device> texDevice;
+                                    swapchainTexture->GetDevice(&texDevice);
+                                    LOG_INFO("Frame %d, Eye %d: Texture device: 0x%p, Renderer device: 0x%p, MATCH=%s",
+                                        frameNumber, eye, texDevice.Get(), renderer.device.Get(),
+                                        (texDevice.Get() == renderer.device.Get()) ? "YES" : "NO");
+                                }
 
                                 // Create RTV for this swapchain image
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: Creating RTV...", frameNumber, eye);
+                                }
                                 ID3D11RenderTargetView* rtv = nullptr;
-                                CreateRenderTargetView(renderer, swapchainTexture, &rtv);
+                                bool rtvCreated = CreateRenderTargetView(renderer, swapchainTexture, &rtv);
+                                if (!rtvCreated || !rtv) {
+                                    LOG_ERROR("Frame %d, Eye %d: Failed to create RTV!", frameNumber, eye);
+                                    ReleaseSwapchainImage(xr, eye);
+                                    continue;
+                                }
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: RTV created: 0x%p", frameNumber, eye, rtv);
+                                }
 
                                 // Select view/projection matrices
                                 XMMATRIX viewMatrix = (eye == 0) ? leftViewMatrix : rightViewMatrix;
                                 XMMATRIX projMatrix = (eye == 0) ? leftProjMatrix : rightProjMatrix;
 
                                 // Render scene
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: Rendering scene...", frameNumber, eye);
+                                }
                                 RenderScene(renderer, rtv, depthDSVs[eye].Get(),
                                     xr.swapchains[eye].width,
                                     xr.swapchains[eye].height,
@@ -385,8 +443,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                     g_inputState.cameraPosZ,
                                     g_inputState.yaw,
                                     g_inputState.pitch);
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: Scene rendered", frameNumber, eye);
+                                }
 
                                 // Render text overlay (minimal - just session state)
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: Rendering text overlay...", frameNumber, eye);
+                                }
                                 {
                                     std::wstring stateText = L"Session: ";
                                     stateText += FormatSessionState((int)xr.sessionState);
@@ -394,11 +458,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                     RenderText(textOverlay, renderer.device.Get(), swapchainTexture,
                                         stateText, 10, 10, 300, 25);
                                 }
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: Text overlay rendered", frameNumber, eye);
+                                }
 
                                 // Release RTV
                                 if (rtv) rtv->Release();
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: RTV released", frameNumber, eye);
+                                }
 
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: Releasing swapchain image...", frameNumber, eye);
+                                }
                                 ReleaseSwapchainImage(xr, eye);
+                                if (frameNumber <= 3) {
+                                    LOG_INFO("Frame %d, Eye %d: Swapchain image released", frameNumber, eye);
+                                }
 
                                 // Set up projection view for this eye
                                 projectionViews[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
@@ -429,7 +505,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 }
 
                 // End frame
+                if (frameNumber <= 3) {
+                    LOG_INFO("Frame %d: Calling EndFrame...", frameNumber);
+                }
                 EndFrame(xr, frameState.predictedDisplayTime, projectionViews);
+                if (frameNumber <= 3) {
+                    LOG_INFO("Frame %d: EndFrame completed", frameNumber);
+                }
             }
         } else {
             // Not running - sleep to avoid spinning
