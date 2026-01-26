@@ -615,7 +615,9 @@ static const char *instance_extensions[] = {
 static bool
 detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
 {
-	return false;
+	// Return true so the service creates its own window at startup.
+	// This is needed for WebXR/AppContainer apps that don't provide a window handle.
+	return true;
 }
 
 static bool
@@ -635,7 +637,7 @@ const struct comp_target_factory comp_target_factory_mswin = {
     .name = "Microsoft Windows(TM)",
     .identifier = "mswin",
     .requires_vulkan_for_create = false,
-    .is_deferred = true,
+    .is_deferred = false,  // Create window at startup for WebXR/AppContainer support
     .required_instance_version = 0,
     .required_instance_extensions = instance_extensions,
     .required_instance_extension_count = ARRAY_SIZE(instance_extensions),
