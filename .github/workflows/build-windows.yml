@@ -63,6 +63,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=_package `
             -DXRT_BUILD_INSTALLER=ON `
             -DXRT_FEATURE_SERVICE=ON `
+            -DXRT_FEATURE_HYBRID_MODE=ON `
             -DBUILD_NUM="${{ github.run_number }}"
 
       - name: Build

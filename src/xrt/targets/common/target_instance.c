@@ -26,7 +26,8 @@
 #include "main/comp_main_interface.h"
 #endif
 
-#ifdef XRT_FEATURE_HYBRID_MODE
+// D3D11 service compositor is used when available (both service and hybrid client)
+#ifdef XRT_USE_D3D11_SERVICE_COMPOSITOR
 #include "d3d11_service/comp_d3d11_service.h"
 #endif
 
@@ -46,8 +47,9 @@
 
 DEBUG_GET_ONCE_BOOL_OPTION(use_null, "XRT_COMPOSITOR_NULL", USE_NULL_DEFAULT)
 
-#ifdef XRT_FEATURE_HYBRID_MODE
-// When hybrid mode is enabled, service can use D3D11 compositor to avoid Vulkan
+// When D3D11 service compositor is available, prefer it to avoid Vulkan-D3D11 interop issues
+// This is enabled for both the service (target_instance) and client (target_instance_hybrid)
+#ifdef XRT_USE_D3D11_SERVICE_COMPOSITOR
 DEBUG_GET_ONCE_BOOL_OPTION(use_d3d11_service, "XRT_SERVICE_USE_D3D11", true)
 #endif
 
@@ -118,10 +120,10 @@ t_instance_create_system(struct xrt_instance *xinst,
 	}
 #endif
 
-#ifdef XRT_FEATURE_HYBRID_MODE
-	// In hybrid mode, prefer D3D11 service compositor to avoid Vulkan-D3D11 interop issues
+#ifdef XRT_USE_D3D11_SERVICE_COMPOSITOR
+	// Prefer D3D11 service compositor to avoid Vulkan-D3D11 interop issues
 	if (xret == XRT_SUCCESS && xsysc == NULL && debug_get_bool_option_use_d3d11_service()) {
-		U_LOG_I("Using D3D11 service compositor (hybrid mode)");
+		U_LOG_I("Using D3D11 service compositor");
 		xret = comp_d3d11_service_create_system(head, &xsysc);
 		if (xret != XRT_SUCCESS) {
 			U_LOG_W("D3D11 service compositor creation failed, falling back to Vulkan");

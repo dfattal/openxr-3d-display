@@ -114,6 +114,7 @@ Both paths avoid Vulkan-D3D11 interop entirely on Windows.
 
 ```c
 // src/xrt/targets/openxr/target.c
+// Hybrid entry point - decides between in-process and IPC mode
 xrt_result_t xrt_instance_create(...)
 {
     if (u_sandbox_should_use_ipc()) {
@@ -125,12 +126,17 @@ xrt_result_t xrt_instance_create(...)
     }
 }
 
-// src/xrt/targets/common/target_instance.c (service-side)
+// src/xrt/targets/common/target_instance.c
+// Both service (target_instance) and hybrid client (target_instance_hybrid)
+// use this code path when XRT_USE_D3D11_SERVICE_COMPOSITOR is defined
+#ifdef XRT_USE_D3D11_SERVICE_COMPOSITOR
 if (debug_get_bool_option_use_d3d11_service()) {
     // Default: use D3D11 service compositor
     comp_d3d11_service_create_system(head, &xsysc);
-} else {
-    // Fallback: use Vulkan compositor
+}
+#endif
+// Fallback to Vulkan compositor if D3D11 fails or is disabled
+if (xsysc == NULL) {
     comp_main_create_system_compositor(head, NULL, NULL, &xsysc);
 }
 ```
@@ -229,8 +235,16 @@ When enabled, the build produces:
 
 | Target | Purpose |
 |--------|---------|
-| `target_instance_hybrid` | Instance creation with D3D11 service compositor support |
+| `target_instance` | Standard instance (service uses this) - gets D3D11 compositor support when hybrid mode enabled |
+| `target_instance_hybrid` | Hybrid instance for client DLL - exports `native_instance_create` to avoid symbol conflict |
 | `comp_d3d11_service` | D3D11 service compositor library |
+
+### Internal Compile Definitions
+
+| Define | Where Used | Purpose |
+|--------|-----------|---------|
+| `XRT_FEATURE_HYBRID_MODE` | `target_instance_hybrid`, client DLL | Renames `xrt_instance_create` to `native_instance_create` |
+| `XRT_USE_D3D11_SERVICE_COMPOSITOR` | `target_instance`, `target_instance_hybrid` | Enables D3D11 compositor selection logic |
 
 ---
 
