@@ -24,6 +24,8 @@
 #include "math/m_api.h"
 #include "math/m_vec3.h"
 
+#include "d3d/d3d_d3d11_fence.hpp"
+
 #ifdef XRT_HAVE_LEIA_SR
 #include "leiasr/leiasr_d3d11.h"
 #endif
@@ -37,6 +39,7 @@
 #include <wil/com.h>
 #include <wil/result.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
@@ -111,6 +114,25 @@ struct d3d11_service_compositor
 	//! Thread safety
 	std::mutex mutex;
 };
+
+/*!
+ * D3D11 service compositor semaphore (timeline fence).
+ */
+struct d3d11_service_semaphore
+{
+	//! Base semaphore - must be first!
+	struct xrt_compositor_semaphore base;
+
+	//! Parent system
+	struct d3d11_service_system *sys;
+
+	//! The D3D11 fence
+	wil::com_ptr<ID3D11Fence> fence;
+
+	//! Event for waiting on fence
+	wil::unique_event_nothrow wait_event;
+};
+
 
 /*!
  * D3D11 service system compositor.
@@ -226,6 +248,12 @@ static inline struct d3d11_service_system *
 d3d11_service_system_from_xrt(struct xrt_system_compositor *xsysc)
 {
 	return reinterpret_cast<struct d3d11_service_system *>(xsysc);
+}
+
+static inline struct d3d11_service_semaphore *
+d3d11_service_semaphore_from_xrt(struct xrt_compositor_semaphore *xcsem)
+{
+	return reinterpret_cast<struct d3d11_service_semaphore *>(xcsem);
 }
 
 
@@ -961,6 +989,35 @@ swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction di
 
 /*
  *
+ * Semaphore functions
+ *
+ */
+
+static xrt_result_t
+semaphore_wait(struct xrt_compositor_semaphore *xcsem, uint64_t value, uint64_t timeout_ns)
+{
+	struct d3d11_service_semaphore *sem = d3d11_service_semaphore_from_xrt(xcsem);
+
+	// Convert nanoseconds to milliseconds
+	auto timeout_ms = std::chrono::milliseconds(timeout_ns / 1000000);
+
+	return xrt::auxiliary::d3d::d3d11::waitOnFenceWithTimeout(
+	    sem->fence, sem->wait_event, value, timeout_ms);
+}
+
+static void
+semaphore_destroy(struct xrt_compositor_semaphore *xcsem)
+{
+	struct d3d11_service_semaphore *sem = d3d11_service_semaphore_from_xrt(xcsem);
+
+	sem->wait_event.reset();
+	sem->fence.reset();
+	delete sem;
+}
+
+
+/*
+ *
  * Native compositor functions
  *
  */
@@ -1108,7 +1165,46 @@ compositor_create_semaphore(struct xrt_compositor *xc,
                              xrt_graphics_sync_handle_t *out_handle,
                              struct xrt_compositor_semaphore **out_xcsem)
 {
-	return XRT_ERROR_FENCE_CREATE_FAILED;
+	struct d3d11_service_compositor *c = d3d11_service_compositor_from_xrt(xc);
+	struct d3d11_service_system *sys = c->sys;
+
+	// Allocate semaphore
+	struct d3d11_service_semaphore *sem = new d3d11_service_semaphore();
+	std::memset(&sem->base, 0, sizeof(sem->base));
+
+	sem->sys = sys;
+	sem->base.reference.count = 1;
+	sem->base.wait = semaphore_wait;
+	sem->base.destroy = semaphore_destroy;
+
+	// Create the wait event
+	sem->wait_event.create();
+	if (!sem->wait_event) {
+		U_LOG_E("Failed to create wait event for semaphore");
+		delete sem;
+		return XRT_ERROR_FENCE_CREATE_FAILED;
+	}
+
+	// Create a shared D3D11 fence
+	xrt_graphics_sync_handle_t handle = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
+	xrt_result_t xret = xrt::auxiliary::d3d::d3d11::createSharedFence(
+	    *sys->device.get(),
+	    false,  // share_cross_adapter
+	    &handle,
+	    sem->fence);
+
+	if (xret != XRT_SUCCESS) {
+		U_LOG_E("Failed to create D3D11 fence for semaphore");
+		delete sem;
+		return XRT_ERROR_FENCE_CREATE_FAILED;
+	}
+
+	U_LOG_I("Created D3D11 compositor semaphore");
+
+	*out_handle = handle;
+	*out_xcsem = &sem->base;
+
+	return XRT_SUCCESS;
 }
 
 static xrt_result_t
