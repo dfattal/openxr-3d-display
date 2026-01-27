@@ -121,24 +121,41 @@ t_instance_create_system(struct xrt_instance *xinst,
 #endif
 
 #ifdef XRT_USE_D3D11_SERVICE_COMPOSITOR
-	// Prefer D3D11 service compositor to avoid Vulkan-D3D11 interop issues
+	// Try D3D11 service compositor first (preferred for Windows service mode)
 	if (xret == XRT_SUCCESS && xsysc == NULL && debug_get_bool_option_use_d3d11_service()) {
 		U_LOG_I("Using D3D11 service compositor");
 		xret = comp_d3d11_service_create_system(head, &xsysc);
 		if (xret != XRT_SUCCESS) {
+#ifdef XRT_D3D11_SERVICE_ONLY
+			// D3D11-only mode (service): no Vulkan fallback available
+			U_LOG_E("D3D11 service compositor creation failed (no Vulkan fallback in service mode)");
+			// Don't reset xret - let the error propagate
+#else
+			// Hybrid client: can fall back to Vulkan
 			U_LOG_W("D3D11 service compositor creation failed, falling back to Vulkan");
 			xret = XRT_SUCCESS; // Reset to allow fallback
+#endif
 		}
 	}
+#ifdef XRT_D3D11_SERVICE_ONLY
+	// D3D11-only mode: if D3D11 was disabled, error out
+	if (xret == XRT_SUCCESS && xsysc == NULL && !debug_get_bool_option_use_d3d11_service()) {
+		U_LOG_E("D3D11 service compositor disabled via XRT_SERVICE_USE_D3D11=0, but Vulkan is not available in service mode");
+		xret = XRT_ERROR_VULKAN;
+	}
+#endif
 #endif
 
 #ifdef XRT_MODULE_COMPOSITOR_MAIN
+#ifndef XRT_D3D11_SERVICE_ONLY
+	// Vulkan compositor fallback (not available in D3D11-only service mode)
 	if (xret == XRT_SUCCESS && xsysc == NULL) {
 		xret = comp_main_create_system_compositor(head, NULL, NULL, &xsysc);
 	}
+#endif
 #else
-	if (!use_null) {
-		U_LOG_E("Explicitly didn't request the null compositor, but the main compositor hasn't been built!");
+	if (!use_null && xsysc == NULL) {
+		U_LOG_E("Explicitly didn't request the null compositor, but no compositor is available!");
 		xret = XRT_ERROR_VULKAN;
 	}
 #endif

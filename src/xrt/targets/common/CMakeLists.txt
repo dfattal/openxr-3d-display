@@ -226,20 +226,25 @@ if(XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL)
 		)
 	target_include_directories(target_instance PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-	if(XRT_MODULE_COMPOSITOR_MAIN)
-		target_link_libraries(target_instance PRIVATE comp_main)
+	# When hybrid mode is enabled, the service (which uses target_instance) should
+	# ONLY use D3D11 compositor to avoid Vulkan dependencies (no Vulkan SR library needed)
+	if(XRT_FEATURE_HYBRID_MODE)
+		# D3D11-only mode for service - no Vulkan compositor linked
+		target_link_libraries(target_instance PRIVATE comp_d3d11_service)
+		target_include_directories(target_instance PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../compositor)
+		# XRT_USE_D3D11_SERVICE_COMPOSITOR: enables D3D11 compositor
+		# XRT_D3D11_SERVICE_ONLY: disables Vulkan fallback (service doesn't need it)
+		target_compile_definitions(target_instance PRIVATE XRT_USE_D3D11_SERVICE_COMPOSITOR XRT_D3D11_SERVICE_ONLY)
+		# Note: NOT linking comp_main here - service uses D3D11 only
+	else()
+		# Standard mode: link Vulkan compositor
+		if(XRT_MODULE_COMPOSITOR_MAIN)
+			target_link_libraries(target_instance PRIVATE comp_main)
+		endif()
 	endif()
 
 	if(XRT_MODULE_COMPOSITOR_NULL)
 		target_link_libraries(target_instance PRIVATE comp_null)
-	endif()
-
-	# When hybrid mode is enabled, the service (which uses target_instance) should
-	# prefer D3D11 compositor to avoid Vulkan-D3D11 interop issues
-	if(XRT_FEATURE_HYBRID_MODE)
-		target_link_libraries(target_instance PRIVATE comp_d3d11_service)
-		target_include_directories(target_instance PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../compositor)
-		target_compile_definitions(target_instance PRIVATE XRT_USE_D3D11_SERVICE_COMPOSITOR)
 	endif()
 
 	# Hybrid mode: create a separate library that exports native_instance_create
