@@ -151,14 +151,6 @@ d3d11_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 {
 	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 
-	// Debug logging for first few acquires
-	static int acquire_count = 0;
-	if (acquire_count < 10) {
-		U_LOG_W("[DEBUG] d3d11_swapchain_acquire_image: sc=%p, image_count=%u, last_released=%u, acquired_index=%d",
-		        (void *)sc, sc->image_count, sc->last_released_index, sc->acquired_index);
-		acquire_count++;
-	}
-
 	if (sc->acquired_index >= 0) {
 		U_LOG_E("Image already acquired");
 		return XRT_ERROR_IPC_FAILURE;
@@ -171,10 +163,6 @@ d3d11_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 	sc->acquired_index = static_cast<int32_t>(index);
 	*out_index = index;
 
-	if (acquire_count <= 10) {
-		U_LOG_W("[DEBUG] d3d11_swapchain_acquire_image: returning index=%u", index);
-	}
-
 	return XRT_SUCCESS;
 }
 
@@ -183,14 +171,6 @@ d3d11_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32
 {
 	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 	(void)timeout_ns;
-
-	// Debug logging for first few waits
-	static int wait_count = 0;
-	if (wait_count < 10) {
-		U_LOG_W("[DEBUG] d3d11_swapchain_wait_image: sc=%p, index=%u, acquired_index=%d",
-		        (void *)sc, index, sc->acquired_index);
-		wait_count++;
-	}
 
 	if (sc->acquired_index < 0) {
 		U_LOG_E("No image acquired");
@@ -223,14 +203,6 @@ static xrt_result_t
 d3d11_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 {
 	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
-
-	// Debug logging for first few releases
-	static int release_count = 0;
-	if (release_count < 10) {
-		U_LOG_W("[DEBUG] d3d11_swapchain_release_image: sc=%p, index=%u, waited_index=%d",
-		        (void *)sc, index, sc->waited_index);
-		release_count++;
-	}
 
 	if (sc->waited_index < 0) {
 		U_LOG_E("No image to release");
@@ -353,13 +325,6 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
 		}
 	}
 
-	U_LOG_W("[DEBUG] Swapchain creation: bits=0x%x, bind_flags=0x%x (RT=%d, SR=%d, DS=%d), device=%p",
-	        info->bits, bind_flags,
-	        (bind_flags & D3D11_BIND_RENDER_TARGET) ? 1 : 0,
-	        (bind_flags & D3D11_BIND_SHADER_RESOURCE) ? 1 : 0,
-	        (bind_flags & D3D11_BIND_DEPTH_STENCIL) ? 1 : 0,
-	        (void *)internals->device);
-
 	// Create textures
 	D3D11_TEXTURE2D_DESC texDesc = {};
 	texDesc.Width = info->width;
@@ -417,9 +382,6 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
 		sc->base.images[i].size = 0; // Not applicable for D3D11
 		sc->base.images[i].use_dedicated_allocation = false;
 		sc->base.images[i].is_dxgi_handle = false;
-
-		U_LOG_W("[DEBUG] Swapchain image[%u]: texture=%p, handle=%p",
-		        i, (void *)sc->images[i], (void *)sc->base.images[i].handle);
 	}
 
 	// Set up swapchain interface
@@ -433,8 +395,8 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
 
 	*out_xsc = &sc->base.base;
 
-	U_LOG_W("[DEBUG] Created D3D11 swapchain: %ux%u, %u images, format %d (DXGI), sc=%p, base=%p",
-	        info->width, info->height, image_count, (int)dxgi_format, (void *)sc, (void *)&sc->base);
+	U_LOG_I("Created D3D11 swapchain: %ux%u, %u images, format %d",
+	        info->width, info->height, image_count, (int)dxgi_format);
 
 	return XRT_SUCCESS;
 }

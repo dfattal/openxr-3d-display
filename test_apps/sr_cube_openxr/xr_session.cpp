@@ -261,6 +261,72 @@ bool CreateSwapchains(XrSessionManager& xr) {
     return true;
 }
 
+bool CreateQuadLayerSwapchain(XrSessionManager& xr, uint32_t width, uint32_t height) {
+    LOG_INFO("Creating quad layer swapchain for UI overlay (%ux%u)...", width, height);
+
+    uint32_t formatCount = 0;
+    XR_CHECK(xrEnumerateSwapchainFormats(xr.session, 0, &formatCount, nullptr));
+
+    std::vector<int64_t> formats(formatCount);
+    XR_CHECK(xrEnumerateSwapchainFormats(xr.session, formatCount, &formatCount, formats.data()));
+
+    int64_t selectedFormat = formats[0];
+    for (int64_t format : formats) {
+        if (format == DXGI_FORMAT_R8G8B8A8_UNORM || format == DXGI_FORMAT_B8G8R8A8_UNORM) {
+            selectedFormat = format;
+            break;
+        }
+    }
+    LOG_INFO("Selected quad swapchain format: %lld", selectedFormat);
+
+    XrSwapchainCreateInfo swapchainInfo = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
+    swapchainInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+    swapchainInfo.format = selectedFormat;
+    swapchainInfo.sampleCount = 1;
+    swapchainInfo.width = width;
+    swapchainInfo.height = height;
+    swapchainInfo.faceCount = 1;
+    swapchainInfo.arraySize = 1;
+    swapchainInfo.mipCount = 1;
+
+    XR_CHECK_LOG(xrCreateSwapchain(xr.session, &swapchainInfo, &xr.quadSwapchain.swapchain));
+    LOG_INFO("Quad swapchain created: 0x%p", (void*)xr.quadSwapchain.swapchain);
+
+    xr.quadSwapchain.format = selectedFormat;
+    xr.quadSwapchain.width = width;
+    xr.quadSwapchain.height = height;
+
+    uint32_t imageCount = 0;
+    XR_CHECK(xrEnumerateSwapchainImages(xr.quadSwapchain.swapchain, 0, &imageCount, nullptr));
+
+    xr.quadSwapchain.images.resize(imageCount, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
+    XR_CHECK(xrEnumerateSwapchainImages(xr.quadSwapchain.swapchain, imageCount, &imageCount,
+        (XrSwapchainImageBaseHeader*)xr.quadSwapchain.images.data()));
+
+    LOG_INFO("Got %u quad swapchain images", imageCount);
+    xr.hasQuadLayer = true;
+
+    return true;
+}
+
+bool AcquireQuadSwapchainImage(XrSessionManager& xr, uint32_t& imageIndex) {
+    if (!xr.hasQuadLayer) return false;
+
+    XrSwapchainImageAcquireInfo acquireInfo = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    if (XR_FAILED(xrAcquireSwapchainImage(xr.quadSwapchain.swapchain, &acquireInfo, &imageIndex))) return false;
+
+    XrSwapchainImageWaitInfo waitInfo = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    waitInfo.timeout = XR_INFINITE_DURATION;
+    return XR_SUCCEEDED(xrWaitSwapchainImage(xr.quadSwapchain.swapchain, &waitInfo));
+}
+
+bool ReleaseQuadSwapchainImage(XrSessionManager& xr) {
+    if (!xr.hasQuadLayer) return false;
+
+    XrSwapchainImageReleaseInfo releaseInfo = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    return XR_SUCCEEDED(xrReleaseSwapchainImage(xr.quadSwapchain.swapchain, &releaseInfo));
+}
+
 bool PollEvents(XrSessionManager& xr) {
     XrEventDataBuffer event = {XR_TYPE_EVENT_DATA_BUFFER};
 
@@ -391,8 +457,55 @@ bool EndFrame(XrSessionManager& xr, XrTime displayTime, const XrCompositionLayer
     return XR_SUCCEEDED(xrEndFrame(xr.session, &endInfo));
 }
 
+bool EndFrameWithQuadLayer(
+    XrSessionManager& xr,
+    XrTime displayTime,
+    const XrCompositionLayerProjectionView* projViews,
+    float quadPosX, float quadPosY, float quadPosZ,
+    float quadWidth, float quadHeight
+) {
+    XrCompositionLayerProjection projectionLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    projectionLayer.space = xr.localSpace;
+    projectionLayer.viewCount = 2;
+    projectionLayer.views = projViews;
+
+    XrCompositionLayerQuad quadLayer = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    quadLayer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    quadLayer.space = xr.viewSpace;
+    quadLayer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    quadLayer.subImage.swapchain = xr.quadSwapchain.swapchain;
+    quadLayer.subImage.imageRect.offset = {0, 0};
+    quadLayer.subImage.imageRect.extent = {
+        (int32_t)xr.quadSwapchain.width,
+        (int32_t)xr.quadSwapchain.height
+    };
+    quadLayer.subImage.imageArrayIndex = 0;
+    quadLayer.pose.position = {quadPosX, quadPosY, quadPosZ};
+    quadLayer.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+    quadLayer.size = {quadWidth, quadHeight};
+
+    const XrCompositionLayerBaseHeader* layers[] = {
+        (XrCompositionLayerBaseHeader*)&projectionLayer,
+        (XrCompositionLayerBaseHeader*)&quadLayer
+    };
+
+    XrFrameEndInfo endInfo = {XR_TYPE_FRAME_END_INFO};
+    endInfo.displayTime = displayTime;
+    endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    endInfo.layerCount = xr.hasQuadLayer ? 2 : 1;
+    endInfo.layers = layers;
+
+    return XR_SUCCEEDED(xrEndFrame(xr.session, &endInfo));
+}
+
 void CleanupOpenXR(XrSessionManager& xr) {
     LOG_INFO("Cleaning up OpenXR resources...");
+
+    if (xr.quadSwapchain.swapchain != XR_NULL_HANDLE) {
+        xrDestroySwapchain(xr.quadSwapchain.swapchain);
+        xr.quadSwapchain.swapchain = XR_NULL_HANDLE;
+        xr.hasQuadLayer = false;
+    }
 
     for (int eye = 0; eye < 2; eye++) {
         if (xr.swapchains[eye].swapchain != XR_NULL_HANDLE) {

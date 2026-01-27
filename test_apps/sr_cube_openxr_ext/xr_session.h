@@ -45,6 +45,10 @@ struct XrSessionManager {
     // Swapchains (one per eye for stereo)
     SwapchainInfo swapchains[2];
 
+    // Quad layer swapchain for UI overlay
+    SwapchainInfo quadSwapchain;
+    bool hasQuadLayer = false;
+
     // View configuration
     XrViewConfigurationType viewConfigType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
     std::vector<XrViewConfigurationView> configViews;
@@ -86,6 +90,13 @@ bool CreateSpaces(XrSessionManager& xr);
 // Create swapchains for rendering
 bool CreateSwapchains(XrSessionManager& xr);
 
+// Create quad layer swapchain for UI overlay
+bool CreateQuadLayerSwapchain(XrSessionManager& xr, uint32_t width, uint32_t height);
+
+// Acquire/release quad layer swapchain image
+bool AcquireQuadSwapchainImage(XrSessionManager& xr, uint32_t& imageIndex);
+bool ReleaseQuadSwapchainImage(XrSessionManager& xr);
+
 // Poll for OpenXR events and update session state
 bool PollEvents(XrSessionManager& xr);
 
@@ -108,8 +119,17 @@ bool AcquireSwapchainImage(XrSessionManager& xr, int eye, uint32_t& imageIndex);
 // Release swapchain image after rendering
 bool ReleaseSwapchainImage(XrSessionManager& xr, int eye);
 
-// End frame and submit layers
+// End frame and submit layers (projection layer only)
 bool EndFrame(XrSessionManager& xr, XrTime displayTime, const XrCompositionLayerProjectionView* views);
+
+// End frame with projection layer and quad layer for UI
+bool EndFrameWithQuadLayer(
+    XrSessionManager& xr,
+    XrTime displayTime,
+    const XrCompositionLayerProjectionView* projViews,
+    float quadPosX, float quadPosY, float quadPosZ,
+    float quadWidth, float quadHeight
+);
 
 // Clean up OpenXR resources
 void CleanupOpenXR(XrSessionManager& xr);
