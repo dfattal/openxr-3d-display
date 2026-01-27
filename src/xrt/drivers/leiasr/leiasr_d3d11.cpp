@@ -21,6 +21,7 @@
 #include <sysinfoapi.h>
 
 #include <mutex>
+#include <cmath>
 
 /*!
  * D3D11 SR weaver instance.
@@ -91,11 +92,25 @@ create_sr_context(double max_time, leiasr_d3d11 &sr)
 		return false;
 	}
 
-	// Wait for display to be ready.
+	// Get display manager (modern API) and wait for display to be ready.
+	SR::IDisplayManager *displayManager = nullptr;
+	SR::IDisplay *display = nullptr;
 	bool display_ready = false;
+
+	try {
+		displayManager = SR::GetDisplayManagerInstance(*sr.context);
+		if (displayManager == nullptr) {
+			U_LOG_E("Failed to get SR DisplayManager instance");
+			return false;
+		}
+	} catch (...) {
+		U_LOG_E("Exception getting SR DisplayManager - requires runtime version 1.34.8-RC1 or later");
+		return false;
+	}
+
 	while (!display_ready) {
-		SR::Display *display = SR::Display::create(*sr.context);
-		if (display != nullptr) {
+		display = displayManager->getPrimaryActiveSRDisplay();
+		if (display != nullptr && display->isValid()) {
 			SR_recti display_location = display->getLocation();
 			int64_t width = display_location.right - display_location.left;
 			int64_t height = display_location.bottom - display_location.top;
@@ -104,12 +119,15 @@ create_sr_context(double max_time, leiasr_d3d11 &sr)
 
 				// Cache display dimensions in meters for Kooima FOV calculation
 				// Use SR SDK's physical size API (returns cm, convert to meters)
-				sr.display_width_m = display->getPhysicalSizeWidth() / 100.0f;
-				sr.display_height_m = display->getPhysicalSizeHeight() / 100.0f;
+				float raw_width_cm = display->getPhysicalSizeWidth();
+				float raw_height_cm = display->getPhysicalSizeHeight();
+				sr.display_width_m = raw_width_cm / 100.0f;
+				sr.display_height_m = raw_height_cm / 100.0f;
 				sr.display_dims_valid = true;
 
-				U_LOG_I("SR D3D11 display dimensions: %ldx%ld px, physical %.3fx%.3f m",
+				U_LOG_I("SR D3D11 display (modern API): %ldx%ld px, physical %.2fcm x %.2fcm = %.4fm x %.4fm",
 				        (long)width, (long)height,
+				        raw_width_cm, raw_height_cm,
 				        sr.display_width_m, sr.display_height_m);
 
 				break;
@@ -278,6 +296,18 @@ leiasr_d3d11_get_predicted_eye_positions(struct leiasr_d3d11 *leiasr,
 	out_right_eye[0] = right_mm[0] / 1000.0f;
 	out_right_eye[1] = right_mm[1] / 1000.0f;
 	out_right_eye[2] = right_mm[2] / 1000.0f;
+
+	// Throttled diagnostic logging
+	static int eye_log_counter = 0;
+	if (++eye_log_counter % 300 == 1) { // Log every ~5 seconds at 60fps
+		float ipd_mm = sqrtf(powf(right_mm[0] - left_mm[0], 2) +
+		                     powf(right_mm[1] - left_mm[1], 2) +
+		                     powf(right_mm[2] - left_mm[2], 2));
+		U_LOG_I("SR eye positions (raw mm): L=(%.1f,%.1f,%.1f) R=(%.1f,%.1f,%.1f) IPD=%.1fmm",
+		        left_mm[0], left_mm[1], left_mm[2],
+		        right_mm[0], right_mm[1], right_mm[2],
+		        ipd_mm);
+	}
 
 	return true;
 }

@@ -76,12 +76,25 @@ CreateSRContext(double maxTime, leiasr &sr)
 			break;
 	}
 
-	// Wait for display to be ready.
+	// Get display manager (modern API) and wait for display to be ready.
+	SR::IDisplayManager *displayManager = nullptr;
+	SR::IDisplay *display = nullptr;
 	bool displayReady = false;
+
+	try {
+		displayManager = SR::GetDisplayManagerInstance(*sr.context);
+		if (displayManager == nullptr) {
+			U_LOG_E("Failed to get SR DisplayManager instance");
+			return false;
+		}
+	} catch (...) {
+		U_LOG_E("Exception getting SR DisplayManager - requires runtime version 1.34.8-RC1 or later");
+		return false;
+	}
+
 	while (sr.context && !displayReady) {
-		// Attempt to get display.
-		SR::Display *display = SR::Display::create(*sr.context);
-		if (display != nullptr) {
+		display = displayManager->getPrimaryActiveSRDisplay();
+		if (display != nullptr && display->isValid()) {
 			// Get the display location, and when it is valid, the device is ready.
 			SR_recti displayLocation = display->getLocation();
 			int64_t width = displayLocation.right - displayLocation.left;
@@ -91,12 +104,15 @@ CreateSRContext(double maxTime, leiasr &sr)
 
 				// Cache display dimensions in meters for Kooima FOV calculation
 				// Use SR SDK's physical size API (returns cm, convert to meters)
-				sr.display_width_m = display->getPhysicalSizeWidth() / 100.0f;
-				sr.display_height_m = display->getPhysicalSizeHeight() / 100.0f;
+				float raw_width_cm = display->getPhysicalSizeWidth();
+				float raw_height_cm = display->getPhysicalSizeHeight();
+				sr.display_width_m = raw_width_cm / 100.0f;
+				sr.display_height_m = raw_height_cm / 100.0f;
 				sr.display_dims_valid = true;
 
-				U_LOG_I("SR display dimensions: %ldx%ld px, physical %.3fx%.3f m",
+				U_LOG_I("SR display (modern API): %ldx%ld px, physical %.2fcm x %.2fcm = %.4fm x %.4fm",
 				        (long)width, (long)height,
+				        raw_width_cm, raw_height_cm,
 				        sr.display_width_m, sr.display_height_m);
 
 				break;
