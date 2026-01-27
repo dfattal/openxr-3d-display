@@ -41,6 +41,17 @@ if(WIN32 AND XRT_HAVE_D3D11)
 		target_link_libraries(comp_d3d11 PRIVATE drv_leiasr)
 	endif()
 
+	# Debug GUI support (XRT_DEBUG_GUI=1 to enable)
+	if(XRT_FEATURE_DEBUG_GUI)
+		target_sources(
+			comp_d3d11
+			PRIVATE
+				comp_d3d11_debug.cpp
+				comp_d3d11_debug.h
+			)
+		target_link_libraries(comp_d3d11 PRIVATE aux_util_debug_gui)
+	endif()
+
 	# Install HLSL shaders (for reference, actual shaders are compiled at runtime)
 	# file(GLOB HLSL_SHADERS shaders/*.hlsl)
 	# install(FILES ${HLSL_SHADERS} DESTINATION share/monado/shaders/d3d11)

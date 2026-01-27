@@ -97,6 +97,20 @@ comp_d3d11_renderer_get_view_dimensions(struct comp_d3d11_renderer *renderer,
                                         uint32_t *out_view_width,
                                         uint32_t *out_view_height);
 
+/*!
+ * Get the stereo texture for debug readback.
+ *
+ * Returns the ID3D11Texture2D of the side-by-side stereo texture.
+ *
+ * @param renderer The renderer.
+ *
+ * @return Pointer to the D3D11 texture (ID3D11Texture2D*).
+ *
+ * @ingroup comp_d3d11
+ */
+void *
+comp_d3d11_renderer_get_stereo_texture(struct comp_d3d11_renderer *renderer);
+
 #ifdef __cplusplus
 }
 #endif

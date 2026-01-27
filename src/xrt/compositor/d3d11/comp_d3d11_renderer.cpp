@@ -957,3 +957,9 @@ comp_d3d11_renderer_get_view_dimensions(struct comp_d3d11_renderer *renderer,
 	*out_view_width = renderer->view_width;
 	*out_view_height = renderer->view_height;
 }
+
+extern "C" void *
+comp_d3d11_renderer_get_stereo_texture(struct comp_d3d11_renderer *renderer)
+{
+	return renderer->stereo_texture;
+}
