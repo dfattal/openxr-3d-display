@@ -26,6 +26,7 @@ target_link_libraries(
 		aux_util
 		aux_os
 		aux_math
+		aux_d3d  # For D3D11 fence/semaphore support
 		WIL::WIL
 		${D3D11_LIBRARY}
 		${DXGI_LIBRARY}
