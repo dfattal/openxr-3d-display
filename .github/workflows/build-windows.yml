@@ -316,6 +316,61 @@ jobs:
   #     - name: Checkout repository
   #       uses: actions/checkout@v4
 
+  # Native SR SDK app (no OpenXR) - Direct CNSDK integration
+  TestAppNative:
+    if: true  # <-- Change to 'false' to disable
+    runs-on: windows-2022
+
+    env:
+      GH_TOKEN: ${{ secrets.LEIALOFT_GITHUB_TOKEN }}
+      SR_TAG: 1.35.0.2011
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.LEIALOFT_GITHUB_TOKEN }}
+          submodules: recursive
+
+      - name: Download Simulated Reality SDK
+        run: |
+          gh release download -R LeiaInc/SR-SDK-Windows-Releases-Internal-Public $env:SR_TAG -p LeiaSR-SDK-$env:SR_TAG-win64.zip -D .
+          tar -xf LeiaSR-SDK-$env:SR_TAG-win64.zip -C .
+          Write-Host "SR SDK contents:"
+          Get-ChildItem -Recurse LeiaSR-SDK-$env:SR_TAG-win64 | Select-Object FullName
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build native SR test app (sr_cube_native)
+        run: |
+          cd test_apps/sr_cube_native
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/LeiaSR-SDK-$env:SR_TAG-win64"
+          cmake --build build
+
+      - name: Copy required DLLs
+        run: |
+          # Copy SR SDK DLLs
+          $srSdkBin = "${{ github.workspace }}/LeiaSR-SDK-$env:SR_TAG-win64/bin"
+          if (Test-Path $srSdkBin) {
+            Get-ChildItem -Path $srSdkBin -Filter "*.dll" | ForEach-Object {
+              Copy-Item $_.FullName -Destination test_apps/sr_cube_native/build/
+              Write-Host "Copied $($_.Name)"
+            }
+          }
+
+      - name: Upload native SR test app
+        uses: actions/upload-artifact@v4
+        with:
+          name: SRCubeNative
+          if-no-files-found: error
+          path: |
+            test_apps/sr_cube_native/build/sr_cube_native.exe
+            test_apps/sr_cube_native/build/*.dll
+
   # D3D11 test app WITHOUT session_target extension - Standard OpenXR app
   TestAppStandard:
     if: true  # <-- Change to 'false' to disable
