@@ -203,13 +203,6 @@ d3d11_compositor_predict_frame(struct xrt_compositor *xc,
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
-	// Debug logging for first few frames
-	static int predict_count = 0;
-	if (predict_count < 5) {
-		U_LOG_W("[DEBUG] d3d11_compositor_predict_frame called (count=%d)", predict_count);
-		predict_count++;
-	}
-
 	std::lock_guard<std::mutex> lock(c->mutex);
 
 	c->frame_id++;
@@ -237,13 +230,6 @@ d3d11_compositor_wait_frame(struct xrt_compositor *xc,
                              int64_t *out_predicted_display_period_ns)
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
-
-	// Debug logging for first few frames
-	static int wait_count = 0;
-	if (wait_count < 5) {
-		U_LOG_W("[DEBUG] d3d11_compositor_wait_frame called (count=%d)", wait_count);
-		wait_count++;
-	}
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -277,14 +263,6 @@ static xrt_result_t
 d3d11_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
-
-	// Debug logging for first few frames
-	static int begin_count = 0;
-	if (begin_count < 5) {
-		U_LOG_W("[DEBUG] d3d11_compositor_begin_frame called (frame_id=%lld, count=%d)",
-		        (long long)frame_id, begin_count);
-		begin_count++;
-	}
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -342,13 +320,6 @@ d3d11_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
-	// Debug logging for first few calls
-	static int layer_begin_count = 0;
-	if (layer_begin_count < 10) {
-		U_LOG_W("[DEBUG] d3d11_compositor_layer_begin called (count=%d)", layer_begin_count);
-		layer_begin_count++;
-	}
-
 	std::lock_guard<std::mutex> lock(c->mutex);
 
 	comp_layer_accum_begin(&c->layer_accum, data);
@@ -363,14 +334,6 @@ d3d11_compositor_layer_projection(struct xrt_compositor *xc,
                                    const struct xrt_layer_data *data)
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
-
-	// Debug logging for first few layers
-	static int layer_count = 0;
-	if (layer_count < 5) {
-		U_LOG_W("[DEBUG] d3d11_compositor_layer_projection called (xsc[0]=%p, xsc[1]=%p, count=%d)",
-		        (void *)xsc[0], (void *)xsc[1], layer_count);
-		layer_count++;
-	}
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
@@ -486,19 +449,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
-	// Debug logging for first few commits
-	static int commit_count = 0;
-	if (commit_count < 10) {
-		U_LOG_W("[DEBUG] d3d11_compositor_layer_commit called (layers=%u, count=%d)",
-		        c->layer_accum.layer_count, commit_count);
-		commit_count++;
-	}
-
 	std::lock_guard<std::mutex> lock(c->mutex);
-
-	if (commit_count <= 10) {
-		U_LOG_W("[DEBUG] layer_commit: acquired lock, preparing eye positions");
-	}
 
 	// Get predicted eye positions
 	struct xrt_vec3 left_eye = {-0.032f, 0.0f, 0.6f};   // Default: 64mm IPD, 60cm from screen
@@ -518,19 +469,11 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	}
 #endif
 
-	if (commit_count <= 10) {
-		U_LOG_W("[DEBUG] layer_commit: calling renderer_draw");
-	}
-
 	// Render layers to side-by-side stereo texture
 	xrt_result_t xret = comp_d3d11_renderer_draw(c->renderer, &c->layer_accum, &left_eye, &right_eye);
 	if (xret != XRT_SUCCESS) {
 		U_LOG_E("Failed to render layers");
 		return xret;
-	}
-
-	if (commit_count <= 10) {
-		U_LOG_W("[DEBUG] layer_commit: renderer_draw succeeded, acquiring target");
 	}
 
 	// Acquire target image
@@ -541,16 +484,8 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		return xret;
 	}
 
-	if (commit_count <= 10) {
-		U_LOG_W("[DEBUG] layer_commit: target acquired index=%u", target_index);
-	}
-
 #ifdef XRT_HAVE_LEIA_SR
 	if (c->weaver != nullptr && leiasr_d3d11_is_ready(c->weaver)) {
-		if (commit_count <= 10) {
-			U_LOG_W("[DEBUG] layer_commit: weaver ready, starting weave");
-		}
-
 		// Get stereo texture SRV from renderer
 		void *stereo_srv = comp_d3d11_renderer_get_stereo_srv(c->renderer);
 
@@ -576,39 +511,16 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		viewport.MaxDepth = 1.0f;
 		c->context->RSSetViewports(1, &viewport);
 
-		// Note: Target RTV should be bound before calling weave
-		// The target implementation handles this
-
 		// Perform weaving
 		leiasr_d3d11_weave(c->weaver);
-
-		if (commit_count <= 10) {
-			U_LOG_W("[DEBUG] layer_commit: weave completed");
-		}
-	} else {
-		if (commit_count <= 10) {
-			U_LOG_W("[DEBUG] layer_commit: weaver not ready or NULL, skipping weave");
-		}
-	}
-#else
-	if (commit_count <= 10) {
-		U_LOG_W("[DEBUG] layer_commit: XRT_HAVE_LEIA_SR not defined, no weaving");
 	}
 #endif
-
-	if (commit_count <= 10) {
-		U_LOG_W("[DEBUG] layer_commit: calling present");
-	}
 
 	// Present
 	xret = comp_d3d11_target_present(c->target, 1); // VSync enabled
 	if (xret != XRT_SUCCESS) {
 		U_LOG_E("Failed to present");
 		return xret;
-	}
-
-	if (commit_count <= 10) {
-		U_LOG_W("[DEBUG] layer_commit: present succeeded, frame complete");
 	}
 
 	return XRT_SUCCESS;

@@ -243,6 +243,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
+    // Create quad layer swapchain for UI overlay (512x256 pixels)
+    const uint32_t QUAD_UI_WIDTH = 512;
+    const uint32_t QUAD_UI_HEIGHT = 256;
+    if (!CreateQuadLayerSwapchain(xr, QUAD_UI_WIDTH, QUAD_UI_HEIGHT)) {
+        LOG_WARN("Failed to create quad layer swapchain - UI will not be displayed");
+    } else {
+        LOG_INFO("Quad layer created for UI overlay (%ux%u)", QUAD_UI_WIDTH, QUAD_UI_HEIGHT);
+    }
+
     // Show control window
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
@@ -317,7 +326,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                         leftViewMatrix, leftProjMatrix,
                         rightViewMatrix, rightProjMatrix)) {
 
-                        // Render each eye
+                        // Render each eye (3D scene only - no UI)
                         for (int eye = 0; eye < 2; eye++) {
                             uint32_t imageIndex;
                             if (AcquireSwapchainImage(xr, eye, imageIndex)) {
@@ -334,27 +343,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                     viewMatrix, projMatrix,
                                     g_inputState.cameraPosX, g_inputState.cameraPosY, g_inputState.cameraPosZ,
                                     g_inputState.yaw, g_inputState.pitch);
-
-                                // Render text overlay
-                                {
-                                    std::wstring stateText = L"Session: ";
-                                    stateText += FormatSessionState((int)xr.sessionState);
-                                    RenderText(textOverlay, renderer.device.Get(), swapchainTexture,
-                                        stateText, 10, 10, 200, 25);
-
-                                    std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
-                                        xr.swapchains[eye].width, xr.swapchains[eye].height);
-                                    RenderText(textOverlay, renderer.device.Get(), swapchainTexture,
-                                        perfText, 10, 40, 200, 60, true);
-
-                                    std::wstring eyeText = FormatEyeTrackingInfo(xr.eyePosX, xr.eyePosY, xr.eyeTrackingActive);
-                                    RenderText(textOverlay, renderer.device.Get(), swapchainTexture,
-                                        eyeText, 10, 110, 200, 60, true);
-
-                                    std::wstring helpText = L"WASD: Move | Mouse: Look | ESC: Quit";
-                                    RenderText(textOverlay, renderer.device.Get(), swapchainTexture,
-                                        helpText, 10, xr.swapchains[eye].height - 30.0f, 400, 25, true);
-                                }
 
                                 if (rtv) rtv->Release();
 
@@ -385,10 +373,51 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                 projectionViews[eye].fov = views[eye].fov;
                             }
                         }
+
+                        // Render UI to quad layer (if available)
+                        if (xr.hasQuadLayer) {
+                            uint32_t quadImageIndex;
+                            if (AcquireQuadSwapchainImage(xr, quadImageIndex)) {
+                                ID3D11Texture2D* quadTexture = xr.quadSwapchain.images[quadImageIndex].texture;
+
+                                // Clear with semi-transparent background
+                                ID3D11RenderTargetView* quadRtv = nullptr;
+                                CreateRenderTargetView(renderer, quadTexture, &quadRtv);
+                                if (quadRtv) {
+                                    float clearColor[4] = {0.0f, 0.0f, 0.0f, 0.7f};
+                                    renderer.context->ClearRenderTargetView(quadRtv, clearColor);
+                                    quadRtv->Release();
+                                }
+
+                                // Render text to quad
+                                std::wstring stateText = L"Session: ";
+                                stateText += FormatSessionState((int)xr.sessionState);
+                                RenderText(textOverlay, renderer.device.Get(), quadTexture,
+                                    stateText, 10, 10, 300, 30);
+
+                                std::wstring modeText = L"Mode: Standard OpenXR (Monado window)";
+                                RenderText(textOverlay, renderer.device.Get(), quadTexture,
+                                    modeText, 10, 45, 350, 30, true);
+
+                                std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
+                                    xr.swapchains[0].width, xr.swapchains[0].height);
+                                RenderText(textOverlay, renderer.device.Get(), quadTexture,
+                                    perfText, 10, 85, 300, 70, true);
+
+                                std::wstring eyeText = FormatEyeTrackingInfo(xr.eyePosX, xr.eyePosY, xr.eyeTrackingActive);
+                                RenderText(textOverlay, renderer.device.Get(), quadTexture,
+                                    eyeText, 10, 165, 300, 70, true);
+
+                                ReleaseQuadSwapchainImage(xr);
+                            }
+                        }
                     }
                 }
 
-                EndFrame(xr, frameState.predictedDisplayTime, projectionViews);
+                // Submit frame with quad layer for UI
+                EndFrameWithQuadLayer(xr, frameState.predictedDisplayTime, projectionViews,
+                    -0.15f, -0.08f, -0.5f,
+                    0.3f, 0.15f);
             }
         } else {
             Sleep(100);
