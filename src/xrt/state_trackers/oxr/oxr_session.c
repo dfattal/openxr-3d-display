@@ -222,6 +222,21 @@ compute_kooima_fov(const struct leiasr_eye_position *eye,
 	out_fov->angle_right = atanf((half_w - eye->x) / distance);
 	out_fov->angle_up = atanf((half_h - eye->y) / distance);
 	out_fov->angle_down = atanf((-half_h - eye->y) / distance);
+
+	// Diagnostic logging (throttled)
+	static int fov_log_counter = 0;
+	if (++fov_log_counter % 300 == 1) { // Log every ~5 seconds at 60fps
+		float h_fov_deg = (out_fov->angle_right - out_fov->angle_left) * 180.0f / 3.14159265f;
+		float v_fov_deg = (out_fov->angle_up - out_fov->angle_down) * 180.0f / 3.14159265f;
+		U_LOG_I("Kooima FOV: eye=(%.4f,%.4f,%.4f)m, screen=%.4fx%.4fm",
+		        eye->x, eye->y, eye->z, screen_width_m, screen_height_m);
+		U_LOG_I("  angles: L=%.2f° R=%.2f° U=%.2f° D=%.2f° (H=%.2f° V=%.2f°)",
+		        out_fov->angle_left * 180.0f / 3.14159265f,
+		        out_fov->angle_right * 180.0f / 3.14159265f,
+		        out_fov->angle_up * 180.0f / 3.14159265f,
+		        out_fov->angle_down * 180.0f / 3.14159265f,
+		        h_fov_deg, v_fov_deg);
+	}
 }
 #endif
 
@@ -856,6 +871,26 @@ oxr_session_locate_views(struct oxr_logger *log,
 		    screen_width_m > 0.0f && screen_height_m > 0.0f) {
 			compute_kooima_fov(&eye_pair.left, screen_width_m, screen_height_m, &fovs[0]);
 			compute_kooima_fov(&eye_pair.right, screen_width_m, screen_height_m, &fovs[1]);
+
+			// Compare FOVs between eyes (throttled logging)
+			if (sr_should_log) {
+				float left_h_fov = (fovs[0].angle_right - fovs[0].angle_left) * 180.0f / 3.14159265f;
+				float right_h_fov = (fovs[1].angle_right - fovs[1].angle_left) * 180.0f / 3.14159265f;
+				float left_v_fov = (fovs[0].angle_up - fovs[0].angle_down) * 180.0f / 3.14159265f;
+				float right_v_fov = (fovs[1].angle_up - fovs[1].angle_down) * 180.0f / 3.14159265f;
+				U_LOG_I("SR FOV comparison: Left eye H=%.2f° V=%.2f°, Right eye H=%.2f° V=%.2f°",
+				        left_h_fov, left_v_fov, right_h_fov, right_v_fov);
+				U_LOG_I("  Left  FOV: L=%.2f° R=%.2f° U=%.2f° D=%.2f°",
+				        fovs[0].angle_left * 180.0f / 3.14159265f,
+				        fovs[0].angle_right * 180.0f / 3.14159265f,
+				        fovs[0].angle_up * 180.0f / 3.14159265f,
+				        fovs[0].angle_down * 180.0f / 3.14159265f);
+				U_LOG_I("  Right FOV: L=%.2f° R=%.2f° U=%.2f° D=%.2f°",
+				        fovs[1].angle_left * 180.0f / 3.14159265f,
+				        fovs[1].angle_right * 180.0f / 3.14159265f,
+				        fovs[1].angle_up * 180.0f / 3.14159265f,
+				        fovs[1].angle_down * 180.0f / 3.14159265f);
+			}
 		} else {
 			// Fallback to device FOV if display dimensions unavailable
 			fovs[0] = xdev->hmd->distortion.fov[0];
