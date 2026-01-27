@@ -12,14 +12,25 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-# Find CNSDK (SR SDK)
-find_package(CNSDK CONFIG QUIET)
-if(CNSDK_FOUND)
-    message(STATUS "Found CNSDK - SR native app will have full functionality")
-    set(HAVE_CNSDK TRUE)
+# Find LeiaSR SDK
+set(LEIASR_SDKROOT "$ENV{LEIASR_SDKROOT}" CACHE PATH "Path to LeiaSR SDK root")
+
+# Add SDK cmake path to prefix
+if(LEIASR_SDKROOT)
+    list(APPEND CMAKE_PREFIX_PATH "${LEIASR_SDKROOT}/lib/cmake")
+    message(STATUS "LeiaSR SDK root: ${LEIASR_SDKROOT}")
+endif()
+
+find_package(simulatedreality QUIET)
+find_package(srDirectX QUIET)
+
+if(simulatedreality_FOUND AND srDirectX_FOUND)
+    message(STATUS "Found LeiaSR SDK - SR native app will have full functionality")
+    set(HAVE_LEIA_SR TRUE)
 else()
-    message(WARNING "CNSDK not found - SR native app will show error message at runtime")
-    set(HAVE_CNSDK FALSE)
+    message(WARNING "LeiaSR SDK not found - SR native app will show error message at runtime")
+    message(STATUS "  Set LEIASR_SDKROOT environment variable to the SDK installation path")
+    set(HAVE_LEIA_SR FALSE)
 endif()
 
 # Common library
@@ -36,15 +47,27 @@ target_link_libraries(sr_cube_native PRIVATE
     sr_common
 )
 
-# Add CNSDK if available
-if(HAVE_CNSDK)
+# Add LeiaSR SDK if available
+if(HAVE_LEIA_SR)
     target_compile_definitions(sr_cube_native PRIVATE XRT_HAVE_CNSDK)
-    target_link_libraries(sr_cube_native PRIVATE CNSDK::CNSDK)
+    target_link_libraries(sr_cube_native PRIVATE
+        simulatedreality
+        srDirectX::srDirectX
+    )
 endif()
 
 # Embed manifest
 if(MSVC)
     set_target_properties(sr_cube_native PROPERTIES
         LINK_FLAGS "/MANIFEST:EMBED /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/sr_cube_native.manifest"
+    )
+endif()
+
+# Copy runtime DLLs to output directory
+if(HAVE_LEIA_SR)
+    add_custom_command(TARGET sr_cube_native POST_BUILD COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_RUNTIME_DLLS:sr_cube_native>
+        $<TARGET_FILE_DIR:sr_cube_native>
     )
 endif()
