@@ -18,6 +18,7 @@
 
 #include "xrt/xrt_handles.h"
 #include "xrt/xrt_config_have.h"
+#include "xrt/xrt_config_build.h"
 #include "xrt/xrt_limits.h"
 
 #include "util/u_logging.h"
@@ -25,6 +26,11 @@
 #include "util/u_time.h"
 #include "util/u_pacing.h"
 #include "os/os_time.h"
+
+#ifdef XRT_FEATURE_DEBUG_GUI
+#include "util/u_debug_gui.h"
+#include "comp_d3d11_debug.h"
+#endif
 
 #ifdef XRT_HAVE_LEIA_SR
 #include "leiasr/leiasr_d3d11.h"
@@ -37,6 +43,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <mutex>
 
 /*!
@@ -83,6 +90,14 @@ struct comp_d3d11_compositor
 #ifdef XRT_HAVE_LEIA_SR
 	//! SR weaver for light field display.
 	struct leiasr_d3d11 *weaver;
+#endif
+
+#ifdef XRT_FEATURE_DEBUG_GUI
+	//! Debug GUI window.
+	struct u_debug_gui *debug_gui;
+
+	//! Debug readback module.
+	struct comp_d3d11_debug *debug;
 #endif
 
 	//! Frame pacing helper.
@@ -178,6 +193,14 @@ d3d11_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin
 
 	U_LOG_I("D3D11 compositor session begin - hwnd=%p, owns_window=%d, target=%p, renderer=%p",
 	        (void *)c->hwnd, c->owns_window, (void *)c->target, (void *)c->renderer);
+
+#ifdef XRT_FEATURE_DEBUG_GUI
+	// Start the debug GUI thread now that session is beginning
+	// Pass NULL for xinst and xsysd since the D3D11 compositor doesn't track them
+	if (c->debug_gui != nullptr) {
+		u_debug_gui_start(c->debug_gui, NULL, NULL);
+	}
+#endif
 
 	return XRT_SUCCESS;
 }
@@ -476,6 +499,15 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		return xret;
 	}
 
+#ifdef XRT_FEATURE_DEBUG_GUI
+	// Update debug GUI preview with the rendered stereo texture
+	if (comp_d3d11_debug_is_active(c->debug)) {
+		ID3D11Texture2D *stereo_texture =
+		    static_cast<ID3D11Texture2D *>(comp_d3d11_renderer_get_stereo_texture(c->renderer));
+		comp_d3d11_debug_update_preview(c->debug, c->context, stereo_texture);
+	}
+#endif
+
 	// Acquire target image
 	uint32_t target_index;
 	xret = comp_d3d11_target_acquire(c->target, &target_index);
@@ -541,6 +573,16 @@ d3d11_compositor_destroy(struct xrt_compositor *xc)
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	U_LOG_I("Destroying D3D11 compositor");
+
+#ifdef XRT_FEATURE_DEBUG_GUI
+	// Stop debug GUI first (before destroying resources it may reference)
+	if (c->debug != nullptr) {
+		comp_d3d11_debug_destroy(&c->debug);
+	}
+	if (c->debug_gui != nullptr) {
+		u_debug_gui_stop(&c->debug_gui);
+	}
+#endif
 
 #ifdef XRT_HAVE_LEIA_SR
 	if (c->weaver != nullptr) {
@@ -737,6 +779,31 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 		d3d11_compositor_destroy(&c->base.base);
 		return xret;
 	}
+
+#ifdef XRT_FEATURE_DEBUG_GUI
+	// Create debug GUI (controlled by XRT_DEBUG_GUI env var)
+	struct u_debug_gui_create_info udgci = {};
+	udgci.open = U_DEBUG_GUI_OPEN_AUTO;
+	strncpy(udgci.window_title, "Monado D3D11 Debug", U_DEBUG_GUI_WINDOW_TITLE_MAX - 1);
+
+	int gui_ret = u_debug_gui_create(&udgci, &c->debug_gui);
+	if (gui_ret == 0 && c->debug_gui != nullptr) {
+		// Debug GUI was created, now create the readback module
+		// Stereo texture is 2x view width
+		xret = comp_d3d11_debug_create(c->device, view_width * 2, view_height, &c->debug);
+		if (xret != XRT_SUCCESS) {
+			U_LOG_W("Failed to create D3D11 debug readback, debug GUI preview disabled");
+			c->debug = nullptr;
+		} else {
+			// Add debug variables to u_var
+			comp_d3d11_debug_add_vars(c->debug);
+		}
+
+		// Note: u_debug_gui_start() is called later when xsysd is available
+		// For now, we just create the resources
+		U_LOG_I("D3D11 debug GUI created (set XRT_DEBUG_GUI=1 to enable window)");
+	}
+#endif
 
 #ifdef XRT_HAVE_LEIA_SR
 	// Create SR weaver if available
