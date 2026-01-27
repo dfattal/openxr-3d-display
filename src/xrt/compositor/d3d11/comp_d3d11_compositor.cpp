@@ -904,7 +904,14 @@ comp_d3d11_compositor_get_predicted_eye_positions(struct xrt_compositor *xc,
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
+	// Debug: log entry (throttled)
+	static int call_count = 0;
+	bool should_log = (++call_count % 60) == 1;
+
 #ifdef XRT_HAVE_LEIA_SR
+	if (should_log) {
+		U_LOG_D("D3D11 get_predicted_eye_positions: weaver=%p", (void *)c->weaver);
+	}
 	if (c->weaver != nullptr) {
 		float left[3], right[3];
 		if (leiasr_d3d11_get_predicted_eye_positions(c->weaver, left, right)) {
@@ -914,8 +921,18 @@ comp_d3d11_compositor_get_predicted_eye_positions(struct xrt_compositor *xc,
 			out_right_eye->x = right[0];
 			out_right_eye->y = right[1];
 			out_right_eye->z = right[2];
+			if (should_log) {
+				U_LOG_D("D3D11 eye positions from SR: left=(%.3f,%.3f,%.3f) right=(%.3f,%.3f,%.3f)",
+				        left[0], left[1], left[2], right[0], right[1], right[2]);
+			}
 			return true;
+		} else if (should_log) {
+			U_LOG_W("D3D11 leiasr_d3d11_get_predicted_eye_positions failed!");
 		}
+	}
+#else
+	if (should_log) {
+		U_LOG_D("D3D11 get_predicted_eye_positions: XRT_HAVE_LEIA_SR not defined");
 	}
 #endif
 
@@ -926,6 +943,10 @@ comp_d3d11_compositor_get_predicted_eye_positions(struct xrt_compositor *xc,
 	out_right_eye->x = 0.032f;
 	out_right_eye->y = 0.0f;
 	out_right_eye->z = 0.6f;
+
+	if (should_log) {
+		U_LOG_D("D3D11 using default eye positions");
+	}
 
 	return false;
 }

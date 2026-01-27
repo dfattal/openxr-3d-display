@@ -39,7 +39,11 @@
 #include "android/android_instance_base.h"
 #endif
 
-#ifdef XRT_MODULE_COMPOSITOR_MAIN
+// For hybrid mode native apps, always use null compositor during instance creation
+// (D3D11 native compositor is created during session creation)
+#ifdef XRT_HYBRID_USE_NULL_COMPOSITOR
+#define USE_NULL_DEFAULT (true)
+#elif defined(XRT_MODULE_COMPOSITOR_MAIN)
 #define USE_NULL_DEFAULT (false)
 #else
 #define USE_NULL_DEFAULT (true)

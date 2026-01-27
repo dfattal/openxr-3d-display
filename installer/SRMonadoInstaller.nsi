@@ -180,6 +180,7 @@ done:
 FunctionEnd
 
 ; RemoveFromPath - Removes a directory from the system PATH
+; Handles multiple occurrences, trailing backslashes, and case variations
 ; Usage: Push "C:\path\to\remove"
 ;        Call un.RemoveFromPath
 Function un.RemoveFromPath
@@ -187,18 +188,26 @@ Function un.RemoveFromPath
 	Push $1  ; Current PATH
 	Push $2  ; Temp
 	Push $3  ; New PATH
-	Push $4  ; Length
+	Push $4  ; Current part
+	Push $5  ; Normalized path to remove
+	Push $6  ; Normalized current part
 
 	; Read current PATH
 	ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+
+	; Normalize path to remove (strip trailing backslash)
+	StrCpy $5 $0
+	StrCpy $2 $5 1 -1  ; Get last char
+	StrCmp $2 "\" 0 +2
+	StrCpy $5 $5 -1    ; Remove trailing backslash
 
 	; Initialize new PATH
 	StrCpy $3 ""
 
 	; Parse PATH and rebuild without our directory
 loop:
-	StrLen $4 $1
-	StrCmp $4 0 writepath
+	StrLen $2 $1
+	StrCmp $2 0 writepath
 
 	; Find next semicolon
 	Push $1
@@ -216,8 +225,21 @@ loop:
 	IntOp $2 $2 + 1
 	StrCpy $1 $1 "" $2  ; Rest of PATH
 
-	; Check if this part matches what we want to remove
-	StrCmp $4 $0 loop  ; Skip if matches
+	; Normalize current part (strip trailing backslash)
+	StrCpy $6 $4
+	StrCpy $2 $6 1 -1  ; Get last char
+	StrCmp $2 "\" 0 +2
+	StrCpy $6 $6 -1    ; Remove trailing backslash
+
+	; Check if this part matches what we want to remove (case-insensitive via StrCmp)
+	StrCmp $6 $5 loop  ; Skip if matches
+
+	; Also check if the path contains "SRMonado" as substring (catches any install path variations)
+	Push $6
+	Push "SRMonado"
+	Call un.StrStr
+	Pop $2
+	StrCmp $2 "" 0 loop  ; Skip if contains SRMonado
 
 	; Add to new PATH
 	StrLen $2 $3
@@ -229,7 +251,20 @@ loop:
 
 lastpart:
 	; Handle last part (no trailing semicolon)
-	StrCmp $1 $0 writepath  ; Skip if matches
+	; Normalize it
+	StrCpy $6 $1
+	StrCpy $2 $6 1 -1
+	StrCmp $2 "\" 0 +2
+	StrCpy $6 $6 -1
+
+	StrCmp $6 $5 writepath  ; Skip if matches
+
+	; Also check for SRMonado substring
+	Push $6
+	Push "SRMonado"
+	Call un.StrStr
+	Pop $2
+	StrCmp $2 "" 0 writepath  ; Skip if contains SRMonado
 
 	StrLen $2 $3
 	StrCmp $2 0 0 +3
@@ -244,8 +279,10 @@ writepath:
 	; Broadcast WM_SETTINGCHANGE
 	SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
-	DetailPrint "Removed $0 from system PATH"
+	DetailPrint "Removed SRMonado entries from system PATH"
 
+	Pop $6
+	Pop $5
 	Pop $4
 	Pop $3
 	Pop $2
