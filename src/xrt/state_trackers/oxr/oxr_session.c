@@ -119,7 +119,18 @@ oxr_session_get_predicted_eye_positions(struct oxr_session *sess, struct leiasr_
 	// Check if using D3D11 native compositor (not multi_compositor)
 	if (sess->is_d3d11_native_compositor) {
 		struct xrt_vec3 left_eye, right_eye;
-		if (comp_d3d11_compositor_get_predicted_eye_positions(&sess->xcn->base, &left_eye, &right_eye)) {
+		bool got_positions = comp_d3d11_compositor_get_predicted_eye_positions(&sess->xcn->base, &left_eye, &right_eye);
+
+		// Log periodically for debugging (every ~60 frames)
+		static int log_counter = 0;
+		if (++log_counter >= 60) {
+			log_counter = 0;
+			U_LOG_D("D3D11 eye tracking: got_positions=%d, left=(%.3f, %.3f, %.3f), right=(%.3f, %.3f, %.3f)",
+			        got_positions, left_eye.x, left_eye.y, left_eye.z,
+			        right_eye.x, right_eye.y, right_eye.z);
+		}
+
+		if (got_positions) {
 			out_eye_pair->left.x = left_eye.x;
 			out_eye_pair->left.y = left_eye.y;
 			out_eye_pair->left.z = left_eye.z;

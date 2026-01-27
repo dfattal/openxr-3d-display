@@ -259,22 +259,20 @@ if(XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL)
 				st_prober
 				target_lists
 				drv_includes
-				comp_d3d11_service  # D3D11 service compositor for hybrid mode
 			)
 		target_include_directories(target_instance_hybrid PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-		# Add compositor include path for d3d11_service headers
-		target_include_directories(target_instance_hybrid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../compositor)
 		# XRT_FEATURE_HYBRID_MODE renames xrt_instance_create to native_instance_create
-		# XRT_USE_D3D11_SERVICE_COMPOSITOR enables D3D11 service compositor as the system compositor
-		# Note: D3D11 native compositor is created during session creation for actual rendering
+		# XRT_HYBRID_USE_NULL_COMPOSITOR forces null compositor during instance creation
+		#   (no window created - the D3D11 native compositor handles rendering during session)
 		target_compile_definitions(target_instance_hybrid PRIVATE
 			XRT_FEATURE_HYBRID_MODE
-			XRT_USE_D3D11_SERVICE_COMPOSITOR
+			XRT_HYBRID_USE_NULL_COMPOSITOR
 		)
 
-		# Note: comp_main is NOT linked - D3D11 service compositor is used instead
-		# This avoids creating a Vulkan window
-
+		# For hybrid mode native apps:
+		# - Instance creation uses null compositor (no window)
+		# - Session creation uses D3D11 native compositor (renders to app window)
+		# This avoids the "M" window that D3D11 service compositor would create
 		if(XRT_MODULE_COMPOSITOR_NULL)
 			target_link_libraries(target_instance_hybrid PRIVATE comp_null)
 		endif()
