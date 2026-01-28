@@ -61,6 +61,10 @@ static UINT g_windowHeight = 1600;  // SR display height
 static bool g_windowResized = false;
 static std::recursive_mutex g_mutex;
 
+// Swapchain for presentation (required for native app - weaver outputs here)
+static ComPtr<IDXGISwapChain1> g_swapChain;
+static ComPtr<ID3D11RenderTargetView> g_swapChainRTV;
+
 #ifdef XRT_HAVE_CNSDK
 // SR SDK global state
 static SR::SRContext*        g_srContext = nullptr;
@@ -392,6 +396,74 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
     LOG_INFO("D3D11 initialized");
 
+    // Create swapchain for presentation (weaver outputs to this)
+    LOG_INFO("Creating swapchain...");
+    {
+        ComPtr<IDXGIDevice> dxgiDevice;
+        renderer.device->QueryInterface(IID_PPV_ARGS(&dxgiDevice));
+
+        ComPtr<IDXGIAdapter> dxgiAdapter;
+        dxgiDevice->GetAdapter(&dxgiAdapter);
+
+        ComPtr<IDXGIFactory2> dxgiFactory;
+        dxgiAdapter->GetParent(IID_PPV_ARGS(&dxgiFactory));
+
+        DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+        swapChainDesc.Width = g_windowWidth;
+        swapChainDesc.Height = g_windowHeight;
+        swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        swapChainDesc.SampleDesc.Count = 1;
+        swapChainDesc.SampleDesc.Quality = 0;
+        swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        swapChainDesc.BufferCount = 2;
+        swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        swapChainDesc.Flags = 0;
+
+        HRESULT hr = dxgiFactory->CreateSwapChainForHwnd(
+            renderer.device.Get(),
+            hwnd,
+            &swapChainDesc,
+            nullptr,
+            nullptr,
+            &g_swapChain
+        );
+        if (FAILED(hr)) {
+            LOG_ERROR("Failed to create swapchain, hr=0x%08X", hr);
+            MessageBox(hwnd, L"Failed to create swapchain", L"Error", MB_OK | MB_ICONERROR);
+            CleanupD3D11(renderer);
+            DestroyWindow(hwnd);
+            CleanupLeiaSR();
+            ShutdownLogging();
+            return 1;
+        }
+
+        // Create render target view for swapchain backbuffer
+        ComPtr<ID3D11Texture2D> backBuffer;
+        hr = g_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+        if (FAILED(hr)) {
+            LOG_ERROR("Failed to get swapchain backbuffer");
+            CleanupD3D11(renderer);
+            DestroyWindow(hwnd);
+            CleanupLeiaSR();
+            ShutdownLogging();
+            return 1;
+        }
+
+        hr = renderer.device->CreateRenderTargetView(backBuffer.Get(), nullptr, &g_swapChainRTV);
+        if (FAILED(hr)) {
+            LOG_ERROR("Failed to create swapchain RTV");
+            CleanupD3D11(renderer);
+            DestroyWindow(hwnd);
+            CleanupLeiaSR();
+            ShutdownLogging();
+            return 1;
+        }
+
+        // Disable Alt+Enter fullscreen toggle
+        dxgiFactory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+    }
+    LOG_INFO("Swapchain created");
+
     // Initialize text overlay
     LOG_INFO("Initializing text overlay...");
     TextOverlay textOverlay = {};
@@ -638,13 +710,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 helpText, 10, g_viewTextureHeight - 30.0f, 450, 25, true);
         }
 
-        // Weave and present
+        // Set swapchain as render target for weaver output
+        D3D11_VIEWPORT swapViewport = {};
+        swapViewport.TopLeftX = 0.0f;
+        swapViewport.TopLeftY = 0.0f;
+        swapViewport.Width = (float)g_windowWidth;
+        swapViewport.Height = (float)g_windowHeight;
+        swapViewport.MinDepth = 0.0f;
+        swapViewport.MaxDepth = 1.0f;
+        renderer.context->RSSetViewports(1, &swapViewport);
+        renderer.context->OMSetRenderTargets(1, g_swapChainRTV.GetAddressOf(), nullptr);
+
+        // Weave (outputs interlaced image to swapchain)
         g_srWeaver->weave();
+
+        // Present to display
+        g_swapChain->Present(1, 0);
     }
 
 cleanup:
     LOG_INFO("");
     LOG_INFO("=== Shutting down ===");
+
+    // Clean up swapchain
+    g_swapChainRTV.Reset();
+    g_swapChain.Reset();
 
     viewDepthDSV.Reset();
     viewDepthTexture.Reset();
