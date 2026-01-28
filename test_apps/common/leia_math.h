@@ -5,8 +5,11 @@
 #pragma once
 
 #include <math.h>
+#include <DirectXMath.h>
 
 #pragma pack(push,1)
+
+namespace leia {
 
 struct vec3f
 {
@@ -217,5 +220,64 @@ struct mat4f
         return m;
     }
 };
+
+// Kooima off-axis stereo projection matrix calculation
+// Based on Robert Kooima's paper "Generalized Perspective Projection"
+// Screen is assumed to be at Z=0 plane, centered at origin
+// All units in millimeters
+inline mat4f CalculateMVP(const vec3f& eye, float screenWidthMM, float screenHeightMM,
+                           float cubeRotation, float cubeSize, float znear, float zfar)
+{
+    // Model matrix: rotation * scaling * translation(0,0,0)
+    mat4f model = {};
+    {
+        const mat4f translation = mat4f::translation(0.0f, 0.0f, 0.0f);
+        const mat4f scaling     = mat4f::scaling(cubeSize, cubeSize, cubeSize);
+        const mat4f rotation    = mat4f::rotationY(cubeRotation);
+        model = rotation * scaling * translation;
+    }
+
+    // View matrix: identity (camera is at eye position via projection)
+    mat4f view = mat4f::identity();
+
+    // Projection matrix: Kooima off-axis projection
+    mat4f projection = {};
+    {
+        // Screen corners in world space (screen at Z=0, centered at origin)
+        vec3f pa = vec3f(-screenWidthMM / 2.0f,  screenHeightMM / 2.0f, 0.0f);  // top-left
+        vec3f pb = vec3f( screenWidthMM / 2.0f,  screenHeightMM / 2.0f, 0.0f);  // top-right
+        vec3f pc = vec3f(-screenWidthMM / 2.0f, -screenHeightMM / 2.0f, 0.0f);  // bottom-left
+
+        // Screen coordinate system (screen faces +Z direction)
+        vec3f vr = vec3f(1.0f, 0.0f, 0.0f);  // right
+        vec3f vu = vec3f(0.0f, 1.0f, 0.0f);  // up
+        vec3f vn = vec3f(0.0f, 0.0f, 1.0f);  // normal (toward viewer)
+
+        // Vectors from eye to screen corners
+        vec3f va = pa - eye;
+        vec3f vb = pb - eye;
+        vec3f vc = pc - eye;
+
+        // Distance from eye to screen plane
+        float distance = -vec3f::dot(va, vn);
+
+        // Frustum parameters at near plane
+        float l = vec3f::dot(vr, va) * znear / distance;
+        float r = vec3f::dot(vr, vb) * znear / distance;
+        float b = vec3f::dot(vu, vc) * znear / distance;
+        float t = vec3f::dot(vu, va) * znear / distance;
+
+        // Build projection matrix
+        mat4f frustum = mat4f::perspective(l, r, b, t, znear, zfar);
+        mat4f translate = mat4f::translation(-eye);
+        projection = frustum * translate;
+    }
+
+    // Final MVP matrix
+    mat4f mvp = projection * view * model;
+    return mvp;
+}
+
+} // namespace leia
 
 #pragma pack(pop)

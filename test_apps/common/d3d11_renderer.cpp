@@ -55,9 +55,10 @@ float4 PSMain(PSInput input) : SV_TARGET {
 )";
 
 // HLSL shader source for grid
+// NOTE: Uses mul(matrix, position) convention like reference example
 static const char* g_gridShaderSource = R"(
 cbuffer Constants : register(b0) {
-    float4x4 worldViewProj;
+    float4x4 transform;
     float4 color;
 };
 
@@ -71,7 +72,7 @@ struct PSInput {
 
 PSInput VSMain(VSInput input) {
     PSInput output;
-    output.position = mul(float4(input.position, 1.0), worldViewProj);
+    output.position = mul(transform, float4(input.position, 1.0));
     return output;
 }
 
@@ -483,7 +484,9 @@ static void UpdateConstantBuffer(D3D11Renderer& renderer, const XMMATRIX& wvp, c
     HRESULT hr = renderer.context->Map(renderer.constantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
     if (SUCCEEDED(hr)) {
         ConstantBufferData* cb = (ConstantBufferData*)mapped.pData;
-        XMStoreFloat4x4(&cb->worldViewProj, XMMatrixTranspose(wvp));
+        // NOTE: No transpose! Shader uses mul(matrix, vector) which expects column-major.
+        // XMMATRIX is row-major but HLSL interprets cbuffer as column-major, so this works correctly.
+        XMStoreFloat4x4(&cb->worldViewProj, wvp);
         cb->color = color;
         renderer.context->Unmap(renderer.constantBuffer.Get(), 0);
     }
@@ -596,4 +599,43 @@ bool CreateDepthStencilView(
     }
 
     return true;
+}
+
+void RenderCubeWithMVP(
+    D3D11Renderer& renderer,
+    ID3D11RenderTargetView* rtv,
+    ID3D11DepthStencilView* dsv,
+    const float* mvpData
+) {
+    // Set render target (viewport should already be set by caller)
+    renderer.context->OMSetRenderTargets(1, &rtv, dsv);
+
+    // Set states
+    renderer.context->OMSetDepthStencilState(renderer.depthStencilState.Get(), 0);
+    renderer.context->RSSetState(renderer.rasterizerState.Get());
+
+    // Update constant buffer with MVP matrix (no transpose needed - mat4f is column-major)
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    HRESULT hr = renderer.context->Map(renderer.constantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+    if (SUCCEEDED(hr)) {
+        ConstantBufferData* cb = (ConstantBufferData*)mapped.pData;
+        memcpy(&cb->worldViewProj, mvpData, sizeof(float) * 16);
+        cb->color = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+        renderer.context->Unmap(renderer.constantBuffer.Get(), 0);
+    }
+
+    // Set up cube rendering
+    renderer.context->IASetInputLayout(renderer.cubeInputLayout.Get());
+    renderer.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    UINT stride = 28;  // sizeof(CubeVertex) = 3 floats + 4 floats = 28 bytes
+    UINT offset = 0;
+    renderer.context->IASetVertexBuffers(0, 1, renderer.cubeVertexBuffer.GetAddressOf(), &stride, &offset);
+    renderer.context->IASetIndexBuffer(renderer.cubeIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+    renderer.context->VSSetShader(renderer.cubeVertexShader.Get(), nullptr, 0);
+    renderer.context->PSSetShader(renderer.cubePixelShader.Get(), nullptr, 0);
+    renderer.context->VSSetConstantBuffers(0, 1, renderer.constantBuffer.GetAddressOf());
+    renderer.context->PSSetConstantBuffers(0, 1, renderer.constantBuffer.GetAddressOf());
+
+    // Draw cube
+    renderer.context->DrawIndexed(36, 0, 0);
 }
