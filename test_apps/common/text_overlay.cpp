@@ -6,6 +6,7 @@
  */
 
 #include "text_overlay.h"
+#include "logging.h"
 #include <d2d1_1.h>
 #include <sstream>
 #include <iomanip>
@@ -18,7 +19,11 @@ bool InitializeTextOverlay(TextOverlay& overlay) {
 
     // Create D2D factory
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_PPV_ARGS(&overlay.d2dFactory));
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        LOG_ERROR("D2D1CreateFactory failed: 0x%08X", hr);
+        return false;
+    }
+    LOG_DEBUG("D2D factory created");
 
     // Create DirectWrite factory
     hr = DWriteCreateFactory(
@@ -26,7 +31,11 @@ bool InitializeTextOverlay(TextOverlay& overlay) {
         __uuidof(IDWriteFactory),
         reinterpret_cast<IUnknown**>(overlay.dwriteFactory.GetAddressOf())
     );
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        LOG_ERROR("DWriteCreateFactory failed: 0x%08X", hr);
+        return false;
+    }
+    LOG_DEBUG("DirectWrite factory created");
 
     // Create text format for normal text
     hr = overlay.dwriteFactory->CreateTextFormat(
@@ -39,7 +48,10 @@ bool InitializeTextOverlay(TextOverlay& overlay) {
         L"en-us",
         &overlay.textFormat
     );
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        LOG_ERROR("CreateTextFormat (normal) failed: 0x%08X", hr);
+        return false;
+    }
 
     // Create text format for small text
     hr = overlay.dwriteFactory->CreateTextFormat(
@@ -52,9 +64,13 @@ bool InitializeTextOverlay(TextOverlay& overlay) {
         L"en-us",
         &overlay.smallTextFormat
     );
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        LOG_ERROR("CreateTextFormat (small) failed: 0x%08X", hr);
+        return false;
+    }
 
     overlay.initialized = true;
+    LOG_INFO("Text overlay initialized successfully");
     return true;
 }
 
@@ -80,7 +96,8 @@ void RenderText(
 ) {
     if (!overlay.initialized || !texture || !device) {
         if (!g_d2dErrorLogged) {
-            OutputDebugStringA("RenderText: overlay not initialized or texture/device null\n");
+            LOG_ERROR("RenderText: overlay not initialized (%d) or texture (%p) / device (%p) null",
+                overlay.initialized, texture, device);
             g_d2dErrorLogged = true;
         }
         return;
@@ -98,9 +115,7 @@ void RenderText(
     HRESULT hr = texture->QueryInterface(IID_PPV_ARGS(&surface));
     if (FAILED(hr)) {
         if (!g_d2dErrorLogged) {
-            char buf[256];
-            sprintf_s(buf, "RenderText: QueryInterface for IDXGISurface failed: 0x%08X\n", hr);
-            OutputDebugStringA(buf);
+            LOG_ERROR("RenderText: QueryInterface for IDXGISurface failed: 0x%08X", hr);
             g_d2dErrorLogged = true;
         }
         return;
@@ -116,9 +131,7 @@ void RenderText(
     hr = overlay.d2dFactory->CreateDxgiSurfaceRenderTarget(surface.Get(), &rtProps, &d2dRenderTarget);
     if (FAILED(hr)) {
         if (!g_d2dErrorLogged) {
-            char buf[256];
-            sprintf_s(buf, "RenderText: CreateDxgiSurfaceRenderTarget failed: 0x%08X\n", hr);
-            OutputDebugStringA(buf);
+            LOG_ERROR("RenderText: CreateDxgiSurfaceRenderTarget failed: 0x%08X", hr);
             g_d2dErrorLogged = true;
         }
         return;
