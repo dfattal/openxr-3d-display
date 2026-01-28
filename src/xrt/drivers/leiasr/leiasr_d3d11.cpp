@@ -47,6 +47,11 @@ struct leiasr_d3d11
 	float display_height_m = 0.0f;
 	bool display_dims_valid = false;
 
+	// Recommended view texture dimensions from SR display
+	uint32_t recommended_view_width = 0;
+	uint32_t recommended_view_height = 0;
+	bool recommended_dims_valid = false;
+
 	// Configuration
 	bool srgb_read = false;
 	bool srgb_write = false;
@@ -125,10 +130,17 @@ create_sr_context(double max_time, leiasr_d3d11 &sr)
 				sr.display_height_m = raw_height_cm / 100.0f;
 				sr.display_dims_valid = true;
 
+				// Cache recommended view texture dimensions from SR display
+				sr.recommended_view_width = display->getRecommendedViewsTextureWidth();
+				sr.recommended_view_height = display->getRecommendedViewsTextureHeight();
+				sr.recommended_dims_valid = (sr.recommended_view_width > 0 && sr.recommended_view_height > 0);
+
 				U_LOG_W("SR D3D11 display (modern API): %ldx%ld px, physical %.2fcm x %.2fcm = %.4fm x %.4fm",
 				        (long)width, (long)height,
 				        raw_width_cm, raw_height_cm,
 				        sr.display_width_m, sr.display_height_m);
+				U_LOG_W("SR recommended view texture: %ux%u per eye",
+				        sr.recommended_view_width, sr.recommended_view_height);
 
 				break;
 			}
@@ -381,6 +393,27 @@ leiasr_d3d11_get_display_dimensions(struct leiasr_d3d11 *leiasr, struct leiasr_d
 	out_dims->width_m = leiasr->display_width_m;
 	out_dims->height_m = leiasr->display_height_m;
 	out_dims->valid = true;
+
+	return true;
+}
+
+bool
+leiasr_d3d11_get_recommended_view_dimensions(struct leiasr_d3d11 *leiasr,
+                                              uint32_t *out_width,
+                                              uint32_t *out_height)
+{
+	if (leiasr == nullptr || out_width == nullptr || out_height == nullptr) {
+		return false;
+	}
+
+	std::lock_guard<std::mutex> lock(leiasr->mutex);
+
+	if (!leiasr->recommended_dims_valid) {
+		return false;
+	}
+
+	*out_width = leiasr->recommended_view_width;
+	*out_height = leiasr->recommended_view_height;
 
 	return true;
 }
