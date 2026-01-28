@@ -418,4 +418,85 @@ leiasr_d3d11_get_recommended_view_dimensions(struct leiasr_d3d11 *leiasr,
 	return true;
 }
 
+bool
+leiasr_query_recommended_view_dimensions(double max_time,
+                                          uint32_t *out_width,
+                                          uint32_t *out_height)
+{
+	if (out_width == nullptr || out_height == nullptr) {
+		return false;
+	}
+
+	const double start_time = (double)GetTickCount64() / 1000.0;
+
+	// Create temporary SR context
+	SR::SRContext *context = nullptr;
+	while (context == nullptr) {
+		try {
+			context = SR::SRContext::create();
+			break;
+		} catch (SR::ServerNotAvailableException &e) {
+			(void)e;
+		}
+
+		U_LOG_D("Waiting for SR context (dimension query)...");
+		Sleep(100);
+
+		double cur_time = (double)GetTickCount64() / 1000.0;
+		if ((cur_time - start_time) > max_time) {
+			break;
+		}
+	}
+
+	if (context == nullptr) {
+		U_LOG_E("Failed to create SR context for dimension query within %.1f seconds", max_time);
+		return false;
+	}
+
+	// Get display manager and query dimensions
+	bool success = false;
+	try {
+		SR::IDisplayManager *displayManager = SR::GetDisplayManagerInstance(*context);
+		if (displayManager != nullptr) {
+			// Wait for display to be ready
+			while (!success) {
+				SR::IDisplay *display = displayManager->getPrimaryActiveSRDisplay();
+				if (display != nullptr && display->isValid()) {
+					SR_recti display_location = display->getLocation();
+					int64_t width = display_location.right - display_location.left;
+					int64_t height = display_location.bottom - display_location.top;
+					if ((width != 0) && (height != 0)) {
+						*out_width = display->getRecommendedViewsTextureWidth();
+						*out_height = display->getRecommendedViewsTextureHeight();
+						success = (*out_width > 0 && *out_height > 0);
+						if (success) {
+							U_LOG_I("SR query: recommended view dimensions %ux%u per eye",
+							        *out_width, *out_height);
+						}
+						break;
+					}
+				}
+
+				Sleep(100);
+
+				double cur_time = (double)GetTickCount64() / 1000.0;
+				if ((cur_time - start_time) > max_time) {
+					break;
+				}
+			}
+		}
+	} catch (...) {
+		U_LOG_E("Exception querying SR display dimensions");
+	}
+
+	// Clean up temporary context
+	SR::SRContext::deleteSRContext(context);
+
+	if (!success) {
+		U_LOG_E("Failed to query SR recommended dimensions within %.1f seconds", max_time);
+	}
+
+	return success;
+}
+
 } // extern "C"

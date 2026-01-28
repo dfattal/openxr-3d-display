@@ -276,17 +276,36 @@ compositor_init_sys_info(struct null_compositor *c, struct xrt_device *xdev)
 	(void)sys_info->client_vk_deviceUUID;
 	(void)sys_info->client_d3d_deviceLUID;
 	(void)sys_info->client_d3d_deviceLUID_valid;
+
+	// Use custom dimensions if set, otherwise use defaults
+	uint64_t rec_width = (c->recommended_view_width > 0) ? c->recommended_view_width : RECOMMENDED_VIEW_WIDTH;
+	uint64_t rec_height = (c->recommended_view_height > 0) ? c->recommended_view_height : RECOMMENDED_VIEW_HEIGHT;
+
+	// Scale max dimensions proportionally if custom dimensions exceed defaults
+	uint64_t max_width = MAX_VIEW_WIDTH;
+	uint64_t max_height = MAX_VIEW_HEIGHT;
+	if (rec_width > max_width) {
+		max_width = rec_width;
+	}
+	if (rec_height > max_height) {
+		max_height = rec_height;
+	}
+
 	uint32_t view_count = xdev->hmd->view_count;
 	// clang-format off
 	for (uint32_t i = 0; i < view_count; ++i) {
-		sys_info->views[i].recommended.width_pixels  = RECOMMENDED_VIEW_WIDTH;
-		sys_info->views[i].recommended.height_pixels = RECOMMENDED_VIEW_HEIGHT;
+		sys_info->views[i].recommended.width_pixels  = rec_width;
+		sys_info->views[i].recommended.height_pixels = rec_height;
 		sys_info->views[i].recommended.sample_count  = 1;
-		sys_info->views[i].max.width_pixels  = MAX_VIEW_WIDTH;
-		sys_info->views[i].max.height_pixels = MAX_VIEW_HEIGHT;
+		sys_info->views[i].max.width_pixels  = max_width;
+		sys_info->views[i].max.height_pixels = max_height;
 		sys_info->views[i].max.sample_count  = 1;
 	}
 	// clang-format on
+
+	NULL_INFO(c, "Null compositor recommended view: %lux%lu (max: %lux%lu)",
+	          (unsigned long)rec_width, (unsigned long)rec_height,
+	          (unsigned long)max_width, (unsigned long)max_height);
 
 	// Copy the list directly.
 	assert(xdev->hmd->blend_mode_count <= XRT_MAX_DEVICE_BLEND_MODES);
@@ -536,6 +555,16 @@ null_compositor_request_display_refresh_rate(struct xrt_compositor *xc, float di
 xrt_result_t
 null_compositor_create_system(struct xrt_device *xdev, struct xrt_system_compositor **out_xsysc)
 {
+	// Use default dimensions (0, 0)
+	return null_compositor_create_system_with_dims(xdev, 0, 0, out_xsysc);
+}
+
+xrt_result_t
+null_compositor_create_system_with_dims(struct xrt_device *xdev,
+                                         uint32_t recommended_width,
+                                         uint32_t recommended_height,
+                                         struct xrt_system_compositor **out_xsysc)
+{
 	struct null_compositor *c = U_TYPED_CALLOC(struct null_compositor);
 
 	struct xrt_compositor *iface = &c->base.base.base;
@@ -554,6 +583,10 @@ null_compositor_create_system(struct xrt_device *xdev, struct xrt_system_composi
 	c->frame.rendering.id = -1;
 	c->settings.frame_interval_ns = U_TIME_1S_IN_NS / 20; // 20 FPS
 	c->xdev = xdev;
+
+	// Store custom recommended dimensions (0 = use defaults)
+	c->recommended_view_width = recommended_width;
+	c->recommended_view_height = recommended_height;
 
 	NULL_DEBUG(c, "Doing init %p", (void *)c);
 

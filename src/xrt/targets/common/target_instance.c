@@ -33,6 +33,11 @@
 #include "d3d11_service/comp_d3d11_service.h"
 #endif
 
+// SR display dimension query for proper swapchain dimensions
+#ifdef XRT_HAVE_LEIA_SR
+#include "leiasr/leiasr_d3d11.h"
+#endif
+
 #include "target_instance_parts.h"
 
 #include <assert.h>
@@ -61,6 +66,12 @@ DEBUG_GET_ONCE_BOOL_OPTION(use_d3d11_service, "XRT_SERVICE_USE_D3D11", true)
 
 xrt_result_t
 null_compositor_create_system(struct xrt_device *xdev, struct xrt_system_compositor **out_xsysc);
+
+xrt_result_t
+null_compositor_create_system_with_dims(struct xrt_device *xdev,
+                                         uint32_t recommended_width,
+                                         uint32_t recommended_height,
+                                         struct xrt_system_compositor **out_xsysc);
 
 
 
@@ -117,7 +128,20 @@ t_instance_create_system(struct xrt_instance *xinst,
 
 #ifdef XRT_MODULE_COMPOSITOR_NULL
 	if (use_null) {
-		xret = null_compositor_create_system(head, &xsysc);
+		uint32_t sr_rec_width = 0;
+		uint32_t sr_rec_height = 0;
+
+#ifdef XRT_HAVE_LEIA_SR
+		// Query SR display for recommended view dimensions
+		// This ensures apps create properly-sized swapchains for SR displays
+		if (leiasr_query_recommended_view_dimensions(5.0, &sr_rec_width, &sr_rec_height)) {
+			U_LOG_I("Using SR recommended view dimensions: %ux%u per eye", sr_rec_width, sr_rec_height);
+		} else {
+			U_LOG_W("Could not query SR display dimensions, using defaults");
+		}
+#endif
+
+		xret = null_compositor_create_system_with_dims(head, sr_rec_width, sr_rec_height, &xsysc);
 	}
 #else
 	if (use_null) {

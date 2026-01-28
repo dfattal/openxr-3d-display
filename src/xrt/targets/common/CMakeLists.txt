@@ -247,6 +247,12 @@ if(XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL)
 		target_link_libraries(target_instance PRIVATE comp_null)
 	endif()
 
+	# Link SR driver for dimension query when available
+	if(XRT_HAVE_LEIA_SR)
+		target_link_libraries(target_instance PRIVATE drv_leiasr)
+		target_include_directories(target_instance PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../drivers)
+	endif()
+
 	# Hybrid mode: create a separate library that exports native_instance_create
 	# instead of xrt_instance_create to avoid symbol conflict with IPC client
 	if(XRT_FEATURE_HYBRID_MODE)
@@ -278,6 +284,12 @@ if(XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL)
 		# This avoids the "M" window that D3D11 service compositor would create
 		if(XRT_MODULE_COMPOSITOR_NULL)
 			target_link_libraries(target_instance_hybrid PRIVATE comp_null)
+		endif()
+
+		# Link SR driver for dimension query when available (hybrid mode)
+		if(XRT_HAVE_LEIA_SR)
+			target_link_libraries(target_instance_hybrid PRIVATE drv_leiasr)
+			target_include_directories(target_instance_hybrid PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../drivers)
 		endif()
 	endif()
 endif()
