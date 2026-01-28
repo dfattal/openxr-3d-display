@@ -652,9 +652,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         renderer.context->ClearRenderTargetView(viewTextureRTV.Get(), clearColor);
         renderer.context->ClearDepthStencilView(viewDepthDSV.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
-        // Set view texture as render target
-        ID3D11RenderTargetView* rtvs[] = { viewTextureRTV.Get() };
-        renderer.context->OMSetRenderTargets(1, rtvs, viewDepthDSV.Get());
+        // Cube parameters (matching reference exactly)
+        const float cubeSize = 60.0f;  // 60mm cube size
+        const float znear = 0.1f;
+        const float zfar = 10000.0f;
 
         // Render stereo views (left and right)
         for (int eye = 0; eye < 2; eye++) {
@@ -671,24 +672,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             // Get eye position for this eye
             leia::vec3f eyePos = (eye == 0) ? leftEye : rightEye;
 
-            // Compute Kooima projection matrix
-            // All units are in mm (eye position from SR SDK is in mm)
-            leia::mat4f projection = leia::kooimaProjectionSimple(
+            // Calculate MVP matrix exactly like reference app
+            leia::mat4f mvp = leia::CalculateMVP(
                 eyePos,
                 g_screenWidthMM, g_screenHeightMM,
-                0.1f, 10000.0f
+                renderer.cubeRotation,  // Use renderer's cube rotation
+                cubeSize,
+                znear, zfar
             );
 
-            // Convert to XMMATRIX (view is identity since camera is at eye position)
-            XMMATRIX viewMatrix = XMMatrixIdentity();
-            XMMATRIX projMatrix = projection.toXMMATRIX();
-
-            // Render scene
-            RenderScene(renderer, viewTextureRTV.Get(), viewDepthDSV.Get(),
-                g_viewTextureWidth, g_viewTextureHeight,
-                viewMatrix, projMatrix,
-                g_inputState.cameraPosX, g_inputState.cameraPosY, g_inputState.cameraPosZ,
-                g_inputState.yaw, g_inputState.pitch);
+            // Render cube with the MVP matrix
+            RenderCubeWithMVP(renderer, viewTextureRTV.Get(), viewDepthDSV.Get(), mvp.m);
         }
 
         // Render text overlay (on left eye view only)

@@ -106,3 +106,12 @@ bool CreateDepthStencilView(
     ID3D11Texture2D** depthTexture,
     ID3D11DepthStencilView** dsv
 );
+
+// Render cube with pre-computed MVP matrix (for SR native app)
+// mvpData points to 16 floats in column-major order (like mat4f::m)
+void RenderCubeWithMVP(
+    D3D11Renderer& renderer,
+    ID3D11RenderTargetView* rtv,
+    ID3D11DepthStencilView* dsv,
+    const float* mvpData
+);
