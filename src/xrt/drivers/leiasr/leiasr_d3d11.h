@@ -158,6 +158,23 @@ leiasr_d3d11_is_ready(struct leiasr_d3d11 *leiasr);
 bool
 leiasr_d3d11_get_display_dimensions(struct leiasr_d3d11 *leiasr, struct leiasr_display_dimensions *out_dims);
 
+/*!
+ * Get the recommended view texture dimensions from the SR display.
+ * These dimensions are queried from the SR SDK during weaver creation and should
+ * be used for creating swapchains and the compositor stereo texture.
+ *
+ * @param leiasr The D3D11 weaver instance.
+ * @param[out] out_width Recommended width per view (single eye).
+ * @param[out] out_height Recommended height per view.
+ * @return true if valid dimensions are available, false otherwise.
+ *
+ * @ingroup drv_leiasr
+ */
+bool
+leiasr_d3d11_get_recommended_view_dimensions(struct leiasr_d3d11 *leiasr,
+                                              uint32_t *out_width,
+                                              uint32_t *out_height);
+
 #ifdef __cplusplus
 }
 #endif
