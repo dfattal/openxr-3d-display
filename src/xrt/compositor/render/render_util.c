@@ -19,11 +19,11 @@
 static void
 calc_projection(const struct xrt_fov *fov, struct xrt_matrix_4x4_f64 *result)
 {
-	const double tan_left = tan(fov->angle_left);
-	const double tan_right = tan(fov->angle_right);
+	const double tan_left = tan((double)fov->angle_left);
+	const double tan_right = tan((double)fov->angle_right);
 
-	const double tan_down = tan(fov->angle_down);
-	const double tan_up = tan(fov->angle_up);
+	const double tan_down = tan((double)fov->angle_down);
+	const double tan_up = tan((double)fov->angle_up);
 
 	const bool vulkan_projection_space_y = true;
 
@@ -188,11 +188,11 @@ render_calc_uv_to_tangent_lengths_rect(const struct xrt_fov *fov, struct xrt_nor
 {
 	const struct xrt_fov copy = *fov;
 
-	const double tan_left = tan(copy.angle_left);
-	const double tan_right = tan(copy.angle_right);
+	const double tan_left = tan((double)copy.angle_left);
+	const double tan_right = tan((double)copy.angle_right);
 
-	const double tan_down = tan(copy.angle_down);
-	const double tan_up = tan(copy.angle_up);
+	const double tan_down = tan((double)copy.angle_down);
+	const double tan_up = tan((double)copy.angle_up);
 
 	const double tan_width = tan_right - tan_left;
 	const double tan_height = tan_up - tan_down;
