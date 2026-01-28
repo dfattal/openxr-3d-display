@@ -10,6 +10,7 @@
 #pragma once
 
 #include "xrt_compiler.h"
+#include "xrt_defines.h"
 
 #include <stdint.h>
 
