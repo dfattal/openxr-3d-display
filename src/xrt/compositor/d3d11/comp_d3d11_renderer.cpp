@@ -595,6 +595,11 @@ render_projection_layer(struct comp_d3d11_renderer *r,
 		        r->view_width, r->view_width, r->view_height);
 	}
 
+	// Set projection shaders explicitly (must be done per-draw because quad layer
+	// rendering switches to quad shaders, and those persist to the next projection layer)
+	internals->context->VSSetShader(r->projection_vs, nullptr, 0);
+	internals->context->PSSetShader(r->projection_ps, nullptr, 0);
+
 	// Update constant buffer
 	LayerConstants constants = {};
 

@@ -335,6 +335,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                 ID3D11RenderTargetView* rtv = nullptr;
                                 CreateRenderTargetView(renderer, swapchainTexture, &rtv);
 
+                                // Set viewport to match swapchain dimensions.
+                                // Each eye has its own swapchain so we must set the viewport
+                                // explicitly (the D3D11 context is shared with the compositor
+                                // which sets its own viewports during layer_commit).
+                                D3D11_VIEWPORT vp = {};
+                                vp.Width = (FLOAT)xr.swapchains[eye].width;
+                                vp.Height = (FLOAT)xr.swapchains[eye].height;
+                                vp.MaxDepth = 1.0f;
+                                renderer.context->RSSetViewports(1, &vp);
+
+                                // Clear render target and depth buffer for this eye.
+                                // Each eye renders to its own swapchain so both must be cleared.
+                                float clearColor[4] = {0.05f, 0.05f, 0.25f, 1.0f};
+                                renderer.context->ClearRenderTargetView(rtv, clearColor);
+                                renderer.context->ClearDepthStencilView(depthDSVs[eye].Get(),
+                                    D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+
                                 XMMATRIX viewMatrix = (eye == 0) ? leftViewMatrix : rightViewMatrix;
                                 XMMATRIX projMatrix = (eye == 0) ? leftProjMatrix : rightProjMatrix;
 
