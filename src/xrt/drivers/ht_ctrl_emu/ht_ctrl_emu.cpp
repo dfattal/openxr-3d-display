@@ -31,6 +31,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <cstdint>
 
 
 static const float cm2m = 0.01f;
@@ -43,7 +44,7 @@ DEBUG_GET_ONCE_LOG_OPTION(cemu_log, "CEMU_LOG", U_LOGGING_TRACE)
 #define CEMU_WARN(d, ...) U_LOG_XDEV_IFL_W(&d->base, d->sys->log_level, __VA_ARGS__)
 #define CEMU_ERROR(d, ...) U_LOG_XDEV_IFL_E(&d->base, d->sys->log_level, __VA_ARGS__)
 
-enum cemu_input_index
+enum cemu_input_index : std::uint8_t
 {
 	CEMU_INDEX_HAND_TRACKING,
 	CEMU_INDEX_PINCH_BOOL,

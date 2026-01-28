@@ -114,7 +114,7 @@ using namespace xrt::auxiliary::tracking;
 //! Namespace for PSVR tracking implementation
 namespace xrt::auxiliary::tracking::psvr {
 
-typedef enum blob_type
+typedef enum blob_type : std::uint8_t
 {
 	BLOB_TYPE_UNKNOWN,
 	BLOB_TYPE_SIDE,
@@ -156,7 +156,7 @@ struct View
 	}
 };
 
-typedef enum led_tag
+typedef enum led_tag : std::uint8_t
 {
 	TAG_TL,
 	TAG_TR,

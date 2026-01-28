@@ -59,7 +59,7 @@ struct InputClass
 namespace {
 using namespace std::string_view_literals;
 // From https://github.com/ValveSoftware/openvr/blob/master/docs/Driver_API_Documentation.md#bone-structure
-enum HandSkeletonBone : int32_t
+enum HandSkeletonBone : std::uint8_t
 {
 	eBone_Root = 0,
 	eBone_Wrist,

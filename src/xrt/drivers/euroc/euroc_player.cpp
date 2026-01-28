@@ -71,7 +71,7 @@ using imu_samples = vector<xrt_imu_sample>;
 using img_samples = vector<img_sample>;
 using gt_trajectory = vector<xrt_pose_sample>;
 
-enum euroc_player_ui_state
+enum euroc_player_ui_state : std::uint8_t
 {
 	UNINITIALIZED = 0,
 	NOT_STREAMING,
