@@ -530,7 +530,11 @@ void RenderScene(
     XMMATRIX view = cameraRotation * cameraOffset * viewMatrix;
 
     // Render cube
-    XMMATRIX cubeWorld = XMMatrixRotationY(renderer.cubeRotation);
+    // Scale cube to 60mm (matching reference SR example) - unit cube is -0.5 to 0.5
+    const float cubeSize = 60.0f;  // Size in mm
+    XMMATRIX cubeScale = XMMatrixScaling(cubeSize, cubeSize, cubeSize);
+    XMMATRIX cubeRotation = XMMatrixRotationY(renderer.cubeRotation);
+    XMMATRIX cubeWorld = cubeRotation * cubeScale;
     XMMATRIX cubeWVP = cubeWorld * view * projMatrix;
 
     renderer.context->IASetInputLayout(renderer.cubeInputLayout.Get());
@@ -548,7 +552,11 @@ void RenderScene(
     renderer.context->DrawIndexed(36, 0, 0);
 
     // Render grid
-    XMMATRIX gridWVP = view * projMatrix; // Grid has no world transform
+    // Scale grid to be visible in mm scale (original grid is -10 to +10 units at y=-1)
+    // Scale to 500mm range, positioned at y=-30mm (below the cube)
+    const float gridScale = 50.0f;  // Each unit becomes 50mm
+    XMMATRIX gridWorld = XMMatrixScaling(gridScale, gridScale, gridScale) * XMMatrixTranslation(0, -30.0f + gridScale, 0);
+    XMMATRIX gridWVP = gridWorld * view * projMatrix;
 
     renderer.context->IASetInputLayout(renderer.gridInputLayout.Get());
     renderer.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);

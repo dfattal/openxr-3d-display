@@ -594,10 +594,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             leia::vec3f eyePos = (eye == 0) ? leftEye : rightEye;
 
             // Compute Kooima projection matrix
-            // Note: Screen dimensions are in mm, convert to meters for projection
+            // All units are in mm (eye position from SR SDK is in mm)
             leia::mat4f projection = leia::kooimaProjectionSimple(
                 eyePos,
-                g_screenWidthMM / 1000.0f, g_screenHeightMM / 1000.0f,
+                g_screenWidthMM, g_screenHeightMM,
                 0.1f, 10000.0f
             );
 
