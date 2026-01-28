@@ -404,7 +404,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                 RenderText(textOverlay, renderer.device.Get(), quadTexture,
                                     perfText, 10, 85, 300, 70, true);
 
-                                std::wstring eyeText = FormatEyeTrackingInfo(xr.eyePosX, xr.eyePosY, xr.eyeTrackingActive);
+                                std::wstring eyeText = FormatEyeTrackingInfo(xr.eyePosX, xr.eyePosY, xr.eyePosZ, xr.eyeTrackingActive);
                                 RenderText(textOverlay, renderer.device.Get(), quadTexture,
                                     eyeText, 10, 165, 300, 70, true);
 

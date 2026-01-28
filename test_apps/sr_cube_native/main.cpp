@@ -584,6 +584,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Eye tracking state
     float eyePosX = 0.0f;
     float eyePosY = 0.0f;
+    float eyePosZ = 0.0f;
     bool eyeTrackingActive = false;
 
     LOG_INFO("");
@@ -632,6 +633,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             // Average for display
             eyePosX = (leftPos[0] + rightPos[0]) / 2.0f;
             eyePosY = (leftPos[1] + rightPos[1]) / 2.0f;
+            eyePosZ = (leftPos[2] + rightPos[2]) / 2.0f;
         }
 
         // Apply parallax toggle
@@ -692,7 +694,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 g_viewTextureWidth, g_viewTextureHeight);
 
             // Eye tracking info
-            std::wstring eyeText = FormatEyeTrackingInfo(eyePosX, eyePosY, eyeTrackingActive);
+            std::wstring eyeText = FormatEyeTrackingInfo(eyePosX, eyePosY, eyePosZ, eyeTrackingActive);
 
             // Parallax state
             std::wstring parallaxText = g_inputState.parallaxEnabled ?

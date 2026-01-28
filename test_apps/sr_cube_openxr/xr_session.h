@@ -60,6 +60,7 @@ struct XrSessionManager {
     // Eye tracking data (from views)
     float eyePosX = 0.0f;
     float eyePosY = 0.0f;
+    float eyePosZ = 0.0f;
     bool eyeTrackingActive = false;
 
     // Frame timing

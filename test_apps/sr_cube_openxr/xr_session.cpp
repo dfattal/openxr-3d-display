@@ -421,6 +421,7 @@ bool LocateViews(
 
     xr.eyePosX = (views[0].pose.position.x + views[1].pose.position.x) / 2.0f;
     xr.eyePosY = (views[0].pose.position.y + views[1].pose.position.y) / 2.0f;
+    xr.eyePosZ = (views[0].pose.position.z + views[1].pose.position.z) / 2.0f;
     xr.eyeTrackingActive = (viewState.viewStateFlags & XR_VIEW_STATE_POSITION_TRACKED_BIT) != 0;
 
     return true;
