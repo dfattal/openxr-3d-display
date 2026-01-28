@@ -197,12 +197,16 @@ oxr_session_get_display_dimensions(struct oxr_session *sess, float *out_width_m,
  * @param eye Eye position in meters (x=right, y=up, z=toward viewer from screen center)
  * @param screen_width_m Screen width in meters
  * @param screen_height_m Screen height in meters
+ * @param eye_name Name of the eye ("Left" or "Right") for diagnostic logging
+ * @param should_log Whether to log this frame (caller controls throttling)
  * @param[out] out_fov FOV angles in radians
  */
 static void
 compute_kooima_fov(const struct leiasr_eye_position *eye,
                    float screen_width_m,
                    float screen_height_m,
+                   const char *eye_name,
+                   bool should_log,
                    struct xrt_fov *out_fov)
 {
 	const float half_w = screen_width_m / 2.0f;
@@ -215,6 +219,9 @@ compute_kooima_fov(const struct leiasr_eye_position *eye,
 		out_fov->angle_right = 0.785398f;   //  45 degrees
 		out_fov->angle_up = 0.523599f;      //  30 degrees
 		out_fov->angle_down = -0.523599f;   // -30 degrees
+		if (should_log) {
+			U_LOG_W("Kooima FOV [%s]: eye too close (z=%.4fm), using fallback angles", eye_name, eye->z);
+		}
 		return;
 	}
 
@@ -238,14 +245,14 @@ compute_kooima_fov(const struct leiasr_eye_position *eye,
 	out_fov->angle_up = atanf((half_h - eye->y) / distance);
 	out_fov->angle_down = atanf((-half_h - eye->y) / distance);
 
-	// Diagnostic logging (throttled)
-	static int fov_log_counter = 0;
-	if (++fov_log_counter % 300 == 1) { // Log every ~5 seconds at 60fps
+	// Diagnostic logging (caller controls throttling)
+	if (should_log) {
 		float h_fov_deg = (out_fov->angle_right - out_fov->angle_left) * 180.0f / 3.14159265f;
 		float v_fov_deg = (out_fov->angle_up - out_fov->angle_down) * 180.0f / 3.14159265f;
-		U_LOG_W("Kooima FOV: eye=(%.4f,%.4f,%.4f)m, screen=%.4fx%.4fm",
-		        eye->x, eye->y, eye->z, screen_width_m, screen_height_m);
-		U_LOG_W("  angles: L=%.2f° R=%.2f° U=%.2f° D=%.2f° (H=%.2f° V=%.2f°)",
+		U_LOG_W("Kooima FOV [%s]: eye=(%.4f,%.4f,%.4f)m, screen=%.4fx%.4fm",
+		        eye_name, eye->x, eye->y, eye->z, screen_width_m, screen_height_m);
+		U_LOG_W("  [%s] angles: L=%.2f° R=%.2f° U=%.2f° D=%.2f° (H=%.2f° V=%.2f°)",
+		        eye_name,
 		        out_fov->angle_left * 180.0f / 3.14159265f,
 		        out_fov->angle_right * 180.0f / 3.14159265f,
 		        out_fov->angle_up * 180.0f / 3.14159265f,
@@ -884,8 +891,10 @@ oxr_session_locate_views(struct oxr_logger *log,
 
 		if (oxr_session_get_display_dimensions(sess, &screen_width_m, &screen_height_m) &&
 		    screen_width_m > 0.0f && screen_height_m > 0.0f) {
-			compute_kooima_fov(&eye_pair.left, screen_width_m, screen_height_m, &fovs[0]);
-			compute_kooima_fov(&eye_pair.right, screen_width_m, screen_height_m, &fovs[1]);
+			compute_kooima_fov(&eye_pair.left, screen_width_m, screen_height_m,
+			                   "Left", sr_should_log, &fovs[0]);
+			compute_kooima_fov(&eye_pair.right, screen_width_m, screen_height_m,
+			                   "Right", sr_should_log, &fovs[1]);
 
 			// Compare FOVs between eyes (throttled logging)
 			if (sr_should_log) {

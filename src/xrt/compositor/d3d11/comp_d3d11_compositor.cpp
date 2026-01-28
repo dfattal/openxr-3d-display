@@ -523,17 +523,26 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		// Get stereo texture SRV from renderer
 		void *stereo_srv = comp_d3d11_renderer_get_stereo_srv(c->renderer);
 
-		// Get view dimensions
+		// Get view dimensions (single eye width - stereo texture is 2x this width)
 		uint32_t view_width, view_height;
 		comp_d3d11_renderer_get_view_dimensions(c->renderer, &view_width, &view_height);
-
-		// Set input texture for weaving
-		leiasr_d3d11_set_input_texture(c->weaver, stereo_srv, view_width, view_height,
-		                                DXGI_FORMAT_R8G8B8A8_UNORM);
 
 		// Get target dimensions for viewport
 		uint32_t target_width, target_height;
 		comp_d3d11_target_get_dimensions(c->target, &target_width, &target_height);
+
+		// Diagnostic logging for texture dimensions (throttled)
+		static int dim_log_counter = 0;
+		if (++dim_log_counter % 300 == 1) {
+			U_LOG_W("SR weaver input: view=%ux%u (stereo=%ux%u), target=%ux%u",
+			        view_width, view_height,
+			        view_width * 2, view_height,
+			        target_width, target_height);
+		}
+
+		// Set input texture for weaving (view_width is single eye, weaver handles side-by-side)
+		leiasr_d3d11_set_input_texture(c->weaver, stereo_srv, view_width, view_height,
+		                                DXGI_FORMAT_R8G8B8A8_UNORM);
 
 		// Set viewport for weaving
 		D3D11_VIEWPORT viewport = {};

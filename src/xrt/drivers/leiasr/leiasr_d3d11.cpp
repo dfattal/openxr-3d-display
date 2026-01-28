@@ -247,12 +247,22 @@ leiasr_d3d11_set_input_texture(struct leiasr_d3d11 *leiasr,
 
 	std::lock_guard<std::mutex> lock(leiasr->mutex);
 
+	// Log dimension changes (first time or when dimensions change)
+	static uint32_t last_logged_width = 0, last_logged_height = 0;
+	if (view_width != last_logged_width || view_height != last_logged_height) {
+		U_LOG_W("SR weaver setInputViewTexture: view=%ux%u (expects side-by-side stereo SRV)",
+		        view_width, view_height);
+		last_logged_width = view_width;
+		last_logged_height = view_height;
+	}
+
 	leiasr->input_srv = static_cast<ID3D11ShaderResourceView *>(stereo_srv);
 	leiasr->view_width = view_width;
 	leiasr->view_height = view_height;
 	leiasr->input_format = static_cast<DXGI_FORMAT>(format);
 
 	// Configure the weaver with the input texture
+	// NOTE: view_width is single-eye width; SR SDK handles the side-by-side stereo layout internally
 	leiasr->weaver->setInputViewTexture(leiasr->input_srv,
 	                                     static_cast<int>(view_width),
 	                                     static_cast<int>(view_height),
