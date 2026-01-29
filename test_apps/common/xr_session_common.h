@@ -30,12 +30,13 @@
 #include <vector>
 #include <string>
 
-struct ConvergencePlane {
-    XrPosef pose;    // center position + orientation in LOCAL space
-    float width;     // meters
-    float height;    // meters
-    bool valid;
-};
+// [Commented out — will be reused for 3D-positioned HUD later]
+// struct ConvergencePlane {
+//     XrPosef pose;    // center position + orientation in LOCAL space
+//     float width;     // meters
+//     float height;    // meters
+//     bool valid;
+// };
 
 struct SwapchainInfo {
     XrSwapchain swapchain = XR_NULL_HANDLE;
@@ -134,29 +135,20 @@ bool ReleaseSwapchainImage(XrSessionManager& xr, int eye);
 // End frame and submit layers (projection layer only)
 bool EndFrame(XrSessionManager& xr, XrTime displayTime, const XrCompositionLayerProjectionView* views);
 
-// Compute the convergence plane (virtual display surface) from two stereo XrViews.
-// The convergence plane is derived from the intersection of the asymmetric frustums
-// of the two eyes, representing the physical display surface in LOCAL space.
-ConvergencePlane LocateConvergencePlane(const XrView views[2]);
-
-// Compute the HUD quad pose anchored to the top-left region of the convergence plane.
-// coverageFraction controls how much of the display the HUD covers (0.2 = 20%).
-// viewMidpoint is the eye midpoint pose used to transform the result into VIEW space.
-// Returns the pose in VIEW space and writes the HUD dimensions to outWidth/outHeight.
-XrPosef ComputeHUDPose(
-    const ConvergencePlane& plane,
-    float coverageFraction,
-    const XrView views[2],
-    float& outWidth, float& outHeight);
-
-// End frame with projection layer and quad layer for UI
-bool EndFrameWithQuadLayer(
-    XrSessionManager& xr,
-    XrTime displayTime,
-    const XrCompositionLayerProjectionView* projViews,
-    const XrPosef& quadPose,
-    float quadWidth, float quadHeight
-);
+// [Commented out — will be reused for 3D-positioned HUD later]
+// ConvergencePlane LocateConvergencePlane(const XrView views[2]);
+// XrPosef ComputeHUDPose(
+//     const ConvergencePlane& plane,
+//     float coverageFraction,
+//     const XrView views[2],
+//     float& outWidth, float& outHeight);
+// bool EndFrameWithQuadLayer(
+//     XrSessionManager& xr,
+//     XrTime displayTime,
+//     const XrCompositionLayerProjectionView* projViews,
+//     const XrPosef& quadPose,
+//     float quadWidth, float quadHeight
+// );
 
 // Clean up OpenXR resources
 void CleanupOpenXR(XrSessionManager& xr);

@@ -160,11 +160,12 @@ static void RenderThreadFunc(
     XrSessionManager* xr,
     D3D11Renderer* renderer,
     TextOverlay* textOverlay,
-    ComPtr<ID3D11Texture2D> quadStagingTexture,
+    ComPtr<ID3D11Texture2D> hudStagingTexture,
+    uint32_t hudWidth,
+    uint32_t hudHeight,
     ComPtr<ID3D11Texture2D>* depthTextures,
     ComPtr<ID3D11DepthStencilView>* depthDSVs,
-    std::vector<XrSwapchainImageD3D11KHR>* swapchainImages,
-    std::vector<XrSwapchainImageD3D11KHR>* quadSwapchainImages)
+    std::vector<XrSwapchainImageD3D11KHR>* swapchainImages)
 {
     LOG_INFO("[RenderThread] Started");
 
@@ -219,8 +220,6 @@ static void RenderThreadFunc(
             XrFrameState frameState;
             if (BeginFrame(*xr, frameState)) {
                 XrCompositionLayerProjectionView projectionViews[2] = {};
-                ConvergencePlane convPlane = {};
-                XrView rawViews[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
 
                 if (frameState.shouldRender) {
                     XMMATRIX leftViewMatrix, leftProjMatrix;
@@ -233,7 +232,6 @@ static void RenderThreadFunc(
                         inputSnapshot.yaw, inputSnapshot.pitch)) {
 
                         // Get raw view poses (pre-player-transform) for projection views
-                        // and convergence plane computation
                         XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
                         locateInfo.viewConfigurationType = xr->viewConfigType;
                         locateInfo.displayTime = frameState.predictedDisplayTime;
@@ -241,13 +239,13 @@ static void RenderThreadFunc(
 
                         XrViewState viewState = {XR_TYPE_VIEW_STATE};
                         uint32_t viewCount = 2;
-                        rawViews[0] = {XR_TYPE_VIEW}; rawViews[1] = {XR_TYPE_VIEW};
+                        XrView rawViews[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
                         xrLocateViews(xr->session, &locateInfo, &viewState, 2, &viewCount, rawViews);
 
-                        // Compute convergence plane from raw views (physical display surface)
-                        convPlane = LocateConvergencePlane(rawViews);
+                        // [Commented out — will be reused for 3D-positioned HUD later]
+                        // ConvergencePlane convPlane = LocateConvergencePlane(rawViews);
 
-                        // Render each eye (3D scene only - no UI)
+                        // Render each eye with screen-space HUD overlay
                         for (int eye = 0; eye < 2; eye++) {
                             uint32_t imageIndex;
                             if (AcquireSwapchainImage(*xr, eye, imageIndex)) {
@@ -256,14 +254,12 @@ static void RenderThreadFunc(
                                 ID3D11RenderTargetView* rtv = nullptr;
                                 CreateRenderTargetView(*renderer, swapchainTexture, &rtv);
 
-                                // Set viewport to match swapchain dimensions.
                                 D3D11_VIEWPORT vp = {};
                                 vp.Width = (FLOAT)xr->swapchains[eye].width;
                                 vp.Height = (FLOAT)xr->swapchains[eye].height;
                                 vp.MaxDepth = 1.0f;
                                 renderer->context->RSSetViewports(1, &vp);
 
-                                // Clear render target and depth buffer for this eye.
                                 float clearColor[4] = {0.05f, 0.05f, 0.25f, 1.0f};
                                 renderer->context->ClearRenderTargetView(rtv, clearColor);
                                 renderer->context->ClearDepthStencilView(depthDSVs[eye].Get(),
@@ -277,11 +273,51 @@ static void RenderThreadFunc(
                                     viewMatrix, projMatrix,
                                     inputSnapshot.zoomScale);
 
+                                // Screen-space HUD: render text on eye 0, copy to both eyes
+                                if (inputSnapshot.hudVisible && hudStagingTexture) {
+                                    if (eye == 0) {
+                                        ID3D11RenderTargetView* hudRtv = nullptr;
+                                        CreateRenderTargetView(*renderer, hudStagingTexture.Get(), &hudRtv);
+                                        if (hudRtv) {
+                                            float hudClear[4] = {0.0f, 0.0f, 0.0f, 0.7f};
+                                            renderer->context->ClearRenderTargetView(hudRtv, hudClear);
+                                            hudRtv->Release();
+                                        }
+
+                                        float sx = hudWidth / 512.0f;
+                                        float sy = hudHeight / 256.0f;
+
+                                        std::wstring stateText = L"Session: ";
+                                        stateText += FormatSessionState((int)xr->sessionState);
+                                        RenderText(*textOverlay, renderer->device.Get(), hudStagingTexture.Get(),
+                                            stateText, 10*sx, 10*sy, 300*sx, 30*sy);
+
+                                        std::wstring extText = xr->hasSessionTargetExt ?
+                                            L"XR_EXT_session_target: ACTIVE" :
+                                            L"XR_EXT_session_target: NOT AVAILABLE";
+                                        RenderText(*textOverlay, renderer->device.Get(), hudStagingTexture.Get(),
+                                            extText, 10*sx, 45*sy, 350*sx, 30*sy, true);
+
+                                        std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
+                                            xr->swapchains[0].width, xr->swapchains[0].height);
+                                        RenderText(*textOverlay, renderer->device.Get(), hudStagingTexture.Get(),
+                                            perfText, 10*sx, 85*sy, 300*sx, 70*sy, true);
+
+                                        std::wstring eyeText = FormatEyeTrackingInfo(xr->eyePosX, xr->eyePosY, xr->eyePosZ, xr->eyeTrackingActive);
+                                        RenderText(*textOverlay, renderer->device.Get(), hudStagingTexture.Get(),
+                                            eyeText, 10*sx, 165*sy, 300*sx, 70*sy, true);
+                                    }
+
+                                    D3D11_BOX srcBox = {0, 0, 0, hudWidth, hudHeight, 1};
+                                    renderer->context->CopySubresourceRegion(
+                                        swapchainTexture, 0, 0, 0, 0,
+                                        hudStagingTexture.Get(), 0, &srcBox);
+                                }
+
                                 if (rtv) rtv->Release();
 
                                 ReleaseSwapchainImage(*xr, eye);
 
-                                // Set up projection view for this eye
                                 projectionViews[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
                                 projectionViews[eye].subImage.swapchain = xr->swapchains[eye].swapchain;
                                 projectionViews[eye].subImage.imageRect.offset = {0, 0};
@@ -295,67 +331,11 @@ static void RenderThreadFunc(
                                 projectionViews[eye].fov = rawViews[eye].fov;
                             }
                         }
-
-                        // Render UI to quad layer (if available)
-                        if (xr->hasQuadLayer) {
-                            uint32_t quadImageIndex;
-                            if (AcquireQuadSwapchainImage(*xr, quadImageIndex)) {
-                                ID3D11Texture2D* quadTexture = (*quadSwapchainImages)[quadImageIndex].texture;
-
-                                // Use staging texture for D2D rendering
-                                ID3D11Texture2D* textTarget = quadStagingTexture ? quadStagingTexture.Get() : quadTexture;
-
-                                // Clear with semi-transparent black background
-                                ID3D11RenderTargetView* quadRtv = nullptr;
-                                CreateRenderTargetView(*renderer, textTarget, &quadRtv);
-                                if (quadRtv) {
-                                    float clearColor[4] = {0.0f, 0.0f, 0.0f, 0.7f};
-                                    renderer->context->ClearRenderTargetView(quadRtv, clearColor);
-                                    quadRtv->Release();
-                                }
-
-                                // Render text to staging texture
-                                std::wstring stateText = L"Session: ";
-                                stateText += FormatSessionState((int)xr->sessionState);
-                                RenderText(*textOverlay, renderer->device.Get(), textTarget,
-                                    stateText, 10, 10, 300, 30);
-
-                                std::wstring extText = xr->hasSessionTargetExt ?
-                                    L"XR_EXT_session_target: ACTIVE" :
-                                    L"XR_EXT_session_target: NOT AVAILABLE";
-                                RenderText(*textOverlay, renderer->device.Get(), textTarget,
-                                    extText, 10, 45, 350, 30, true);
-
-                                std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
-                                    xr->swapchains[0].width, xr->swapchains[0].height);
-                                RenderText(*textOverlay, renderer->device.Get(), textTarget,
-                                    perfText, 10, 85, 300, 70, true);
-
-                                std::wstring eyeText = FormatEyeTrackingInfo(xr->eyePosX, xr->eyePosY, xr->eyePosZ, xr->eyeTrackingActive);
-                                RenderText(*textOverlay, renderer->device.Get(), textTarget,
-                                    eyeText, 10, 165, 300, 70, true);
-
-                                // Copy staging texture to swapchain
-                                if (quadStagingTexture) {
-                                    renderer->context->CopyResource(quadTexture, quadStagingTexture.Get());
-                                }
-
-                                ReleaseQuadSwapchainImage(*xr);
-                            }
-                        }
                     }
                 }
 
-                // Submit frame with quad layer for UI (anchored to convergence plane)
-                if (convPlane.valid) {
-                    float hudW, hudH;
-                    XrPosef hudPose = ComputeHUDPose(convPlane, 0.2f, rawViews, hudW, hudH);
-                    EndFrameWithQuadLayer(*xr, frameState.predictedDisplayTime, projectionViews,
-                        hudPose, hudW, hudH);
-                } else {
-                    // Fallback: skip quad layer, submit projection only
-                    EndFrame(*xr, frameState.predictedDisplayTime, projectionViews);
-                }
+                // Submit frame (projection layer only)
+                EndFrame(*xr, frameState.predictedDisplayTime, projectionViews);
             }
         } else {
             Sleep(100);
@@ -488,15 +468,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // Create quad layer swapchain for UI overlay (512x256 pixels)
-    const uint32_t QUAD_UI_WIDTH = 512;
-    const uint32_t QUAD_UI_HEIGHT = 256;
-    if (!CreateQuadLayerSwapchain(xr, QUAD_UI_WIDTH, QUAD_UI_HEIGHT)) {
-        LOG_WARN("Failed to create quad layer swapchain - UI will not be displayed");
-    } else {
-        LOG_INFO("Quad layer created for UI overlay (%ux%u)", QUAD_UI_WIDTH, QUAD_UI_HEIGHT);
-    }
-
     // Enumerate D3D11 swapchain images (now done per-app since common is API-agnostic)
     std::vector<XrSwapchainImageD3D11KHR> swapchainImages[2];
     for (int eye = 0; eye < 2; eye++) {
@@ -507,36 +478,29 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         LOG_INFO("Eye %d: enumerated %u D3D11 swapchain images", eye, count);
     }
 
-    std::vector<XrSwapchainImageD3D11KHR> quadSwapchainImages;
-    if (xr.hasQuadLayer) {
-        uint32_t count = xr.quadSwapchain.imageCount;
-        quadSwapchainImages.resize(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
-        xrEnumerateSwapchainImages(xr.quadSwapchain.swapchain, count, &count,
-            (XrSwapchainImageBaseHeader*)quadSwapchainImages.data());
-        LOG_INFO("Quad layer: enumerated %u D3D11 swapchain images", count);
-    }
+    // Create HUD staging texture for screen-space text rendering
+    const float HUD_WIDTH_PERCENT = 0.30f;
+    const float HUD_HEIGHT_PERCENT = 0.35f;
+    uint32_t hudWidth = (uint32_t)(xr.swapchains[0].width * HUD_WIDTH_PERCENT);
+    uint32_t hudHeight = (uint32_t)(xr.swapchains[0].height * HUD_HEIGHT_PERCENT);
 
-    // Create staging texture for D2D text rendering.
-    // OpenXR swapchain textures are shared resources created by the runtime and
-    // Direct2D cannot create a render target on them. We render text to this
-    // app-owned staging texture, then CopyResource to the swapchain texture.
-    ComPtr<ID3D11Texture2D> quadStagingTexture;
-    if (xr.hasQuadLayer) {
-        D3D11_TEXTURE2D_DESC stagingDesc = {};
-        stagingDesc.Width = QUAD_UI_WIDTH;
-        stagingDesc.Height = QUAD_UI_HEIGHT;
-        stagingDesc.MipLevels = 1;
-        stagingDesc.ArraySize = 1;
-        stagingDesc.Format = (DXGI_FORMAT)xr.quadSwapchain.format;
-        stagingDesc.SampleDesc.Count = 1;
-        stagingDesc.Usage = D3D11_USAGE_DEFAULT;
-        stagingDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    ComPtr<ID3D11Texture2D> hudStagingTexture;
+    {
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width = hudWidth;
+        desc.Height = hudHeight;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // D2D-compatible
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_RENDER_TARGET;
 
-        HRESULT hr = renderer.device->CreateTexture2D(&stagingDesc, nullptr, &quadStagingTexture);
+        HRESULT hr = renderer.device->CreateTexture2D(&desc, nullptr, &hudStagingTexture);
         if (FAILED(hr)) {
-            LOG_WARN("Failed to create quad staging texture: 0x%08X", hr);
+            LOG_WARN("Failed to create HUD staging texture: 0x%08X", hr);
         } else {
-            LOG_INFO("Quad staging texture created for D2D text rendering");
+            LOG_INFO("HUD staging texture created (%ux%u, R8G8B8A8_UNORM)", hudWidth, hudHeight);
         }
     }
 
@@ -567,13 +531,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     LOG_INFO("=== Entering main loop ===");
     LOG_INFO("XR rendering happens in the application window (XR_EXT_session_target)");
     LOG_INFO("Render thread handles OpenXR frame loop; main thread handles Win32 messages");
-    LOG_INFO("Controls: WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset, P=Parallax, ESC=Quit");
+    LOG_INFO("Controls: WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset, P=Parallax, TAB=HUD, ESC=Quit");
     LOG_INFO("");
 
     // Launch render thread — the frame loop runs independently of the message pump
     // so that rendering continues even when DefWindowProc blocks during window drag/resize.
     std::thread renderThread(RenderThreadFunc, hwnd, &xr, &renderer, &textOverlay,
-        quadStagingTexture, depthTextures, depthDSVs, swapchainImages, &quadSwapchainImages);
+        hudStagingTexture, hudWidth, hudHeight, depthTextures, depthDSVs, swapchainImages);
 
     // Main thread: blocking Win32 message pump.
     // GetMessage blocks efficiently (no CPU spin) until a message arrives.

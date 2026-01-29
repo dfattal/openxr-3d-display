@@ -38,6 +38,9 @@ typedef ptrdiff_t GLintptr;
 #define GL_FRAMEBUFFER_COMPLETE           0x8CD5
 #define GL_SRGB8_ALPHA8                   0x8C43
 #define GL_CLAMP_TO_EDGE                  0x812F
+#define GL_READ_FRAMEBUFFER               0x8CA8
+#define GL_DRAW_FRAMEBUFFER               0x8CA9
+#define GL_RGBA8                          0x8058
 #define GL_TEXTURE_WRAP_S                 0x2802
 #define GL_TEXTURE_WRAP_T                 0x2803
 
@@ -84,6 +87,8 @@ typedef void (APIENTRY *PFNGLBINDRENDERBUFFERPROC)(GLenum target, GLuint renderb
 typedef void (APIENTRY *PFNGLRENDERBUFFERSTORAGEPROC)(GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
 typedef void (APIENTRY *PFNGLFRAMEBUFFERRENDERBUFFERPROC)(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
 typedef void (APIENTRY *PFNGLDELETERENDERBUFFERSPROC)(GLsizei n, const GLuint* renderbuffers);
+typedef void (APIENTRY *PFNGLBLITFRAMEBUFFERPROC)(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
+    GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
 
 typedef HGLRC (APIENTRY *PFNWGLCREATECONTEXTATTRIBSARBPROC)(HDC hDC, HGLRC hShareContext, const int* attribList);
 
@@ -123,6 +128,7 @@ extern PFNGLBINDRENDERBUFFERPROC glBindRenderbuffer_;
 extern PFNGLRENDERBUFFERSTORAGEPROC glRenderbufferStorage_;
 extern PFNGLFRAMEBUFFERRENDERBUFFERPROC glFramebufferRenderbuffer_;
 extern PFNGLDELETERENDERBUFFERSPROC glDeleteRenderbuffers_;
+extern PFNGLBLITFRAMEBUFFERPROC glBlitFramebuffer_;
 
 extern PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB_;
 

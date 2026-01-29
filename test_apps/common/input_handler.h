@@ -58,6 +58,9 @@ struct InputState {
 
     // Mouse scroll zoom
     float zoomScale = 1.0f;
+
+    // HUD visibility toggle (TAB key)
+    bool hudVisible = true;
 };
 
 // Process a Win32 message and update input state
