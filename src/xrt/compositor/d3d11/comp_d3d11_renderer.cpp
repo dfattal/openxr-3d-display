@@ -215,8 +215,10 @@ VS_OUTPUT VSMain(uint vertex_id : SV_VertexID)
     // Center the quad at origin
     float2 pos = in_uv - 0.5;
 
-    // Flip Y for OpenXR coordinate system
-    pos.y = -pos.y;
+    // No Y flip: the Vulkan-style projection (negative a22) already inverts Y,
+    // which maps OpenXR's +Y-up world to D3D11's screen correctly.
+    // (Vulkan compositor would need Y flip because Vulkan NDC has Y-down,
+    // but D3D11 NDC has Y-up, matching OpenGL convention.)
 
     // Transform position by MVP (which includes quad size scaling)
     output.position = mul(mvp, float4(pos, 0.0, 1.0));

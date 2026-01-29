@@ -604,9 +604,7 @@ bool EndFrameWithQuadLayer(
 
     // Position the quad in front of the viewer (in VIEW space)
     quadLayer.pose.position = {quadPosX, quadPosY, quadPosZ};
-    // Rotate 180° around Y axis so the quad's front face (-Z) points toward the viewer (+Z).
-    // Without this, the front face points away from the viewer and text appears mirror-flipped.
-    quadLayer.pose.orientation = {0.0f, 1.0f, 0.0f, 0.0f};
+    quadLayer.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};  // Identity
 
     // Size of the quad in meters
     quadLayer.size = {quadWidth, quadHeight};
