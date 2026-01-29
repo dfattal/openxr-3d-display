@@ -251,7 +251,7 @@ static void RenderThreadFunc(
                         for (int eye = 0; eye < 2; eye++) {
                             uint32_t imageIndex;
                             if (AcquireSwapchainImage(*xr, eye, imageIndex)) {
-                                ID3D11Texture2D* swapchainTexture = (*swapchainImages)[eye][imageIndex].texture;
+                                ID3D11Texture2D* swapchainTexture = swapchainImages[eye][imageIndex].texture;
 
                                 ID3D11RenderTargetView* rtv = nullptr;
                                 CreateRenderTargetView(*renderer, swapchainTexture, &rtv);
@@ -300,7 +300,7 @@ static void RenderThreadFunc(
                         if (xr->hasQuadLayer) {
                             uint32_t quadImageIndex;
                             if (AcquireQuadSwapchainImage(*xr, quadImageIndex)) {
-                                ID3D11Texture2D* quadTexture = (*quadSwapchainImages)[quadImageIndex].texture;
+                                ID3D11Texture2D* quadTexture = quadSwapchainImages[quadImageIndex].texture;
 
                                 // Use staging texture for D2D rendering
                                 ID3D11Texture2D* textTarget = quadStagingTexture ? quadStagingTexture.Get() : quadTexture;

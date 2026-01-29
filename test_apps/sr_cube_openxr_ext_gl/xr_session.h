@@ -7,9 +7,9 @@
 
 #pragma once
 
-#include <GL/gl.h>
 #define XR_USE_GRAPHICS_API_OPENGL
 #include "xr_session_common.h"
+#include <GL/gl.h>
 
 // Initialize OpenXR instance with OpenGL + session_target extensions
 bool InitializeOpenXR(XrSessionManager& xr);
