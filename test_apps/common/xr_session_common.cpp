@@ -9,6 +9,7 @@
 #include "logging.h"
 #include <cstring>
 #include <cmath>
+#include <chrono>
 
 using namespace DirectX;
 
@@ -478,6 +479,11 @@ bool EndFrame(XrSessionManager& xr, XrTime displayTime, const XrCompositionLayer
 }
 
 ConvergencePlane LocateConvergencePlane(const XrView views[2]) {
+    // Throttled logging: log every ~5 seconds
+    static auto lastLogTime = std::chrono::steady_clock::now() - std::chrono::seconds(5);
+    auto now = std::chrono::steady_clock::now();
+    bool shouldLog = std::chrono::duration_cast<std::chrono::seconds>(now - lastLogTime).count() >= 5;
+
     ConvergencePlane result = {};
     result.valid = false;
 
@@ -492,6 +498,18 @@ ConvergencePlane LocateConvergencePlane(const XrView views[2]) {
     float d1 = -tanf(views[1].fov.angleDown);
     float r1 = tanf(views[1].fov.angleRight);
     float l1 = -tanf(views[1].fov.angleLeft);
+
+    if (shouldLog) {
+        LOG_WARN("[ConvPlane] FOV L eye: up=%.4f down=%.4f right=%.4f left=%.4f (rad)",
+            views[0].fov.angleUp, views[0].fov.angleDown, views[0].fov.angleRight, views[0].fov.angleLeft);
+        LOG_WARN("[ConvPlane] FOV R eye: up=%.4f down=%.4f right=%.4f left=%.4f (rad)",
+            views[1].fov.angleUp, views[1].fov.angleDown, views[1].fov.angleRight, views[1].fov.angleLeft);
+        LOG_WARN("[ConvPlane] tan: u0=%.4f d0=%.4f r0=%.4f l0=%.4f | u1=%.4f d1=%.4f r1=%.4f l1=%.4f",
+            u0, d0, r0, l0, u1, d1, r1, l1);
+        LOG_WARN("[ConvPlane] L pos: (%.6f, %.6f, %.6f) R pos: (%.6f, %.6f, %.6f)",
+            views[0].pose.position.x, views[0].pose.position.y, views[0].pose.position.z,
+            views[1].pose.position.x, views[1].pose.position.y, views[1].pose.position.z);
+    }
 
     // Camera-local frame: use the left eye orientation as the reference frame.
     // Transform both eye positions into this frame via inverse left eye quaternion.
@@ -520,11 +538,23 @@ ConvergencePlane LocateConvergencePlane(const XrView views[2]) {
     float x0 = lp.x, y0 = lp.y, z0 = lp.z;
     float x1 = rp.x, y1 = rp.y, z1 = rp.z;
 
+    if (shouldLog) {
+        LOG_WARN("[ConvPlane] local L: (%.6f, %.6f, %.6f) local R: (%.6f, %.6f, %.6f)",
+            x0, y0, z0, x1, y1, z1);
+    }
+
     // Compute display center Z from frustum intersection
     // denomX = (r1 - l1) - (r0 - l0)  (difference in horizontal FOV widths)
     float denomX = (r1 - l1) - (r0 - l0);
+    if (shouldLog) {
+        LOG_WARN("[ConvPlane] (r0-l0)=%.6f (r1-l1)=%.6f denomX=%.6f",
+            r0 - l0, r1 - l1, denomX);
+    }
     if (fabsf(denomX) < 0.0001f) {
-        // Symmetric or degenerate FOVs - cannot compute convergence plane
+        if (shouldLog) {
+            LOG_WARN("[ConvPlane] FAILED: denomX too small (%.6f) - symmetric/degenerate FOVs", denomX);
+            lastLogTime = now;
+        }
         return result;
     }
 
@@ -536,7 +566,16 @@ ConvergencePlane LocateConvergencePlane(const XrView views[2]) {
     float W = fabsf((z0 - zd) * (l0 + r0));
     float H = fabsf((z0 - zd) * (u0 + d0));
 
+    if (shouldLog) {
+        LOG_WARN("[ConvPlane] display center local: (%.4f, %.4f, %.4f) size: %.4f x %.4f m",
+            xd, yd, zd, W, H);
+    }
+
     if (W < 0.001f || H < 0.001f) {
+        if (shouldLog) {
+            LOG_WARN("[ConvPlane] FAILED: display too small W=%.6f H=%.6f", W, H);
+            lastLogTime = now;
+        }
         return result;
     }
 
@@ -553,6 +592,12 @@ ConvergencePlane LocateConvergencePlane(const XrView views[2]) {
     result.width = W;
     result.height = H;
     result.valid = true;
+
+    if (shouldLog) {
+        LOG_WARN("[ConvPlane] SUCCESS: world pos (%.4f, %.4f, %.4f) size %.4f x %.4f m",
+            wc.x, wc.y, wc.z, W, H);
+        lastLogTime = now;
+    }
 
     return result;
 }
