@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, Bash, Task, Edit, Write
 
 # CI-Monitor Skill
 
-This skill automates the complete build workflow for CNSDK-OpenXR (Monado): commit → push → monitor → diagnose/fix errors.
+This skill automates the complete build workflow for Monado fork with LeiaSR SDK: commit → push → monitor → diagnose/fix errors.
 
 ## Architecture
 
@@ -48,10 +48,10 @@ Task(
 Pass this complete prompt to the subagent (replace `[USER_MESSAGE]` with the user's commit message or "auto-generate"):
 
 ```
-Execute the CNSDK-OpenXR ci-monitor workflow. You have access to Edit and Write tools to fix build errors.
+Execute the LeiaSR-OpenXR ci-monitor workflow. You have access to Edit and Write tools to fix build errors.
 
 ## Configuration
-- Repository: CNSDK-OpenXR (Monado fork with Leia SDK)
+- Repository: LeiaSR-OpenXR (Monado fork with Leia SDK)
 - Workflow: build-windows.yml
 - Artifact Name: SRMonado
 - Build: CMake + Ninja Multi-Config (Release)

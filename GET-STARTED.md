@@ -48,7 +48,7 @@ SRMonado is built from Monado's codebase, which was designed for **VR headsets**
 | Persistent head tracking state | Eye tracking is handled by SR Tracker Service (Leia's service) |
 | Single display output shared by apps | XR_EXT_session_target gives each app its own window |
 
-For Leia SR, tracking state is already shared via **Leia's SR Tracker Service** (part of CNSDK), not Monado:
+For Leia SR, tracking state is already shared via **Leia's SR Tracker Service** (part of SR SDK), not Monado:
 
 ```
 ┌──────────────┐  ┌──────────────┐
@@ -60,7 +60,7 @@ For Leia SR, tracking state is already shared via **Leia's SR Tracker Service** 
        ▼                 ▼
 ┌─────────────────────────────────┐
 │     SR Tracker Service          │  ← Leia's service (not Monado)
-│     (part of CNSDK/SR SDK)      │
+│     (part of SR SDK)      │
 │     - Eye tracking              │
 │     - Face detection            │
 │     - Shared state              │

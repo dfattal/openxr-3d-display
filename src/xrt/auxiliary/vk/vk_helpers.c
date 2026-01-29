@@ -612,7 +612,6 @@ vk_format_feature_flag_string(VkFormatFeatureFlagBits bits, bool null_on_unknown
 		ENUM_TO_STR(VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
 		ENUM_TO_STR(VK_FORMAT_FEATURE_TRANSFER_SRC_BIT);
 		ENUM_TO_STR(VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
-		ENUM_TO_STR(VK_FORMAT_R5G6B5_UNORM_PACK16);
 	default:
 		if (bits == 0) {
 			return "FORMAT FEATURE: NO BITS SET";
@@ -1143,7 +1142,7 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR,
 	    .pNext = NULL,
 	    .viewFormatCount = info->format_count,
-	    .pViewFormats = info->formats,
+	    .pViewFormats = (const VkFormat *)info->formats,
 	};
 	const bool has_mutable_format_list =
 	    has_mutable_usage && vk->has_KHR_image_format_list && info->format_count > 0;

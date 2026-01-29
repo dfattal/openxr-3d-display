@@ -5,7 +5,7 @@
 # Build from this directory to build all test apps at once
 #
 # Apps:
-#   sr_cube_native     - Native SR SDK (no OpenXR) - requires CNSDK
+#   sr_cube_native     - Native SR SDK (no OpenXR) - requires LeiaSR SDK
 #   sr_cube_openxr     - OpenXR standard mode (Monado creates window)
 #   sr_cube_openxr_ext - OpenXR with XR_EXT_session_target (app creates window)
 
@@ -18,7 +18,7 @@ if(NOT WIN32)
     return()
 endif()
 
-# Build sr_cube_native (requires CNSDK for full functionality)
+# Build sr_cube_native (requires LeiaSR SDK for full functionality)
 add_subdirectory(sr_cube_native)
 
 # Build OpenXR test apps (require OpenXR loader)

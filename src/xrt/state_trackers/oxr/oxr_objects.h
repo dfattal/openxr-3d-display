@@ -2686,8 +2686,10 @@ struct oxr_hand_tracking_data_source
 static inline int
 oxr_hand_tracking_data_source_cmp(const void *p1, const void *p2)
 {
-	const struct oxr_hand_tracking_data_source *lhs = (const struct oxr_hand_tracking_data_source *)p1;
-	const struct oxr_hand_tracking_data_source *rhs = (const struct oxr_hand_tracking_data_source *)p2;
+	const struct oxr_hand_tracking_data_source *const *lhs_ptr = p1;
+	const struct oxr_hand_tracking_data_source *const *rhs_ptr = p2;
+	const struct oxr_hand_tracking_data_source *lhs = *lhs_ptr;
+	const struct oxr_hand_tracking_data_source *rhs = *rhs_ptr;
 	assert(lhs && rhs);
 	if (rhs->input_name < lhs->input_name)
 		return -1;

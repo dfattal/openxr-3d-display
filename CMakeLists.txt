@@ -156,7 +156,9 @@ if(WIN32)
 	list(APPEND CMAKE_PREFIX_PATH "${LEIASR_SDKROOT}/lib/cmake")
 endif()
 
-find_package(CNSDK CONFIG)
+if(ANDROID)
+    find_package(CNSDK CONFIG)
+endif()
 find_package(simulatedreality CONFIG GLOBAL)
 find_package(srDirectX CONFIG GLOBAL)
 
@@ -239,7 +241,7 @@ endif()
 option_with_deps(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable inter-procedural (link-time) optimization" DEFAULT OFF DEPENDS HAS_IPO)
 option(XRT_HAVE_TRACY "Enable Tracy support for tracing, make sure to set XRT_FEATURE_TRACING as well." OFF)
 
-option_with_deps(XRT_HAVE_CNSDK "Enable CNSDK support" DEPENDS CNSDK_FOUND)
+option_with_deps(XRT_HAVE_CNSDK "Enable CNSDK support (Android)" DEPENDS CNSDK_FOUND)
 option_with_deps(XRT_HAVE_LEIA_SR "Enable Leia SR support" DEPENDS simulatedreality_FOUND srDirectX_FOUND)
 
 # Graphics deps to use (sorted in each group, groups thematic and ordered to handle internal deps: e.g. EGL and SDL2 need OpenGL/GLES)

@@ -413,4 +413,4 @@ monado-service.exe
 - [phase-2.md](phase-2.md) - Per-session infrastructure
 - [phase-3.md](phase-3.md) - Target Provider Service Pattern
 - [app-control.md](app-control.md) - Application window control design
-- [CNSDK Documentation](https://developer.leiainc.com/) - Leia SR SDK
+- [Leia SR SDK Documentation](https://developer.leiainc.com/) - Leia SR SDK
