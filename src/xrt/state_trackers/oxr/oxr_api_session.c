@@ -479,10 +479,10 @@ oxr_hand_tracker_create(struct oxr_logger *log,
 		const uint32_t source_count =
 		    MIN(data_source_info->requestedDataSourceCount, hand_tracker->requested_sources_count);
 		hand_tracker->requested_sources_count = 0;
-		memset(hand_tracker->requested_sources, 0, sizeof(hand_tracker->requested_sources));
+		memset((void *)hand_tracker->requested_sources, 0, sizeof(hand_tracker->requested_sources));
 
 		for (uint32_t i = 0; i < source_count; ++i) {
-			struct oxr_hand_tracking_data_source *requested_source = NULL;
+			const struct oxr_hand_tracking_data_source *requested_source = NULL;
 			switch (data_source_info->requestedDataSources[i]) {
 			case XR_HAND_TRACKING_DATA_SOURCE_UNOBSTRUCTED_EXT:
 				requested_source = &hand_tracker->unobstructed;
@@ -506,7 +506,7 @@ oxr_hand_tracker_create(struct oxr_logger *log,
 
 		const size_t sort_size = hand_tracker->requested_sources_count;
 		const size_t elem_size = sizeof(const struct oxr_hand_tracking_data_source *);
-		qsort(hand_tracker->requested_sources, sort_size, elem_size, oxr_hand_tracking_data_source_cmp);
+		qsort((void *)hand_tracker->requested_sources, sort_size, elem_size, oxr_hand_tracking_data_source_cmp);
 	}
 #endif
 

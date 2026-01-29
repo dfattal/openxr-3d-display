@@ -457,7 +457,7 @@ u_device_get_view_pose(const struct xrt_vec3 *eye_relation, uint32_t view_index,
 	}
 
 	/*
-	float baselineScaling = 10.0f; // emulate default CNSDK LWETest values. In OpenVR, we used the IPD (eye_relation here) to change the effective baseline scaling
+	float baselineScaling = 10.0f; // emulate default SR SDK LWETest values. In OpenVR, we used the IPD (eye_relation here) to change the effective baseline scaling
 	if (view_index == 0) {
 		pose.position.x = -5.0f;
 		pose.position.y = 0.0f;

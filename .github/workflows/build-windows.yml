@@ -319,7 +319,7 @@ jobs:
   #     - name: Checkout repository
   #       uses: actions/checkout@v4
 
-  # Native SR SDK app (no OpenXR) - Direct CNSDK integration
+  # Native SR SDK app (no OpenXR) - Direct LeiaSR SDK integration
   TestAppNative:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
