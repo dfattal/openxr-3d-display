@@ -152,7 +152,6 @@ Checks:       |
     -performance-inefficient-string-concatenation,
     -performance-no-int-to-ptr,
     -performance-readability-avoid-const-params-in-decls,
-    -performance-unnecessary-copy-initialization,
     -readability-avoid-const-params-in-decls,
     -readability-avoid-nested-conditional-operator,
     -readability-avoid-return-with-void-value,
