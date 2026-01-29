@@ -9,7 +9,7 @@
 #include "logging.h"
 #include <cstring>
 #include <cmath>
-#include <chrono>
+// #include <chrono>  // [Commented out — was only used for convergence plane logging throttle]
 
 using namespace DirectX;
 
@@ -408,6 +408,8 @@ bool EndFrame(XrSessionManager& xr, XrTime displayTime, const XrCompositionLayer
     return XR_SUCCEEDED(xrEndFrame(xr.session, &endInfo));
 }
 
+// [Commented out — will be reused for 3D-positioned HUD later]
+#if 0
 ConvergencePlane LocateConvergencePlane(const XrView views[2]) {
     // Throttled logging: log every ~5 seconds
     static auto lastLogTime = std::chrono::steady_clock::now() - std::chrono::seconds(5);
@@ -645,6 +647,7 @@ bool EndFrameWithQuadLayer(
 
     return XR_SUCCEEDED(xrEndFrame(xr.session, &endInfo));
 }
+#endif // Commented out convergence plane / quad layer code
 
 void CleanupOpenXR(XrSessionManager& xr) {
     LOG_INFO("Cleaning up OpenXR resources...");

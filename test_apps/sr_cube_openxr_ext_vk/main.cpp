@@ -17,9 +17,13 @@
 #include "xr_session.h"
 #include "vk_renderer.h"
 
+#include "hud_renderer.h"
+#include "text_overlay.h"
+
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -134,7 +138,13 @@ static void RenderThreadFunc(
     HWND hwnd,
     XrSessionManager* xr,
     VkRenderer* renderer,
-    std::vector<XrSwapchainImageVulkanKHR>* swapchainImages)
+    std::vector<XrSwapchainImageVulkanKHR>* swapchainImages,
+    HudRenderer* hud,
+    uint32_t hudWidth,
+    uint32_t hudHeight,
+    VkBuffer hudStagingBuffer,
+    void* hudStagingMapped,
+    VkCommandPool hudCmdPool)
 {
     LOG_INFO("[RenderThread] Started");
 
@@ -206,6 +216,91 @@ static void RenderThreadFunc(
                                     xr->swapchains[eye].width, xr->swapchains[eye].height,
                                     viewMatrix, projMatrix,
                                     inputSnapshot.zoomScale);
+
+                                // Screen-space HUD: render text on eye 0, copy to both eyes
+                                if (inputSnapshot.hudVisible && hud) {
+                                    if (eye == 0) {
+                                        std::wstring sessionText = L"Session: ";
+                                        sessionText += FormatSessionState((int)xr->sessionState);
+                                        std::wstring modeText = xr->hasSessionTargetExt ?
+                                            L"XR_EXT_session_target: ACTIVE (Vulkan)" :
+                                            L"XR_EXT_session_target: NOT AVAILABLE (Vulkan)";
+                                        std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
+                                            xr->swapchains[0].width, xr->swapchains[0].height);
+                                        std::wstring eyeText = FormatEyeTrackingInfo(xr->eyePosX, xr->eyePosY, xr->eyePosZ, xr->eyeTrackingActive);
+
+                                        uint32_t srcRowPitch = 0;
+                                        const void* pixels = RenderHudAndMap(*hud, &srcRowPitch, sessionText, modeText, perfText, eyeText);
+                                        if (pixels) {
+                                            // Copy pixels to staging buffer
+                                            const uint8_t* src = (const uint8_t*)pixels;
+                                            uint8_t* dst = (uint8_t*)hudStagingMapped;
+                                            for (uint32_t row = 0; row < hudHeight; row++) {
+                                                memcpy(dst + row * hudWidth * 4, src + row * srcRowPitch, hudWidth * 4);
+                                            }
+                                            UnmapHud(*hud);
+                                        }
+                                    }
+
+                                    // Record and execute a command buffer to copy HUD to swapchain
+                                    VkCommandBufferAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+                                    allocInfo.commandPool = hudCmdPool;
+                                    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                                    allocInfo.commandBufferCount = 1;
+
+                                    VkCommandBuffer cmdBuf;
+                                    vkAllocateCommandBuffers(renderer->device, &allocInfo, &cmdBuf);
+
+                                    VkCommandBufferBeginInfo beginInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+                                    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+                                    vkBeginCommandBuffer(cmdBuf, &beginInfo);
+
+                                    VkImage swapImg = swapchainImages[eye][imageIndex].image;
+
+                                    // Barrier: swapchain COLOR_ATTACHMENT -> TRANSFER_DST
+                                    VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+                                    barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                                    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                                    barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                                    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                                    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                                    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                                    barrier.image = swapImg;
+                                    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+                                    vkCmdPipelineBarrier(cmdBuf,
+                                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+                                    // Copy buffer to image (top-left region)
+                                    VkBufferImageCopy region = {};
+                                    region.bufferRowLength = hudWidth;
+                                    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+                                    region.imageOffset = {0, 0, 0};
+                                    region.imageExtent = {hudWidth, hudHeight, 1};
+                                    vkCmdCopyBufferToImage(cmdBuf, hudStagingBuffer, swapImg,
+                                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+                                    // Barrier: TRANSFER_DST -> COLOR_ATTACHMENT
+                                    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                                    barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                                    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                                    barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                                    vkCmdPipelineBarrier(cmdBuf,
+                                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+                                    vkEndCommandBuffer(cmdBuf);
+
+                                    VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+                                    submitInfo.commandBufferCount = 1;
+                                    submitInfo.pCommandBuffers = &cmdBuf;
+                                    vkQueueSubmit(renderer->graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+                                    vkQueueWaitIdle(renderer->graphicsQueue);
+
+                                    vkFreeCommandBuffers(renderer->device, hudCmdPool, 1, &cmdBuf);
+                                }
 
                                 ReleaseSwapchainImage(*xr, eye);
 
@@ -406,15 +501,94 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     }
 
+    // Initialize HUD renderer for screen-space text overlay
+    const float HUD_WIDTH_PERCENT = 0.30f;
+    const float HUD_HEIGHT_PERCENT = 0.35f;
+    uint32_t hudWidth = (uint32_t)(xr.swapchains[0].width * HUD_WIDTH_PERCENT);
+    uint32_t hudHeight = (uint32_t)(xr.swapchains[0].height * HUD_HEIGHT_PERCENT);
+
+    HudRenderer hudRenderer = {};
+    bool hudOk = InitializeHudRenderer(hudRenderer, hudWidth, hudHeight);
+    if (!hudOk) {
+        LOG_WARN("HUD renderer init failed - HUD will not be displayed");
+    }
+
+    // Create Vulkan staging buffer (host-visible, persistently mapped) for HUD pixel upload
+    VkBuffer hudStagingBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory hudStagingMemory = VK_NULL_HANDLE;
+    void* hudStagingMapped = nullptr;
+    VkCommandPool hudCmdPool = VK_NULL_HANDLE;
+
+    if (hudOk) {
+        // Staging buffer
+        VkBufferCreateInfo bufInfo = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bufInfo.size = (VkDeviceSize)hudWidth * hudHeight * 4;
+        bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        if (vkCreateBuffer(vkDevice, &bufInfo, nullptr, &hudStagingBuffer) != VK_SUCCESS) {
+            LOG_WARN("Failed to create HUD staging buffer");
+            hudOk = false;
+        }
+
+        if (hudOk) {
+            VkMemoryRequirements memReqs;
+            vkGetBufferMemoryRequirements(vkDevice, hudStagingBuffer, &memReqs);
+
+            VkPhysicalDeviceMemoryProperties memProps;
+            vkGetPhysicalDeviceMemoryProperties(physDevice, &memProps);
+
+            uint32_t memTypeIndex = UINT32_MAX;
+            for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) {
+                if ((memReqs.memoryTypeBits & (1 << i)) &&
+                    (memProps.memoryTypes[i].propertyFlags &
+                        (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
+                        (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+                    memTypeIndex = i;
+                    break;
+                }
+            }
+
+            if (memTypeIndex == UINT32_MAX) {
+                LOG_WARN("No suitable memory type for HUD staging buffer");
+                hudOk = false;
+            } else {
+                VkMemoryAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+                allocInfo.allocationSize = memReqs.size;
+                allocInfo.memoryTypeIndex = memTypeIndex;
+                vkAllocateMemory(vkDevice, &allocInfo, nullptr, &hudStagingMemory);
+                vkBindBufferMemory(vkDevice, hudStagingBuffer, hudStagingMemory, 0);
+                vkMapMemory(vkDevice, hudStagingMemory, 0, bufInfo.size, 0, &hudStagingMapped);
+            }
+        }
+
+        // Command pool for HUD copy operations
+        if (hudOk) {
+            VkCommandPoolCreateInfo poolInfo = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+            poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            poolInfo.queueFamilyIndex = queueFamilyIndex;
+            if (vkCreateCommandPool(vkDevice, &poolInfo, nullptr, &hudCmdPool) != VK_SUCCESS) {
+                LOG_WARN("Failed to create HUD command pool");
+                hudOk = false;
+            }
+        }
+
+        if (hudOk) {
+            LOG_INFO("HUD Vulkan resources created (%ux%u)", hudWidth, hudHeight);
+        }
+    }
+
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
 
     LOG_INFO("");
     LOG_INFO("=== Entering main loop ===");
-    LOG_INFO("Controls: WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset, ESC=Quit");
+    LOG_INFO("Controls: WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset, TAB=HUD, ESC=Quit");
     LOG_INFO("");
 
-    std::thread renderThread(RenderThreadFunc, hwnd, &xr, &vkRenderer, swapchainImages);
+    std::thread renderThread(RenderThreadFunc, hwnd, &xr, &vkRenderer, swapchainImages,
+        hudOk ? &hudRenderer : nullptr, hudWidth, hudHeight,
+        hudStagingBuffer, hudStagingMapped, hudCmdPool);
 
     MSG msg = {};
     while (GetMessage(&msg, nullptr, 0, 0) > 0) {
@@ -429,6 +603,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     LOG_INFO("");
     LOG_INFO("=== Shutting down ===");
+
+    if (hudCmdPool != VK_NULL_HANDLE) vkDestroyCommandPool(vkDevice, hudCmdPool, nullptr);
+    if (hudStagingBuffer != VK_NULL_HANDLE) {
+        vkUnmapMemory(vkDevice, hudStagingMemory);
+        vkDestroyBuffer(vkDevice, hudStagingBuffer, nullptr);
+    }
+    if (hudStagingMemory != VK_NULL_HANDLE) vkFreeMemory(vkDevice, hudStagingMemory, nullptr);
+    if (hudOk) CleanupHudRenderer(hudRenderer);
 
     CleanupVkRenderer(vkRenderer);
     CleanupOpenXR(xr);
