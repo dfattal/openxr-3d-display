@@ -1898,12 +1898,23 @@ oxr_session_update_action_bindings(struct oxr_logger *log, struct oxr_session *s
 		}
 	}
 
+	/*
+	 * This code will only send events (and update the bindings) if there
+	 * is a profile mapped to the subaction path. Meaning it won't update
+	 * the cache or generate events when a controller goes away, basically
+	 * latching the interaction profile to the last active device.
+	 */
 #define POPULATE_PROFILE(X)                                                                                            \
-	sess->X = XR_NULL_PATH;                                                                                        \
-	if (profiles.X != NULL) {                                                                                      \
-		sess->X = profiles.X->path;                                                                            \
-		oxr_event_push_XrEventDataInteractionProfileChanged(log, sess);                                        \
-	}
+	do {                                                                                                           \
+		XrPath path = profiles.X != NULL ? profiles.X->path : XR_NULL_PATH;                                    \
+		if (path == XR_NULL_PATH) {                                                                            \
+			break; /* Only update on "active" interaction profiles per sub-action path. */                 \
+		}                                                                                                      \
+		if (sess->X != path) {                                                                                 \
+			sess->X = path;                                                                                \
+			oxr_event_push_XrEventDataInteractionProfileChanged(log, sess);                                \
+		}                                                                                                      \
+	} while (false);
 	OXR_FOR_EACH_VALID_SUBACTION_PATH(POPULATE_PROFILE)
 #undef POPULATE_PROFILE
 
