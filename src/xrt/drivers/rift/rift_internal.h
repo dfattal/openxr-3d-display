@@ -62,6 +62,10 @@
 
 #define IN_REPORT_RADIO_DATA_SIZE 64
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // asserts the size of a type is equal to the byte size provided
 #define SIZE_ASSERT(type, size)                                                                                        \
 	static_assert(sizeof(type) == (size), "Size of " #type " is not " #size " bytes as was expected")
@@ -581,6 +585,41 @@ enum rift_touch_controller_input
 	RIFT_TOUCH_CONTROLLER_INPUT_COUNT = 16,
 };
 
+struct rift_touch_controller_led
+{
+	struct xrt_vec3 position;
+	struct xrt_vec3 normal;
+	struct xrt_vec3 angles;
+};
+
+struct rift_touch_controller_calibration
+{
+	uint16_t joy_x_range[2];
+	uint16_t joy_x_dead[2];
+	uint16_t joy_y_range[2];
+	uint16_t joy_y_dead[2];
+
+	// min - mid - max
+	uint16_t trigger_range[3];
+
+	// min - mid - max
+	uint16_t middle_range[3];
+	bool middle_flipped;
+
+	uint16_t cap_sense_min[8];
+	uint16_t cap_sense_touch[8];
+
+	float gyro_calibration[3][3];
+	struct xrt_vec3 gyro_offset;
+	float accel_calibration[3][3];
+	struct xrt_vec3 accel_offset;
+
+	struct xrt_vec3 imu_position;
+
+	size_t num_leds;
+	struct rift_touch_controller_led *leds;
+};
+
 struct rift_touch_controller_input_state
 {
 	uint8_t buttons;
@@ -608,10 +647,17 @@ struct rift_touch_controller
 
 	enum rift_radio_device_type device_type;
 
-	bool input_mutex_created;
-	struct os_mutex input_mutex;
+	struct
+	{
+		bool mutex_created;
+		struct os_mutex mutex;
 
-	struct rift_touch_controller_input_state input_state;
+		struct rift_touch_controller_input_state state;
+
+		bool calibration_read;
+		struct rift_touch_controller_calibration calibration;
+	} input;
+
 
 	//! Locked by radio_state.thread
 	struct
@@ -625,7 +671,6 @@ struct rift_touch_controller
 		uint8_t *calibration_body_json;
 		uint16_t calibration_body_json_length;
 
-		bool calibration_read;
 	} radio_data;
 };
 
@@ -800,5 +845,14 @@ rift_radio_touch_index_to_device_type(size_t index)
 	default: assert(false);
 	}
 
-	return 0;
+	return (enum rift_radio_device_type)0;
 }
+
+bool
+rift_touch_calibration_parse(const char *calibration_data,
+                             size_t calibration_size,
+                             struct rift_touch_controller_calibration *out_calibration);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif

@@ -55,8 +55,16 @@ rift_touch_controller_destroy(struct xrt_device *xdev)
 
 	u_var_remove_root(controller);
 
-	if (controller->input_mutex_created) {
-		os_mutex_destroy(&controller->input_mutex);
+	if (controller->input.mutex_created) {
+		os_mutex_destroy(&controller->input.mutex);
+	}
+
+	if (controller->radio_data.calibration_body_json) {
+		free(controller->radio_data.calibration_body_json);
+	}
+
+	if (controller->input.calibration.leds) {
+		free(controller->input.calibration.leds);
 	}
 
 	u_device_free(&controller->base);
@@ -67,9 +75,9 @@ rift_touch_controller_update_inputs(struct xrt_device *xdev)
 {
 	struct rift_touch_controller *controller = rift_touch_controller(xdev);
 
-	os_mutex_lock(&controller->input_mutex);
-	struct rift_touch_controller_input_state input_state = controller->input_state;
-	os_mutex_unlock(&controller->input_mutex);
+	os_mutex_lock(&controller->input.mutex);
+	struct rift_touch_controller_input_state input_state = controller->input.state;
+	os_mutex_unlock(&controller->input.mutex);
 
 	uint64_t now = os_monotonic_get_ns();
 
@@ -286,17 +294,17 @@ rift_touch_controller_create(struct rift_hmd *hmd, enum rift_radio_device_type d
 	controller->base.binding_profile_count = touch_profile_bindings_count;
 	controller->base.binding_profiles = touch_profile_bindings;
 
-	result = os_mutex_init(&controller->input_mutex);
+	result = os_mutex_init(&controller->input.mutex);
 	if (result < 0) {
 		HMD_ERROR(hmd, "Failed to init touch controller input mutex");
 		u_device_free(&controller->base);
 		return NULL;
 	}
-	controller->input_mutex_created = true;
+	controller->input.mutex_created = true;
 
 	u_var_add_root(controller, "Rift Touch Controller", true);
-	u_var_add_u8(controller, &controller->input_state.buttons, "buttons");
-	u_var_add_bool(controller, &controller->radio_data.calibration_read, "Read Calibration");
+	u_var_add_u8(controller, &controller->input.state.buttons, "buttons");
+	u_var_add_bool(controller, &controller->input.calibration_read, "Read Calibration");
 
 	return controller;
 }
@@ -450,7 +458,17 @@ rift_touch_controller_calibration_body_read_callback(void *user_data, uint16_t a
 	printf("%s\n", controller->radio_data.calibration_body_json);
 #endif
 
-	controller->radio_data.calibration_read = true;
+	os_mutex_lock(&controller->input.mutex);
+	if (!rift_touch_calibration_parse((const char *)controller->radio_data.calibration_body_json,
+	                                  controller->radio_data.calibration_body_json_length,
+	                                  &controller->input.calibration)) {
+		HMD_ERROR(controller->hmd, "Failed to parse touch controller calibration JSON");
+		os_mutex_unlock(&controller->input.mutex);
+		return -1;
+	}
+
+	controller->input.calibration_read = true;
+	os_mutex_unlock(&controller->input.mutex);
 
 	return 0;
 }
@@ -635,9 +653,9 @@ rift_radio_handle_read(struct rift_hmd *hmd)
 				break;
 			}
 
-			os_mutex_lock(&controller->input_mutex);
-			controller->input_state.buttons = message.touch.buttons & 0x0F;
-			os_mutex_unlock(&controller->input_mutex);
+			os_mutex_lock(&controller->input.mutex);
+			controller->input.state.buttons = message.touch.buttons & 0x0F;
+			os_mutex_unlock(&controller->input.mutex);
 
 			break;
 		}

@@ -263,6 +263,7 @@ if(XRT_BUILD_DRIVER_RIFT)
 		rift/rift_usb.h
 		rift/rift_radio.c
 		rift/rift_radio.h
+		rift/rift_touch_calibration.cpp
 		)
 	target_include_directories(drv_rift SYSTEM PRIVATE)
 	target_link_libraries(
