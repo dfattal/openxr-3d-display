@@ -63,9 +63,49 @@ struct leiasr_d3d11
 	bool srgb_read = false;
 	bool srgb_write = false;
 
+	// Window subclass for thread-safe SR WndProc serialization
+	HWND hwnd = nullptr;
+	WNDPROC sr_wndproc = nullptr;  // SR SDK's WndProc (saved after weaver creation)
+	WNDPROC app_wndproc = nullptr; // App's original WndProc (saved before weaver creation)
+
 	// Thread safety
 	std::mutex mutex;
 };
+
+// Global pointer for the WndProc wrapper. Only one D3D11 SR weaver exists at a time.
+static leiasr_d3d11 *g_leiasr_d3d11_instance = nullptr;
+
+/*!
+ * Window procedure wrapper that serializes SR SDK's weaverWndProc with
+ * weaver API calls (weave, setInputViewTexture, etc.) on the render thread.
+ *
+ * The SR SDK's weaverWndProc and weave() share internal state without
+ * synchronization, causing crashes when they run concurrently (e.g. mouse-up
+ * on the main thread while weave() executes on the render thread).
+ *
+ * Uses try_lock to avoid deadlock: if the render thread holds the mutex
+ * (inside weave()), we skip the SR WndProc for that message and forward
+ * directly to the app's original WndProc. Missing one high-frequency mouse
+ * message in the SR SDK is harmless; crashing is not.
+ */
+static LRESULT CALLBACK
+leiasr_d3d11_wndproc_wrapper(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	leiasr_d3d11 *sr = g_leiasr_d3d11_instance;
+	if (sr != nullptr && sr->sr_wndproc != nullptr) {
+		if (sr->mutex.try_lock()) {
+			LRESULT result = CallWindowProc(sr->sr_wndproc, hwnd, msg, wParam, lParam);
+			sr->mutex.unlock();
+			return result;
+		}
+		// Render thread is active — skip SR WndProc to avoid the race,
+		// forward directly to the app's original WndProc.
+		if (sr->app_wndproc != nullptr) {
+			return CallWindowProc(sr->app_wndproc, hwnd, msg, wParam, lParam);
+		}
+	}
+	return DefWindowProc(hwnd, msg, wParam, lParam);
+}
 
 namespace {
 
@@ -208,10 +248,14 @@ leiasr_d3d11_create(double max_time,
 		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
-	// Create D3D11 weaver
+	// Save the app's original WndProc before the SR SDK subclasses the window
+	sr->hwnd = static_cast<HWND>(hwnd);
+	sr->app_wndproc = (WNDPROC)GetWindowLongPtr(sr->hwnd, GWLP_WNDPROC);
+
+	// Create D3D11 weaver (SR SDK installs its WndProc via SetWindowLongPtr)
 	WeaverErrorCode result = SR::CreateDX11Weaver(sr->context,
 	                                               sr->d3d11_context,
-	                                               static_cast<HWND>(hwnd),
+	                                               sr->hwnd,
 	                                               &sr->weaver);
 	if (result != WeaverErrorCode::WeaverSuccess) {
 		U_LOG_E("Failed to create SR D3D11 weaver: %d", (int)result);
@@ -219,6 +263,15 @@ leiasr_d3d11_create(double max_time,
 		delete sr;
 		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
+
+	// Install thread-safety wrapper around SR SDK's WndProc.
+	// The SR SDK's weaverWndProc and weave() share internal state without
+	// synchronization, so we serialize them with leiasr_d3d11::mutex.
+	// See doc/XR_EXT_session_target/mouse-race-condition.md
+	sr->sr_wndproc = (WNDPROC)GetWindowLongPtr(sr->hwnd, GWLP_WNDPROC);
+	g_leiasr_d3d11_instance = sr;
+	SetWindowLongPtr(sr->hwnd, GWLP_WNDPROC, (LONG_PTR)leiasr_d3d11_wndproc_wrapper);
+	U_LOG_I("Installed SR WndProc thread-safety wrapper on HWND %p", hwnd);
 
 	// Initialize the context after creating the weaver
 	sr->context->initialize();
@@ -242,66 +295,25 @@ leiasr_d3d11_destroy(struct leiasr_d3d11 **leiasr_ptr)
 
 	leiasr_d3d11 *sr = *leiasr_ptr;
 
-	U_LOG_I("leiasr_d3d11_destroy: beginning cleanup");
-
-	// WORKAROUND for SR SDK race condition in WndProcDispatcher:
-	// The SR SDK's WeaverBaseImpl has a use-after-free bug where it releases
-	// the lock before dereferencing the instance pointer in WndProcDispatcher.
-	// This can cause crashes when window messages (especially mouse movement)
-	// arrive during weaver destruction.
-	//
-	// Mitigation 1: Pump all pending window messages before destroying the weaver
-	// to reduce the race window. This gives in-flight message handlers time to
-	// complete before the weaver is destroyed.
-	{
-		U_LOG_I("leiasr_d3d11_destroy: pumping window messages before cleanup");
-		MSG msg;
-		// Process all pending messages (non-blocking)
-		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-		// Small delay to let any in-flight handlers complete
-		// The race window is very small, but mouse messages are high-frequency
-		Sleep(50);
-		// Pump again after the delay
-		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-		U_LOG_I("leiasr_d3d11_destroy: message pump complete");
+	// Remove our WndProc wrapper before destroying the weaver.
+	// Restore the SR SDK's WndProc so that weaver->destroy() can cleanly
+	// call restoreOriginalWindowProc (which restores the app's WndProc).
+	if (sr->hwnd != nullptr && sr->sr_wndproc != nullptr) {
+		SetWindowLongPtr(sr->hwnd, GWLP_WNDPROC, (LONG_PTR)sr->sr_wndproc);
+		U_LOG_I("Removed SR WndProc thread-safety wrapper from HWND %p", (void *)sr->hwnd);
 	}
+	g_leiasr_d3d11_instance = nullptr;
 
-	// Mitigation 2: Explicitly destroy the weaver before deleting the context.
-	// This ensures the window subclass is restored (via restoreOriginalWindowProc)
-	// before the object memory is freed, reducing the race window further.
+	// Destroy weaver (SR SDK restores the app's original WndProc)
 	if (sr->weaver != nullptr) {
-		U_LOG_I("leiasr_d3d11_destroy: explicitly destroying weaver");
 		sr->weaver->destroy();
 		sr->weaver = nullptr;
-		U_LOG_I("leiasr_d3d11_destroy: weaver destroyed");
-
-		// Pump messages again after weaver destroy, since restoreOriginalWindowProc
-		// was just called and there may be in-flight messages that got the old
-		// instance pointer before the map was updated
-		MSG msg;
-		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-		Sleep(10);
-		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
 	}
 
 	// Destroy context
 	if (sr->context != nullptr) {
-		U_LOG_I("leiasr_d3d11_destroy: deleting SR context");
 		SR::SRContext::deleteSRContext(sr->context);
 		sr->context = nullptr;
-		U_LOG_I("leiasr_d3d11_destroy: SR context deleted");
 	}
 
 	delete sr;
