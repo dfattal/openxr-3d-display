@@ -25,12 +25,13 @@ extern "C" {
 #endif
 
 #define XR_EXT_session_target 1
-#define XR_EXT_session_target_SPEC_VERSION 1
+#define XR_EXT_session_target_SPEC_VERSION 2
 #define XR_EXT_SESSION_TARGET_EXTENSION_NAME "XR_EXT_session_target"
 
 // Use a value in the vendor extension range (1000000000+)
 // This should be replaced with an official Khronos-assigned value if the extension is standardized
 #define XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT ((XrStructureType)1000999001)
+#define XR_TYPE_COMPOSITION_LAYER_WINDOW_SPACE_EXT ((XrStructureType)1000999002)
 
 /*!
  * @brief Structure passed in XrSessionCreateInfo::next chain to provide
@@ -54,6 +55,35 @@ typedef struct XrSessionTargetCreateInfoEXT {
     void*                       windowHandle;   //!< Platform-specific window handle (reserved)
 #endif
 } XrSessionTargetCreateInfoEXT;
+
+/*!
+ * @brief Composition layer positioned in fractional window coordinates.
+ *
+ * This layer type renders a textured quad at a position specified as fractions
+ * of the target window dimensions. The coordinates automatically scale when the
+ * window is resized.
+ *
+ * The same texture is composited into both eye views with a per-eye horizontal
+ * shift controlled by the disparity parameter. The layer is rendered pre-interlace
+ * (passes through the weaver like any other layer).
+ *
+ * This layer type is only valid when the session was created with
+ * XrSessionTargetCreateInfoEXT (i.e., rendering to an application-provided window).
+ *
+ * @extends XrFrameEndInfo (submitted as a composition layer)
+ */
+typedef struct XrCompositionLayerWindowSpaceEXT {
+    XrStructureType             type;       //!< Must be XR_TYPE_COMPOSITION_LAYER_WINDOW_SPACE_EXT
+    const void* XR_MAY_ALIAS    next;       //!< Pointer to next structure in chain
+    XrCompositionLayerFlags     layerFlags; //!< e.g. XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT
+    XrSwapchainSubImage         subImage;   //!< Source swapchain + rect
+    float                       x;          //!< Left edge, fraction of window width  [0..1]
+    float                       y;          //!< Top edge, fraction of window height   [0..1]
+    float                       width;      //!< Fraction of window width  [0..1]
+    float                       height;     //!< Fraction of window height [0..1]
+    float                       disparity;  //!< Horizontal shift, fraction of window width.
+                                            //!< 0 = screen depth, negative = toward viewer
+} XrCompositionLayerWindowSpaceEXT;
 
 #ifdef __cplusplus
 }

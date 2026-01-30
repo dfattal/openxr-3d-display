@@ -820,6 +820,117 @@ render_quad_layer(struct comp_d3d11_renderer *r,
 	internals->context->OMSetBlendState(r->blend_opaque, nullptr, 0xFFFFFFFF);
 }
 
+/*!
+ * Render a window-space layer. Positioned in fractional window coordinates
+ * with per-eye disparity shift. Uses the same quad shaders.
+ */
+static void
+render_window_space_layer(struct comp_d3d11_renderer *r,
+                          const struct comp_layer *layer,
+                          uint32_t view_index)
+{
+	auto internals = get_internals(r->c);
+	const struct xrt_layer_data *data = &layer->data;
+	const struct xrt_layer_window_space_data *ws = &data->window_space;
+
+	// Get swapchain
+	struct xrt_swapchain *xsc = layer->sc_array[0];
+	if (xsc == nullptr) {
+		return;
+	}
+
+	uint32_t image_index = ws->sub.image_index;
+
+	// Get the D3D11 swapchain's SRV for this image
+	ID3D11ShaderResourceView *srv = static_cast<ID3D11ShaderResourceView *>(
+	    comp_d3d11_swapchain_get_srv(xsc, image_index));
+	if (srv == nullptr) {
+		return;
+	}
+
+	// Compute per-eye disparity offset
+	float half_disp = ws->disparity / 2.0f;
+	float eye_shift = (view_index == 0) ? -half_disp : half_disp;
+
+	// Window-space fractional coords → NDC [-1, 1]
+	// Center of the quad in fractional window coords
+	float frac_cx = ws->x + ws->width / 2.0f + eye_shift;
+	float frac_cy = ws->y + ws->height / 2.0f;
+
+	// Convert to NDC: x: frac*2-1, y: 1-frac*2 (Y is flipped in NDC)
+	float ndc_cx = frac_cx * 2.0f - 1.0f;
+	float ndc_cy = 1.0f - frac_cy * 2.0f;
+
+	// Scale in NDC (full window = 2.0 in NDC)
+	float ndc_sx = ws->width * 2.0f;
+	float ndc_sy = ws->height * 2.0f;
+
+	// Build 2D orthographic MVP: scale then translate
+	// The quad vertex shader uses a [-0.5, 0.5] unit quad
+	// MVP = translate(cx, cy, 0.5) * scale(sx, sy, 1)
+	struct xrt_matrix_4x4 mvp;
+	// clang-format off
+	mvp.v[0]  = ndc_sx; mvp.v[1]  = 0.0f;   mvp.v[2]  = 0.0f; mvp.v[3]  = 0.0f;
+	mvp.v[4]  = 0.0f;   mvp.v[5]  = ndc_sy;  mvp.v[6]  = 0.0f; mvp.v[7]  = 0.0f;
+	mvp.v[8]  = 0.0f;   mvp.v[9]  = 0.0f;   mvp.v[10] = 1.0f; mvp.v[11] = 0.0f;
+	mvp.v[12] = ndc_cx; mvp.v[13] = ndc_cy;  mvp.v[14] = 0.5f; mvp.v[15] = 1.0f;
+	// clang-format on
+
+	// Fill constant buffer
+	LayerConstants constants = {};
+	memcpy(constants.mvp, &mvp, sizeof(constants.mvp));
+
+	// UV transform for sub-image
+	constants.post_transform[0] = ws->sub.norm_rect.x;
+	constants.post_transform[1] = ws->sub.norm_rect.y;
+	constants.post_transform[2] = ws->sub.norm_rect.w;
+	constants.post_transform[3] = ws->sub.norm_rect.h;
+
+	// Handle Y-flip
+	if (data->flip_y) {
+		constants.post_transform[1] += constants.post_transform[3];
+		constants.post_transform[3] = -constants.post_transform[3];
+	}
+
+	get_color_scale_bias(data, constants.color_scale, constants.color_bias);
+
+	// Update constant buffer
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	HRESULT hr = internals->context->Map(r->constant_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+	if (SUCCEEDED(hr)) {
+		memcpy(mapped.pData, &constants, sizeof(constants));
+		internals->context->Unmap(r->constant_buffer, 0);
+	}
+
+	// Set shaders - reuse quad shaders (screen-aligned quad with MVP)
+	internals->context->VSSetShader(r->quad_vs, nullptr, 0);
+	internals->context->PSSetShader(r->quad_ps, nullptr, 0);
+
+	// Bind resources
+	internals->context->VSSetConstantBuffers(0, 1, &r->constant_buffer);
+	internals->context->PSSetConstantBuffers(0, 1, &r->constant_buffer);
+	internals->context->PSSetShaderResources(0, 1, &srv);
+	internals->context->PSSetSamplers(0, 1, &r->sampler_linear);
+
+	// Set blend state for alpha blending
+	bool is_premultiplied = (data->flags & XRT_LAYER_COMPOSITION_BLEND_TEXTURE_SOURCE_ALPHA_BIT) == 0;
+	if (is_premultiplied) {
+		internals->context->OMSetBlendState(r->blend_premul, nullptr, 0xFFFFFFFF);
+	} else {
+		internals->context->OMSetBlendState(r->blend_alpha, nullptr, 0xFFFFFFFF);
+	}
+
+	// Draw quad (triangle strip, 4 vertices)
+	internals->context->Draw(4, 0);
+
+	// Unbind SRV
+	ID3D11ShaderResourceView *null_srv = nullptr;
+	internals->context->PSSetShaderResources(0, 1, &null_srv);
+
+	// Restore opaque blend state for subsequent layers
+	internals->context->OMSetBlendState(r->blend_opaque, nullptr, 0xFFFFFFFF);
+}
+
 extern "C" xrt_result_t
 comp_d3d11_renderer_create(struct comp_d3d11_compositor *c,
                            uint32_t view_width,
@@ -1003,6 +1114,10 @@ comp_d3d11_renderer_draw(struct comp_d3d11_renderer *renderer,
 				}
 				break;
 			}
+
+			case XRT_LAYER_WINDOW_SPACE:
+				render_window_space_layer(renderer, layer, view_index);
+				break;
 
 			default:
 				// Unsupported layer type

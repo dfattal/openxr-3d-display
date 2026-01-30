@@ -172,6 +172,15 @@ comp_layer_accum_equirect2(struct comp_layer_accum *cla, struct xrt_swapchain *x
 
 
 /*!
+ * Accumulate swapchain and data for a window-space layer for a frame.
+ *
+ * @public @memberof comp_layer_accum
+ */
+xrt_result_t
+comp_layer_accum_window_space(struct comp_layer_accum *cla, struct xrt_swapchain *xsc, const struct xrt_layer_data *data);
+
+
+/*!
  * Get a (color) swapchain associated with a layer.
  *
  * @param cla self

@@ -43,6 +43,8 @@ static std::mutex g_inputMutex;            // Guards g_inputState + window dimen
 static std::atomic<bool> g_running{true};  // Atomic: main thread writes, render thread reads
 static UINT g_windowWidth = 1280;          // Protected by g_inputMutex
 static UINT g_windowHeight = 720;          // Protected by g_inputMutex
+static const float HUD_WIDTH_PERCENT = 0.30f;
+static const float HUD_HEIGHT_PERCENT = 0.35f;
 
 // Window procedure (runs on main thread)
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -160,9 +162,7 @@ static void RenderThreadFunc(
     XrSessionManager* xr,
     D3D11Renderer* renderer,
     TextOverlay* textOverlay,
-    ComPtr<ID3D11Texture2D> hudStagingTexture,
-    uint32_t hudWidth,
-    uint32_t hudHeight,
+    std::vector<XrSwapchainImageD3D11KHR>* hudSwapchainImages,
     ComPtr<ID3D11Texture2D>* depthTextures,
     ComPtr<ID3D11DepthStencilView>* depthDSVs,
     std::vector<XrSwapchainImageD3D11KHR>* swapchainImages)
@@ -245,7 +245,50 @@ static void RenderThreadFunc(
                         // [Commented out — will be reused for 3D-positioned HUD later]
                         // ConvergencePlane convPlane = LocateConvergencePlane(rawViews);
 
-                        // Render each eye with screen-space HUD overlay
+                        // Render HUD to window-space layer swapchain (once per frame, before eye loop)
+                        bool hudSubmitted = false;
+                        if (inputSnapshot.hudVisible && xr->hasHudSwapchain && hudSwapchainImages && !hudSwapchainImages->empty()) {
+                            uint32_t hudImageIndex;
+                            if (AcquireHudSwapchainImage(*xr, hudImageIndex)) {
+                                ID3D11Texture2D* hudTexture = (*hudSwapchainImages)[hudImageIndex].texture;
+
+                                ID3D11RenderTargetView* hudRtv = nullptr;
+                                CreateRenderTargetView(*renderer, hudTexture, &hudRtv);
+                                if (hudRtv) {
+                                    float hudClear[4] = {0.0f, 0.0f, 0.0f, 0.7f};
+                                    renderer->context->ClearRenderTargetView(hudRtv, hudClear);
+                                    hudRtv->Release();
+                                }
+
+                                float sx = xr->hudSwapchain.width / 512.0f;
+                                float sy = xr->hudSwapchain.height / 256.0f;
+
+                                std::wstring stateText = L"Session: ";
+                                stateText += FormatSessionState((int)xr->sessionState);
+                                RenderText(*textOverlay, renderer->device.Get(), hudTexture,
+                                    stateText, 10*sx, 10*sy, 300*sx, 30*sy);
+
+                                std::wstring extText = xr->hasSessionTargetExt ?
+                                    L"XR_EXT_session_target: ACTIVE" :
+                                    L"XR_EXT_session_target: NOT AVAILABLE";
+                                RenderText(*textOverlay, renderer->device.Get(), hudTexture,
+                                    extText, 10*sx, 45*sy, 350*sx, 30*sy, true);
+
+                                std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
+                                    xr->swapchains[0].width, xr->swapchains[0].height);
+                                RenderText(*textOverlay, renderer->device.Get(), hudTexture,
+                                    perfText, 10*sx, 85*sy, 300*sx, 70*sy, true);
+
+                                std::wstring eyeText = FormatEyeTrackingInfo(xr->eyePosX, xr->eyePosY, xr->eyePosZ, xr->eyeTrackingActive);
+                                RenderText(*textOverlay, renderer->device.Get(), hudTexture,
+                                    eyeText, 10*sx, 165*sy, 300*sx, 70*sy, true);
+
+                                ReleaseHudSwapchainImage(*xr);
+                                hudSubmitted = true;
+                            }
+                        }
+
+                        // Render each eye
                         for (int eye = 0; eye < 2; eye++) {
                             uint32_t imageIndex;
                             if (AcquireSwapchainImage(*xr, eye, imageIndex)) {
@@ -273,47 +316,6 @@ static void RenderThreadFunc(
                                     viewMatrix, projMatrix,
                                     inputSnapshot.zoomScale);
 
-                                // Screen-space HUD: render text on eye 0, copy to both eyes
-                                if (inputSnapshot.hudVisible && hudStagingTexture) {
-                                    if (eye == 0) {
-                                        ID3D11RenderTargetView* hudRtv = nullptr;
-                                        CreateRenderTargetView(*renderer, hudStagingTexture.Get(), &hudRtv);
-                                        if (hudRtv) {
-                                            float hudClear[4] = {0.0f, 0.0f, 0.0f, 0.7f};
-                                            renderer->context->ClearRenderTargetView(hudRtv, hudClear);
-                                            hudRtv->Release();
-                                        }
-
-                                        float sx = hudWidth / 512.0f;
-                                        float sy = hudHeight / 256.0f;
-
-                                        std::wstring stateText = L"Session: ";
-                                        stateText += FormatSessionState((int)xr->sessionState);
-                                        RenderText(*textOverlay, renderer->device.Get(), hudStagingTexture.Get(),
-                                            stateText, 10*sx, 10*sy, 300*sx, 30*sy);
-
-                                        std::wstring extText = xr->hasSessionTargetExt ?
-                                            L"XR_EXT_session_target: ACTIVE" :
-                                            L"XR_EXT_session_target: NOT AVAILABLE";
-                                        RenderText(*textOverlay, renderer->device.Get(), hudStagingTexture.Get(),
-                                            extText, 10*sx, 45*sy, 350*sx, 30*sy, true);
-
-                                        std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
-                                            xr->swapchains[0].width, xr->swapchains[0].height);
-                                        RenderText(*textOverlay, renderer->device.Get(), hudStagingTexture.Get(),
-                                            perfText, 10*sx, 85*sy, 300*sx, 70*sy, true);
-
-                                        std::wstring eyeText = FormatEyeTrackingInfo(xr->eyePosX, xr->eyePosY, xr->eyePosZ, xr->eyeTrackingActive);
-                                        RenderText(*textOverlay, renderer->device.Get(), hudStagingTexture.Get(),
-                                            eyeText, 10*sx, 165*sy, 300*sx, 70*sy, true);
-                                    }
-
-                                    D3D11_BOX srcBox = {0, 0, 0, hudWidth, hudHeight, 1};
-                                    renderer->context->CopySubresourceRegion(
-                                        swapchainTexture, 0, 0, 0, 0,
-                                        hudStagingTexture.Get(), 0, &srcBox);
-                                }
-
                                 if (rtv) rtv->Release();
 
                                 ReleaseSwapchainImage(*xr, eye);
@@ -334,8 +336,13 @@ static void RenderThreadFunc(
                     }
                 }
 
-                // Submit frame (projection layer only)
-                EndFrame(*xr, frameState.predictedDisplayTime, projectionViews);
+                // Submit frame with window-space HUD layer if visible
+                if (hudSubmitted) {
+                    EndFrameWithWindowSpaceHud(*xr, frameState.predictedDisplayTime, projectionViews,
+                        0.0f, 0.0f, HUD_WIDTH_PERCENT, HUD_HEIGHT_PERCENT, 0.0f);
+                } else {
+                    EndFrame(*xr, frameState.predictedDisplayTime, projectionViews);
+                }
             }
         } else {
             Sleep(100);
@@ -478,30 +485,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         LOG_INFO("Eye %d: enumerated %u D3D11 swapchain images", eye, count);
     }
 
-    // Create HUD staging texture for screen-space text rendering
-    const float HUD_WIDTH_PERCENT = 0.30f;
-    const float HUD_HEIGHT_PERCENT = 0.35f;
+    // Create HUD swapchain for window-space layer submission
     uint32_t hudWidth = (uint32_t)(xr.swapchains[0].width * HUD_WIDTH_PERCENT);
     uint32_t hudHeight = (uint32_t)(xr.swapchains[0].height * HUD_HEIGHT_PERCENT);
 
-    ComPtr<ID3D11Texture2D> hudStagingTexture;
-    {
-        D3D11_TEXTURE2D_DESC desc = {};
-        desc.Width = hudWidth;
-        desc.Height = hudHeight;
-        desc.MipLevels = 1;
-        desc.ArraySize = 1;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // D2D-compatible
-        desc.SampleDesc.Count = 1;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    if (!CreateHudSwapchain(xr, hudWidth, hudHeight)) {
+        LOG_WARN("Failed to create HUD swapchain - HUD will not be displayed");
+    }
 
-        HRESULT hr = renderer.device->CreateTexture2D(&desc, nullptr, &hudStagingTexture);
-        if (FAILED(hr)) {
-            LOG_WARN("Failed to create HUD staging texture: 0x%08X", hr);
-        } else {
-            LOG_INFO("HUD staging texture created (%ux%u, R8G8B8A8_UNORM)", hudWidth, hudHeight);
-        }
+    // Enumerate HUD swapchain images
+    std::vector<XrSwapchainImageD3D11KHR> hudSwapchainImages;
+    if (xr.hasHudSwapchain) {
+        uint32_t count = xr.hudSwapchain.imageCount;
+        hudSwapchainImages.resize(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
+        xrEnumerateSwapchainImages(xr.hudSwapchain.swapchain, count, &count,
+            (XrSwapchainImageBaseHeader*)hudSwapchainImages.data());
+        LOG_INFO("HUD: enumerated %u D3D11 swapchain images", count);
     }
 
     // Show window
@@ -537,7 +536,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Launch render thread — the frame loop runs independently of the message pump
     // so that rendering continues even when DefWindowProc blocks during window drag/resize.
     std::thread renderThread(RenderThreadFunc, hwnd, &xr, &renderer, &textOverlay,
-        hudStagingTexture, hudWidth, hudHeight, depthTextures, depthDSVs, swapchainImages);
+        &hudSwapchainImages, depthTextures, depthDSVs, swapchainImages);
 
     // Main thread: blocking Win32 message pump.
     // GetMessage blocks efficiently (no CPU spin) until a message arrives.

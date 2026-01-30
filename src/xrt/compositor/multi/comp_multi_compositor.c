@@ -858,6 +858,22 @@ multi_compositor_layer_equirect2(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
+multi_compositor_layer_window_space(struct xrt_compositor *xc,
+                                    struct xrt_device *xdev,
+                                    struct xrt_swapchain *xsc,
+                                    const struct xrt_layer_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	size_t index = mc->progress.layer_count++;
+	mc->progress.layers[index].xdev = xdev;
+	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
+	mc->progress.layers[index].data = *data;
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
 	COMP_TRACE_MARKER();
@@ -982,6 +998,40 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 			                    &mc->session_render.fences[mc->session_render.fenced_buffer],
 			                    VK_TRUE, UINT64_MAX);
 			mc->session_render.fenced_buffer = -1;
+		}
+
+		// Destroy composite resources (intermediate pre-weaving targets)
+		if (vk != NULL && mc->session_render.composite_initialized) {
+			// Destroy UBO buffer and memory
+			if (mc->session_render.composite_ubo_buffer != VK_NULL_HANDLE) {
+				vk->vkDestroyBuffer(vk->device, mc->session_render.composite_ubo_buffer, NULL);
+			}
+			if (mc->session_render.composite_ubo_memory != VK_NULL_HANDLE) {
+				vk->vkFreeMemory(vk->device, mc->session_render.composite_ubo_memory, NULL);
+			}
+			vk->vkDestroyDescriptorPool(vk->device, mc->session_render.composite_desc_pool, NULL);
+			vk->vkDestroySampler(vk->device, mc->session_render.composite_sampler, NULL);
+			vk->vkDestroyPipeline(vk->device, mc->session_render.composite_pipeline, NULL);
+			vk->vkDestroyPipelineLayout(vk->device, mc->session_render.composite_pipe_layout, NULL);
+			vk->vkDestroyDescriptorSetLayout(vk->device, mc->session_render.composite_desc_layout, NULL);
+			for (int i = 0; i < 2; i++) {
+				if (mc->session_render.composite_framebuffers[i] != VK_NULL_HANDLE) {
+					vk->vkDestroyFramebuffer(vk->device, mc->session_render.composite_framebuffers[i], NULL);
+				}
+			}
+			vk->vkDestroyRenderPass(vk->device, mc->session_render.composite_render_pass, NULL);
+			for (int i = 0; i < 2; i++) {
+				if (mc->session_render.composite_eye_views[i] != VK_NULL_HANDLE) {
+					vk->vkDestroyImageView(vk->device, mc->session_render.composite_eye_views[i], NULL);
+				}
+				if (mc->session_render.composite_images[i] != VK_NULL_HANDLE) {
+					vk->vkDestroyImage(vk->device, mc->session_render.composite_images[i], NULL);
+				}
+				if (mc->session_render.composite_memories[i] != VK_NULL_HANDLE) {
+					vk->vkFreeMemory(vk->device, mc->session_render.composite_memories[i], NULL);
+				}
+			}
+			mc->session_render.composite_initialized = false;
 		}
 
 		// Destroy fences
@@ -1339,6 +1389,7 @@ multi_compositor_create(struct multi_system_compositor *msc,
 	mc->base.base.layer_cylinder = multi_compositor_layer_cylinder;
 	mc->base.base.layer_equirect1 = multi_compositor_layer_equirect1;
 	mc->base.base.layer_equirect2 = multi_compositor_layer_equirect2;
+	mc->base.base.layer_window_space = multi_compositor_layer_window_space;
 	mc->base.base.layer_commit = multi_compositor_layer_commit;
 	mc->base.base.layer_commit_with_semaphore = multi_compositor_layer_commit_with_semaphore;
 	mc->base.base.destroy = multi_compositor_destroy;

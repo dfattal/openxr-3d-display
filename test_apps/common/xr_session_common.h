@@ -76,6 +76,10 @@ struct XrSessionManager {
     // Window handle for session target (used by ext app, ignored by non-ext app)
     HWND windowHandle = nullptr;
 
+    // HUD window-space layer swapchain
+    SwapchainInfo hudSwapchain;
+    bool hasHudSwapchain = false;
+
     // Eye tracking data (from views)
     float eyePosX = 0.0f;
     float eyePosY = 0.0f;
@@ -134,6 +138,22 @@ bool ReleaseSwapchainImage(XrSessionManager& xr, int eye);
 
 // End frame and submit layers (projection layer only)
 bool EndFrame(XrSessionManager& xr, XrTime displayTime, const XrCompositionLayerProjectionView* views);
+
+// Create a HUD swapchain for window-space layer submission
+bool CreateHudSwapchain(XrSessionManager& xr, uint32_t width, uint32_t height);
+
+// Acquire/release HUD swapchain image
+bool AcquireHudSwapchainImage(XrSessionManager& xr, uint32_t& imageIndex);
+bool ReleaseHudSwapchainImage(XrSessionManager& xr);
+
+// End frame with both projection layer and window-space HUD layer
+bool EndFrameWithWindowSpaceHud(
+    XrSessionManager& xr,
+    XrTime displayTime,
+    const XrCompositionLayerProjectionView* projViews,
+    float hudX, float hudY, float hudWidth, float hudHeight,
+    float hudDisparity
+);
 
 // [Commented out — will be reused for 3D-positioned HUD later]
 // ConvergencePlane LocateConvergencePlane(const XrView views[2]);
