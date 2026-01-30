@@ -22,6 +22,7 @@
 #include "util/comp_base.h"
 #include "util/comp_target_service.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 
@@ -102,6 +103,9 @@ struct null_compositor
 	//! Custom recommended view dimensions (0 = use defaults)
 	uint32_t recommended_view_width;
 	uint32_t recommended_view_height;
+
+	//! Whether Vulkan was successfully initialized (false = D3D11-only fallback).
+	bool vulkan_inited;
 
 	//! @todo Insert your own required members here
 

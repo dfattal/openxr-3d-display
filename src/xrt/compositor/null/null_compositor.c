@@ -36,6 +36,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#ifdef XRT_OS_WINDOWS
+#include <windows.h>
+#endif
+
 static const uint64_t RECOMMENDED_VIEW_WIDTH = 320;
 static const uint64_t RECOMMENDED_VIEW_HEIGHT = 240;
 
@@ -159,6 +163,18 @@ select_instances_extensions(struct null_compositor *c, struct u_string_list *req
 static bool
 compositor_init_vulkan(struct null_compositor *c)
 {
+#ifdef XRT_OS_WINDOWS
+	// Probe for Vulkan availability before attempting init.
+	// With /DELAYLOAD:vulkan-1.dll, calling any Vulkan function when the
+	// DLL is missing would trigger an SEH exception. Check first.
+	HMODULE vk_mod = LoadLibraryA("vulkan-1.dll");
+	if (vk_mod == NULL) {
+		NULL_WARN(c, "vulkan-1.dll not found — Vulkan is not available on this system");
+		return false;
+	}
+	FreeLibrary(vk_mod);
+#endif
+
 	struct vk_bundle *vk = get_vk(c);
 	VkResult ret;
 
@@ -507,22 +523,27 @@ null_compositor_destroy(struct xrt_compositor *xc)
 
 	NULL_DEBUG(c, "NULL_COMP_DESTROY");
 
-	// Make sure we don't have anything to destroy.
-	comp_swapchain_shared_garbage_collect(&c->base.cscs);
+	// Vulkan-dependent cleanup — only safe if Vulkan was actually initialized.
+	// Calling vk_deinit_mutex or comp_swapchain_shared_destroy on uninitialized
+	// state would hit undefined behavior (destroying uninitialized mutexes).
+	if (c->vulkan_inited) {
+		// Make sure we don't have anything to destroy.
+		comp_swapchain_shared_garbage_collect(&c->base.cscs);
 
-	// Must be destroyed before Vulkan.
-	comp_swapchain_shared_destroy(&c->base.cscs, vk);
+		// Must be destroyed before Vulkan.
+		comp_swapchain_shared_destroy(&c->base.cscs, vk);
 
-	if (vk->device != VK_NULL_HANDLE) {
-		vk->vkDestroyDevice(vk->device, NULL);
-		vk->device = VK_NULL_HANDLE;
-	}
+		if (vk->device != VK_NULL_HANDLE) {
+			vk->vkDestroyDevice(vk->device, NULL);
+			vk->device = VK_NULL_HANDLE;
+		}
 
-	vk_deinit_mutex(vk);
+		vk_deinit_mutex(vk);
 
-	if (vk->instance != VK_NULL_HANDLE) {
-		vk->vkDestroyInstance(vk->instance, NULL);
-		vk->instance = VK_NULL_HANDLE;
+		if (vk->instance != VK_NULL_HANDLE) {
+			vk->vkDestroyInstance(vk->instance, NULL);
+			vk->instance = VK_NULL_HANDLE;
+		}
 	}
 
 	comp_base_fini(&c->base);
@@ -625,8 +646,8 @@ null_compositor_create_system_with_dims(struct xrt_device *xdev,
 		return XRT_ERROR_VULKAN;
 	}
 
-	bool vulkan_ok = compositor_init_vulkan(c);
-	if (!vulkan_ok) {
+	c->vulkan_inited = compositor_init_vulkan(c);
+	if (!c->vulkan_inited) {
 		NULL_WARN(c, "Vulkan init failed, continuing without Vulkan "
 		             "(D3D11 native compositor will be used at session level)");
 	}
@@ -638,7 +659,7 @@ null_compositor_create_system_with_dims(struct xrt_device *xdev,
 	}
 
 	// compositor_init_info needs Vulkan for format enumeration — skip if Vulkan failed
-	if (vulkan_ok && !compositor_init_info(c)) {
+	if (c->vulkan_inited && !compositor_init_info(c)) {
 		NULL_DEBUG(c, "Failed to init info %p", (void *)c);
 		c->base.base.base.destroy(&c->base.base.base);
 		return XRT_ERROR_VULKAN;

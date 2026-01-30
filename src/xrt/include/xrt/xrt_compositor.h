@@ -82,7 +82,8 @@ enum xrt_layer_type
 	XRT_LAYER_CYLINDER,
 	XRT_LAYER_EQUIRECT1,
 	XRT_LAYER_EQUIRECT2,
-	XRT_LAYER_PASSTHROUGH
+	XRT_LAYER_PASSTHROUGH,
+	XRT_LAYER_WINDOW_SPACE
 };
 
 /*!
@@ -385,6 +386,24 @@ struct xrt_layer_passthrough_data
 };
 
 /*!
+ * All the pure data values associated with a window-space layer.
+ *
+ * Coordinates are fractions of the target window dimensions [0..1].
+ * The same texture is composited into both eyes with per-eye horizontal
+ * shift from disparity.
+ */
+struct xrt_layer_window_space_data
+{
+	struct xrt_sub_image sub;
+
+	float x;         //!< Left edge, fraction of window width [0..1]
+	float y;         //!< Top edge, fraction of window height [0..1]
+	float width;     //!< Fraction of window width [0..1]
+	float height;    //!< Fraction of window height [0..1]
+	float disparity; //!< Horizontal shift, fraction of window width
+};
+
+/*!
  * All the pure data values associated with a composition layer.
  *
  * The @ref xrt_swapchain references and @ref xrt_device are provided outside of
@@ -468,6 +487,7 @@ struct xrt_layer_data
 		struct xrt_layer_equirect1_data equirect1;
 		struct xrt_layer_equirect2_data equirect2;
 		struct xrt_layer_passthrough_data passthrough;
+		struct xrt_layer_window_space_data window_space;
 	};
 	uint32_t view_count;
 };
@@ -1344,6 +1364,22 @@ struct xrt_compositor
 	                                  const struct xrt_layer_data *data);
 
 	/*!
+	 * Adds a window-space layer for submission. Positioned in fractional
+	 * window coordinates with per-eye disparity shift.
+	 *
+	 * @param xc          Self pointer
+	 * @param xdev        The device the layer is relative to.
+	 * @param xsc         Swapchain.
+	 * @param data        All of the pure data bits (not pointers/handles),
+	 *                    including what part of the supplied swapchain
+	 *                    object to use.
+	 */
+	xrt_result_t (*layer_window_space)(struct xrt_compositor *xc,
+	                                   struct xrt_device *xdev,
+	                                   struct xrt_swapchain *xsc,
+	                                   const struct xrt_layer_data *data);
+
+	/*!
 	 * @brief Commits all of the submitted layers.
 	 *
 	 * Only after this call will the compositor actually use the layers.
@@ -1817,6 +1853,22 @@ static inline xrt_result_t
 xrt_comp_layer_passthrough(struct xrt_compositor *xc, struct xrt_device *xdev, const struct xrt_layer_data *data)
 {
 	return xc->layer_passthrough(xc, xdev, data);
+}
+
+/*!
+ * @copydoc xrt_compositor::layer_window_space
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_compositor
+ */
+static inline xrt_result_t
+xrt_comp_layer_window_space(struct xrt_compositor *xc,
+                            struct xrt_device *xdev,
+                            struct xrt_swapchain *xsc,
+                            const struct xrt_layer_data *data)
+{
+	return xc->layer_window_space(xc, xdev, xsc, data);
 }
 
 /*!

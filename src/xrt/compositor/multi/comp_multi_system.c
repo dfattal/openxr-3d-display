@@ -39,6 +39,8 @@
 
 #ifdef XRT_HAVE_LEIA_SR_VULKAN
 #include "leiasr/leiasr.h"
+#include "render/render_interface.h"
+#include "vk/vk_helpers.h"
 #endif
 
 #include <math.h>
@@ -322,6 +324,827 @@ get_session_layer_view(struct multi_layer_entry *layer,
 }
 
 /*!
+ * Initialize intermediate composite resources for pre-weaving layer compositing.
+ * Creates a side-by-side stereo image, per-eye views, render pass, framebuffers,
+ * pipeline, and descriptor resources.
+ *
+ * @param mc    The multi_compositor with per-session rendering already initialized
+ * @param vk    The Vulkan bundle
+ * @param width Single eye width
+ * @param height Eye height
+ * @param format Image format (should match swapchain format)
+ * @return true on success
+ */
+static bool
+init_composite_resources(struct multi_compositor *mc, struct vk_bundle *vk, uint32_t width, uint32_t height, VkFormat format)
+{
+	VkResult ret;
+
+	if (mc->session_render.composite_initialized) {
+		return true;
+	}
+
+	mc->session_render.composite_width = width;
+	mc->session_render.composite_height = height;
+
+	U_LOG_W("[composite] Initializing composite resources: %ux%u per eye, format=%d", width, height, format);
+
+	// Create per-eye composite images (separate images for clean weaver input)
+	VkExtent2D eye_extent = {.width = width, .height = height};
+	VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+	                          VK_IMAGE_USAGE_SAMPLED_BIT |
+	                          VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+	VkImageSubresourceRange eye_range = {
+	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .baseMipLevel = 0,
+	    .levelCount = 1,
+	    .baseArrayLayer = 0,
+	    .layerCount = 1,
+	};
+
+	for (int eye = 0; eye < 2; eye++) {
+		ret = vk_create_image_simple(vk, eye_extent, format, usage,
+		                             &mc->session_render.composite_memories[eye],
+		                             &mc->session_render.composite_images[eye]);
+		if (ret != VK_SUCCESS) {
+			U_LOG_E("[composite] Failed to create composite image %d: %d", eye, ret);
+			goto err_images;
+		}
+
+		ret = vk_create_view(vk, mc->session_render.composite_images[eye],
+		                     VK_IMAGE_VIEW_TYPE_2D, format, eye_range,
+		                     &mc->session_render.composite_eye_views[eye]);
+		if (ret != VK_SUCCESS) {
+			U_LOG_E("[composite] Failed to create eye view %d: %d", eye, ret);
+			goto err_images;
+		}
+	}
+
+	// Create render pass with LOAD_OP_LOAD for overlay compositing
+	VkAttachmentDescription attachment = {
+	    .format = format,
+	    .samples = VK_SAMPLE_COUNT_1_BIT,
+	    .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+	    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+	    .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+	    .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+	    .initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+	    .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+	};
+
+	VkAttachmentReference color_ref = {
+	    .attachment = 0,
+	    .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+	};
+
+	VkSubpassDescription subpass = {
+	    .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+	    .colorAttachmentCount = 1,
+	    .pColorAttachments = &color_ref,
+	};
+
+	VkRenderPassCreateInfo rp_info = {
+	    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+	    .attachmentCount = 1,
+	    .pAttachments = &attachment,
+	    .subpassCount = 1,
+	    .pSubpasses = &subpass,
+	};
+
+	ret = vk->vkCreateRenderPass(vk->device, &rp_info, NULL,
+	                             &mc->session_render.composite_render_pass);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("[composite] Failed to create render pass: %d", ret);
+		goto err_views;
+	}
+
+	// Create framebuffers - one per eye, each using its own image view
+	for (int eye = 0; eye < 2; eye++) {
+		VkImageView attachments[1] = {mc->session_render.composite_eye_views[eye]};
+		VkFramebufferCreateInfo fb_info = {
+		    .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+		    .renderPass = mc->session_render.composite_render_pass,
+		    .attachmentCount = 1,
+		    .pAttachments = attachments,
+		    .width = width,
+		    .height = height,
+		    .layers = 1,
+		};
+		ret = vk->vkCreateFramebuffer(vk->device, &fb_info, NULL,
+		                              &mc->session_render.composite_framebuffers[eye]);
+		if (ret != VK_SUCCESS) {
+			U_LOG_E("[composite] Failed to create framebuffer %d: %d", eye, ret);
+			goto err_framebuffers;
+		}
+	}
+
+	// Create descriptor set layout (UBO + combined image sampler, same as render_resources)
+	VkDescriptorSetLayoutBinding bindings[2] = {
+	    {
+	        .binding = 0, // UBO
+	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+	        .descriptorCount = 1,
+	        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+	    },
+	    {
+	        .binding = 1, // Combined image sampler
+	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+	        .descriptorCount = 1,
+	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+	    },
+	};
+
+	VkDescriptorSetLayoutCreateInfo dsl_info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+	    .bindingCount = 2,
+	    .pBindings = bindings,
+	};
+
+	ret = vk->vkCreateDescriptorSetLayout(vk->device, &dsl_info, NULL,
+	                                      &mc->session_render.composite_desc_layout);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("[composite] Failed to create descriptor set layout: %d", ret);
+		goto err_framebuffers;
+	}
+
+	// Create pipeline layout
+	ret = vk_create_pipeline_layout(vk, mc->session_render.composite_desc_layout,
+	                                &mc->session_render.composite_pipe_layout);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("[composite] Failed to create pipeline layout: %d", ret);
+		goto err_desc_layout;
+	}
+
+	// Create pipeline using quad shaders from comp_compositor
+	struct comp_compositor *c = comp_compositor(&mc->msc->xcn->base);
+
+	// Build a pipeline compatible with our render pass
+	// Triangle strip, no vertex input, dynamic viewport/scissor, alpha blending
+	VkPipelineInputAssemblyStateCreateInfo ia = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+	    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
+	};
+
+	VkPipelineVertexInputStateCreateInfo vi = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+	};
+
+	VkPipelineViewportStateCreateInfo vp = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+	    .viewportCount = 1,
+	    .scissorCount = 1,
+	};
+
+	VkPipelineRasterizationStateCreateInfo rs = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+	    .polygonMode = VK_POLYGON_MODE_FILL,
+	    .cullMode = VK_CULL_MODE_BACK_BIT,
+	    .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+	    .lineWidth = 1.0f,
+	};
+
+	VkPipelineMultisampleStateCreateInfo ms = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+	    .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+	};
+
+	VkPipelineColorBlendAttachmentState blend_att = {
+	    .blendEnable = VK_TRUE,
+	    .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+	                      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+	    .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+	    .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+	    .colorBlendOp = VK_BLEND_OP_ADD,
+	    .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+	    .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+	    .alphaBlendOp = VK_BLEND_OP_ADD,
+	};
+
+	VkPipelineColorBlendStateCreateInfo cb = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+	    .attachmentCount = 1,
+	    .pAttachments = &blend_att,
+	};
+
+	VkPipelineDepthStencilStateCreateInfo ds = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+	};
+
+	VkDynamicState dyn_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+	VkPipelineDynamicStateCreateInfo dyn = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+	    .dynamicStateCount = 2,
+	    .pDynamicStates = dyn_states,
+	};
+
+	VkPipelineShaderStageCreateInfo stages[2] = {
+	    {
+	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+	        .stage = VK_SHADER_STAGE_VERTEX_BIT,
+	        .module = c->shaders.layer_quad_vert,
+	        .pName = "main",
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+	        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+	        .module = c->shaders.layer_shared_frag,
+	        .pName = "main",
+	    },
+	};
+
+	VkGraphicsPipelineCreateInfo pipe_info = {
+	    .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+	    .stageCount = 2,
+	    .pStages = stages,
+	    .pVertexInputState = &vi,
+	    .pInputAssemblyState = &ia,
+	    .pViewportState = &vp,
+	    .pRasterizationState = &rs,
+	    .pMultisampleState = &ms,
+	    .pDepthStencilState = &ds,
+	    .pColorBlendState = &cb,
+	    .pDynamicState = &dyn,
+	    .layout = mc->session_render.composite_pipe_layout,
+	    .renderPass = mc->session_render.composite_render_pass,
+	    .subpass = 0,
+	};
+
+	ret = vk->vkCreateGraphicsPipelines(vk->device, c->nr.pipeline_cache, 1,
+	                                    &pipe_info, NULL,
+	                                    &mc->session_render.composite_pipeline);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("[composite] Failed to create composite pipeline: %d", ret);
+		goto err_pipe_layout;
+	}
+
+	// Create sampler
+	ret = vk_create_sampler(vk, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+	                        &mc->session_render.composite_sampler);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("[composite] Failed to create sampler: %d", ret);
+		goto err_pipeline;
+	}
+
+	// Create descriptor pool (enough for XRT_MAX_LAYERS descriptors)
+	struct vk_descriptor_pool_info pool_info = {
+	    .uniform_per_descriptor_count = 1,
+	    .sampler_per_descriptor_count = 1,
+	    .descriptor_count = XRT_MAX_LAYERS,
+	    .freeable = false,
+	};
+	ret = vk_create_descriptor_pool(vk, &pool_info,
+	                                &mc->session_render.composite_desc_pool);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("[composite] Failed to create descriptor pool: %d", ret);
+		goto err_sampler;
+	}
+
+	// Pre-allocate descriptor sets
+	for (uint32_t i = 0; i < XRT_MAX_LAYERS; i++) {
+		ret = vk_create_descriptor_set(vk, mc->session_render.composite_desc_pool,
+		                               mc->session_render.composite_desc_layout,
+		                               &mc->session_render.composite_desc_sets[i]);
+		if (ret != VK_SUCCESS) {
+			U_LOG_E("[composite] Failed to create descriptor set %u: %d", i, ret);
+			goto err_desc_pool;
+		}
+	}
+
+	// Create persistent UBO buffer for window-space layer data
+	// Size: per-eye quad UBO (post_transform + mvp = 80 bytes) × 2 eyes × XRT_MAX_LAYERS
+	VkDeviceSize ubo_size = sizeof(struct xrt_normalized_rect) + sizeof(struct xrt_matrix_4x4);
+	VkDeviceSize total_ubo_size = ubo_size * 2 * XRT_MAX_LAYERS;
+	{
+		VkBufferCreateInfo buf_ci = {
+		    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		    .size = total_ubo_size,
+		    .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+		};
+		ret = vk->vkCreateBuffer(vk->device, &buf_ci, NULL, &mc->session_render.composite_ubo_buffer);
+		if (ret != VK_SUCCESS) {
+			U_LOG_E("[composite] Failed to create UBO buffer: %d", ret);
+			goto err_desc_pool;
+		}
+
+		VkMemoryRequirements mem_reqs;
+		vk->vkGetBufferMemoryRequirements(vk->device, mc->session_render.composite_ubo_buffer, &mem_reqs);
+
+		VkPhysicalDeviceMemoryProperties mem_props;
+		vk->vkGetPhysicalDeviceMemoryProperties(vk->physical_device, &mem_props);
+		uint32_t mem_type = 0;
+		VkMemoryPropertyFlags desired = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+		                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+		for (uint32_t mi = 0; mi < mem_props.memoryTypeCount; mi++) {
+			if ((mem_reqs.memoryTypeBits & (1u << mi)) &&
+			    (mem_props.memoryTypes[mi].propertyFlags & desired) == desired) {
+				mem_type = mi;
+				break;
+			}
+		}
+
+		VkMemoryAllocateInfo alloc_ci = {
+		    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		    .allocationSize = mem_reqs.size,
+		    .memoryTypeIndex = mem_type,
+		};
+		ret = vk->vkAllocateMemory(vk->device, &alloc_ci, NULL, &mc->session_render.composite_ubo_memory);
+		if (ret != VK_SUCCESS) {
+			U_LOG_E("[composite] Failed to allocate UBO memory: %d", ret);
+			vk->vkDestroyBuffer(vk->device, mc->session_render.composite_ubo_buffer, NULL);
+			mc->session_render.composite_ubo_buffer = VK_NULL_HANDLE;
+			goto err_desc_pool;
+		}
+
+		vk->vkBindBufferMemory(vk->device, mc->session_render.composite_ubo_buffer,
+		                       mc->session_render.composite_ubo_memory, 0);
+
+		ret = vk->vkMapMemory(vk->device, mc->session_render.composite_ubo_memory,
+		                      0, total_ubo_size, 0, &mc->session_render.composite_ubo_mapped);
+		if (ret != VK_SUCCESS) {
+			U_LOG_E("[composite] Failed to map UBO memory: %d", ret);
+			vk->vkDestroyBuffer(vk->device, mc->session_render.composite_ubo_buffer, NULL);
+			vk->vkFreeMemory(vk->device, mc->session_render.composite_ubo_memory, NULL);
+			mc->session_render.composite_ubo_buffer = VK_NULL_HANDLE;
+			mc->session_render.composite_ubo_memory = VK_NULL_HANDLE;
+			goto err_desc_pool;
+		}
+	}
+
+	mc->session_render.composite_initialized = true;
+	U_LOG_W("[composite] Composite resources initialized: %ux%u per eye", width, height);
+	return true;
+
+	// Error cleanup (reverse order)
+err_desc_pool:
+	vk->vkDestroyDescriptorPool(vk->device, mc->session_render.composite_desc_pool, NULL);
+	mc->session_render.composite_desc_pool = VK_NULL_HANDLE;
+err_sampler:
+	vk->vkDestroySampler(vk->device, mc->session_render.composite_sampler, NULL);
+	mc->session_render.composite_sampler = VK_NULL_HANDLE;
+err_pipeline:
+	vk->vkDestroyPipeline(vk->device, mc->session_render.composite_pipeline, NULL);
+	mc->session_render.composite_pipeline = VK_NULL_HANDLE;
+err_pipe_layout:
+	vk->vkDestroyPipelineLayout(vk->device, mc->session_render.composite_pipe_layout, NULL);
+	mc->session_render.composite_pipe_layout = VK_NULL_HANDLE;
+err_desc_layout:
+	vk->vkDestroyDescriptorSetLayout(vk->device, mc->session_render.composite_desc_layout, NULL);
+	mc->session_render.composite_desc_layout = VK_NULL_HANDLE;
+err_framebuffers:
+	for (int i = 0; i < 2; i++) {
+		if (mc->session_render.composite_framebuffers[i] != VK_NULL_HANDLE) {
+			vk->vkDestroyFramebuffer(vk->device, mc->session_render.composite_framebuffers[i], NULL);
+			mc->session_render.composite_framebuffers[i] = VK_NULL_HANDLE;
+		}
+	}
+	vk->vkDestroyRenderPass(vk->device, mc->session_render.composite_render_pass, NULL);
+	mc->session_render.composite_render_pass = VK_NULL_HANDLE;
+err_images:
+	for (int i = 0; i < 2; i++) {
+		if (mc->session_render.composite_eye_views[i] != VK_NULL_HANDLE) {
+			vk->vkDestroyImageView(vk->device, mc->session_render.composite_eye_views[i], NULL);
+			mc->session_render.composite_eye_views[i] = VK_NULL_HANDLE;
+		}
+		if (mc->session_render.composite_images[i] != VK_NULL_HANDLE) {
+			vk->vkDestroyImage(vk->device, mc->session_render.composite_images[i], NULL);
+			mc->session_render.composite_images[i] = VK_NULL_HANDLE;
+		}
+		if (mc->session_render.composite_memories[i] != VK_NULL_HANDLE) {
+			vk->vkFreeMemory(vk->device, mc->session_render.composite_memories[i], NULL);
+			mc->session_render.composite_memories[i] = VK_NULL_HANDLE;
+		}
+	}
+	return false;
+}
+
+/*!
+ * Destroy intermediate composite resources.
+ */
+static void
+fini_composite_resources(struct multi_compositor *mc, struct vk_bundle *vk)
+{
+	if (!mc->session_render.composite_initialized) {
+		return;
+	}
+
+	// Destroy UBO buffer and memory
+	if (mc->session_render.composite_ubo_buffer != VK_NULL_HANDLE) {
+		vk->vkDestroyBuffer(vk->device, mc->session_render.composite_ubo_buffer, NULL);
+		mc->session_render.composite_ubo_buffer = VK_NULL_HANDLE;
+	}
+	if (mc->session_render.composite_ubo_memory != VK_NULL_HANDLE) {
+		vk->vkFreeMemory(vk->device, mc->session_render.composite_ubo_memory, NULL);
+		mc->session_render.composite_ubo_memory = VK_NULL_HANDLE;
+	}
+	mc->session_render.composite_ubo_mapped = NULL;
+
+	vk->vkDestroyDescriptorPool(vk->device, mc->session_render.composite_desc_pool, NULL);
+	mc->session_render.composite_desc_pool = VK_NULL_HANDLE;
+
+	vk->vkDestroySampler(vk->device, mc->session_render.composite_sampler, NULL);
+	mc->session_render.composite_sampler = VK_NULL_HANDLE;
+
+	vk->vkDestroyPipeline(vk->device, mc->session_render.composite_pipeline, NULL);
+	mc->session_render.composite_pipeline = VK_NULL_HANDLE;
+
+	vk->vkDestroyPipelineLayout(vk->device, mc->session_render.composite_pipe_layout, NULL);
+	mc->session_render.composite_pipe_layout = VK_NULL_HANDLE;
+
+	vk->vkDestroyDescriptorSetLayout(vk->device, mc->session_render.composite_desc_layout, NULL);
+	mc->session_render.composite_desc_layout = VK_NULL_HANDLE;
+
+	for (int i = 0; i < 2; i++) {
+		if (mc->session_render.composite_framebuffers[i] != VK_NULL_HANDLE) {
+			vk->vkDestroyFramebuffer(vk->device, mc->session_render.composite_framebuffers[i], NULL);
+			mc->session_render.composite_framebuffers[i] = VK_NULL_HANDLE;
+		}
+	}
+
+	vk->vkDestroyRenderPass(vk->device, mc->session_render.composite_render_pass, NULL);
+	mc->session_render.composite_render_pass = VK_NULL_HANDLE;
+
+	for (int i = 0; i < 2; i++) {
+		if (mc->session_render.composite_eye_views[i] != VK_NULL_HANDLE) {
+			vk->vkDestroyImageView(vk->device, mc->session_render.composite_eye_views[i], NULL);
+			mc->session_render.composite_eye_views[i] = VK_NULL_HANDLE;
+		}
+		if (mc->session_render.composite_images[i] != VK_NULL_HANDLE) {
+			vk->vkDestroyImage(vk->device, mc->session_render.composite_images[i], NULL);
+			mc->session_render.composite_images[i] = VK_NULL_HANDLE;
+		}
+		if (mc->session_render.composite_memories[i] != VK_NULL_HANDLE) {
+			vk->vkFreeMemory(vk->device, mc->session_render.composite_memories[i], NULL);
+			mc->session_render.composite_memories[i] = VK_NULL_HANDLE;
+		}
+	}
+
+	mc->session_render.composite_initialized = false;
+}
+
+/*!
+ * Check if any window-space layers exist in the delivered frame.
+ */
+static bool
+has_window_space_layers(struct multi_compositor *mc)
+{
+	for (uint32_t i = 0; i < mc->delivered.layer_count; i++) {
+		if (mc->delivered.layers[i].data.type == XRT_LAYER_WINDOW_SPACE) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/*!
+ * Composite all layers (projection + window-space) into the intermediate stereo
+ * targets before weaving. This is the pre-weaving compositing step.
+ *
+ * @param mc  The multi_compositor
+ * @param vk  The Vulkan bundle
+ * @param cmd The command buffer to record into
+ * @param leftImageView  Output: left eye view of composited result
+ * @param rightImageView Output: right eye view of composited result
+ * @return true if compositing was performed
+ */
+static bool
+composite_layers_to_intermediate(struct multi_compositor *mc,
+                                 struct vk_bundle *vk,
+                                 VkCommandBuffer cmd,
+                                 VkImageView *out_left_view,
+                                 VkImageView *out_right_view)
+{
+	// Find the projection layer first
+	struct multi_layer_entry *proj_layer = NULL;
+	for (uint32_t i = 0; i < mc->delivered.layer_count; i++) {
+		enum xrt_layer_type type = mc->delivered.layers[i].data.type;
+		if (type == XRT_LAYER_PROJECTION || type == XRT_LAYER_PROJECTION_DEPTH) {
+			proj_layer = &mc->delivered.layers[i];
+			break;
+		}
+	}
+
+	if (proj_layer == NULL) {
+		U_LOG_W("[composite] No projection layer found");
+		return false;
+	}
+
+	// Get projection layer image info
+	int imgW = 0, imgH = 0;
+	VkFormat imgFmt = VK_FORMAT_UNDEFINED;
+	VkImageView leftProjView = VK_NULL_HANDLE, rightProjView = VK_NULL_HANDLE;
+
+	if (!get_session_layer_view(proj_layer, 0, &imgW, &imgH, &imgFmt, &leftProjView) ||
+	    !get_session_layer_view(proj_layer, 1, &imgW, &imgH, &imgFmt, &rightProjView)) {
+		U_LOG_W("[composite] Could not extract projection views");
+		return false;
+	}
+
+	// Lazily init composite resources if needed
+	if (!mc->session_render.composite_initialized) {
+		if (!init_composite_resources(mc, vk, (uint32_t)imgW, (uint32_t)imgH, imgFmt)) {
+			return false;
+		}
+	}
+
+	uint32_t cw = mc->session_render.composite_width;
+	uint32_t ch = mc->session_render.composite_height;
+
+	// Step 1: Transition both composite images to TRANSFER_DST
+	VkImageMemoryBarrier barriers_to_dst[2];
+	for (int eye = 0; eye < 2; eye++) {
+		barriers_to_dst[eye] = (VkImageMemoryBarrier){
+		    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		    .srcAccessMask = 0,
+		    .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+		    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+		    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		    .image = mc->session_render.composite_images[eye],
+		    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+		};
+	}
+	vk->vkCmdPipelineBarrier(cmd,
+	                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+	                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+	                         0, 0, NULL, 0, NULL, 2, barriers_to_dst);
+
+	// Step 2: Blit projection layer into per-eye composite images
+	for (int eye = 0; eye < 2; eye++) {
+		struct xrt_swapchain *xsc = proj_layer->xscs[eye];
+		if (xsc == NULL)
+			continue;
+
+		struct comp_swapchain *sc = comp_swapchain(xsc);
+		const struct xrt_layer_projection_view_data *vd = &proj_layer->data.proj.v[eye];
+		const struct comp_swapchain_image *image = &sc->images[vd->sub.image_index];
+
+		// Transition source image to TRANSFER_SRC
+		VkImageMemoryBarrier src_barrier = {
+		    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		    .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+		    .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+		    .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		    .image = image->image,
+		    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+		};
+		vk->vkCmdPipelineBarrier(cmd,
+		                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+		                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+		                         0, 0, NULL, 0, NULL, 1, &src_barrier);
+
+		// Blit from source to per-eye composite target
+		VkImageBlit blit = {
+		    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, vd->sub.array_index, 1},
+		    .srcOffsets = {
+		        {vd->sub.rect.offset.x, vd->sub.rect.offset.y, 0},
+		        {vd->sub.rect.offset.x + (int32_t)vd->sub.rect.extent.w,
+		         vd->sub.rect.offset.y + (int32_t)vd->sub.rect.extent.h, 1},
+		    },
+		    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+		    .dstOffsets = {
+		        {0, 0, 0},
+		        {(int32_t)cw, (int32_t)ch, 1},
+		    },
+		};
+		vk->vkCmdBlitImage(cmd,
+		                   image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		                   mc->session_render.composite_images[eye], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		                   1, &blit, VK_FILTER_LINEAR);
+
+		// Transition source back to SHADER_READ_ONLY
+		VkImageMemoryBarrier src_restore = {
+		    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		    .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+		    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+		    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		    .image = image->image,
+		    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+		};
+		vk->vkCmdPipelineBarrier(cmd,
+		                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+		                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+		                         0, 0, NULL, 0, NULL, 1, &src_restore);
+	}
+
+	// Step 3: Transition both composite images to COLOR_ATTACHMENT_OPTIMAL
+	VkImageMemoryBarrier barriers_to_attach[2];
+	for (int eye = 0; eye < 2; eye++) {
+		barriers_to_attach[eye] = (VkImageMemoryBarrier){
+		    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+		    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+		    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		    .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		    .image = mc->session_render.composite_images[eye],
+		    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+		};
+	}
+	vk->vkCmdPipelineBarrier(cmd,
+	                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+	                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+	                         0, 0, NULL, 0, NULL, 2, barriers_to_attach);
+
+	// Step 4: Render window-space layers as alpha-blended quads
+	uint32_t ws_desc_index = 0;
+	for (uint32_t li = 0; li < mc->delivered.layer_count; li++) {
+		struct multi_layer_entry *layer = &mc->delivered.layers[li];
+		if (layer->data.type != XRT_LAYER_WINDOW_SPACE) {
+			continue;
+		}
+		if (ws_desc_index >= XRT_MAX_LAYERS) {
+			break;
+		}
+
+		const struct xrt_layer_window_space_data *ws = &layer->data.window_space;
+		struct xrt_swapchain *xsc = layer->xscs[0];
+		if (xsc == NULL) {
+			continue;
+		}
+
+		struct comp_swapchain *sc = comp_swapchain(xsc);
+		uint32_t img_idx = ws->sub.image_index;
+		const struct comp_swapchain_image *ws_image = &sc->images[img_idx];
+		VkImageView ws_view = get_image_view(ws_image, layer->data.flags, ws->sub.array_index);
+		if (ws_view == VK_NULL_HANDLE) {
+			continue;
+		}
+
+		// Transition window-space swapchain image to SHADER_READ_ONLY
+		VkImageMemoryBarrier ws_barrier = {
+		    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		    .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+		    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+		    .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		    .image = ws_image->image,
+		    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+		};
+		vk->vkCmdPipelineBarrier(cmd,
+		                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+		                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+		                         0, 0, NULL, 0, NULL, 1, &ws_barrier);
+
+		// Compute per-eye disparity offset
+		float half_disp = ws->disparity / 2.0f;
+
+		// UBO stride for sub-allocation from the persistent UBO buffer
+		VkDeviceSize ubo_stride = sizeof(struct xrt_normalized_rect) + sizeof(struct xrt_matrix_4x4);
+
+		// Render to both eyes
+		for (int eye = 0; eye < 2; eye++) {
+			float eye_shift = (eye == 0) ? -half_disp : half_disp;
+
+			// Window-space fractional coords → NDC [-1, 1]
+			float frac_cx = ws->x + ws->width / 2.0f + eye_shift;
+			float frac_cy = ws->y + ws->height / 2.0f;
+			float ndc_cx = frac_cx * 2.0f - 1.0f;
+			float ndc_cy = 1.0f - frac_cy * 2.0f;
+			float ndc_sx = ws->width * 2.0f;
+			float ndc_sy = ws->height * 2.0f;
+
+			// Build orthographic MVP (quad vert shader uses [-0.5, 0.5] unit quad)
+			struct xrt_matrix_4x4 mvp;
+			// clang-format off
+			mvp.v[0]  = ndc_sx; mvp.v[1]  = 0.0f;   mvp.v[2]  = 0.0f; mvp.v[3]  = 0.0f;
+			mvp.v[4]  = 0.0f;   mvp.v[5]  = ndc_sy;  mvp.v[6]  = 0.0f; mvp.v[7]  = 0.0f;
+			mvp.v[8]  = 0.0f;   mvp.v[9]  = 0.0f;   mvp.v[10] = 1.0f; mvp.v[11] = 0.0f;
+			mvp.v[12] = ndc_cx; mvp.v[13] = ndc_cy;  mvp.v[14] = 0.5f; mvp.v[15] = 1.0f;
+			// clang-format on
+
+			// UBO data: post_transform (xrt_normalized_rect) + mvp (xrt_matrix_4x4)
+			struct
+			{
+				struct xrt_normalized_rect post_transform;
+				struct xrt_matrix_4x4 mvp;
+			} ubo_data;
+
+			ubo_data.post_transform.x = ws->sub.norm_rect.x;
+			ubo_data.post_transform.y = ws->sub.norm_rect.y;
+			ubo_data.post_transform.w = ws->sub.norm_rect.w;
+			ubo_data.post_transform.h = ws->sub.norm_rect.h;
+
+			if (layer->data.flip_y) {
+				ubo_data.post_transform.y += ubo_data.post_transform.h;
+				ubo_data.post_transform.h = -ubo_data.post_transform.h;
+			}
+
+			ubo_data.mvp = mvp;
+
+			// Write UBO data to persistent buffer at the right offset
+			// Layout: [layer0_eye0, layer0_eye1, layer1_eye0, layer1_eye1, ...]
+			uint32_t ubo_index = ws_desc_index * 2 + eye;
+			VkDeviceSize ubo_offset = ubo_index * ubo_stride;
+			memcpy((uint8_t *)mc->session_render.composite_ubo_mapped + ubo_offset,
+			       &ubo_data, sizeof(ubo_data));
+
+			// Update descriptor set
+			VkDescriptorSet ds_set = mc->session_render.composite_desc_sets[ws_desc_index];
+
+			VkDescriptorBufferInfo buf_desc = {
+			    .buffer = mc->session_render.composite_ubo_buffer,
+			    .offset = ubo_offset,
+			    .range = sizeof(ubo_data),
+			};
+
+			VkDescriptorImageInfo img_desc = {
+			    .sampler = mc->session_render.composite_sampler,
+			    .imageView = ws_view,
+			    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			};
+
+			VkWriteDescriptorSet writes[2] = {
+			    {
+			        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			        .dstSet = ds_set,
+			        .dstBinding = 0,
+			        .descriptorCount = 1,
+			        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			        .pBufferInfo = &buf_desc,
+			    },
+			    {
+			        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			        .dstSet = ds_set,
+			        .dstBinding = 1,
+			        .descriptorCount = 1,
+			        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			        .pImageInfo = &img_desc,
+			    },
+			};
+			vk->vkUpdateDescriptorSets(vk->device, 2, writes, 0, NULL);
+
+			// Begin render pass on the eye's framebuffer (per-eye image)
+			VkRenderPassBeginInfo rp_begin = {
+			    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+			    .renderPass = mc->session_render.composite_render_pass,
+			    .framebuffer = mc->session_render.composite_framebuffers[eye],
+			    .renderArea = {
+			        .offset = {0, 0},
+			        .extent = {cw, ch},
+			    },
+			    .clearValueCount = 0,
+			    .pClearValues = NULL,
+			};
+			vk->vkCmdBeginRenderPass(cmd, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+			// Set viewport and scissor for the full per-eye image
+			VkViewport eye_viewport = {
+			    .x = 0.0f,
+			    .y = 0.0f,
+			    .width = (float)cw,
+			    .height = (float)ch,
+			    .minDepth = 0.0f,
+			    .maxDepth = 1.0f,
+			};
+			vk->vkCmdSetViewport(cmd, 0, 1, &eye_viewport);
+
+			VkRect2D scissor = {
+			    .offset = {0, 0},
+			    .extent = {cw, ch},
+			};
+			vk->vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+			// Bind pipeline and descriptor set, draw quad
+			vk->vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+			                      mc->session_render.composite_pipeline);
+			vk->vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+			                            mc->session_render.composite_pipe_layout,
+			                            0, 1, &ds_set, 0, NULL);
+			vk->vkCmdDraw(cmd, 4, 1, 0, 0);
+
+			vk->vkCmdEndRenderPass(cmd);
+		}
+
+		ws_desc_index++;
+	}
+
+	// Step 5: Transition both composite images to SHADER_READ_ONLY for weaver input
+	VkImageMemoryBarrier barriers_to_read[2];
+	for (int eye = 0; eye < 2; eye++) {
+		barriers_to_read[eye] = (VkImageMemoryBarrier){
+		    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		    .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+		    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+		    .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		    .image = mc->session_render.composite_images[eye],
+		    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+		};
+	}
+	vk->vkCmdPipelineBarrier(cmd,
+	                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+	                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+	                         0, 0, NULL, 0, NULL, 2, barriers_to_read);
+
+	// Output the per-eye views
+	*out_left_view = mc->session_render.composite_eye_views[0];
+	*out_right_view = mc->session_render.composite_eye_views[1];
+
+	return true;
+}
+
+/*!
  * Render a single per-session client to its own comp_target using SR weaving.
  *
  * @param mc The multi_compositor with per-session rendering
@@ -349,8 +1172,23 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 
 	U_LOG_W("[per-session] Have %u layers, extracting stereo views...", mc->delivered.layer_count);
 
-	// Get the first projection layer (for SR we only use the first stereo layer)
-	struct multi_layer_entry *layer = &mc->delivered.layers[0];
+	// Check if we need compositing (window-space layers present)
+	bool needs_compositing = has_window_space_layers(mc);
+
+	// Get the first projection layer
+	struct multi_layer_entry *layer = NULL;
+	for (uint32_t i = 0; i < mc->delivered.layer_count; i++) {
+		enum xrt_layer_type type = mc->delivered.layers[i].data.type;
+		if (type == XRT_LAYER_PROJECTION || type == XRT_LAYER_PROJECTION_DEPTH) {
+			layer = &mc->delivered.layers[i];
+			break;
+		}
+	}
+
+	if (layer == NULL) {
+		U_LOG_W("[per-session] No projection layer found, skipping");
+		return;
+	}
 
 	// Extract left and right view info
 	int imageWidth = 0, imageHeight = 0;
@@ -366,8 +1204,8 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		return;
 	}
 
-	U_LOG_W("[per-session] Got stereo views: %dx%d, left=%p, right=%p",
-	        imageWidth, imageHeight, (void *)leftImageView, (void *)rightImageView);
+	U_LOG_W("[per-session] Got stereo views: %dx%d, left=%p, right=%p, needs_compositing=%d",
+	        imageWidth, imageHeight, (void *)leftImageView, (void *)rightImageView, needs_compositing);
 
 	// Wait for pending fence if exists (from previous frame using same buffer)
 	if (mc->session_render.fenced_buffer >= 0) {
@@ -437,10 +1275,30 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	}
 	U_LOG_W("[per-session] Command buffer started");
 
-	// Perform SR weaving directly to the target
+	// If we have window-space layers, composite all layers into intermediate targets first
+	VkImageView weaveLeft = leftImageView;
+	VkImageView weaveRight = rightImageView;
+	int weaveWidth = imageWidth;
+	int weaveHeight = imageHeight;
+
+	if (needs_compositing) {
+		U_LOG_W("[per-session] Compositing layers to intermediate targets...");
+		VkImageView compLeft = VK_NULL_HANDLE, compRight = VK_NULL_HANDLE;
+		if (composite_layers_to_intermediate(mc, vk, cmd, &compLeft, &compRight)) {
+			weaveLeft = compLeft;
+			weaveRight = compRight;
+			weaveWidth = (int)mc->session_render.composite_width;
+			weaveHeight = (int)mc->session_render.composite_height;
+			U_LOG_W("[per-session] Using composited per-eye views: %dx%d", weaveWidth, weaveHeight);
+		} else {
+			U_LOG_W("[per-session] Compositing failed, falling back to direct projection views");
+		}
+	}
+
+	// Perform SR weaving
 	U_LOG_W("[per-session] Calling leiasr_weave: weaver=%p, cmd=%p, fb=%ux%u",
 	        (void *)weaver, (void *)cmd, framebufferWidth, framebufferHeight);
-	leiasr_weave(weaver, cmd, leftImageView, rightImageView, viewport, imageWidth, imageHeight, imageFormat,
+	leiasr_weave(weaver, cmd, weaveLeft, weaveRight, viewport, weaveWidth, weaveHeight, imageFormat,
 	             VK_NULL_HANDLE, // framebuffer - SR Runtime handles this internally
 	             (int)framebufferWidth, (int)framebufferHeight, framebufferFormat);
 	U_LOG_W("[per-session] leiasr_weave returned");

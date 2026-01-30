@@ -495,6 +495,21 @@ d3d11_compositor_layer_passthrough(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
+d3d11_compositor_layer_window_space(struct xrt_compositor *xc,
+                                     struct xrt_device *xdev,
+                                     struct xrt_swapchain *xsc,
+                                     const struct xrt_layer_data *data)
+{
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
+
+	std::lock_guard<std::mutex> lock(c->mutex);
+
+	comp_layer_accum_window_space(&c->layer_accum, xsc, data);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
@@ -967,6 +982,7 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 	c->base.base.layer_equirect1 = d3d11_compositor_layer_equirect1;
 	c->base.base.layer_equirect2 = d3d11_compositor_layer_equirect2;
 	c->base.base.layer_passthrough = d3d11_compositor_layer_passthrough;
+	c->base.base.layer_window_space = d3d11_compositor_layer_window_space;
 	c->base.base.layer_commit = d3d11_compositor_layer_commit;
 	c->base.base.layer_commit_with_semaphore = d3d11_compositor_layer_commit_with_semaphore;
 	c->base.base.destroy = d3d11_compositor_destroy;

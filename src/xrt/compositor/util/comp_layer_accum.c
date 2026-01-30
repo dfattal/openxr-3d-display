@@ -127,3 +127,9 @@ comp_layer_accum_equirect2(struct comp_layer_accum *cla, struct xrt_swapchain *x
 {
 	return push_single_swapchain_layer(cla, xsc, data);
 }
+
+xrt_result_t
+comp_layer_accum_window_space(struct comp_layer_accum *cla, struct xrt_swapchain *xsc, const struct xrt_layer_data *data)
+{
+	return push_single_swapchain_layer(cla, xsc, data);
+}

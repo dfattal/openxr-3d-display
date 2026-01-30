@@ -229,6 +229,30 @@ struct multi_compositor
 
 		//! Index of buffer with pending fence (-1 = none)
 		int32_t fenced_buffer;
+
+		//! @name Intermediate composite targets for pre-weaving layer compositing
+		//! @{
+
+		//! Per-eye composite images (one per eye, not side-by-side)
+		VkImage composite_images[2];
+		VkDeviceMemory composite_memories[2];
+		VkImageView composite_eye_views[2];      //!< Per-eye image views for weaver input
+		VkFramebuffer composite_framebuffers[2]; //!< Per-eye framebuffers for overlay rendering
+		VkRenderPass composite_render_pass;      //!< LOAD_OP_LOAD for overlay compositing
+		VkPipeline composite_pipeline;           //!< Alpha-blended quad pipeline
+		VkPipelineLayout composite_pipe_layout;
+		VkDescriptorSetLayout composite_desc_layout;
+		VkDescriptorPool composite_desc_pool;
+		VkDescriptorSet composite_desc_sets[XRT_MAX_LAYERS]; //!< One per possible window-space layer
+		VkSampler composite_sampler;
+		VkBuffer composite_ubo_buffer;           //!< Persistent UBO for window-space layer data
+		VkDeviceMemory composite_ubo_memory;     //!< Memory backing composite_ubo_buffer
+		void *composite_ubo_mapped;              //!< Persistently mapped UBO pointer
+		uint32_t composite_width;                //!< Single eye width
+		uint32_t composite_height;               //!< Eye height
+		bool composite_initialized;              //!< True if composite resources are ready
+
+		//! @}
 #endif
 
 		//! True if per-session resources are initialized

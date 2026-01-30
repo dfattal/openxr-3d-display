@@ -1830,6 +1830,9 @@ struct oxr_session
 	//! True if using D3D11 native compositor (not multi_compositor).
 	bool is_d3d11_native_compositor;
 
+	//! True if session was created with an external window handle (XR_EXT_session_target).
+	bool has_external_window;
+
 	struct oxr_session *next;
 
 	XrSessionState state;

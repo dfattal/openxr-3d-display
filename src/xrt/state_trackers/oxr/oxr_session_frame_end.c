@@ -33,6 +33,8 @@
 #include "oxr_chain.h"
 #include "oxr_xret.h"
 
+#include <openxr/XR_EXT_session_target.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -1164,6 +1166,70 @@ verify_passthrough_layer(struct xrt_compositor *xc,
 #endif
 }
 
+static XrResult
+verify_window_space_layer(struct oxr_session *sess,
+                          struct xrt_compositor *xc,
+                          struct oxr_logger *log,
+                          uint32_t layer_index,
+                          const XrCompositionLayerWindowSpaceEXT *ws,
+                          struct xrt_device *head,
+                          uint64_t timestamp)
+{
+	// Window-space layers require a session created with XR_EXT_session_target
+	if (!sess->is_d3d11_native_compositor && !sess->has_external_window) {
+		return oxr_error(log, XR_ERROR_LAYER_INVALID,
+		                 "(frameEndInfo->layers[%u]) window-space layer requires session created with "
+		                 "XR_EXT_session_target",
+		                 layer_index);
+	}
+
+	struct oxr_swapchain *sc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_swapchain *, ws->subImage.swapchain);
+
+	if (sc == NULL) {
+		return oxr_error(log, XR_ERROR_LAYER_INVALID,
+		                 "(frameEndInfo->layers[%u]->subImage.swapchain) swapchain is NULL!", layer_index);
+	}
+
+	if (!sc->released.yes) {
+		return oxr_error(log, XR_ERROR_LAYER_INVALID,
+		                 "(frameEndInfo->layers[%u]->subImage.swapchain) swapchain has not been released!",
+		                 layer_index);
+	}
+
+	if (sc->released.index >= (int)sc->swapchain->image_count) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
+		                 "(frameEndInfo->layers[%u]->subImage.swapchain) internal image index out of bounds",
+		                 layer_index);
+	}
+
+	if (is_rect_neg(&ws->subImage.imageRect)) {
+		return oxr_error(
+		    log, XR_ERROR_SWAPCHAIN_RECT_INVALID,
+		    "(frameEndInfo->layers[%u]->subImage.imageRect.offset == {%i, %i}) has negative component(s)",
+		    layer_index, ws->subImage.imageRect.offset.x, ws->subImage.imageRect.offset.y);
+	}
+
+	if (is_rect_out_of_bounds(&ws->subImage.imageRect, sc)) {
+		return oxr_error(log, XR_ERROR_SWAPCHAIN_RECT_INVALID,
+		                 "(frameEndInfo->layers[%u]->subImage.imageRect == {{%i, %i}, {%u, %u}}) imageRect out "
+		                 "of image bounds (%u, %u)",
+		                 layer_index, ws->subImage.imageRect.offset.x, ws->subImage.imageRect.offset.y,
+		                 ws->subImage.imageRect.extent.width, ws->subImage.imageRect.extent.height,
+		                 sc->width, sc->height);
+	}
+
+	// Validate fractional coordinates
+	if (ws->x < 0.0f || ws->x > 1.0f || ws->y < 0.0f || ws->y > 1.0f ||
+	    ws->width < 0.0f || ws->width > 1.0f || ws->height < 0.0f || ws->height > 1.0f) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(frameEndInfo->layers[%u]) window-space coords out of [0,1] range: "
+		                 "x=%f y=%f w=%f h=%f",
+		                 layer_index, ws->x, ws->y, ws->width, ws->height);
+	}
+
+	return XR_SUCCESS;
+}
+
 /*
  *
  * Submit functions.
@@ -1614,6 +1680,42 @@ submit_equirect2_layer(struct oxr_session *sess,
 }
 
 static XrResult
+submit_window_space_layer(struct oxr_session *sess,
+                          struct xrt_compositor *xc,
+                          struct oxr_logger *log,
+                          const XrCompositionLayerWindowSpaceEXT *ws,
+                          struct xrt_device *head,
+                          struct xrt_pose *inv_offset,
+                          uint64_t oxr_timestamp,
+                          uint64_t xrt_timestamp)
+{
+	struct oxr_swapchain *sc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_swapchain *, ws->subImage.swapchain);
+
+	enum xrt_layer_composition_flags flags = convert_layer_flags(ws->layerFlags);
+
+	struct xrt_layer_data data;
+	U_ZERO(&data);
+	data.type = XRT_LAYER_WINDOW_SPACE;
+	data.name = XRT_INPUT_GENERIC_HEAD_POSE;
+	data.timestamp = xrt_timestamp;
+	data.flags = flags;
+
+	data.window_space.x = ws->x;
+	data.window_space.y = ws->y;
+	data.window_space.width = ws->width;
+	data.window_space.height = ws->height;
+	data.window_space.disparity = ws->disparity;
+	fill_in_sub_image(sc, &ws->subImage, &data.window_space.sub);
+	fill_in_color_scale_bias(sess, (XrCompositionLayerBaseHeader *)ws, &data);
+	fill_in_y_flip(sess, (XrCompositionLayerBaseHeader *)ws, &data);
+
+	xrt_result_t xret = xrt_comp_layer_window_space(xc, head, sc->swapchain, &data);
+	OXR_CHECK_XRET(log, sess, xret, xrt_comp_layer_window_space);
+
+	return XR_SUCCESS;
+}
+
+static XrResult
 submit_passthrough_layer(struct oxr_session *sess,
                          struct xrt_compositor *xc,
                          struct oxr_logger *log,
@@ -1773,6 +1875,11 @@ oxr_session_frame_end(struct oxr_logger *log, struct oxr_session *sess, const Xr
 			res = verify_passthrough_layer(xc, log, i, (XrCompositionLayerPassthroughFB *)layer, xdev,
 			                               frameEndInfo->displayTime);
 			break;
+		case XR_TYPE_COMPOSITION_LAYER_WINDOW_SPACE_EXT:
+			res = verify_window_space_layer(sess, xc, log, i,
+			                                (XrCompositionLayerWindowSpaceEXT *)layer, xdev,
+			                                frameEndInfo->displayTime);
+			break;
 		default:
 			return oxr_error(log, XR_ERROR_LAYER_INVALID,
 			                 "(frameEndInfo->layers[%u]->type) layer type not supported (%u)", i,
@@ -1837,6 +1944,10 @@ oxr_session_frame_end(struct oxr_logger *log, struct oxr_session *sess, const Xr
 		case XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB:
 			submit_passthrough_layer(sess, xc, log, (XrCompositionLayerPassthroughFB *)layer, xdev,
 			                         &inv_offset, frameEndInfo->displayTime, xrt_display_time_ns);
+			break;
+		case XR_TYPE_COMPOSITION_LAYER_WINDOW_SPACE_EXT:
+			submit_window_space_layer(sess, xc, log, (XrCompositionLayerWindowSpaceEXT *)layer, xdev,
+			                          &inv_offset, frameEndInfo->displayTime, xrt_display_time_ns);
 			break;
 		default: assert(false && "invalid layer type");
 		}

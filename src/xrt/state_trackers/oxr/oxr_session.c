@@ -1712,6 +1712,9 @@ oxr_session_create(struct oxr_logger *log,
 		return ret;
 	}
 
+	// Track whether this session has an external window handle
+	sess->has_external_window = (xsi.external_window_handle != NULL);
+
 	// Everything is in order, start the state changes.
 	oxr_session_change_state(log, sess, XR_SESSION_STATE_IDLE, 0);
 	oxr_session_change_state(log, sess, XR_SESSION_STATE_READY, 0);

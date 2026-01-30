@@ -24,10 +24,12 @@
 #include "window_manager.h"
 #include "leia_math.h"
 
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <sstream>
 #include <mutex>
+#include <thread>
 
 // Library for SetProcessDpiAwareness
 #pragma comment(lib, "shcore.lib")
@@ -52,18 +54,25 @@ static const char* APP_NAME = "sr_cube_native";
 static const wchar_t* WINDOW_CLASS = L"SRCubeNativeClass";
 static const wchar_t* WINDOW_TITLE = L"SR Cube (Native SDK)";
 
-// Global state
-static InputState g_inputState;
+// Global state (shared between main thread and render thread)
+static InputState g_inputState;              // Protected by g_mutex
 static WindowInfo g_windowInfo;
-static bool g_running = true;
-static UINT g_windowWidth = 2560;   // Stereo width
-static UINT g_windowHeight = 1600;  // SR display height
-static bool g_windowResized = false;
-static std::recursive_mutex g_mutex;
+static std::atomic<bool> g_running{true};    // Atomic: main thread writes, render thread reads
+static UINT g_windowWidth = 2560;            // Protected by g_mutex
+static UINT g_windowHeight = 1600;           // Protected by g_mutex
+static bool g_windowResized = false;         // Protected by g_mutex
+static std::mutex g_mutex;
 
 // Swapchain for presentation (required for native app - weaver outputs here)
 static ComPtr<IDXGISwapChain1> g_swapChain;
 static ComPtr<ID3D11RenderTargetView> g_swapChainRTV;
+
+// Stereo view texture resources (accessed by render thread)
+static ComPtr<ID3D11Texture2D> g_viewTexture;
+static ComPtr<ID3D11ShaderResourceView> g_viewTextureSRV;
+static ComPtr<ID3D11RenderTargetView> g_viewTextureRTV;
+static ComPtr<ID3D11Texture2D> g_viewDepthTexture;
+static ComPtr<ID3D11DepthStencilView> g_viewDepthDSV;
 
 #ifdef HAVE_LEIA_SR
 // SR SDK global state
@@ -76,17 +85,29 @@ static SR::IDX11Weaver1*     g_srWeaver = nullptr;
 static float g_screenWidthMM = 0.0f;
 static float g_screenHeightMM = 0.0f;
 static leia::vec3f g_defaultViewingPosition = leia::vec3f(0.0f, 0.0f, 600.0f);
-static int g_viewTextureWidth = 0;
-static int g_viewTextureHeight = 0;
+static int g_viewTextureWidth = 0;       // Active view texture width (may change on resize)
+static int g_viewTextureHeight = 0;      // Active view texture height (may change on resize)
+static int g_srRecommendedViewWidth = 0; // Original SR recommended width (never changes)
+static int g_srRecommendedViewHeight = 0;// Original SR recommended height (never changes)
+
+// Display pixel geometry (for viewport scale computation)
+static int g_displayPixelWidth = 0;
+static int g_displayPixelHeight = 0;
+static int g_displayScreenLeft = 0;
+static int g_displayScreenTop = 0;
 #endif
 
-// Window procedure
+// Window procedure (runs on main thread)
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    UpdateInputState(g_inputState, msg, wParam, lParam);
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        UpdateInputState(g_inputState, msg, wParam, lParam);
+    }
 
     switch (msg) {
     case WM_SIZE:
         if (wParam != SIZE_MINIMIZED) {
+            std::lock_guard<std::mutex> lock(g_mutex);
             g_windowWidth = LOWORD(lParam);
             g_windowHeight = HIWORD(lParam);
             g_windowResized = true;
@@ -94,13 +115,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
 
     case WM_CLOSE:
-        g_running = false;
+        g_running.store(false);
         PostQuitMessage(0);
         return 0;
 
     case WM_KEYDOWN:
         if (wParam == VK_ESCAPE) {
-            g_running = false;
+            g_running.store(false);
             PostQuitMessage(0);
             return 0;
         }
@@ -227,7 +248,7 @@ static bool CreateSRContext(double maxTimeSeconds) {
 }
 
 static bool InitializeLeiaSR(ID3D11DeviceContext* d3dContext, HWND hwnd, double maxTimeSeconds) {
-    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    std::lock_guard<std::mutex> lock(g_mutex);
 
     LOG_INFO("Initializing LeiaSR...");
 
@@ -270,7 +291,7 @@ static bool InitializeLeiaSR(ID3D11DeviceContext* d3dContext, HWND hwnd, double 
 }
 
 static void CleanupLeiaSR() {
-    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    std::lock_guard<std::mutex> lock(g_mutex);
 
     LOG_INFO("Cleaning up LeiaSR...");
 
@@ -288,6 +309,308 @@ static void CleanupLeiaSR() {
     g_display = nullptr;
 
     LOG_INFO("LeiaSR cleanup complete");
+}
+
+// Helper: (re)create stereo view texture resources at the given single-eye dimensions.
+// Returns true on success. Releases old resources before creating new ones.
+static bool CreateStereoViewTextures(ID3D11Device* device, int viewW, int viewH) {
+    // Release old resources
+    g_viewDepthDSV.Reset();
+    g_viewDepthTexture.Reset();
+    g_viewTextureRTV.Reset();
+    g_viewTextureSRV.Reset();
+    g_viewTexture.Reset();
+
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    texDesc.Width = viewW * 2;  // Side-by-side stereo
+    texDesc.Height = viewH;
+    texDesc.MipLevels = 1;
+    texDesc.ArraySize = 1;
+    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Usage = D3D11_USAGE_DEFAULT;
+    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+    HRESULT hr = device->CreateTexture2D(&texDesc, nullptr, &g_viewTexture);
+    if (FAILED(hr)) {
+        LOG_ERROR("Failed to create view texture (%dx%d)", viewW * 2, viewH);
+        return false;
+    }
+
+    hr = device->CreateShaderResourceView(g_viewTexture.Get(), nullptr, &g_viewTextureSRV);
+    if (FAILED(hr)) {
+        LOG_ERROR("Failed to create view texture SRV");
+        return false;
+    }
+
+    hr = device->CreateRenderTargetView(g_viewTexture.Get(), nullptr, &g_viewTextureRTV);
+    if (FAILED(hr)) {
+        LOG_ERROR("Failed to create view texture RTV");
+        return false;
+    }
+
+    // Create depth texture
+    texDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    texDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    hr = device->CreateTexture2D(&texDesc, nullptr, &g_viewDepthTexture);
+    if (FAILED(hr)) {
+        LOG_ERROR("Failed to create depth texture");
+        return false;
+    }
+
+    hr = device->CreateDepthStencilView(g_viewDepthTexture.Get(), nullptr, &g_viewDepthDSV);
+    if (FAILED(hr)) {
+        LOG_ERROR("Failed to create depth DSV");
+        return false;
+    }
+
+    return true;
+}
+
+// Render thread function — runs the render/weave loop independently of the
+// Win32 message pump so that rendering continues even when the user drags or
+// resizes the window (DefWindowProc enters a modal loop that blocks the main
+// thread during those operations).
+static void RenderThreadFunc(HWND hwnd, D3D11Renderer* renderer, TextOverlay* textOverlay) {
+    LOG_INFO("[RenderThread] Started");
+
+    PerformanceStats perfStats = {};
+    perfStats.lastTime = std::chrono::high_resolution_clock::now();
+
+    float eyePosX = 0.0f;
+    float eyePosY = 0.0f;
+    float eyePosZ = 0.0f;
+    bool eyeTrackingActive = false;
+
+    // Track current swapchain/view texture dimensions for resize detection
+    UINT currentSwapW = g_windowWidth;
+    UINT currentSwapH = g_windowHeight;
+
+    while (g_running.load()) {
+        // Skip rendering when minimized
+        if (IsIconic(hwnd)) {
+            Sleep(10);
+            continue;
+        }
+
+        // Snapshot input state and window dimensions under lock
+        InputState inputSnapshot;
+        UINT snapWidth, snapHeight;
+        bool snapResized;
+        bool resetRequested = false;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            inputSnapshot = g_inputState;
+            snapWidth = g_windowWidth;
+            snapHeight = g_windowHeight;
+            snapResized = g_windowResized;
+            resetRequested = g_inputState.resetViewRequested;
+            // Clear one-shot flags
+            g_inputState.resetViewRequested = false;
+            g_windowResized = false;
+        }
+
+        // Update performance stats
+        UpdatePerformanceStats(perfStats);
+
+        // Update input-based camera movement (operates on local snapshot)
+        UpdateCameraMovement(inputSnapshot, perfStats.deltaTime);
+
+        // Write back camera position under lock
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_inputState.cameraPosX = inputSnapshot.cameraPosX;
+            g_inputState.cameraPosY = inputSnapshot.cameraPosY;
+            g_inputState.cameraPosZ = inputSnapshot.cameraPosZ;
+            if (resetRequested) {
+                g_inputState.yaw = inputSnapshot.yaw;
+                g_inputState.pitch = inputSnapshot.pitch;
+                g_inputState.zoomScale = inputSnapshot.zoomScale;
+            }
+        }
+
+        // Update scene (cube rotation)
+        UpdateScene(*renderer, perfStats.deltaTime);
+
+        // --- Handle resize (swapchain + stereo textures) ---
+        if (snapResized && (snapWidth != currentSwapW || snapHeight != currentSwapH) &&
+            snapWidth > 0 && snapHeight > 0) {
+
+            LOG_INFO("[RenderThread] Resizing: %ux%u -> %ux%u", currentSwapW, currentSwapH, snapWidth, snapHeight);
+
+            // Resize swapchain
+            g_swapChainRTV.Reset();
+            HRESULT hr = g_swapChain->ResizeBuffers(0, snapWidth, snapHeight, DXGI_FORMAT_UNKNOWN, 0);
+            if (SUCCEEDED(hr)) {
+                ComPtr<ID3D11Texture2D> backBuffer;
+                hr = g_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+                if (SUCCEEDED(hr)) {
+                    hr = renderer->device->CreateRenderTargetView(backBuffer.Get(), nullptr, &g_swapChainRTV);
+                }
+            }
+            if (FAILED(hr)) {
+                LOG_ERROR("[RenderThread] Swapchain resize failed, hr=0x%08X", hr);
+            }
+
+            // Resize stereo textures proportionally
+            float ratio = fminf((float)snapWidth / (float)g_displayPixelWidth,
+                                (float)snapHeight / (float)g_displayPixelHeight);
+            if (ratio > 1.0f) ratio = 1.0f;
+
+            int newViewW = (int)((float)g_srRecommendedViewWidth * ratio);
+            int newViewH = (int)((float)g_srRecommendedViewHeight * ratio);
+            if (newViewW < 64) newViewW = 64;
+            if (newViewH < 64) newViewH = 64;
+
+            if (newViewW != g_viewTextureWidth || newViewH != g_viewTextureHeight) {
+                LOG_INFO("[RenderThread] Resizing stereo texture: %dx%d -> %dx%d",
+                    g_viewTextureWidth, g_viewTextureHeight, newViewW, newViewH);
+
+                if (CreateStereoViewTextures(renderer->device.Get(), newViewW, newViewH)) {
+                    g_viewTextureWidth = newViewW;
+                    g_viewTextureHeight = newViewH;
+                    g_srWeaver->setInputViewTexture(g_viewTextureSRV.Get(),
+                        g_viewTextureWidth, g_viewTextureHeight, DXGI_FORMAT_R8G8B8A8_UNORM);
+                }
+            }
+
+            currentSwapW = snapWidth;
+            currentSwapH = snapHeight;
+        }
+
+        // --- Viewport scale and eye offset for windowed mode ---
+        float pixelSizeX = g_screenWidthMM / (float)g_displayPixelWidth;
+        float pixelSizeY = g_screenHeightMM / (float)g_displayPixelHeight;
+
+        float winWidthMM  = (float)snapWidth * pixelSizeX;
+        float winHeightMM = (float)snapHeight * pixelSizeY;
+
+        float minDisp = fminf(g_screenWidthMM, g_screenHeightMM);
+        float minWin  = fminf(winWidthMM, winHeightMM);
+        float vs = (minWin > 0.0f) ? (minDisp / minWin) : 1.0f;
+
+        float effectiveWidthMM  = winWidthMM * vs;
+        float effectiveHeightMM = winHeightMM * vs;
+
+        // Compute eye offset for off-center windows
+        POINT clientOrigin = {0, 0};
+        ClientToScreen(hwnd, &clientOrigin);
+
+        float winCenterPxX = (float)(clientOrigin.x - g_displayScreenLeft) + (float)snapWidth / 2.0f;
+        float winCenterPxY = (float)(clientOrigin.y - g_displayScreenTop) + (float)snapHeight / 2.0f;
+        float dispCenterPxX = (float)g_displayPixelWidth / 2.0f;
+        float dispCenterPxY = (float)g_displayPixelHeight / 2.0f;
+
+        float offsetX_mm = (winCenterPxX - dispCenterPxX) * pixelSizeX;
+        float offsetY_mm = -((winCenterPxY - dispCenterPxY) * pixelSizeY);  // negate Y
+
+        // Get predicted eye positions from weaver
+        leia::vec3f leftEye, rightEye;
+        {
+            float leftPos[3], rightPos[3];
+            g_srWeaver->getPredictedEyePositions(leftPos, rightPos);
+            leftEye = leia::vec3f(leftPos[0], leftPos[1], leftPos[2]);
+            rightEye = leia::vec3f(rightPos[0], rightPos[1], rightPos[2]);
+            eyeTrackingActive = true;
+
+            // Average for display
+            eyePosX = (leftPos[0] + rightPos[0]) / 2.0f;
+            eyePosY = (leftPos[1] + rightPos[1]) / 2.0f;
+            eyePosZ = (leftPos[2] + rightPos[2]) / 2.0f;
+        }
+
+        // Apply parallax toggle
+        if (!inputSnapshot.parallaxEnabled) {
+            leia::vec3f midEye = (leftEye + rightEye) * 0.5f;
+            leia::vec3f translation = g_defaultViewingPosition - midEye;
+            leftEye = leftEye + translation;
+            rightEye = rightEye + translation;
+        }
+
+        // Apply eye offset for off-center window
+        leia::vec3f eyeOffset = leia::vec3f(offsetX_mm, offsetY_mm, 0.0f);
+        leia::vec3f adjLeftEye  = leftEye  - eyeOffset;
+        leia::vec3f adjRightEye = rightEye - eyeOffset;
+
+        // Clear view texture
+        float clearColor[] = { 0.05f, 0.05f, 0.15f, 1.0f };
+        renderer->context->ClearRenderTargetView(g_viewTextureRTV.Get(), clearColor);
+        renderer->context->ClearDepthStencilView(g_viewDepthDSV.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+
+        // Cube parameters
+        const float cubeSize = 60.0f;
+        const float znear = 0.1f;
+        const float zfar = 10000.0f;
+
+        // Render stereo views (left and right)
+        for (int eye = 0; eye < 2; eye++) {
+            D3D11_VIEWPORT vp = {};
+            vp.TopLeftX = (float)(eye * g_viewTextureWidth);
+            vp.TopLeftY = 0.0f;
+            vp.Width = (float)g_viewTextureWidth;
+            vp.Height = (float)g_viewTextureHeight;
+            vp.MinDepth = 0.0f;
+            vp.MaxDepth = 1.0f;
+            renderer->context->RSSetViewports(1, &vp);
+
+            leia::vec3f eyePos = (eye == 0) ? adjLeftEye : adjRightEye;
+
+            leia::mat4f mvp = leia::CalculateMVP(
+                eyePos,
+                effectiveWidthMM, effectiveHeightMM,
+                renderer->cubeRotation,
+                cubeSize,
+                znear, zfar
+            );
+
+            RenderCubeWithMVP(*renderer, g_viewTextureRTV.Get(), g_viewDepthDSV.Get(), mvp.m);
+        }
+
+        // Render text overlay to BOTH eyes
+        {
+            std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
+                g_viewTextureWidth, g_viewTextureHeight);
+            std::wstring eyeText = FormatEyeTrackingInfo(eyePosX, eyePosY, eyePosZ, eyeTrackingActive);
+            std::wstring parallaxText = inputSnapshot.parallaxEnabled ?
+                L"Parallax: ON (tracking)" : L"Parallax: OFF (fixed)";
+            std::wstring helpText = L"P: Parallax | ESC: Quit";
+
+            for (int eye = 0; eye < 2; eye++) {
+                float xOffset = (float)(eye * g_viewTextureWidth);
+
+                RenderText(*textOverlay, renderer->device.Get(), g_viewTexture.Get(),
+                    perfText, xOffset + 10, 10, 200, 60, true);
+
+                RenderText(*textOverlay, renderer->device.Get(), g_viewTexture.Get(),
+                    eyeText, xOffset + 10, 80, 200, 60, true);
+
+                RenderText(*textOverlay, renderer->device.Get(), g_viewTexture.Get(),
+                    parallaxText, xOffset + 10, 150, 200, 25, true);
+
+                RenderText(*textOverlay, renderer->device.Get(), g_viewTexture.Get(),
+                    helpText, xOffset + 10, g_viewTextureHeight - 30.0f, 300, 25, true);
+            }
+        }
+
+        // Set swapchain as render target for weaver output
+        D3D11_VIEWPORT swapViewport = {};
+        swapViewport.TopLeftX = 0.0f;
+        swapViewport.TopLeftY = 0.0f;
+        swapViewport.Width = (float)currentSwapW;
+        swapViewport.Height = (float)currentSwapH;
+        swapViewport.MinDepth = 0.0f;
+        swapViewport.MaxDepth = 1.0f;
+        renderer->context->RSSetViewports(1, &swapViewport);
+        renderer->context->OMSetRenderTargets(1, g_swapChainRTV.GetAddressOf(), nullptr);
+
+        // Weave (outputs interlaced image to swapchain)
+        g_srWeaver->weave();
+
+        // Present to display
+        g_swapChain->Present(1, 0);
+    }
+
+    LOG_INFO("[RenderThread] Exiting");
 }
 
 #endif // HAVE_LEIA_SR
@@ -332,15 +655,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Get display location for window positioning
     SR_recti displayLocation = g_display->getLocation();
-    int displayX = (int)displayLocation.left;
-    int displayY = (int)displayLocation.top;
-    int displayWidth = (int)(displayLocation.right - displayLocation.left);
-    int displayHeight = (int)(displayLocation.bottom - displayLocation.top);
-    LOG_INFO("SR display at (%d,%d) size %dx%d", displayX, displayY, displayWidth, displayHeight);
+    g_displayScreenLeft = (int)displayLocation.left;
+    g_displayScreenTop = (int)displayLocation.top;
+    g_displayPixelWidth = (int)(displayLocation.right - displayLocation.left);
+    g_displayPixelHeight = (int)(displayLocation.bottom - displayLocation.top);
+    LOG_INFO("SR display at (%d,%d) size %dx%d", g_displayScreenLeft, g_displayScreenTop,
+        g_displayPixelWidth, g_displayPixelHeight);
 
     // Use display size for window
-    g_windowWidth = displayWidth;
-    g_windowHeight = displayHeight;
+    g_windowWidth = g_displayPixelWidth;
+    g_windowHeight = g_displayPixelHeight;
 
     // Register window class
     WNDCLASSEX wc = {};
@@ -369,8 +693,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         WINDOW_CLASS,
         WINDOW_TITLE,
         WS_POPUP,  // Borderless for fullscreen
-        displayX, displayY,
-        displayWidth, displayHeight,
+        g_displayScreenLeft, g_displayScreenTop,
+        g_displayPixelWidth, g_displayPixelHeight,
         nullptr, nullptr, hInstance, nullptr
     );
 
@@ -498,8 +822,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     LOG_INFO("D3D11 weaver created");
 
     // Get recommended view texture size
-    g_viewTextureWidth = g_display->getRecommendedViewsTextureWidth();
-    g_viewTextureHeight = g_display->getRecommendedViewsTextureHeight();
+    g_srRecommendedViewWidth = g_display->getRecommendedViewsTextureWidth();
+    g_srRecommendedViewHeight = g_display->getRecommendedViewsTextureHeight();
+    g_viewTextureWidth = g_srRecommendedViewWidth;
+    g_viewTextureHeight = g_srRecommendedViewHeight;
     LOG_INFO("View texture size: %dx%d", g_viewTextureWidth, g_viewTextureHeight);
 
     // Get physical screen dimensions (cm to mm)
@@ -515,60 +841,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Create stereo view texture (side-by-side)
     LOG_INFO("Creating stereo view texture (%dx%d)...", g_viewTextureWidth * 2, g_viewTextureHeight);
-    ComPtr<ID3D11Texture2D> viewTexture;
-    ComPtr<ID3D11ShaderResourceView> viewTextureSRV;
-    ComPtr<ID3D11RenderTargetView> viewTextureRTV;
-    ComPtr<ID3D11Texture2D> viewDepthTexture;
-    ComPtr<ID3D11DepthStencilView> viewDepthDSV;
-
-    {
-        D3D11_TEXTURE2D_DESC texDesc = {};
-        texDesc.Width = g_viewTextureWidth * 2;  // Side-by-side stereo
-        texDesc.Height = g_viewTextureHeight;
-        texDesc.MipLevels = 1;
-        texDesc.ArraySize = 1;
-        texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Usage = D3D11_USAGE_DEFAULT;
-        texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-
-        HRESULT hr = renderer.device->CreateTexture2D(&texDesc, nullptr, &viewTexture);
-        if (FAILED(hr)) {
-            LOG_ERROR("Failed to create view texture");
-            goto cleanup;
-        }
-
-        hr = renderer.device->CreateShaderResourceView(viewTexture.Get(), nullptr, &viewTextureSRV);
-        if (FAILED(hr)) {
-            LOG_ERROR("Failed to create view texture SRV");
-            goto cleanup;
-        }
-
-        hr = renderer.device->CreateRenderTargetView(viewTexture.Get(), nullptr, &viewTextureRTV);
-        if (FAILED(hr)) {
-            LOG_ERROR("Failed to create view texture RTV");
-            goto cleanup;
-        }
-
-        // Create depth texture
-        texDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        texDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-        hr = renderer.device->CreateTexture2D(&texDesc, nullptr, &viewDepthTexture);
-        if (FAILED(hr)) {
-            LOG_ERROR("Failed to create depth texture");
-            goto cleanup;
-        }
-
-        hr = renderer.device->CreateDepthStencilView(viewDepthTexture.Get(), nullptr, &viewDepthDSV);
-        if (FAILED(hr)) {
-            LOG_ERROR("Failed to create depth DSV");
-            goto cleanup;
-        }
+    if (!CreateStereoViewTextures(renderer.device.Get(), g_viewTextureWidth, g_viewTextureHeight)) {
+        LOG_ERROR("Failed to create stereo view textures");
+        goto cleanup;
     }
     LOG_INFO("Stereo view texture created");
 
     // Set input texture for weaver
-    g_srWeaver->setInputViewTexture(viewTextureSRV.Get(), g_viewTextureWidth, g_viewTextureHeight, DXGI_FORMAT_R8G8B8A8_UNORM);
+    g_srWeaver->setInputViewTexture(g_viewTextureSRV.Get(), g_viewTextureWidth, g_viewTextureHeight, DXGI_FORMAT_R8G8B8A8_UNORM);
 
     // Initialize context
     g_srContext->initialize();
@@ -577,166 +857,34 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
 
-    // Performance tracking
-    PerformanceStats perfStats = {};
-    perfStats.lastTime = std::chrono::high_resolution_clock::now();
-
-    // Eye tracking state
-    float eyePosX = 0.0f;
-    float eyePosY = 0.0f;
-    float eyePosZ = 0.0f;
-    bool eyeTrackingActive = false;
-
     LOG_INFO("");
     LOG_INFO("=== Entering main loop ===");
+    LOG_INFO("Render thread handles SR render/weave loop; main thread handles Win32 messages");
     LOG_INFO("Controls: WASD=Move, Mouse=Look, P=Toggle Parallax, ESC=Quit");
     LOG_INFO("");
 
-    // Main loop
-    MSG msg = {};
-    while (g_running) {
-        // Process Windows messages
-        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) {
-                g_running = false;
-            }
+    // Launch render thread — the render/weave loop runs independently of the
+    // message pump so that rendering continues even when DefWindowProc blocks
+    // during window drag/resize.
+    {
+        std::thread renderThread(RenderThreadFunc, hwnd, &renderer, &textOverlay);
+
+        // Main thread: blocking Win32 message pump.
+        // GetMessage blocks efficiently (no CPU spin) until a message arrives.
+        // When the window is being dragged/resized, DefWindowProc runs a modal loop
+        // here on the main thread — but the render thread keeps submitting frames.
+        MSG msg = {};
+        while (GetMessage(&msg, nullptr, 0, 0) > 0) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
 
-        if (!g_running) break;
+        // GetMessage returned 0 (WM_QUIT) or -1 (error) — signal render thread to stop
+        g_running.store(false);
 
-        // Skip rendering when minimized
-        if (IsIconic(hwnd)) {
-            Sleep(10);
-            continue;
-        }
-
-        // Update performance stats
-        UpdatePerformanceStats(perfStats);
-
-        // Update input-based camera movement
-        UpdateCameraMovement(g_inputState, perfStats.deltaTime);
-
-        // Update scene (cube rotation)
-        UpdateScene(renderer, perfStats.deltaTime);
-
-        // Get predicted eye positions from weaver
-        leia::vec3f leftEye, rightEye;
-        {
-            float leftPos[3], rightPos[3];
-            g_srWeaver->getPredictedEyePositions(leftPos, rightPos);
-            leftEye = leia::vec3f(leftPos[0], leftPos[1], leftPos[2]);
-            rightEye = leia::vec3f(rightPos[0], rightPos[1], rightPos[2]);
-            eyeTrackingActive = true;
-
-            // Average for display
-            eyePosX = (leftPos[0] + rightPos[0]) / 2.0f;
-            eyePosY = (leftPos[1] + rightPos[1]) / 2.0f;
-            eyePosZ = (leftPos[2] + rightPos[2]) / 2.0f;
-        }
-
-        // Apply parallax toggle
-        if (!g_inputState.parallaxEnabled) {
-            // Calculate mid-eye point
-            leia::vec3f midEye = (leftEye + rightEye) * 0.5f;
-
-            // Translation to move mid-eye to default viewing position
-            leia::vec3f translation = g_defaultViewingPosition - midEye;
-
-            // Apply to both eyes
-            leftEye = leftEye + translation;
-            rightEye = rightEye + translation;
-        }
-
-        // Clear view texture
-        float clearColor[] = { 0.05f, 0.05f, 0.15f, 1.0f };
-        renderer.context->ClearRenderTargetView(viewTextureRTV.Get(), clearColor);
-        renderer.context->ClearDepthStencilView(viewDepthDSV.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
-
-        // Cube parameters (matching reference exactly)
-        const float cubeSize = 60.0f;  // 60mm cube size
-        const float znear = 0.1f;
-        const float zfar = 10000.0f;
-
-        // Render stereo views (left and right)
-        for (int eye = 0; eye < 2; eye++) {
-            // Set viewport for this eye
-            D3D11_VIEWPORT vp = {};
-            vp.TopLeftX = (float)(eye * g_viewTextureWidth);
-            vp.TopLeftY = 0.0f;
-            vp.Width = (float)g_viewTextureWidth;
-            vp.Height = (float)g_viewTextureHeight;
-            vp.MinDepth = 0.0f;
-            vp.MaxDepth = 1.0f;
-            renderer.context->RSSetViewports(1, &vp);
-
-            // Get eye position for this eye
-            leia::vec3f eyePos = (eye == 0) ? leftEye : rightEye;
-
-            // Calculate MVP matrix exactly like reference app
-            leia::mat4f mvp = leia::CalculateMVP(
-                eyePos,
-                g_screenWidthMM, g_screenHeightMM,
-                renderer.cubeRotation,  // Use renderer's cube rotation
-                cubeSize,
-                znear, zfar
-            );
-
-            // Render cube with the MVP matrix
-            RenderCubeWithMVP(renderer, viewTextureRTV.Get(), viewDepthDSV.Get(), mvp.m);
-        }
-
-        // Render text overlay to BOTH eyes (so it's visible from all viewing angles)
-        {
-            // Performance info
-            std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
-                g_viewTextureWidth, g_viewTextureHeight);
-
-            // Eye tracking info
-            std::wstring eyeText = FormatEyeTrackingInfo(eyePosX, eyePosY, eyePosZ, eyeTrackingActive);
-
-            // Parallax state
-            std::wstring parallaxText = g_inputState.parallaxEnabled ?
-                L"Parallax: ON (tracking)" : L"Parallax: OFF (fixed)";
-
-            // Help text
-            std::wstring helpText = L"P: Parallax | ESC: Quit";
-
-            // Render to both eyes
-            for (int eye = 0; eye < 2; eye++) {
-                float xOffset = (float)(eye * g_viewTextureWidth);
-
-                RenderText(textOverlay, renderer.device.Get(), viewTexture.Get(),
-                    perfText, xOffset + 10, 10, 200, 60, true);
-
-                RenderText(textOverlay, renderer.device.Get(), viewTexture.Get(),
-                    eyeText, xOffset + 10, 80, 200, 60, true);
-
-                RenderText(textOverlay, renderer.device.Get(), viewTexture.Get(),
-                    parallaxText, xOffset + 10, 150, 200, 25, true);
-
-                RenderText(textOverlay, renderer.device.Get(), viewTexture.Get(),
-                    helpText, xOffset + 10, g_viewTextureHeight - 30.0f, 300, 25, true);
-            }
-        }
-
-        // Set swapchain as render target for weaver output
-        D3D11_VIEWPORT swapViewport = {};
-        swapViewport.TopLeftX = 0.0f;
-        swapViewport.TopLeftY = 0.0f;
-        swapViewport.Width = (float)g_windowWidth;
-        swapViewport.Height = (float)g_windowHeight;
-        swapViewport.MinDepth = 0.0f;
-        swapViewport.MaxDepth = 1.0f;
-        renderer.context->RSSetViewports(1, &swapViewport);
-        renderer.context->OMSetRenderTargets(1, g_swapChainRTV.GetAddressOf(), nullptr);
-
-        // Weave (outputs interlaced image to swapchain)
-        g_srWeaver->weave();
-
-        // Present to display
-        g_swapChain->Present(1, 0);
+        LOG_INFO("Main thread: waiting for render thread to finish...");
+        renderThread.join();
+        LOG_INFO("Main thread: render thread joined");
     }
 
 cleanup:
@@ -747,11 +895,11 @@ cleanup:
     g_swapChainRTV.Reset();
     g_swapChain.Reset();
 
-    viewDepthDSV.Reset();
-    viewDepthTexture.Reset();
-    viewTextureRTV.Reset();
-    viewTextureSRV.Reset();
-    viewTexture.Reset();
+    g_viewDepthDSV.Reset();
+    g_viewDepthTexture.Reset();
+    g_viewTextureRTV.Reset();
+    g_viewTextureSRV.Reset();
+    g_viewTexture.Reset();
 
     if (g_srWeaver) {
         g_srWeaver->destroy();
