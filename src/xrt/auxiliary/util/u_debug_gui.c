@@ -250,8 +250,7 @@ sdl2_loop(struct u_debug_gui *p)
 	igCreateContext(NULL);
 
 	// Local state
-	ImGuiIO *io = igGetIO();
-	io->FontGlobalScale = p->gui_scale;
+	ImGuiIO *io = igGetIO_Nil();
 
 	// Make window layout file "imgui.ini" live in config dir
 	XRT_MAYBE_UNUSED int res = u_file_get_path_in_config_dir("imgui.ini", p->layout_file, sizeof(p->layout_file));
@@ -270,6 +269,7 @@ sdl2_loop(struct u_debug_gui *p)
 
 	// Setup Dear ImGui style
 	ImGuiStyle *style = igGetStyle();
+	style->FontScaleMain = p->gui_scale;
 	ImGuiStyle_ScaleAllSizes(style, p->gui_scale);
 	igStyleColorsDark(style);
 

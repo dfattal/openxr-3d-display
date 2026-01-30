@@ -8,7 +8,7 @@ endif()
 
 add_library(
 	xrt-external-imgui STATIC
-	# imgui 1.90.8-docking
+	# imgui 1.92.5-docking 3912b3d9a9c1b3f17431aebafd86d2f40ee6e59c
 	imgui/imconfig.h
 	imgui/imgui.cpp
 	imgui/imgui_tables.cpp
@@ -22,17 +22,17 @@ add_library(
 	imgui/imstb_rectpack.h
 	imgui/imstb_textedit.h
 	imgui/imstb_truetype.h
-	# cimgui 7c16d31cdb9d2db3038b324fe967ffa76b02c8c4
+	# cimgui d94ad1b16224a01592ec60f21b284f0883ea9a56
 	cimgui/cimgui.cpp
 	cimgui/cimgui.h
 	cimgui/cimgui_impl.h
-	# implot 0.17 f156599faefe316f7dd20fe6c783bf87c8bb6fd9
+	# implot 0.17 4707b245fbcd69075b1a8a74fa8d2435561b3134
 	implot/implot.cpp
 	implot/implot.h
 	implot/implot_internal.h
 	implot/implot_items.cpp
 	implot/implot_demo.cpp
-	# cimplot 439f705b1cfae0e9fbe42c13ab5b45becc47d404
+	# cimplot 7ed0a0713c1cbf296df5a625d65e52ce6d6ae68b
 	cimplot/cimplot.cpp
 	cimplot/cimplot.h
 	imgui_monado/imgui_monado.cpp

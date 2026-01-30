@@ -305,10 +305,8 @@ on_f32_arr(const char *name, void *ptr)
 	int length = f32_arr->length;
 	float *arr = (float *)f32_arr->data;
 
-	ImVec2 min, max;
-	igGetWindowContentRegionMin(&min);
-	igGetWindowContentRegionMax(&max);
-	ImVec2 graph_size = {max.x - min.x, 200};
+	ImVec2 region = igGetContentRegionAvail();
+	ImVec2 graph_size = {region.x, 200};
 
 	float stats_min = FLT_MAX;
 	float stats_max = FLT_MAX;
@@ -334,10 +332,8 @@ on_timing(const char *name, void *ptr)
 	int length = f32_arr->length;
 	float *arr = (float *)f32_arr->data;
 
-	ImVec2 min, max;
-	igGetWindowContentRegionMin(&min);
-	igGetWindowContentRegionMax(&max);
-	ImVec2 graph_size = {max.x - min.x, 200};
+	ImVec2 region = igGetContentRegionAvail();
+	ImVec2 graph_size = {region.x, 200};
 
 	float stats_min = FLT_MAX;
 	float stats_max = 0;
@@ -436,10 +432,8 @@ on_ff_vec3_var(struct u_var_info *info, struct gui_program *p)
 
 	struct plot_state state = {ff, os_monotonic_get_ns()};
 
-	ImVec2 min, max;
-	igGetWindowContentRegionMin(&min);
-	igGetWindowContentRegionMax(&max);
-	ImVec2 size = {max.x - min.x, 256};
+	ImVec2 region = igGetContentRegionAvail();
+	ImVec2 size = {region.x, 256};
 	bool shown = ImPlot_BeginPlot(name, size, 0);
 	if (!shown) {
 		return;
@@ -551,10 +545,8 @@ on_curve_var(const char *name, void *ptr)
 {
 	struct u_var_curve *c = (struct u_var_curve *)ptr;
 
-	ImVec2 min, max;
-	igGetWindowContentRegionMin(&min);
-	igGetWindowContentRegionMax(&max);
-	ImVec2 size = {max.x - min.x, 256};
+	ImVec2 region = igGetContentRegionAvail();
+	ImVec2 size = {region.x, 256};
 
 	bool shown = ImPlot_BeginPlot(name, size, 0);
 	if (!shown) {
@@ -572,10 +564,8 @@ static void
 on_curves_var(const char *name, void *ptr)
 {
 	struct u_var_curves *cs = (struct u_var_curves *)ptr;
-	ImVec2 min, max;
-	igGetWindowContentRegionMin(&min);
-	igGetWindowContentRegionMax(&max);
-	ImVec2 size = {max.x - min.x, 256};
+	ImVec2 region = igGetContentRegionAvail();
+	ImVec2 size = {region.x, 256};
 
 	bool shown = ImPlot_BeginPlot(name, size, 0);
 	if (!shown) {
