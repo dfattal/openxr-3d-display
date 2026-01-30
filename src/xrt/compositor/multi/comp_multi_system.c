@@ -416,7 +416,7 @@ init_composite_resources(struct multi_compositor *mc, struct vk_bundle *vk, uint
 	                             &mc->session_render.composite_render_pass);
 	if (ret != VK_SUCCESS) {
 		U_LOG_E("[composite] Failed to create render pass: %d", ret);
-		goto err_views;
+		goto err_images;
 	}
 
 	// Create framebuffers - one per eye, each using its own image view
@@ -876,7 +876,7 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 
 		struct comp_swapchain *sc = comp_swapchain(xsc);
 		const struct xrt_layer_projection_view_data *vd = &proj_layer->data.proj.v[eye];
-		const struct comp_swapchain_image *image = &sc->images[vd->sub.image_index];
+		VkImage src_vk_image = sc->vkic.images[vd->sub.image_index].handle;
 
 		// Transition source image to TRANSFER_SRC
 		VkImageMemoryBarrier src_barrier = {
@@ -885,7 +885,7 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 		    .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
 		    .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		    .image = image->image,
+		    .image = src_vk_image,
 		    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
 		};
 		vk->vkCmdPipelineBarrier(cmd,
@@ -897,9 +897,9 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 		VkImageBlit blit = {
 		    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, vd->sub.array_index, 1},
 		    .srcOffsets = {
-		        {vd->sub.rect.offset.x, vd->sub.rect.offset.y, 0},
-		        {vd->sub.rect.offset.x + (int32_t)vd->sub.rect.extent.w,
-		         vd->sub.rect.offset.y + (int32_t)vd->sub.rect.extent.h, 1},
+		        {vd->sub.rect.offset.w, vd->sub.rect.offset.h, 0},
+		        {vd->sub.rect.offset.w + (int32_t)vd->sub.rect.extent.w,
+		         vd->sub.rect.offset.h + (int32_t)vd->sub.rect.extent.h, 1},
 		    },
 		    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
 		    .dstOffsets = {
@@ -908,7 +908,7 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 		    },
 		};
 		vk->vkCmdBlitImage(cmd,
-		                   image->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		                   src_vk_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		                   mc->session_render.composite_images[eye], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 		                   1, &blit, VK_FILTER_LINEAR);
 
@@ -919,7 +919,7 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 		    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
 		    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		    .image = image->image,
+		    .image = src_vk_image,
 		    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
 		};
 		vk->vkCmdPipelineBarrier(cmd,
@@ -970,6 +970,7 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 		if (ws_view == VK_NULL_HANDLE) {
 			continue;
 		}
+		VkImage ws_vk_image = sc->vkic.images[img_idx].handle;
 
 		// Transition window-space swapchain image to SHADER_READ_ONLY
 		VkImageMemoryBarrier ws_barrier = {
@@ -978,7 +979,7 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 		    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
 		    .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		    .image = ws_image->image,
+		    .image = ws_vk_image,
 		    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
 		};
 		vk->vkCmdPipelineBarrier(cmd,
