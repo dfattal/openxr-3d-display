@@ -44,7 +44,7 @@ bool InitializeTextOverlay(TextOverlay& overlay) {
         DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL,
-        16.0f,
+        20.0f,
         L"en-us",
         &overlay.textFormat
     );
@@ -60,7 +60,7 @@ bool InitializeTextOverlay(TextOverlay& overlay) {
         DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL,
-        12.0f,
+        15.0f,
         L"en-us",
         &overlay.smallTextFormat
     );
@@ -187,12 +187,17 @@ std::wstring FormatSessionState(int state) {
     return L"INVALID";
 }
 
-std::wstring FormatPerformanceInfo(float fps, float frameTimeMs, uint32_t width, uint32_t height) {
+std::wstring FormatPerformanceInfo(float fps, float frameTimeMs, uint32_t renderW, uint32_t renderH, uint32_t windowW, uint32_t windowH) {
     std::wostringstream oss;
     oss << std::fixed << std::setprecision(1);
     oss << L"FPS: " << fps << L"\n";
     oss << L"Frame: " << frameTimeMs << L"ms\n";
-    oss << L"Window: " << width << L"x" << height;
+    if (windowW > 0 && windowH > 0) {
+        oss << L"Render: " << renderW << L"x" << renderH << L"\n";
+        oss << L"Window: " << windowW << L"x" << windowH;
+    } else {
+        oss << L"Window: " << renderW << L"x" << renderH;
+    }
     return oss.str();
 }
 

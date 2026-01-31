@@ -40,8 +40,8 @@ static bool g_running = true;
 static UINT g_windowWidth = 1280;
 static UINT g_windowHeight = 720;
 static bool g_inSizeMove = false;  // True while user is dragging/resizing the window
-static const float HUD_WIDTH_PERCENT = 0.30f;
-static const float HUD_HEIGHT_PERCENT = 0.35f;
+static const uint32_t HUD_PIXEL_WIDTH = 380;
+static const uint32_t HUD_PIXEL_HEIGHT = 280;
 
 // Forward declaration — defined after PerformanceStats
 struct RenderState;
@@ -251,28 +251,29 @@ static void RenderOneFrame(RenderState& rs) {
                                 hudRtv->Release();
                             }
 
-                            float sx = xr.hudSwapchain.width / 512.0f;
-                            float sy = xr.hudSwapchain.height / 256.0f;
+                            float px = 12.0f; // left padding
+                            float tw = (float)xr.hudSwapchain.width - 2 * px; // text width
 
                             std::wstring stateText = L"Session: ";
                             stateText += FormatSessionState((int)xr.sessionState);
                             RenderText(*rs.textOverlay, renderer.device.Get(), hudTexture,
-                                stateText, 10*sx, 10*sy, 300*sx, 30*sy);
+                                stateText, px, 12, tw, 26);
 
                             std::wstring extText = xr.hasSessionTargetExt ?
                                 L"XR_EXT_session_target: ACTIVE" :
                                 L"XR_EXT_session_target: NOT AVAILABLE";
                             RenderText(*rs.textOverlay, renderer.device.Get(), hudTexture,
-                                extText, 10*sx, 45*sy, 350*sx, 30*sy, true);
+                                extText, px, 42, tw, 22, true);
 
                             std::wstring perfText = FormatPerformanceInfo(rs.perfStats->fps, rs.perfStats->frameTimeMs,
-                                xr.swapchains[0].width, xr.swapchains[0].height);
+                                xr.swapchains[0].width, xr.swapchains[0].height,
+                                g_windowWidth, g_windowHeight);
                             RenderText(*rs.textOverlay, renderer.device.Get(), hudTexture,
-                                perfText, 10*sx, 85*sy, 300*sx, 70*sy, true);
+                                perfText, px, 74, tw, 88, true);
 
                             std::wstring eyeText = FormatEyeTrackingInfo(xr.eyePosX, xr.eyePosY, xr.eyePosZ, xr.eyeTrackingActive);
                             RenderText(*rs.textOverlay, renderer.device.Get(), hudTexture,
-                                eyeText, 10*sx, 165*sy, 300*sx, 70*sy, true);
+                                eyeText, px, 172, tw, 88, true);
 
                             ReleaseHudSwapchainImage(xr);
                             hudSubmitted = true;
@@ -329,8 +330,10 @@ static void RenderOneFrame(RenderState& rs) {
 
             // Submit frame with window-space HUD layer if visible
             if (hudSubmitted) {
+                float hudWidthFrac = (float)HUD_PIXEL_WIDTH / xr.swapchains[0].width;
+                float hudHeightFrac = (float)HUD_PIXEL_HEIGHT / xr.swapchains[0].height;
                 EndFrameWithWindowSpaceHud(xr, frameState.predictedDisplayTime, projectionViews,
-                    0.0f, 0.0f, HUD_WIDTH_PERCENT, HUD_HEIGHT_PERCENT, 0.0f);
+                    0.0f, 0.0f, hudWidthFrac, hudHeightFrac, 0.0f);
             } else {
                 EndFrame(xr, frameState.predictedDisplayTime, projectionViews);
             }
@@ -468,10 +471,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     // Create HUD swapchain for window-space layer submission
-    uint32_t hudWidth = (uint32_t)(xr.swapchains[0].width * HUD_WIDTH_PERCENT);
-    uint32_t hudHeight = (uint32_t)(xr.swapchains[0].height * HUD_HEIGHT_PERCENT);
-
-    if (!CreateHudSwapchain(xr, hudWidth, hudHeight)) {
+    if (!CreateHudSwapchain(xr, HUD_PIXEL_WIDTH, HUD_PIXEL_HEIGHT)) {
         LOG_WARN("Failed to create HUD swapchain - HUD will not be displayed");
     }
 
