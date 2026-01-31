@@ -49,7 +49,7 @@ void RenderText(
 
 // Helper to format various overlay texts
 std::wstring FormatSessionState(int state);
-std::wstring FormatPerformanceInfo(float fps, float frameTimeMs, uint32_t width, uint32_t height);
+std::wstring FormatPerformanceInfo(float fps, float frameTimeMs, uint32_t renderW, uint32_t renderH, uint32_t windowW = 0, uint32_t windowH = 0);
 std::wstring FormatInputInfo(const std::string& lastKey, int mouseX, int mouseY, const std::string& mouseButtons);
 std::wstring FormatEyeTrackingInfo(float posX, float posY, float posZ, bool active);
 std::wstring FormatParallaxInfo(bool parallaxEnabled, float eyePosX, float eyePosY);

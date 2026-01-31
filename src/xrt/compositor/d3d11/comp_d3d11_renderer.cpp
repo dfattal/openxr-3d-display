@@ -863,7 +863,7 @@ render_window_space_layer(struct comp_d3d11_renderer *r,
 
 	// Scale in NDC (full window = 2.0 in NDC)
 	float ndc_sx = ws->width * 2.0f;
-	float ndc_sy = ws->height * 2.0f;
+	float ndc_sy = -(ws->height * 2.0f); // Negate to flip Y: D3D11 texture origin is top-left
 
 	// Build 2D orthographic MVP: scale then translate
 	// The quad vertex shader uses a [-0.5, 0.5] unit quad
