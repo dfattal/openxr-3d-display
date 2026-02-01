@@ -378,7 +378,7 @@ oxr_instance_create(struct oxr_logger *log,
 
 	xret = xrt_instance_create(&i_info, &inst->xinst);
 	if (xret != XRT_SUCCESS) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create instance '%i'", xret);
+		ret = oxr_error(log, XR_ERROR_RUNTIME_UNAVAILABLE, "Failed to create instance '%i'", xret);
 		oxr_instance_destroy(log, &inst->handle);
 		return ret;
 	}
