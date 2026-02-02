@@ -134,7 +134,7 @@ static const uint32_t g_cubeFragSpv[] = {
 //   layout(location=0) in vec3 aPos;
 //   void main() { gl_Position = pc.transform * vec4(aPos, 1.0); }
 static const uint32_t g_gridVertSpv[] = {
-    0x07230203, 0x00010000, 0x000d000a, 0x00000020,
+    0x07230203, 0x00010000, 0x000d000a, 0x00000022,
     0x00000000, 0x00020011, 0x00000001, 0x0006000b,
     0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e,
     0x00000000, 0x0003000e, 0x00000000, 0x00000001,
@@ -200,7 +200,7 @@ static const uint32_t g_gridVertSpv[] = {
 //   layout(location=0) out vec4 FragColor;
 //   void main() { FragColor = pc.color; }
 static const uint32_t g_gridFragSpv[] = {
-    0x07230203, 0x00010000, 0x000d000a, 0x00000012,
+    0x07230203, 0x00010000, 0x000d000a, 0x00000013,
     0x00000000, 0x00020011, 0x00000001, 0x0006000b,
     0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e,
     0x00000000, 0x0003000e, 0x00000000, 0x00000001,
