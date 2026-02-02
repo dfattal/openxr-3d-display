@@ -904,26 +904,9 @@ void RenderScene(
         LOG_INFO("[RenderScene] eye=%d: cube draw recorded", eye);
     }
 
-    // Draw grid
-    {
-        const float gridScale = 0.05f;
-        XMMATRIX gridWorld = XMMatrixScaling(gridScale, gridScale, gridScale) *
-                             XMMatrixTranslation(0, -0.03f + gridScale, 0);
-        XMMATRIX gridWVP = gridWorld * zoom * viewMatrix * projMatrix;
-
-        VkPushConstants pc = {};
-        XMStoreFloat4x4(&pc.transform, XMMatrixTranspose(gridWVP));
-        pc.color[0] = 0.3f; pc.color[1] = 0.3f; pc.color[2] = 0.35f; pc.color[3] = 1.0f;
-
-        vkCmdBindPipeline(renderer.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer.gridPipeline);
-        vkCmdPushConstants(renderer.commandBuffer, renderer.pipelineLayout,
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
-
-        VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(renderer.commandBuffer, 0, 1, &renderer.gridVertexBuffer, &offset);
-        vkCmdDraw(renderer.commandBuffer, renderer.gridVertexCount, 1, 0, 0);
-        LOG_INFO("[RenderScene] eye=%d: grid draw recorded", eye);
-    }
+    // Grid drawing disabled - grid shader SPIR-V causes ACCESS_VIOLATION on Intel Iris Xe.
+    // TODO: Replace hand-written SPIR-V with compiler-generated shaders to fix grid rendering.
+    LOG_INFO("[RenderScene] eye=%d: grid skipped (disabled for Intel compatibility)", eye);
 
     LOG_INFO("[RenderScene] eye=%d: vkCmdEndRenderPass...", eye);
     vkCmdEndRenderPass(renderer.commandBuffer);

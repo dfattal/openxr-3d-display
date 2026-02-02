@@ -29,11 +29,13 @@ struct comp_d3d11_window;
 /*!
  * Create a self-owned window for the D3D11 compositor.
  *
- * This creates a window on the calling thread. The caller must pump
- * messages via @ref comp_d3d11_window_pump_messages or its own
- * PeekMessage loop. The window is automatically positioned on the Leia
- * display if found, or on a secondary monitor, or on the primary display
- * as fallback.
+ * This creates a window on a **dedicated thread**. The window thread
+ * handles its own message pump via GetMessage/DispatchMessage. The
+ * caller does NOT need to pump messages — the compositor thread
+ * continues rendering independently during modal drag/resize.
+ *
+ * The window is automatically positioned on the Leia display if found,
+ * or on a secondary monitor, or on the primary display as fallback.
  *
  * By default, the window starts in fullscreen mode unless the environment
  * variable XRT_COMPOSITOR_START_WINDOWED=1 is set.
@@ -50,7 +52,8 @@ comp_d3d11_window_create(uint32_t width, uint32_t height, struct comp_d3d11_wind
 /*!
  * Destroy the self-owned window.
  *
- * Must be called from the thread that created the window.
+ * Posts WM_CLOSE to the window thread and waits for it to exit.
+ * Can be called from any thread.
  *
  * @param window Pointer to window handle (set to NULL after destruction)
  */
@@ -104,11 +107,10 @@ bool
 comp_d3d11_window_is_in_size_move(struct comp_d3d11_window *window);
 
 /*!
- * Pump Win32 messages for the window (non-blocking).
+ * No-op. The dedicated window thread handles its own messages.
  *
- * This dispatches pending messages for the window. The caller may also
- * use its own PeekMessage(NULL, ...) loop which will dispatch messages
- * for all windows on the thread, including this one.
+ * Retained for API compatibility. Callers do not need to pump messages
+ * for the self-owned window.
  *
  * @param window The window object
  */
@@ -116,17 +118,14 @@ void
 comp_d3d11_window_pump_messages(struct comp_d3d11_window *window);
 
 /*!
- * Set a callback invoked from WM_TIMER during drag/resize.
+ * No-op. With the dedicated window thread, the compositor thread
+ * continues rendering during drag/resize without interruption.
  *
- * During a modal move/size loop the normal render loop cannot run.
- * A periodic timer fires to invoke this callback, allowing the
- * compositor to re-present the last frame so the window contents
- * stay up-to-date. WM_TIMER is used instead of WM_PAINT because
- * the SR SDK subclasses the WndProc and consumes WM_PAINT internally.
+ * Retained for API compatibility.
  *
  * @param window    The window object
- * @param callback  Function to call (NULL to clear)
- * @param userdata  Opaque pointer forwarded to @p callback
+ * @param callback  Ignored
+ * @param userdata  Ignored
  */
 void
 comp_d3d11_window_set_repaint_callback(struct comp_d3d11_window *window,
