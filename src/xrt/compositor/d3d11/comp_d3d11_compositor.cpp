@@ -691,97 +691,12 @@ d3d11_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 	return d3d11_compositor_layer_commit(xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
 }
 
-/*!
- * Repaint callback invoked from WM_PAINT during modal drag/resize.
- *
- * Resizes the swapchain target to match the current window size (preserving
- * 1:1 pixel mapping for phase snapping), re-weaves the last stereo frame,
- * and presents. The renderer stereo texture is NOT resized here to avoid
- * expensive texture reallocation every pixel of drag.
- */
-static void
-d3d11_compositor_repaint(void *userdata)
-{
-	comp_d3d11_compositor *c = (comp_d3d11_compositor *)userdata;
-	std::unique_lock<std::mutex> lock(c->mutex, std::try_to_lock);
-	if (!lock.owns_lock()) {
-		static int lock_fail_log_counter = 0;
-		if (++lock_fail_log_counter % 60 == 1) {
-			U_LOG_W("D3D11 repaint: Mutex locked, skipping repaint");
-		}
-		return; // skip if mutex is held
-	}
-
-	static int repaint_count = 0;
-	repaint_count++;
-
-	// Do NOT resize the swapchain target during drag repaint.
-	// Phase snapping jitters the window by 1-4 pixels each frame, which would
-	// trigger ResizeBuffers on every callback (~30Hz). ResizeBuffers releases
-	// all backbuffer references and reallocates them, which is extremely expensive
-	// and likely invalidates the SR weaver's internal render target state.
-	// Let DXGI stretch the 1-4 pixel difference — it's imperceptible.
-	// The target will be resized to the correct size on the first normal
-	// begin_frame after the drag ends.
-
-	uint32_t target_index;
-	xrt_result_t acquire_ret = comp_d3d11_target_acquire(c->target, &target_index);
-	if (acquire_ret != XRT_SUCCESS) {
-		if (repaint_count <= 5 || repaint_count % 60 == 0) {
-			U_LOG_W("D3D11 repaint[%d]: target_acquire FAILED (ret=%d)", repaint_count, acquire_ret);
-		}
-		return;
-	}
-
-#ifdef XRT_HAVE_LEIA_SR_D3D11
-	if (c->weaver != nullptr && leiasr_d3d11_is_ready(c->weaver)) {
-		void *stereo_srv = comp_d3d11_renderer_get_stereo_srv(c->renderer);
-		uint32_t view_width, view_height;
-		comp_d3d11_renderer_get_view_dimensions(c->renderer, &view_width, &view_height);
-
-		uint32_t target_width, target_height;
-		comp_d3d11_target_get_dimensions(c->target, &target_width, &target_height);
-
-		leiasr_d3d11_set_input_texture(c->weaver, stereo_srv, view_width, view_height,
-		                                DXGI_FORMAT_R8G8B8A8_UNORM);
-
-		D3D11_VIEWPORT vp = {};
-		vp.Width = (float)target_width;
-		vp.Height = (float)target_height;
-		vp.MaxDepth = 1.0f;
-		c->context->RSSetViewports(1, &vp);
-
-		if (repaint_count <= 5 || repaint_count % 60 == 0) {
-			U_LOG_W("D3D11 repaint[%d]: weaving view=%ux%u target=%ux%u",
-			         repaint_count, view_width, view_height, target_width, target_height);
-		}
-		leiasr_d3d11_weave(c->weaver);
-	} else {
-		if (repaint_count <= 5) {
-			U_LOG_W("D3D11 repaint[%d]: weaver not ready (weaver=%p, ready=%d)",
-			         repaint_count, (void *)c->weaver,
-			         c->weaver ? leiasr_d3d11_is_ready(c->weaver) : 0);
-		}
-	}
-#endif
-
-	if (repaint_count <= 5 || repaint_count % 60 == 0) {
-		U_LOG_W("D3D11 repaint[%d]: presenting (target_index=%u)", repaint_count, target_index);
-	}
-	comp_d3d11_target_present(c->target, 1);
-}
-
 static void
 d3d11_compositor_destroy(struct xrt_compositor *xc)
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	U_LOG_I("Destroying D3D11 compositor");
-
-	// Clear repaint callback before destroying resources it references
-	if (c->owns_window && c->own_window != nullptr) {
-		comp_d3d11_window_set_repaint_callback(c->own_window, NULL, NULL);
-	}
 
 #ifdef XRT_FEATURE_DEBUG_GUI
 	// Stop debug GUI first (before destroying resources it may reference)
@@ -882,9 +797,22 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 	// Get immediate context
 	c->device->GetImmediateContext(&c->context);
 
+	// Enable D3D11 multithread protection for cross-thread window/compositor access.
+	// The HWND lives on a dedicated window thread while D3D11 rendering happens here.
+	HRESULT hr;
+	{
+		ID3D10Multithread *mt = nullptr;
+		hr = c->device->QueryInterface(__uuidof(ID3D10Multithread), (void **)&mt);
+		if (SUCCEEDED(hr) && mt != nullptr) {
+			mt->SetMultithreadProtected(TRUE);
+			mt->Release();
+			U_LOG_W("D3D11 multithread protection enabled");
+		}
+	}
+
 	// Get DXGI factory
 	IDXGIDevice *dxgi_device;
-	HRESULT hr = c->device->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void **>(&dxgi_device));
+	hr = c->device->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void **>(&dxgi_device));
 	if (SUCCEEDED(hr)) {
 		IDXGIAdapter *adapter;
 		dxgi_device->GetAdapter(&adapter);
@@ -1019,11 +947,6 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 		U_LOG_E("Failed to create D3D11 renderer");
 		d3d11_compositor_destroy(&c->base.base);
 		return xret;
-	}
-
-	// Register WM_PAINT repaint callback so the window stays up-to-date during drag/resize
-	if (c->owns_window && c->own_window != nullptr) {
-		comp_d3d11_window_set_repaint_callback(c->own_window, d3d11_compositor_repaint, c);
 	}
 
 #ifdef XRT_FEATURE_DEBUG_GUI

@@ -1,6 +1,6 @@
 # Window Freeze During Drag (sr_cube_openxr, Non-Extension Path)
 
-**Status:** Unresolved
+**Status:** Resolved (dedicated window thread)
 **Affected path:** `sr_cube_openxr` (Monado-owned window, no `XR_EXT_session_target`)
 **Working path:** `sr_cube_openxr_ext` (app-owned window, uses `XR_EXT_session_target`)
 **Date:** 2026-02-01
