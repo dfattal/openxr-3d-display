@@ -394,6 +394,13 @@ ipc_handle_session_create(volatile struct ipc_client_state *ics,
 	ics->xs = xs;
 	ics->xc = &xcn->base;
 
+	// Set initial state to visible and focused (matching in-process behavior)
+	// The client_state fields may be false initially, but we want the session
+	// to start as visible/focused so the OXR state machine can progress
+	ics->client_state.session_visible = true;
+	ics->client_state.session_focused = true;
+	IPC_WARN(ics->server, "IPC session_create: setting initial state visible=%d, focused=%d",
+	         ics->client_state.session_visible, ics->client_state.session_focused);
 	xrt_syscomp_set_state(ics->server->xsysc, ics->xc, ics->client_state.session_visible,
 	                      ics->client_state.session_focused);
 	xrt_syscomp_set_z_order(ics->server->xsysc, ics->xc, ics->client_state.z_order);
@@ -404,12 +411,26 @@ ipc_handle_session_create(volatile struct ipc_client_state *ics,
 xrt_result_t
 ipc_handle_session_poll_events(volatile struct ipc_client_state *ics, union xrt_session_event *out_xse)
 {
+	static int poll_count = 0;
+
 	// Have we created the session?
 	if (ics->xs == NULL) {
+		IPC_WARN(ics->server, "IPC session_poll_events: session not created");
 		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
 	}
 
-	return xrt_session_poll_events(ics->xs, out_xse);
+	xrt_result_t xret = xrt_session_poll_events(ics->xs, out_xse);
+
+	// Log first few polls and any events (to confirm client is polling)
+	poll_count++;
+	if (poll_count <= 3) {
+		IPC_WARN(ics->server, "IPC session_poll_events: poll #%d, event_type=%d", poll_count, (int)out_xse->type);
+	}
+	if (out_xse->type != XRT_SESSION_EVENT_NONE) {
+		IPC_WARN(ics->server, "IPC session_poll_events: returning event type=%d", (int)out_xse->type);
+	}
+
+	return xret;
 }
 
 xrt_result_t
