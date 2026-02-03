@@ -31,12 +31,14 @@
 #include "util/u_device.h"
 
 #include "oxr_extension_support.h"
-#include "oxr_subaction.h"
 #include "oxr_defines.h"
 #include "oxr_frame_sync.h"
 #include "oxr_forward_declarations.h"
 
 #include "path/oxr_path_store.h"
+
+#include "actions/oxr_subaction.h"
+#include "actions/oxr_dpad_state.h"
 
 #if defined(XRT_HAVE_D3D11) || defined(XRT_HAVE_D3D12)
 #include <dxgi.h>
@@ -389,317 +391,6 @@ oxr_face_tracker_android_to_openxr(struct oxr_face_tracker_android *face_tracker
 	return XRT_CAST_PTR_TO_OXR_HANDLE(XrFaceTrackerANDROID, face_tracker_android);
 }
 #endif
-
-/*!
- *
- * @name oxr_input.c
- * @{
- *
- */
-
-/*!
- * Helper function to classify subaction_paths.
- *
- * Sets all members of @p subaction_paths ( @ref oxr_subaction_paths ) as
- * appropriate based on the subaction paths found in the list.
- *
- * If no paths are provided, @p subaction_paths->any will be true.
- *
- * @return false if an invalid subaction path is provided.
- *
- * @public @memberof oxr_instance
- * @see oxr_subaction_paths
- */
-bool
-oxr_classify_subaction_paths(struct oxr_logger *log,
-                             const struct oxr_instance *inst,
-                             uint32_t subaction_path_count,
-                             const XrPath *subaction_paths,
-                             struct oxr_subaction_paths *subaction_paths_out);
-
-/*!
- * Find the pose input for the set of subaction_paths
- *
- * @public @memberof oxr_session
- */
-XrResult
-oxr_action_get_pose_input(struct oxr_session *sess,
-                          uint32_t act_key,
-                          const struct oxr_subaction_paths *subaction_paths_ptr,
-                          struct oxr_action_input **out_input);
-
-/*!
- * @public @memberof oxr_instance
- */
-XrResult
-oxr_action_set_create(struct oxr_logger *log,
-                      struct oxr_instance *inst,
-                      const XrActionSetCreateInfo *createInfo,
-                      struct oxr_action_set **out_act_set);
-
-/*!
- * @public @memberof oxr_action
- */
-XrResult
-oxr_action_create(struct oxr_logger *log,
-                  struct oxr_action_set *act_set,
-                  const XrActionCreateInfo *createInfo,
-                  struct oxr_action **out_act);
-
-/*!
- * @public @memberof oxr_session
- * @see oxr_action_set
- */
-XrResult
-oxr_session_attach_action_sets(struct oxr_logger *log,
-                               struct oxr_session *sess,
-                               const XrSessionActionSetsAttachInfo *bindInfo);
-
-
-XrResult
-oxr_session_update_action_bindings(struct oxr_logger *log, struct oxr_session *sess, const struct oxr_roles *roles);
-
-/*!
- * Given an action act_key, look up the @ref oxr_action_attachment of
- * the associated action in the given Session.
- *
- * @private @memberof oxr_session
- */
-void
-oxr_session_get_action_attachment(struct oxr_session *sess,
-                                  uint32_t act_key,
-                                  struct oxr_action_attachment **out_act_attached);
-
-/*!
- * @public @memberof oxr_session
- */
-XrResult
-oxr_action_sync_data(struct oxr_logger *log,
-                     struct oxr_session *sess,
-                     uint32_t countActionSets,
-                     const XrActiveActionSet *actionSets,
-                     const XrActiveActionSetPrioritiesEXT *activePriorities);
-
-/*!
- * @public @memberof oxr_session
- */
-XrResult
-oxr_action_enumerate_bound_sources(struct oxr_logger *log,
-                                   struct oxr_session *sess,
-                                   uint32_t act_key,
-                                   uint32_t sourceCapacityInput,
-                                   uint32_t *sourceCountOutput,
-                                   XrPath *sources);
-
-/*!
- * @public @memberof oxr_session
- */
-XrResult
-oxr_action_get_boolean(struct oxr_logger *log,
-                       struct oxr_session *sess,
-                       uint32_t act_key,
-                       struct oxr_subaction_paths subaction_paths,
-                       XrActionStateBoolean *data);
-
-/*!
- * @public @memberof oxr_session
- */
-XrResult
-oxr_action_get_vector1f(struct oxr_logger *log,
-                        struct oxr_session *sess,
-                        uint32_t act_key,
-                        struct oxr_subaction_paths subaction_paths,
-                        XrActionStateFloat *data);
-
-/*!
- * @public @memberof oxr_session
- */
-XrResult
-oxr_action_get_vector2f(struct oxr_logger *log,
-                        struct oxr_session *sess,
-                        uint32_t act_key,
-                        struct oxr_subaction_paths subaction_paths,
-                        XrActionStateVector2f *data);
-/*!
- * @public @memberof oxr_session
- */
-XrResult
-oxr_action_get_pose(struct oxr_logger *log,
-                    struct oxr_session *sess,
-                    uint32_t act_key,
-                    struct oxr_subaction_paths subaction_paths,
-                    XrActionStatePose *data);
-/*!
- * @public @memberof oxr_session
- */
-XrResult
-oxr_action_apply_haptic_feedback(struct oxr_logger *log,
-                                 struct oxr_session *sess,
-                                 uint32_t act_key,
-                                 struct oxr_subaction_paths subaction_paths,
-                                 const XrHapticBaseHeader *hapticEvent);
-/*!
- * @public @memberof oxr_session
- */
-XrResult
-oxr_action_stop_haptic_feedback(struct oxr_logger *log,
-                                struct oxr_session *sess,
-                                uint32_t act_key,
-                                struct oxr_subaction_paths subaction_paths);
-
-/*!
- * @}
- */
-
-/*!
- *
- * @name oxr_binding.c
- * @{
- *
- */
-
-/*!
- * Find the best matching profile for the given @ref xrt_device.
- *
- * @param      log   Logger.
- * @param      sess  Session.
- * @param      xdev  Can be null.
- * @param[out] out_p Returned interaction profile.
- *
- * @public @memberof oxr_session
- */
-void
-oxr_find_profile_for_device(struct oxr_logger *log,
-                            struct oxr_session *sess,
-                            struct xrt_device *xdev,
-                            struct oxr_interaction_profile **out_p);
-
-bool
-oxr_get_profile_for_device_name(struct oxr_logger *log,
-                                struct oxr_session *sess,
-                                enum xrt_device_name name,
-                                struct oxr_interaction_profile **out_p);
-
-struct oxr_interaction_profile *
-oxr_clone_profile(const struct oxr_interaction_profile *src_profile);
-
-/*!
- * Free all memory allocated by the binding system.
- *
- * @public @memberof oxr_instance
- */
-void
-oxr_binding_destroy_all(struct oxr_logger *log, struct oxr_instance *inst);
-
-/*!
- * Free all memory allocated by the binding system.
- *
- * @public @memberof oxr_instance
- */
-void
-oxr_session_binding_destroy_all(struct oxr_logger *log, struct oxr_session *sess);
-
-/*!
- * Find all bindings that is the given action key is bound to.
- * @public @memberof oxr_interaction_profile
- */
-void
-oxr_binding_find_bindings_from_act_key(struct oxr_logger *log,
-                                       struct oxr_interaction_profile *profile,
-                                       uint32_t key,
-                                       size_t max_binding_count,
-                                       struct oxr_binding **out_bindings,
-                                       size_t *out_binding_count);
-
-/*!
- * @public @memberof oxr_instance
- */
-XrResult
-oxr_action_suggest_interaction_profile_bindings(struct oxr_logger *log,
-                                                struct oxr_instance *inst,
-                                                const XrInteractionProfileSuggestedBinding *suggestedBindings,
-                                                struct oxr_dpad_state *state);
-
-/*!
- * @public @memberof oxr_instance
- */
-XrResult
-oxr_action_get_current_interaction_profile(struct oxr_logger *log,
-                                           struct oxr_session *sess,
-                                           XrPath topLevelUserPath,
-                                           XrInteractionProfileState *interactionProfile);
-
-/*!
- * @public @memberof oxr_session
- */
-XrResult
-oxr_action_get_input_source_localized_name(struct oxr_logger *log,
-                                           struct oxr_session *sess,
-                                           const XrInputSourceLocalizedNameGetInfo *getInfo,
-                                           uint32_t bufferCapacityInput,
-                                           uint32_t *bufferCountOutput,
-                                           char *buffer);
-
-/*!
- * @}
- */
-
-
-/*!
- *
- * @name oxr_dpad.c
- * @{
- *
- */
-
-/*!
- * Initialises a dpad state, has to be zero init before a call to this function.
- *
- * @public @memberof oxr_dpad_state_get
- */
-bool
-oxr_dpad_state_init(struct oxr_dpad_state *state);
-
-/*!
- * Look for a entry in the state for the given action set key,
- * returns NULL if no entry has been made for that action set.
- *
- * @public @memberof oxr_dpad_state_get
- */
-struct oxr_dpad_entry *
-oxr_dpad_state_get(struct oxr_dpad_state *state, uint64_t key);
-
-/*!
- * Look for a entry in the state for the given action set key,
- * allocates a new entry if none was found.
- *
- * @public @memberof oxr_dpad_state_get
- */
-struct oxr_dpad_entry *
-oxr_dpad_state_get_or_add(struct oxr_dpad_state *state, uint64_t key);
-
-/*!
- * Frees all state and entries attached to this dpad state.
- *
- * @public @memberof oxr_dpad_state_get
- */
-void
-oxr_dpad_state_deinit(struct oxr_dpad_state *state);
-
-/*!
- * Clones all oxr_dpad_state
- * @param dst_dpad_state destination of cloning
- * @param src_dpad_state source of cloning
- * @public @memberof oxr_dpad_state_clone
- */
-bool
-oxr_dpad_state_clone(struct oxr_dpad_state *dst_dpad_state, const struct oxr_dpad_state *src_dpad_state);
-
-
-/*!
- * @}
- */
-
 
 /*!
  *
@@ -1809,7 +1500,7 @@ struct oxr_session
 
 	/*! initial relation of head in "global" space.
 	 * Used as reference for local space.  */
-	struct xrt_space_relation local_space_pure_relation;
+	// struct xrt_space_relation local_space_pure_relation;
 
 	bool has_lost;
 };
@@ -1852,53 +1543,6 @@ XrResult
 oxr_session_request_display_refresh_rate(struct oxr_logger *log, struct oxr_session *sess, float displayRefreshRate);
 #endif // OXR_HAVE_FB_display_refresh_rate
 
-/*!
- * dpad settings we need extracted from XrInteractionProfileDpadBindingEXT
- *
- * @ingroup oxr_input
- */
-struct oxr_dpad_settings
-{
-	float forceThreshold;
-	float forceThresholdReleased;
-	float centerRegion;
-	float wedgeAngle;
-	bool isSticky;
-};
-
-/*!
- * dpad binding extracted from XrInteractionProfileDpadBindingEXT
- */
-struct oxr_dpad_binding_modification
-{
-	XrPath binding;
-	struct oxr_dpad_settings settings;
-};
-
-/*!
- * A entry in the dpad state for one action set.
- *
- * @ingroup oxr_input
- */
-struct oxr_dpad_entry
-{
-#ifdef XR_EXT_dpad_binding
-	struct oxr_dpad_binding_modification dpads[4];
-	uint32_t dpad_count;
-#endif
-
-	uint64_t key;
-};
-
-/*!
- * Holds dpad binding state for a single interaction profile.
- *
- * @ingroup oxr_input
- */
-struct oxr_dpad_state
-{
-	struct u_hashmap_int *uhi;
-};
 
 /*!
  * dpad emulation settings from oxr_interaction_profile
@@ -2054,16 +1698,6 @@ struct oxr_action_set_attachment
 	size_t action_attachment_count;
 };
 
-/*!
- * De-initialize an action set attachment and its action attachments.
- *
- * Frees the action attachments, but does not de-allocate the action set
- * attachment.
- *
- * @public @memberof oxr_action_set_attachment
- */
-void
-oxr_action_set_attachment_teardown(struct oxr_action_set_attachment *act_set_attached);
 
 
 /*!

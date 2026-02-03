@@ -12,6 +12,8 @@
 #pragma once
 
 #include "oxr_extension_support.h"
+#include "actions/oxr_api_action.h"
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -346,11 +348,16 @@ oxr_xrThermalGetTemperatureTrendEXT(XrSession session,
 #endif // OXR_HAVE_EXT_thermal_query
 
 
+
 /*
  *
  * oxr_api_space.c
  *
  */
+
+//! OpenXR API function @ep{xrCreateActionSpace}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateActionSpace(XrSession session, const XrActionSpaceCreateInfo *createInfo, XrSpace *space);
 
 //! OpenXR API function @ep{xrEnumerateReferenceSpaces}
 XRAPI_ATTR XrResult XRAPI_CALL
@@ -459,90 +466,9 @@ oxr_xrSessionInsertDebugUtilsLabelEXT(XrSession session, const XrDebugUtilsLabel
 
 /*
  *
- * oxr_api_action.c
+ * oxr_api_hand_tracking.c
  *
  */
-
-//! OpenXR API function @ep{xrCreateActionSpace}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrCreateActionSpace(XrSession session, const XrActionSpaceCreateInfo *createInfo, XrSpace *space);
-
-//! OpenXR API function @ep{xrCreateActionSet}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrCreateActionSet(XrInstance instance, const XrActionSetCreateInfo *createInfo, XrActionSet *actionSet);
-
-//! OpenXR API function @ep{xrDestroyActionSet}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrDestroyActionSet(XrActionSet actionSet);
-
-//! OpenXR API function @ep{xrCreateAction}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrCreateAction(XrActionSet actionSet, const XrActionCreateInfo *createInfo, XrAction *action);
-
-//! OpenXR API function @ep{xrDestroyAction}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrDestroyAction(XrAction action);
-
-//! OpenXR API function @ep{xrSuggestInteractionProfileBindings}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
-                                        const XrInteractionProfileSuggestedBinding *suggestedBindings);
-
-//! OpenXR API function @ep{xrAttachSessionActionSets}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttachInfo *bindInfo);
-
-//! OpenXR API function @ep{xrGetCurrentInteractionProfile}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetCurrentInteractionProfile(XrSession session,
-                                   XrPath topLevelUserPath,
-                                   XrInteractionProfileState *interactionProfile);
-
-//! OpenXR API function @ep{xrGetActionStateBoolean}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetActionStateBoolean(XrSession session, const XrActionStateGetInfo *getInfo, XrActionStateBoolean *data);
-
-//! OpenXR API function @ep{xrGetActionStateFloat}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetActionStateFloat(XrSession session, const XrActionStateGetInfo *getInfo, XrActionStateFloat *data);
-
-//! OpenXR API function @ep{xrGetActionStateVector2f}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetActionStateVector2f(XrSession session, const XrActionStateGetInfo *getInfo, XrActionStateVector2f *data);
-
-//! OpenXR API function @ep{xrGetActionStatePose}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetActionStatePose(XrSession session, const XrActionStateGetInfo *getInfo, XrActionStatePose *data);
-
-//! OpenXR API function @ep{xrSyncActions}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrSyncActions(XrSession session, const XrActionsSyncInfo *syncInfo);
-
-//! OpenXR API function @ep{xrEnumerateBoundSourcesForAction}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrEnumerateBoundSourcesForAction(XrSession session,
-                                     const XrBoundSourcesForActionEnumerateInfo *enumerateInfo,
-                                     uint32_t sourceCapacityInput,
-                                     uint32_t *sourceCountOutput,
-                                     XrPath *sources);
-
-//! OpenXR API function @ep{xrGetInputSourceLocalizedName}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetInputSourceLocalizedName(XrSession session,
-                                  const XrInputSourceLocalizedNameGetInfo *getInfo,
-                                  uint32_t bufferCapacityInput,
-                                  uint32_t *bufferCountOutput,
-                                  char *buffer);
-
-//! OpenXR API function @ep{xrApplyHapticFeedback}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrApplyHapticFeedback(XrSession session,
-                          const XrHapticActionInfo *hapticActionInfo,
-                          const XrHapticBaseHeader *hapticEvent);
-
-//! OpenXR API function @ep{xrStopHapticFeedback}
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrStopHapticFeedback(XrSession session, const XrHapticActionInfo *hapticActionInfo);
 
 //! OpenXR API function @ep{xrCreateHandTrackerEXT}
 XRAPI_ATTR XrResult XRAPI_CALL
@@ -571,6 +497,13 @@ oxr_xrEnumerateDisplayRefreshRatesFB(XrSession session,
                                      uint32_t displayRefreshRateCapacityInput,
                                      uint32_t *displayRefreshRateCountOutput,
                                      float *displayRefreshRates);
+
+
+/*
+ *
+ * Mix bag of files, because people put things in the wrong place in the header.
+ *
+ */
 
 //! OpenXR API function @ep{xrGetDisplayRefreshRateFB}
 XRAPI_ATTR XrResult XRAPI_CALL

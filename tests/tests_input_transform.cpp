@@ -1,4 +1,5 @@
 // Copyright 2018-2020, Collabora, Ltd.
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -12,7 +13,7 @@
 
 #include <xrt/xrt_defines.h>
 
-#include <oxr/oxr_input_transform.h>
+#include <oxr/actions/oxr_input_transform.h>
 #include <oxr/oxr_logger.h>
 #include <oxr/oxr_objects.h>
 

@@ -7,7 +7,15 @@
  * @ingroup oxr_api
  */
 
+#include "xrt/xrt_compiler.h"
+
+#include "util/u_trace_marker.h"
+
 #include "oxr_haptic.h"
+#include "oxr_input.h"
+#include "oxr_subaction.h"
+
+#include "../oxr_objects.h"
 
 
 static bool

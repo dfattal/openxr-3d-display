@@ -9,7 +9,13 @@
 
 #pragma once
 
-#include "oxr_objects.h"
+#include "oxr_forward_declarations.h"
+#include "oxr_extension_support.h"
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 
 /*!
@@ -19,3 +25,8 @@ XrResult
 oxr_haptic_get_attachment_pcm_sample_rate(struct oxr_action_attachment *act_attached,
                                           const struct oxr_subaction_paths subaction_paths,
                                           float *sample_rate);
+
+
+#ifdef __cplusplus
+}
+#endif

@@ -29,7 +29,6 @@
 #include "oxr_handle.h"
 #include "oxr_chain.h"
 #include "oxr_roles.h"
-#include "oxr_haptic.h"
 
 
 XRAPI_ATTR XrResult XRAPI_CALL
@@ -476,63 +475,6 @@ oxr_xrRequestDisplayRefreshRateFB(XrSession session, float displayRefreshRate)
 	}
 
 	return oxr_session_request_display_refresh_rate(&log, sess, displayRefreshRate);
-}
-
-#endif
-
-/*
- *
- * XR_FB_haptic_pcm
- *
- */
-
-#ifdef OXR_HAVE_FB_haptic_pcm
-
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetDeviceSampleRateFB(XrSession session,
-                            const XrHapticActionInfo *hapticActionInfo,
-                            XrDevicePcmSampleRateGetInfoFB *deviceSampleRate)
-{
-	OXR_TRACE_MARKER();
-
-	struct oxr_session *sess = NULL;
-	struct oxr_action *act = NULL;
-	struct oxr_subaction_paths subaction_paths = {0};
-	struct oxr_logger log;
-	XrResult ret;
-	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetDeviceSampleRateFB");
-	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
-	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, hapticActionInfo, XR_TYPE_HAPTIC_ACTION_INFO);
-	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, deviceSampleRate, XR_TYPE_DEVICE_PCM_SAMPLE_RATE_GET_INFO_FB);
-	OXR_VERIFY_ACTION_NOT_NULL(&log, hapticActionInfo->action, act);
-	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, FB_haptic_pcm);
-
-	// get the subaction paths
-	ret = oxr_verify_subaction_path_get(&log, act->act_set->inst, hapticActionInfo->subactionPath,
-	                                    &act->data->subaction_paths, &subaction_paths, "getInfo->subactionPath");
-	if (ret != XR_SUCCESS) {
-		return ret;
-	}
-
-	// make sure it's a vibration action
-	if (act->data->action_type != XR_ACTION_TYPE_VIBRATION_OUTPUT) {
-		return oxr_error(&log, XR_ERROR_ACTION_TYPE_MISMATCH, "Not created with output vibration type");
-	}
-
-	// get the attached action
-	struct oxr_action_attachment *act_attached = NULL;
-
-	oxr_session_get_action_attachment(sess, act->act_key, &act_attached);
-	if (act_attached == NULL) {
-		return oxr_error(&log, XR_ERROR_ACTIONSET_NOT_ATTACHED, "Action has not been attached to this session");
-	}
-
-	ret = oxr_haptic_get_attachment_pcm_sample_rate(act_attached, subaction_paths, &deviceSampleRate->sampleRate);
-	if (ret != XR_SUCCESS) {
-		return ret;
-	}
-
-	return oxr_session_success_focused_result(sess);
 }
 
 #endif

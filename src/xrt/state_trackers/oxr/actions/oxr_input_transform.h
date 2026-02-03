@@ -1,4 +1,5 @@
 // Copyright 2018-2020, Collabora, Ltd.
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -11,19 +12,18 @@
 #pragma once
 
 #include "xrt/xrt_device.h"
-#include "oxr_objects.h"
 
 // we need no platform-specific defines from OpenXR.
 #include "openxr/openxr.h"
+
+#include "oxr_forward_declarations.h"
+#include "oxr_dpad_state.h"
+
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-struct oxr_logger;
-struct oxr_sink_logger;
-struct oxr_action;
-struct oxr_action_cache;
 
 /*!
  * @defgroup oxr_input_transform OpenXR input transformation

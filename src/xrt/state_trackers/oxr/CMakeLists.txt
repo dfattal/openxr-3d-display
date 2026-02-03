@@ -11,12 +11,27 @@ add_subdirectory(extension_support)
 
 add_library(
 	st_oxr STATIC
+	actions/oxr_api_action.c
+	actions/oxr_api_action.h
+	actions/oxr_binding.c
+	actions/oxr_binding.h
+	actions/oxr_dpad_state.c
+	actions/oxr_dpad_state.h
+	actions/oxr_get_state.c
+	actions/oxr_get_state.h
+	actions/oxr_haptic.c
+	actions/oxr_haptic.h
+	actions/oxr_input.c
+	actions/oxr_input.h
+	actions/oxr_input_transform.c
+	actions/oxr_input_transform.h
+	actions/oxr_set_haptic.c
+	actions/oxr_set_haptic.h
 	common/oxr_defines.h
 	common/oxr_forward_declarations.h
 	path/oxr_path_store.c
 	path/oxr_path_store.h
 	path/oxr_path_wrappers.h
-	oxr_api_action.c
 	oxr_api_funcs.h
 	oxr_api_instance.c
 	oxr_api_negotiate.c
@@ -26,18 +41,11 @@ add_library(
 	oxr_api_system.c
 	oxr_api_verify.h
 	oxr_api_xdev.c
-	oxr_binding.c
 	oxr_chain.h
-	oxr_dpad.c
 	oxr_event.c
 	oxr_frame_sync.c
 	oxr_frame_sync.h
 	oxr_handle_base.c
-	oxr_haptic.c
-	oxr_haptic.h
-	oxr_input.c
-	oxr_input_transform.c
-	oxr_input_transform.h
 	oxr_instance.c
 	oxr_logger.c
 	oxr_logger.h

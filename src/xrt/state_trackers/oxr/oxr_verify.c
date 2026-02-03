@@ -1,5 +1,5 @@
 // Copyright 2018-2022, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -18,7 +18,9 @@
 #include "oxr_logger.h"
 #include "oxr_api_verify.h"
 #include "oxr_chain.h"
-#include "oxr_subaction.h"
+
+#include "actions/oxr_subaction.h"
+#include "actions/oxr_input.h"
 
 #include <assert.h>
 #include <stdio.h>

@@ -1,4 +1,5 @@
 // Copyright 2018-2022, Collabora, Ltd.
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,14 +10,13 @@
  */
 
 #include "math/m_mathinclude.h"
-
-#include "oxr_input_transform.h"
-#include "oxr_logger.h"
-#include "oxr_objects.h"
-#include "oxr_conversions.h"
-
 #include "util/u_misc.h"
 
+#include "oxr_input_transform.h"
+
+#include "../oxr_logger.h"
+#include "../oxr_objects.h"
+#include "../oxr_conversions.h"
 
 #include <string.h>
 #include <assert.h>

@@ -1,4 +1,5 @@
 // Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,9 +10,9 @@
 
 #include "oxr_objects.h" // For now needs to come before oxr_logger.h
 #include "oxr_logger.h"
-#include "oxr_input_transform.h"
 #include "oxr_pretty_print.h"
-
+#include "actions/oxr_input_transform.h"
+#include "actions/oxr_input.h"
 
 /*
  *

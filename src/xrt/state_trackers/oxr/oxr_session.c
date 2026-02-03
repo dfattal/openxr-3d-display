@@ -48,6 +48,8 @@
 #include "oxr_conversions.h"
 #include "oxr_xret.h"
 #include "oxr_roles.h"
+#include "actions/oxr_input.h"
+#include "actions/oxr_binding.h"
 
 #include <stdio.h>
 #include <stdlib.h>

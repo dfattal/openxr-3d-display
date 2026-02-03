@@ -11,13 +11,15 @@
 
 #include "util/u_misc.h"
 
-#include "xrt/xrt_compiler.h"
-
-#include "oxr_objects.h"
-#include "oxr_logger.h"
-#include "oxr_two_call.h"
+#include "oxr_binding.h"
 #include "oxr_subaction.h"
 #include "oxr_generated_bindings.h"
+#include "oxr_dpad_state.h"
+
+#include "../oxr_objects.h"
+#include "../oxr_logger.h"
+#include "../oxr_two_call.h"
+
 
 #include <stdio.h>
 

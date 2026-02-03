@@ -1,4 +1,5 @@
 // Copyright 2022, Collabora, Ltd.
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -8,7 +9,12 @@
  * @ingroup oxr_main
  */
 
-#include "oxr_objects.h"
+#include "util/u_hashmap.h"
+#include "util/u_misc.h"
+
+#include "oxr_dpad_state.h"
+
+#include <assert.h>
 
 
 /*
@@ -36,6 +42,7 @@ clone_oxr_dpad_entry(uint64_t key, const void *src_data, void *ctx)
 
 	memcpy(dst_dpad_entry, src_dpad_entry, sizeof(struct oxr_dpad_entry));
 }
+
 
 /*
  *

@@ -16,16 +16,20 @@
 
 #include "xrt/xrt_compiler.h"
 
-#include "oxr_objects.h"
-#include "oxr_logger.h"
-#include "oxr_handle.h"
-#include "oxr_two_call.h"
-#include "oxr_input_transform.h"
+#include "oxr_input.h"
+#include "oxr_binding.h"
 #include "oxr_subaction.h"
-#include "oxr_conversions.h"
-#include "oxr_xret.h"
-#include "oxr_roles.h"
+#include "oxr_dpad_state.h"
+#include "oxr_input_transform.h"
 #include "oxr_generated_bindings.h"
+
+#include "../oxr_objects.h"
+#include "../oxr_logger.h"
+#include "../oxr_handle.h"
+#include "../oxr_two_call.h"
+#include "../oxr_conversions.h"
+#include "../oxr_xret.h"
+#include "../oxr_roles.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -926,7 +930,7 @@ oxr_action_attachment_bind(struct oxr_logger *log,
 	return XR_SUCCESS;
 }
 
-static void
+void
 oxr_action_cache_stop_output(struct oxr_logger *log, struct oxr_session *sess, struct oxr_action_cache *cache)
 {
 	// Set this as stopped.
@@ -1867,7 +1871,7 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
 	return oxr_session_success_result(sess);
 }
 
-XrResult
+static XrResult
 oxr_session_update_action_bindings(struct oxr_logger *log, struct oxr_session *sess, const struct oxr_roles *roles)
 {
 	struct oxr_profiles_per_subaction profiles = {0};
@@ -2096,332 +2100,4 @@ oxr_action_enumerate_bound_sources(struct oxr_logger *log,
 
 	OXR_TWO_CALL_HELPER(log, sourceCapacityInput, sourceCountOutput, sources, path_count, temp,
 	                    oxr_session_success_result(sess));
-}
-
-
-/*
- *
- * Action get functions.
- *
- */
-
-#define OXR_ACTION_GET_XR_STATE_FROM_ACTION_STATE_COMMON(ACTION_STATE, DATA)                                           \
-	do {                                                                                                           \
-		DATA->lastChangeTime = time_state_monotonic_to_ts_ns(inst->timekeeping, ACTION_STATE->timestamp);      \
-		DATA->changedSinceLastSync = ACTION_STATE->changed;                                                    \
-		DATA->isActive = XR_TRUE;                                                                              \
-	} while (0)
-
-static void
-get_xr_state_from_action_state_bool(struct oxr_instance *inst,
-                                    struct oxr_action_state *state,
-                                    XrActionStateBoolean *data)
-{
-	/* only get here if the action is active! */
-	assert(state->active);
-	OXR_ACTION_GET_XR_STATE_FROM_ACTION_STATE_COMMON(state, data);
-	data->currentState = state->value.boolean;
-}
-
-static void
-get_xr_state_from_action_state_vec1(struct oxr_instance *inst, struct oxr_action_state *state, XrActionStateFloat *data)
-{
-	/* only get here if the action is active! */
-	assert(state->active);
-	OXR_ACTION_GET_XR_STATE_FROM_ACTION_STATE_COMMON(state, data);
-	data->currentState = state->value.vec1.x;
-}
-
-static void
-get_xr_state_from_action_state_vec2(struct oxr_instance *inst,
-                                    struct oxr_action_state *state,
-                                    XrActionStateVector2f *data)
-{
-	/* only get here if the action is active! */
-	assert(state->active);
-	OXR_ACTION_GET_XR_STATE_FROM_ACTION_STATE_COMMON(state, data);
-	data->currentState.x = state->value.vec2.x;
-	data->currentState.y = state->value.vec2.y;
-}
-
-/*!
- * This populates the internals of action get state functions.
- *
- * @note Keep this synchronized with OXR_FOR_EACH_SUBACTION_PATH!
- */
-#define OXR_ACTION_GET_FILLER(TYPE)                                                                                    \
-	if (subaction_paths.any && act_attached->any_state.active) {                                                   \
-		get_xr_state_from_action_state_##TYPE(sess->sys->inst, &act_attached->any_state, data);                \
-	}                                                                                                              \
-	if (subaction_paths.user && act_attached->user.current.active) {                                               \
-		get_xr_state_from_action_state_##TYPE(sess->sys->inst, &act_attached->user.current, data);             \
-	}                                                                                                              \
-	if (subaction_paths.head && act_attached->head.current.active) {                                               \
-		get_xr_state_from_action_state_##TYPE(sess->sys->inst, &act_attached->head.current, data);             \
-	}                                                                                                              \
-	if (subaction_paths.left && act_attached->left.current.active) {                                               \
-		get_xr_state_from_action_state_##TYPE(sess->sys->inst, &act_attached->left.current, data);             \
-	}                                                                                                              \
-	if (subaction_paths.right && act_attached->right.current.active) {                                             \
-		get_xr_state_from_action_state_##TYPE(sess->sys->inst, &act_attached->right.current, data);            \
-	}                                                                                                              \
-	if (subaction_paths.gamepad && act_attached->gamepad.current.active) {                                         \
-		get_xr_state_from_action_state_##TYPE(sess->sys->inst, &act_attached->gamepad.current, data);          \
-	}
-
-/*!
- * Clear the actual data members of the XrActionState* types, to have the
- * correct return value in case of the action being not active
- */
-#define OXR_ACTION_RESET_XR_ACTION_STATE(data)                                                                         \
-	do {                                                                                                           \
-		data->isActive = XR_FALSE;                                                                             \
-		data->changedSinceLastSync = XR_FALSE;                                                                 \
-		data->lastChangeTime = 0;                                                                              \
-		U_ZERO(&data->currentState);                                                                           \
-	} while (0)
-
-XrResult
-oxr_action_get_boolean(struct oxr_logger *log,
-                       struct oxr_session *sess,
-                       uint32_t act_key,
-                       struct oxr_subaction_paths subaction_paths,
-                       XrActionStateBoolean *data)
-{
-	struct oxr_action_attachment *act_attached = NULL;
-
-	oxr_session_get_action_attachment(sess, act_key, &act_attached);
-	if (act_attached == NULL) {
-		return oxr_error(log, XR_ERROR_ACTIONSET_NOT_ATTACHED, "Action has not been attached to this session");
-	}
-
-	OXR_ACTION_RESET_XR_ACTION_STATE(data);
-
-	OXR_ACTION_GET_FILLER(bool);
-
-	return oxr_session_success_result(sess);
-}
-
-XrResult
-oxr_action_get_vector1f(struct oxr_logger *log,
-                        struct oxr_session *sess,
-                        uint32_t act_key,
-                        struct oxr_subaction_paths subaction_paths,
-                        XrActionStateFloat *data)
-{
-	struct oxr_action_attachment *act_attached = NULL;
-
-	oxr_session_get_action_attachment(sess, act_key, &act_attached);
-	if (act_attached == NULL) {
-		return oxr_error(log, XR_ERROR_ACTIONSET_NOT_ATTACHED, "Action has not been attached to this session");
-	}
-
-	OXR_ACTION_RESET_XR_ACTION_STATE(data);
-
-	OXR_ACTION_GET_FILLER(vec1);
-
-	return oxr_session_success_result(sess);
-}
-
-XrResult
-oxr_action_get_vector2f(struct oxr_logger *log,
-                        struct oxr_session *sess,
-                        uint32_t act_key,
-                        struct oxr_subaction_paths subaction_paths,
-                        XrActionStateVector2f *data)
-{
-	struct oxr_action_attachment *act_attached = NULL;
-
-	oxr_session_get_action_attachment(sess, act_key, &act_attached);
-	if (act_attached == NULL) {
-		return oxr_error(log, XR_ERROR_ACTIONSET_NOT_ATTACHED, "Action has not been attached to this session");
-	}
-
-	OXR_ACTION_RESET_XR_ACTION_STATE(data);
-
-	OXR_ACTION_GET_FILLER(vec2);
-
-	return oxr_session_success_result(sess);
-}
-
-XrResult
-oxr_action_get_pose(struct oxr_logger *log,
-                    struct oxr_session *sess,
-                    uint32_t act_key,
-                    struct oxr_subaction_paths subaction_paths,
-                    XrActionStatePose *data)
-{
-	struct oxr_action_attachment *act_attached = NULL;
-
-	oxr_session_get_action_attachment(sess, act_key, &act_attached);
-	if (act_attached == NULL) {
-		return oxr_error(log, XR_ERROR_ACTIONSET_NOT_ATTACHED, "Action has not been attached to this session");
-	}
-
-	// For poses on the any path we select a single path.
-	if (subaction_paths.any) {
-		subaction_paths = act_attached->any_pose_subaction_path;
-	}
-
-	data->isActive = XR_FALSE;
-
-	/*
-	 * The sub path any is used as a catch all here to see if any
-	 */
-#define COMPUTE_ACTIVE(X)                                                                                              \
-	if (subaction_paths.X) {                                                                                       \
-		data->isActive |= act_attached->X.current.active;                                                      \
-	}
-
-	OXR_FOR_EACH_VALID_SUBACTION_PATH(COMPUTE_ACTIVE)
-#undef COMPUTE_ACTIVE
-
-	return oxr_session_success_result(sess);
-}
-
-
-/*
- *
- * Haptic feedback functions.
- *
- */
-
-static void
-set_action_output_vibration(struct oxr_logger *log,
-                            struct oxr_session *sess,
-                            struct oxr_action_cache *cache,
-                            int64_t stop,
-                            const XrHapticVibration *data)
-{
-	cache->stop_output_time = stop;
-
-	struct xrt_output_value value = {0};
-	value.vibration.frequency = data->frequency;
-	value.vibration.amplitude = data->amplitude;
-	value.vibration.duration_ns = data->duration;
-	value.type = XRT_OUTPUT_VALUE_TYPE_VIBRATION;
-
-	for (uint32_t i = 0; i < cache->output_count; i++) {
-		struct oxr_action_output *output = &cache->outputs[i];
-		struct xrt_device *xdev = output->xdev;
-
-		xrt_result_t xret = xrt_device_set_output(xdev, output->name, &value);
-		if (xret != XRT_SUCCESS) {
-			struct oxr_sink_logger slog = {0};
-			oxr_slog(&slog, "Failed to set output vibration ");
-			u_pp_xrt_output_name(oxr_slog_dg(&slog), output->name);
-			oxr_log_slog(log, &slog);
-		}
-	}
-}
-
-XRT_MAYBE_UNUSED static void
-set_action_output_vibration_pcm(struct oxr_logger *log,
-                                struct oxr_session *sess,
-                                struct oxr_action_cache *cache,
-                                const XrHapticPcmVibrationFB *data)
-{
-	struct xrt_output_value value = {0};
-	value.pcm_vibration.append = data->append;
-	value.pcm_vibration.buffer = data->buffer;
-	value.pcm_vibration.buffer_size = data->bufferSize;
-	value.pcm_vibration.sample_rate = data->sampleRate;
-	value.pcm_vibration.samples_consumed = data->samplesConsumed;
-	value.type = XRT_OUTPUT_VALUE_TYPE_PCM_VIBRATION;
-
-	for (uint32_t i = 0; i < cache->output_count; i++) {
-		struct oxr_action_output *output = &cache->outputs[i];
-		struct xrt_device *xdev = output->xdev;
-
-		xrt_result_t xret = xrt_device_set_output(xdev, output->name, &value);
-		if (xret != XRT_SUCCESS) {
-			struct oxr_sink_logger slog = {0};
-			oxr_slog(&slog, "Failed to set output vibration PCM ");
-			u_pp_xrt_output_name(oxr_slog_dg(&slog), output->name);
-			oxr_log_slog(log, &slog);
-		}
-	}
-}
-
-XrResult
-oxr_action_apply_haptic_feedback(struct oxr_logger *log,
-                                 struct oxr_session *sess,
-                                 uint32_t act_key,
-                                 struct oxr_subaction_paths subaction_paths,
-                                 const XrHapticBaseHeader *hapticEvent)
-{
-	struct oxr_action_attachment *act_attached = NULL;
-
-	oxr_session_get_action_attachment(sess, act_key, &act_attached);
-	if (act_attached == NULL) {
-		return oxr_error(log, XR_ERROR_ACTIONSET_NOT_ATTACHED, "Action has not been attached to this session");
-	}
-
-	if (sess->state != XR_SESSION_STATE_FOCUSED) {
-		return oxr_session_success_focused_result(sess);
-	}
-
-	if (hapticEvent->type == XR_TYPE_HAPTIC_VIBRATION) {
-		const XrHapticVibration *data = (const XrHapticVibration *)hapticEvent;
-
-		// This should all be moved into the drivers.
-		const int64_t min_pulse_time_ns = time_s_to_ns(0.1);
-		int64_t now_ns = time_state_get_now(sess->sys->inst->timekeeping);
-		int64_t stop_ns = 0;
-		if (data->duration <= 0) {
-			stop_ns = now_ns + min_pulse_time_ns;
-		} else {
-			stop_ns = now_ns + data->duration;
-		}
-
-#define SET_OUT_VIBRATION(X)                                                                                           \
-	if (act_attached->X.current.active && (subaction_paths.X || subaction_paths.any)) {                            \
-		set_action_output_vibration(log, sess, &act_attached->X, stop_ns, data);                               \
-	}
-
-		OXR_FOR_EACH_SUBACTION_PATH(SET_OUT_VIBRATION)
-#undef SET_OUT_VIBRATION
-#ifdef OXR_HAVE_FB_haptic_pcm
-	} else if (hapticEvent->type == XR_TYPE_HAPTIC_PCM_VIBRATION_FB) {
-		const XrHapticPcmVibrationFB *data = (const XrHapticPcmVibrationFB *)hapticEvent;
-
-#define SET_OUT_VIBRATION(X)                                                                                           \
-	if (act_attached->X.current.active && (subaction_paths.X || subaction_paths.any)) {                            \
-		set_action_output_vibration_pcm(log, sess, &act_attached->X, data);                                    \
-	}
-
-		OXR_FOR_EACH_SUBACTION_PATH(SET_OUT_VIBRATION)
-#undef SET_OUT_VIBRATION
-#endif /* OXR_HAVE_FB_haptic_pcm */
-	} else {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "Received haptic feedback of invalid type");
-	}
-
-	return oxr_session_success_focused_result(sess);
-}
-
-XrResult
-oxr_action_stop_haptic_feedback(struct oxr_logger *log,
-                                struct oxr_session *sess,
-                                uint32_t act_key,
-                                struct oxr_subaction_paths subaction_paths)
-{
-	struct oxr_action_attachment *act_attached = NULL;
-
-	oxr_session_get_action_attachment(sess, act_key, &act_attached);
-	if (act_attached == NULL) {
-		return oxr_error(log, XR_ERROR_ACTIONSET_NOT_ATTACHED, "Action has not been attached to this session");
-	}
-
-	bool is_focused = sess->state == XR_SESSION_STATE_FOCUSED;
-
-#define STOP_VIBRATION(X)                                                                                              \
-	if (is_focused && act_attached->X.current.active && (subaction_paths.X || subaction_paths.any)) {              \
-		oxr_action_cache_stop_output(log, sess, &act_attached->X);                                             \
-	}
-
-	OXR_FOR_EACH_SUBACTION_PATH(STOP_VIBRATION)
-#undef STOP_VIBRATION
-
-	return oxr_session_success_focused_result(sess);
 }

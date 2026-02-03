@@ -9,22 +9,27 @@
  * @ingroup oxr_api
  */
 
-#include "oxr_objects.h"
-#include "oxr_logger.h"
-#include "oxr_handle.h"
-
 #include "util/u_debug.h"
 #include "util/u_trace_marker.h"
 
-#include "oxr_api_funcs.h"
-#include "oxr_api_verify.h"
-#include "oxr_chain.h"
+#include "oxr_api_action.h"
 #include "oxr_subaction.h"
-#include "oxr_roles.h"
 #include "oxr_generated_bindings.h"
+#include "oxr_get_state.h"
+#include "oxr_set_haptic.h"
+#include "oxr_dpad_state.h"
+#include "oxr_input.h"
+#include "oxr_binding.h"
+#include "oxr_haptic.h"
+
+#include "../oxr_api_verify.h"
+#include "../oxr_objects.h"
+#include "../oxr_logger.h"
+#include "../oxr_handle.h"
+#include "../oxr_chain.h"
+#include "../oxr_roles.h"
 
 #include <stdio.h>
-
 
 
 /*
@@ -842,3 +847,56 @@ oxr_xrStopHapticFeedback(XrSession session, const XrHapticActionInfo *hapticActi
 
 	return oxr_action_stop_haptic_feedback(&log, sess, act->act_key, subaction_paths);
 }
+
+
+#ifdef OXR_HAVE_FB_haptic_pcm
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetDeviceSampleRateFB(XrSession session,
+                            const XrHapticActionInfo *hapticActionInfo,
+                            XrDevicePcmSampleRateGetInfoFB *deviceSampleRate)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_action *act = NULL;
+	struct oxr_subaction_paths subaction_paths = {0};
+	struct oxr_logger log;
+	XrResult ret;
+
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetDeviceSampleRateFB");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, hapticActionInfo, XR_TYPE_HAPTIC_ACTION_INFO);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, deviceSampleRate, XR_TYPE_DEVICE_PCM_SAMPLE_RATE_GET_INFO_FB);
+	OXR_VERIFY_ACTION_NOT_NULL(&log, hapticActionInfo->action, act);
+	// OXR_VERIFY_EXTENSION(&log, sess->sys->inst, FB_haptic_pcm);
+
+	// get the subaction paths
+	ret = oxr_verify_subaction_path_get(&log, act->act_set->inst, hapticActionInfo->subactionPath,
+	                                    &act->data->subaction_paths, &subaction_paths, "getInfo->subactionPath");
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	// make sure it's a vibration action
+	if (act->data->action_type != XR_ACTION_TYPE_VIBRATION_OUTPUT) {
+		return oxr_error(&log, XR_ERROR_ACTION_TYPE_MISMATCH, "Not created with output vibration type");
+	}
+
+	// get the attached action
+	struct oxr_action_attachment *act_attached = NULL;
+
+	oxr_session_get_action_attachment(sess, act->act_key, &act_attached);
+	if (act_attached == NULL) {
+		return oxr_error(&log, XR_ERROR_ACTIONSET_NOT_ATTACHED, "Action has not been attached to this session");
+	}
+
+	ret = oxr_haptic_get_attachment_pcm_sample_rate(act_attached, subaction_paths, &deviceSampleRate->sampleRate);
+	if (ret != XR_SUCCESS) {
+		return oxr_error(&log, ret, "Failed to get sample rate");
+	}
+
+	return oxr_session_success_focused_result(sess);
+}
+
+#endif // OXR_HAVE_FB_haptic_pcm

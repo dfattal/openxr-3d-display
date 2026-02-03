@@ -33,10 +33,11 @@
 #include "oxr_logger.h"
 #include "oxr_handle.h"
 #include "oxr_extension_support.h"
-#include "oxr_subaction.h"
 #include "oxr_chain.h"
 #include "oxr_roles.h"
 #include "oxr_generated_bindings.h"
+#include "actions/oxr_binding.h"
+#include "actions/oxr_subaction.h"
 
 #include <sys/types.h>
 #ifdef XRT_OS_UNIX
