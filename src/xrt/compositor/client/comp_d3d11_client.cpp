@@ -331,9 +331,30 @@ import_image(ID3D11Device1 &device, HANDLE h)
 	wil::com_ptr<ID3D11Texture2D1> tex;
 
 	if (h == nullptr) {
+		OutputDebugStringA("[SRMonado] import_image: handle is NULL!\n");
 		return {};
 	}
-	THROW_IF_FAILED(device.OpenSharedResource1(h, __uuidof(ID3D11Texture2D1), tex.put_void()));
+
+	// Use OpenSharedResource1 for NT handles with detailed HRESULT logging
+	HRESULT hr = device.OpenSharedResource1(h, __uuidof(ID3D11Texture2D1), tex.put_void());
+	if (FAILED(hr)) {
+		char buf[512];
+		snprintf(buf, sizeof(buf),
+		         "[SRMonado] OpenSharedResource1 FAILED: handle=%p, HRESULT=0x%08lx\n"
+		         "  Common causes:\n"
+		         "  - 0x80070057 (E_INVALIDARG): wrong handle type or invalid handle\n"
+		         "  - 0x80070005 (E_ACCESSDENIED): security/permissions issue (AppContainer?)\n"
+		         "  - 0x887a0005 (DXGI_ERROR_DEVICE_REMOVED): wrong GPU adapter (LUID mismatch)\n"
+		         "  - 0x887a0006 (DXGI_ERROR_DEVICE_HUNG): GPU hung during operation\n",
+		         h, (unsigned long)hr);
+		OutputDebugStringA(buf);
+		THROW_IF_FAILED(hr);  // Re-throw for proper error propagation
+	}
+
+	char buf[128];
+	snprintf(buf, sizeof(buf), "[SRMonado] OpenSharedResource1 SUCCESS: handle=%p -> texture=%p\n",
+	         h, (void*)tex.get());
+	OutputDebugStringA(buf);
 	return tex;
 }
 
@@ -343,9 +364,29 @@ import_image_dxgi(ID3D11Device1 &device, HANDLE h)
 	wil::com_ptr<ID3D11Texture2D1> tex;
 
 	if (h == nullptr) {
+		OutputDebugStringA("[SRMonado] import_image_dxgi: handle is NULL!\n");
 		return {};
 	}
-	THROW_IF_FAILED(device.OpenSharedResource(h, __uuidof(ID3D11Texture2D1), tex.put_void()));
+
+	// Use OpenSharedResource for legacy DXGI handles with detailed HRESULT logging
+	HRESULT hr = device.OpenSharedResource(h, __uuidof(ID3D11Texture2D1), tex.put_void());
+	if (FAILED(hr)) {
+		char buf[512];
+		snprintf(buf, sizeof(buf),
+		         "[SRMonado] OpenSharedResource FAILED: handle=%p, HRESULT=0x%08lx\n"
+		         "  Common causes:\n"
+		         "  - 0x80070057 (E_INVALIDARG): wrong handle type (expected DXGI, got NT?)\n"
+		         "  - 0x80070005 (E_ACCESSDENIED): security/permissions issue\n"
+		         "  - 0x887a0005 (DXGI_ERROR_DEVICE_REMOVED): wrong GPU adapter\n",
+		         h, (unsigned long)hr);
+		OutputDebugStringA(buf);
+		THROW_IF_FAILED(hr);  // Re-throw for proper error propagation
+	}
+
+	char buf[128];
+	snprintf(buf, sizeof(buf), "[SRMonado] OpenSharedResource SUCCESS: handle=%p -> texture=%p\n",
+	         h, (void*)tex.get());
+	OutputDebugStringA(buf);
 	return tex;
 }
 
