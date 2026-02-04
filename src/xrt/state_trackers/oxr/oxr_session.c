@@ -501,7 +501,12 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 		// visibility/focus flags during session creation because they don't
 		// use the multi-compositor event system. If flags are already set,
 		// trigger state transitions directly like headless mode.
-		if (sess->compositor_visible && sess->compositor_focused) {
+		//
+		// EXCEPTION: AppContainer apps (Chrome WebXR) need to stay in READY
+		// state while initializing their frame loop. For these apps, we delay
+		// the transitions to the first xrEndFrame call. This matches SRHydra
+		// behavior and prevents Chrome from crashing during initialization.
+		if (sess->compositor_visible && sess->compositor_focused && !sess->is_appcontainer) {
 			oxr_session_change_state(log, sess, XR_SESSION_STATE_SYNCHRONIZED, 0);
 			oxr_session_change_state(log, sess, XR_SESSION_STATE_VISIBLE, 0);
 			oxr_session_change_state(log, sess, XR_SESSION_STATE_FOCUSED, 0);
@@ -1739,6 +1744,14 @@ oxr_session_create(struct oxr_logger *log,
 
 	// Track whether this session has an external window handle
 	sess->has_external_window = (xsi.external_window_handle != NULL);
+
+	// Track whether this is an AppContainer app (Chrome WebXR)
+	// Used to delay session state transitions for sandbox compatibility
+#ifdef OXR_HAVE_EXT_win32_appcontainer_compatible
+	sess->is_appcontainer = sys->inst->extensions.EXT_win32_appcontainer_compatible;
+#else
+	sess->is_appcontainer = false;
+#endif
 
 	// Everything is in order, start the state changes.
 	oxr_session_change_state(log, sess, XR_SESSION_STATE_IDLE, 0);

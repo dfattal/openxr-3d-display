@@ -1622,9 +1622,20 @@ submit_equirect1_layer(struct oxr_session *sess,
 static void
 do_synchronize_state_change(struct oxr_logger *log, struct oxr_session *sess)
 {
+	// First frame: transition from READY to SYNCHRONIZED
 	if (!sess->has_ended_once && sess->state < XR_SESSION_STATE_VISIBLE) {
 		oxr_session_change_state(log, sess, XR_SESSION_STATE_SYNCHRONIZED, 0);
 		sess->has_ended_once = true;
+	}
+
+	// For AppContainer apps (Chrome WebXR), complete the delayed transition
+	// to VISIBLE/FOCUSED that was skipped in xrBeginSession. This matches
+	// SRHydra behavior where state transitions happen during xrEndFrame.
+	if (sess->is_appcontainer &&
+	    sess->state == XR_SESSION_STATE_SYNCHRONIZED &&
+	    sess->compositor_visible && sess->compositor_focused) {
+		oxr_session_change_state(log, sess, XR_SESSION_STATE_VISIBLE, 0);
+		oxr_session_change_state(log, sess, XR_SESSION_STATE_FOCUSED, 0);
 	}
 }
 
