@@ -8,6 +8,21 @@ This is a fork of **Monado**, an open source OpenXR runtime for VR/AR devices. T
 
 ## Build Commands
 
+### Important: Do Not Build Locally on macOS
+This project targets **Windows** with LeiaSR SDK and D3D11 support. Local builds on macOS will fail with platform-specific errors that are not relevant to the actual codebase.
+
+**Instead of building locally**, use the `/ci-monitor` skill to:
+- Commit and push changes
+- Monitor the GitHub Actions Windows build
+- Get actual build errors and auto-fix them
+
+Example:
+```bash
+/ci-monitor "your commit message"
+```
+
+See the `/ci-monitor` skill section below for full details.
+
 ### Standard CMake Build
 ```bash
 mkdir build && cd build
