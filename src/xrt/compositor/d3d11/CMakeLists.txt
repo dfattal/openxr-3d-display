@@ -38,6 +38,7 @@ if(WIN32 AND XRT_HAVE_D3D11)
 	# Link to qwerty driver for Win32 input from main window
 	if(XRT_BUILD_DRIVER_QWERTY)
 		target_link_libraries(comp_d3d11 PRIVATE drv_qwerty drv_qwerty_includes)
+		target_compile_definitions(comp_d3d11 PRIVATE XRT_BUILD_DRIVER_QWERTY)
 	endif()
 
 	# Link to SR SDK D3D11 weaver if available
