@@ -1833,6 +1833,10 @@ struct oxr_session
 	//! True if session was created with an external window handle (XR_EXT_session_target).
 	bool has_external_window;
 
+	//! True if XR_EXT_win32_appcontainer_compatible was enabled (Chrome WebXR).
+	//! Used to delay session state transitions for AppContainer sandbox compatibility.
+	bool is_appcontainer;
+
 	struct oxr_session *next;
 
 	XrSessionState state;
