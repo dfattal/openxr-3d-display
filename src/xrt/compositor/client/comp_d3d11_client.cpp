@@ -406,11 +406,14 @@ try {
 	// This is required for WebXR support because Chrome's sandboxed GPU process
 	// cannot export D3D11 shared handles.
 	D3D_INFO(c, "Requesting server to create swapchain (server-creates-swapchain model)");
-	xret = xrt_comp_create_swapchain(&c->xcn->base, &vkinfo, &sc->xsc.get_underlying_ptr());
+	xrt_swapchain *xsc_raw = nullptr;
+	xret = xrt_comp_create_swapchain(&c->xcn->base, &vkinfo, &xsc_raw);
 	if (xret != XRT_SUCCESS) {
 		D3D_ERROR(c, "Service failed to create swapchain: %d", xret);
 		return xret;
 	}
+	// Transfer ownership to the unique_ptr
+	sc->xsc.reset(xsc_raw);
 
 	// Get handles from service-created swapchain
 	struct xrt_swapchain_native *xscn = (struct xrt_swapchain_native *)sc->xsc.get();
