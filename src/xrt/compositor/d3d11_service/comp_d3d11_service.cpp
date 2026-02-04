@@ -48,6 +48,39 @@
 #include <cstring>
 #include <cmath>
 #include <mutex>
+#include <sddl.h>
+
+
+/*
+ *
+ * Helpers
+ *
+ */
+
+// Helper to create security attributes for AppContainer sharing
+static bool
+create_appcontainer_sa(SECURITY_ATTRIBUTES &sa, PSECURITY_DESCRIPTOR &sd)
+{
+	sa.nLength = sizeof(sa);
+	sa.bInheritHandle = FALSE;
+
+	// D: DACL
+	// (A;;GA;;;AC) Allow Generic All to AppContainer (S-1-15-2-1)
+	// (A;;GA;;;WD) Allow Generic All to Everyone (S-1-1-0) - for safety/debugging
+	// (A;;GA;;;BA) Allow Generic All to Built-in Admins
+	// (A;;GA;;;IU) Allow Generic All to Interactive User
+	const wchar_t *sddl = L"D:(A;;GA;;;AC)(A;;GA;;;WD)(A;;GA;;;BA)(A;;GA;;;IU)";
+
+	if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+	        sddl, SDDL_REVISION_1, &sd, NULL)) {
+		U_LOG_E("ConvertStringSecurityDescriptorToSecurityDescriptorW failed: %lu", GetLastError());
+		return false;
+	}
+
+	sa.lpSecurityDescriptor = sd;
+	return true;
+}
+
 
 
 /*
@@ -1207,12 +1240,19 @@ compositor_create_swapchain(struct xrt_compositor *xc,
 			return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 		}
 
+		// Create security attributes for AppContainer sharing
+		SECURITY_ATTRIBUTES sa = {};
+		PSECURITY_DESCRIPTOR sd = nullptr;
+		create_appcontainer_sa(sa, sd);
+
 		HANDLE shared_handle = nullptr;
 		hr = dxgi_resource1->CreateSharedHandle(
-		    nullptr, // default security
+		    &sa, // AppContainer security
 		    DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
 		    nullptr, // no name
 		    &shared_handle);
+
+		if (sd) LocalFree(sd);
 		if (FAILED(hr) || shared_handle == nullptr) {
 			U_LOG_E("Failed to create NT shared handle [%u]: 0x%08lx", i, hr);
 			swapchain_destroy(&sc->base.base);
@@ -1400,13 +1440,21 @@ compositor_create_semaphore(struct xrt_compositor *xc,
 		return XRT_ERROR_FENCE_CREATE_FAILED;
 	}
 
+	// Create security attributes for AppContainer sharing
+	SECURITY_ATTRIBUTES sa = {};
+	PSECURITY_DESCRIPTOR sd = nullptr;
+	create_appcontainer_sa(sa, sd);
+
 	// Create a shared D3D11 fence
 	xrt_graphics_sync_handle_t handle = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
 	xrt_result_t xret = xrt::auxiliary::d3d::d3d11::createSharedFence(
 	    *sys->device.get(),
 	    false,  // share_cross_adapter
 	    &handle,
-	    sem->fence);
+	    sem->fence,
+	    &sa);
+
+	if (sd) LocalFree(sd);
 
 	if (xret != XRT_SUCCESS) {
 		U_LOG_E("Failed to create D3D11 fence for semaphore");

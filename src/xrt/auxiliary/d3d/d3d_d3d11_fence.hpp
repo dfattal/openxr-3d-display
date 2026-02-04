@@ -39,7 +39,8 @@ xrt_result_t
 createSharedFence(ID3D11Device5 &device,
                   bool share_cross_adapter,
                   xrt_graphics_sync_handle_t *out_handle,
-                  wil::com_ptr<ID3D11Fence> &out_d3dfence);
+                  wil::com_ptr<ID3D11Fence> &out_d3dfence,
+                  SECURITY_ATTRIBUTES *sa = nullptr);
 
 /*!
  * Wait for a fence to be signaled with value equal or greater than @p value within @p timeout_ns nanoseconds.
