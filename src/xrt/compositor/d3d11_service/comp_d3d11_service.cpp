@@ -1000,6 +1000,16 @@ swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t ind
 
 	struct d3d11_service_image *img = &sc->images[index];
 
+	// For server-created swapchains (WebXR), the CLIENT owns the KeyedMutex
+	// during wait_image/release_image. The client handles mutex synchronization
+	// directly in comp_d3d11_client.cpp. Server only acquires mutex later when
+	// it needs to read the texture for composition (in layer_commit).
+	if (sc->service_created) {
+		// Server-created: client handles mutex, just return success
+		return XRT_SUCCESS;
+	}
+
+	// For client-created swapchains (imported), server acquires mutex here
 	if (img->keyed_mutex && !img->mutex_acquired) {
 		// Convert timeout to milliseconds
 		DWORD timeout_ms = (timeout_ns < 0) ? INFINITE : static_cast<DWORD>(timeout_ns / 1000000);
@@ -1029,6 +1039,15 @@ swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 
 	struct d3d11_service_image *img = &sc->images[index];
 
+	// For server-created swapchains (WebXR), the CLIENT owns the KeyedMutex
+	// during wait_image/release_image. The client handles mutex release
+	// directly in comp_d3d11_client.cpp.
+	if (sc->service_created) {
+		// Server-created: client handles mutex, just return success
+		return XRT_SUCCESS;
+	}
+
+	// For client-created swapchains (imported), server releases mutex here
 	if (img->keyed_mutex && img->mutex_acquired) {
 		img->keyed_mutex->ReleaseSync(0);
 		img->mutex_acquired = false;
@@ -1284,6 +1303,22 @@ compositor_create_swapchain(struct xrt_compositor *xc,
 
 	U_LOG_W("Created swapchain with %u shared images (%ux%u, format=%d)",
 	        image_count, info->width, info->height, (int)dxgi_format);
+
+	// CRITICAL: Release KeyedMutex for all images so client can acquire them
+	// When a texture is created with D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
+	// the mutex starts in an "acquired" state (key 0). The creator must
+	// release it before another process (the client) can acquire it.
+	for (uint32_t i = 0; i < image_count; i++) {
+		if (sc->images[i].keyed_mutex) {
+			HRESULT hr = sc->images[i].keyed_mutex->ReleaseSync(0);
+			if (FAILED(hr)) {
+				U_LOG_W("Failed to release initial KeyedMutex [%u]: 0x%08lx", i, hr);
+			} else {
+				U_LOG_D("Released initial KeyedMutex [%u] for client", i);
+			}
+			sc->images[i].mutex_acquired = false;
+		}
+	}
 
 	*out_xsc = &sc->base.base;
 	return XRT_SUCCESS;
