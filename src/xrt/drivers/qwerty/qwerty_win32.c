@@ -24,7 +24,8 @@
 #include <stdbool.h>
 
 // Amount of look_speed units a mouse delta of 1px in screen space will rotate the device
-#define SENSITIVITY 0.1f
+// Match sr_cube_openxr_ext sensitivity (0.005f) for consistent feel
+#define SENSITIVITY 0.005f
 
 /*!
  * Find the qwerty_system from the device list.
@@ -157,7 +158,7 @@ qwerty_process_win32(struct xrt_device **xdevs,
 		default_qdev = default_qwerty_device(xdevs, xdev_count, qsys);
 		default_qctrl = default_qwerty_controller(xdevs, xdev_count, qsys);
 		cached = true;
-		U_LOG_W("QWERTY Win32 input initialized - WASDQE to move, arrows to rotate, right-click+drag to look");
+		U_LOG_W("QWERTY Win32 input initialized - WASDQE to move, arrows to rotate, left-click+drag to look");
 		U_LOG_W("QWERTY Win32: qsys=%p hmd=%p lctrl=%p rctrl=%p process_keys=%d",
 		        (void *)qsys, (void *)qsys->hmd, (void *)qsys->lctrl, (void *)qsys->rctrl, qsys->process_keys);
 	}
@@ -439,15 +440,39 @@ qwerty_process_win32(struct xrt_device **xdevs,
 	}
 
 	// Mouse button events
+	// Left mouse button = mouse look (matches sr_cube_openxr_ext)
+	// Right mouse button = controller trigger
+	// Middle mouse button = controller squeeze/grip
 	switch (message) {
 	case WM_LBUTTONDOWN:
-		qwerty_press_trigger(qctrl);
+		// Start mouse look mode
+		U_LOG_W("QWERTY Win32: LMB DOWN - starting mouse look");
+		mouse_look_active = true;
+		GetCursorPos(&last_mouse_pos);
+		SetCapture(GetActiveWindow()); // Capture mouse to receive events outside window
 		if (out_handled != NULL) {
 			*out_handled = true;
 		}
 		break;
 
 	case WM_LBUTTONUP:
+		// End mouse look mode
+		U_LOG_W("QWERTY Win32: LMB UP - ending mouse look");
+		mouse_look_active = false;
+		ReleaseCapture();
+		if (out_handled != NULL) {
+			*out_handled = true;
+		}
+		break;
+
+	case WM_RBUTTONDOWN:
+		qwerty_press_trigger(qctrl);
+		if (out_handled != NULL) {
+			*out_handled = true;
+		}
+		break;
+
+	case WM_RBUTTONUP:
 		qwerty_release_trigger(qctrl);
 		if (out_handled != NULL) {
 			*out_handled = true;
@@ -468,25 +493,6 @@ qwerty_process_win32(struct xrt_device **xdevs,
 		}
 		break;
 
-	case WM_RBUTTONDOWN:
-		// Start mouse look mode
-		mouse_look_active = true;
-		GetCursorPos(&last_mouse_pos);
-		// Optionally capture mouse to receive events outside window
-		// SetCapture() can be called here if needed
-		if (out_handled != NULL) {
-			*out_handled = true;
-		}
-		break;
-
-	case WM_RBUTTONUP:
-		// End mouse look mode
-		mouse_look_active = false;
-		if (out_handled != NULL) {
-			*out_handled = true;
-		}
-		break;
-
 	case WM_MOUSEMOVE:
 		if (mouse_look_active) {
 			POINT current_pos;
@@ -499,6 +505,7 @@ qwerty_process_win32(struct xrt_device **xdevs,
 			if (dx != 0 || dy != 0) {
 				float yaw = (float)(-dx) * SENSITIVITY;
 				float pitch = (float)(-dy) * SENSITIVITY;
+				U_LOG_W("QWERTY Win32: Mouse look delta dx=%d dy=%d yaw=%.3f pitch=%.3f", dx, dy, yaw, pitch);
 				qwerty_add_look_delta(qdev, yaw, pitch);
 			}
 
