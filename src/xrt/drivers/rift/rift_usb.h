@@ -41,6 +41,9 @@ int
 rift_radio_send_data_read_cmd(struct rift_hmd *hmd, struct rift_radio_data_read_cmd *cmd);
 
 int
+rift_send_radio_data(struct rift_hmd *hmd, struct rift_radio_cmd_report *cmd, uint8_t *data, size_t len);
+
+int
 rift_get_radio_cmd_response(struct rift_hmd *hmd, bool wait, bool radio_hid);
 
 int

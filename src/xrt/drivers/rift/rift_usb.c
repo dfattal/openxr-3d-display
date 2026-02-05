@@ -235,6 +235,24 @@ rift_radio_send_data_read_cmd(struct rift_hmd *hmd, struct rift_radio_data_read_
 }
 
 int
+rift_send_radio_data(struct rift_hmd *hmd, struct rift_radio_cmd_report *cmd, uint8_t *data, size_t len)
+{
+	int result;
+
+	result = rift_send_report(hmd, true, FEATURE_REPORT_RADIO_READ_DATA_CMD, data, len);
+	if (result < 0) {
+		return -1;
+	}
+
+	result = rift_send_radio_cmd(hmd, true, cmd);
+	if (result < 0) {
+		return -1;
+	}
+
+	return 0;
+}
+
+int
 rift_get_radio_cmd_response(struct rift_hmd *hmd, bool wait, bool radio_hid)
 {
 	unsigned char buffer[REPORT_MAX_SIZE] = {0};

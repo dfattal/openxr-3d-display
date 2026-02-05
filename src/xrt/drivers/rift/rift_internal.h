@@ -686,6 +686,17 @@ struct rift_touch_controller
 
 		bool calibration_read;
 		struct rift_touch_controller_calibration calibration;
+
+		struct
+		{
+			timepoint_ns end_time_ns;
+			bool high_freq;
+			float amplitude;
+
+			bool set_enabled;
+			float set_amplitude;
+			bool set_high_freq;
+		} haptic;
 	} input;
 
 	//! Locked by radio_state.thread
@@ -738,6 +749,7 @@ enum rift_radio_command
 	RIFT_RADIO_COMMAND_NONE = 0,
 	RIFT_RADIO_COMMAND_READ_SERIAL,
 	RIFT_RADIO_COMMAND_READ_FLASH,
+	RIFT_RADIO_COMMAND_SEND_HAPTICS,
 };
 
 struct rift_radio_command_data_read_serial

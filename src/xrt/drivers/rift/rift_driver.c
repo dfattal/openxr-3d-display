@@ -272,6 +272,11 @@ rift_usb_thread_radio_tick(struct rift_hmd *hmd)
 		return result;
 	}
 
+	result = rift_radio_handle_haptics(hmd);
+	if (result < 0) {
+		return result;
+	}
+
 	return 0;
 }
 

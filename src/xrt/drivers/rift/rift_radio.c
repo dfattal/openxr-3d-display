@@ -139,6 +139,37 @@ rift_touch_controller_update_inputs(struct xrt_device *xdev)
 }
 
 static xrt_result_t
+rift_touch_controller_set_output(struct xrt_device *xdev,
+                                 enum xrt_output_name name,
+                                 const struct xrt_output_value *value)
+{
+	struct rift_touch_controller *controller = rift_touch_controller(xdev);
+
+	if (name != XRT_OUTPUT_NAME_TOUCH_HAPTIC) {
+		return XRT_ERROR_OUTPUT_UNSUPPORTED;
+	}
+
+	if (value->type != XRT_OUTPUT_VALUE_TYPE_VIBRATION) {
+		return XRT_ERROR_OUTPUT_UNSUPPORTED;
+	}
+
+	timepoint_ns now = os_monotonic_get_ns();
+	// Set the minimum time to 5ms to help guarantee we actually get a pulse of haptics
+	timepoint_ns end_time = now + MAX(value->vibration.duration_ns, U_TIME_1MS_IN_NS * 5);
+
+	// if it's higher than the middle of the two possible frequencies, pick the high frequency rumble
+	bool high_freq = value->vibration.frequency > ((320.0 + 160.0) / 2.0);
+
+	os_mutex_lock(&controller->input.mutex);
+	controller->input.haptic.end_time_ns = end_time;
+	controller->input.haptic.high_freq = high_freq;
+	controller->input.haptic.amplitude = CLAMP(value->vibration.amplitude, 0.0f, 1.0f);
+	os_mutex_unlock(&controller->input.mutex);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 rift_touch_controller_get_battery_status(struct xrt_device *xdev,
                                          bool *out_present,
                                          bool *out_charging,
@@ -332,6 +363,7 @@ rift_touch_controller_create(struct rift_hmd *hmd, enum rift_radio_device_type d
 	u_device_populate_function_pointers(&controller->base, rift_touch_controller_get_tracked_pose,
 	                                    rift_touch_controller_destroy);
 	controller->base.update_inputs = rift_touch_controller_update_inputs;
+	controller->base.set_output = rift_touch_controller_set_output;
 	controller->base.get_battery_status = rift_touch_controller_get_battery_status;
 
 	controller->base.supported.battery_status = true;
@@ -846,8 +878,8 @@ rift_radio_handle_read(struct rift_hmd *hmd)
 	uint8_t buf[REPORT_MAX_SIZE];
 	int length;
 
-	// 3x expected wait time (500hz, so 2ms)
-	length = os_hid_read(hmd->radio_dev, buf, sizeof(buf), 6);
+	// 1ms so the radio thread is ticking at 1khz for haptics.
+	length = os_hid_read(hmd->radio_dev, buf, sizeof(buf), 1);
 
 	timepoint_ns receive_ns = os_monotonic_get_ns();
 
@@ -858,7 +890,7 @@ rift_radio_handle_read(struct rift_hmd *hmd)
 
 	// non fatal, but nothing to do
 	if (length == 0) {
-		HMD_TRACE(hmd, "Timed out waiting for packet from radio, packets should come in at 500hz");
+		// HMD_TRACE(hmd, "Timed out waiting for packet from radio, packets should come in at 500hz");
 		return 0;
 	}
 
@@ -966,6 +998,117 @@ rift_radio_handle_read(struct rift_hmd *hmd)
 	return 0;
 }
 
+static int
+rift_radio_set_touch_controller_haptics_sync(struct rift_hmd *hmd,
+                                             enum rift_radio_device_type device_type,
+                                             bool high_freq,
+                                             uint8_t amplitude)
+{
+	int result;
+	unsigned char buf[30] = {0};
+
+	// radio is already busy!
+	if (hmd->radio_state.current_command != RIFT_RADIO_COMMAND_NONE) {
+		return -EBUSY;
+	}
+
+	if (amplitude != 0) {
+		buf[high_freq ? 3 /* 320hz */ : 2 /* 160hz */] = 0xa0;
+
+		buf[6] = amplitude;
+	}
+
+	result = rift_send_radio_data(
+	    hmd, &(struct rift_radio_cmd_report){.a = 0x02, .b = 0x03, .c = (uint8_t)device_type}, buf, sizeof(buf));
+
+	if (result < 0) {
+		return result;
+	}
+
+	result = rift_get_radio_cmd_response(hmd, true, true);
+	if (result < 0) {
+		HMD_ERROR(hmd, "Failed to send haptics command to device %d, reason %d", device_type, result);
+		return result;
+	}
+
+	return 0;
+}
+
+static int
+rift_radio_update_touch_haptics(struct rift_hmd *hmd, enum rift_radio_device_type device_type, timepoint_ns now)
+{
+	int result = 0;
+	size_t touch_index = rift_radio_device_type_to_touch_index(device_type);
+
+	struct rift_touch_controller *controller = hmd->radio_state.touch_controllers[touch_index];
+
+	if (controller == NULL) {
+		return 0;
+	}
+
+	// Haptic duration has elapsed, turn it off
+	if (now > controller->input.haptic.end_time_ns) {
+		if (controller->input.haptic.set_enabled) {
+			result = rift_radio_set_touch_controller_haptics_sync(hmd, device_type, false, 0);
+			if (result == 0) {
+				controller->input.haptic.set_enabled = false;
+				controller->input.haptic.set_amplitude = -1.0f;
+			}
+
+			return result;
+		}
+
+		// no haptic needed
+		return 0;
+	}
+
+	if (controller->input.haptic.amplitude != controller->input.haptic.set_amplitude ||
+	    controller->input.haptic.high_freq != controller->input.haptic.set_high_freq) {
+		result = rift_radio_set_touch_controller_haptics_sync(
+		    hmd, device_type, controller->input.haptic.high_freq,
+		    CLAMP(controller->input.haptic.amplitude * 255.0f, 0, 255));
+
+		if (result == 0) {
+			controller->input.haptic.set_enabled = true;
+			controller->input.haptic.set_amplitude = controller->input.haptic.amplitude;
+			controller->input.haptic.set_high_freq = controller->input.haptic.high_freq;
+		}
+
+		return result;
+	}
+
+	return 0;
+}
+
+int
+rift_radio_handle_haptics(struct rift_hmd *hmd)
+{
+	int result;
+
+	timepoint_ns now = os_monotonic_get_ns();
+
+	static const enum rift_radio_device_type to_check[] = {
+	    RIFT_RADIO_DEVICE_LEFT_TOUCH,
+	    RIFT_RADIO_DEVICE_RIGHT_TOUCH,
+	    RIFT_RADIO_DEVICE_TRACKED_OBJECT,
+	};
+	for (size_t i = 0; i < ARRAY_SIZE(to_check); i++) {
+		result = rift_radio_update_touch_haptics(hmd, to_check[i], now);
+
+		// radio busy, try again later
+		if (result == -EBUSY) {
+			return 0;
+		}
+
+		if (result < 0) {
+			HMD_ERROR(hmd, "Failed to update haptics for device type %d, reason %d", to_check[i], result);
+			return result;
+		}
+	}
+
+	return 0;
+}
+
 int
 rift_radio_handle_command(struct rift_hmd *hmd)
 {
@@ -982,7 +1125,6 @@ rift_radio_handle_command(struct rift_hmd *hmd)
 	}
 
 	if (result == -ETIMEDOUT) {
-
 		switch (hmd->radio_state.current_command) {
 
 		case RIFT_RADIO_COMMAND_READ_SERIAL:
