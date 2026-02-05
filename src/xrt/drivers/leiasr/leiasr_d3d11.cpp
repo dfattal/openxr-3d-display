@@ -302,6 +302,50 @@ leiasr_d3d11_weave(struct leiasr_d3d11 *leiasr)
 	leiasr->weaver->weave();
 }
 
+/*!
+ * Check if weaver's HWND is still valid (for debugging "window handle is invalid" errors).
+ */
+bool
+leiasr_d3d11_check_window_valid(struct leiasr_d3d11 *leiasr, void *hwnd)
+{
+	if (leiasr == nullptr) {
+		return false;
+	}
+
+	HWND h = static_cast<HWND>(hwnd);
+	if (h == nullptr) {
+		U_LOG_W("leiasr_d3d11: HWND is null");
+		return false;
+	}
+
+	if (!IsWindow(h)) {
+		U_LOG_W("leiasr_d3d11: HWND %p is not a valid window", h);
+		return false;
+	}
+
+	// Check if window is visible
+	if (!IsWindowVisible(h)) {
+		static bool warned_invisible = false;
+		if (!warned_invisible) {
+			U_LOG_W("leiasr_d3d11: Window %p is not visible", h);
+			warned_invisible = true;
+		}
+	}
+
+	// Get window position to check if it's on a valid monitor
+	RECT rect;
+	if (GetWindowRect(h, &rect)) {
+		HMONITOR monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONULL);
+		if (monitor == nullptr) {
+			U_LOG_W("leiasr_d3d11: Window %p is not on any monitor (rect: %ld,%ld-%ld,%ld)",
+			        h, rect.left, rect.top, rect.right, rect.bottom);
+			return false;
+		}
+	}
+
+	return true;
+}
+
 bool
 leiasr_d3d11_get_predicted_eye_positions(struct leiasr_d3d11 *leiasr,
                                          float out_left_eye[3],

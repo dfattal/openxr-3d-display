@@ -146,6 +146,19 @@ bool
 leiasr_d3d11_is_ready(struct leiasr_d3d11 *leiasr);
 
 /*!
+ * Check if the weaver's HWND is still valid.
+ * Use this for debugging "window handle is invalid" errors from SR SDK.
+ *
+ * @param leiasr The D3D11 weaver instance.
+ * @param hwnd Window handle to check (HWND).
+ * @return true if the window is valid and on a monitor.
+ *
+ * @ingroup drv_leiasr
+ */
+bool
+leiasr_d3d11_check_window_valid(struct leiasr_d3d11 *leiasr, void *hwnd);
+
+/*!
  * Get the display dimensions for Kooima FOV calculation.
  * The dimensions are cached from SR::Display during initialization.
  *
