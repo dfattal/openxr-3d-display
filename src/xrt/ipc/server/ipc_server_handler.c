@@ -337,6 +337,7 @@ ipc_handle_instance_describe_client(volatile struct ipc_client_state *ics,
 	EXT(meta_body_tracking_full_body_enabled);
 	EXT(meta_body_tracking_calibration_enabled);
 	EXT(fb_face_tracking2_enabled);
+	EXT(ext_win32_appcontainer_compatible_enabled);
 
 #undef EXT
 #undef PTT
