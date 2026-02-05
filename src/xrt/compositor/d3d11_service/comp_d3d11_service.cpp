@@ -2331,6 +2331,17 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		viewport.MaxDepth = 1.0f;
 		sys->context->RSSetViewports(1, &viewport);
 
+		// Check window validity before weaving (helps diagnose "window handle is invalid" errors)
+		static bool window_check_done = false;
+		if (!window_check_done) {
+			if (!leiasr_d3d11_check_window_valid(sys->weaver, sys->hwnd)) {
+				U_LOG_W("SR weave: Window validity check failed - weaving may not work correctly");
+			} else {
+				U_LOG_W("SR weave: Window %p passed validity check", sys->hwnd);
+			}
+			window_check_done = true;
+		}
+
 		// Perform weaving
 		leiasr_d3d11_weave(sys->weaver);
 	} else
@@ -2769,6 +2780,40 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 #ifdef XRT_HAVE_LEIA_SR_D3D11
 	// Create SR weaver
 	{
+		// Log HWND details before weaver creation
+		U_LOG_W("Creating SR weaver with HWND=%p", sys->hwnd);
+		if (sys->hwnd != nullptr) {
+			if (IsWindow(sys->hwnd)) {
+				RECT window_rect;
+				if (GetWindowRect(sys->hwnd, &window_rect)) {
+					U_LOG_W("  Window rect: (%ld,%ld)-(%ld,%ld) = %ldx%ld",
+					        window_rect.left, window_rect.top, window_rect.right, window_rect.bottom,
+					        window_rect.right - window_rect.left, window_rect.bottom - window_rect.top);
+				}
+				RECT client_rect;
+				if (GetClientRect(sys->hwnd, &client_rect)) {
+					U_LOG_W("  Client rect: %ldx%ld",
+					        client_rect.right - client_rect.left, client_rect.bottom - client_rect.top);
+				}
+				// Check which monitor the window is on
+				HMONITOR monitor = MonitorFromWindow(sys->hwnd, MONITOR_DEFAULTTONULL);
+				if (monitor != nullptr) {
+					MONITORINFO mi = {sizeof(mi)};
+					if (GetMonitorInfo(monitor, &mi)) {
+						U_LOG_W("  On monitor: (%ld,%ld)-(%ld,%ld), primary=%d",
+						        mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom,
+						        (mi.dwFlags & MONITORINFOF_PRIMARY) ? 1 : 0);
+					}
+				} else {
+					U_LOG_W("  WARNING: Window is not on any monitor!");
+				}
+			} else {
+				U_LOG_E("  ERROR: HWND %p is NOT a valid window!", sys->hwnd);
+			}
+		} else {
+			U_LOG_E("  ERROR: HWND is NULL!");
+		}
+
 		xrt_result_t weaver_ret = leiasr_d3d11_create(
 		    5.0,  // 5 second timeout
 		    sys->device.get(),
@@ -2781,6 +2826,8 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 		if (weaver_ret != XRT_SUCCESS) {
 			U_LOG_W("Failed to create SR weaver, continuing without interlacing");
 			sys->weaver = nullptr;
+		} else {
+			U_LOG_W("SR weaver created successfully");
 		}
 	}
 #endif
