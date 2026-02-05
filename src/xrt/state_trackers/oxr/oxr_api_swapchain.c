@@ -33,18 +33,50 @@ oxr_xrEnumerateSwapchainFormats(XrSession session,
 {
 	OXR_TRACE_MARKER();
 
+#ifdef XRT_OS_WINDOWS
+	{
+		char buf[256];
+		snprintf(buf, sizeof(buf), "[SRMonado] xrEnumerateSwapchainFormats: API ENTRY cap=%u\n",
+		         formatCapacityInput);
+		OutputDebugStringA(buf);
+	}
+#endif
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEnumerateSwapchainFormats");
 	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 
-	return oxr_session_enumerate_formats(&log, sess, formatCapacityInput, formatCountOutput, formats);
+	XrResult ret = oxr_session_enumerate_formats(&log, sess, formatCapacityInput, formatCountOutput, formats);
+
+#ifdef XRT_OS_WINDOWS
+	{
+		char buf[256];
+		snprintf(buf, sizeof(buf), "[SRMonado] xrEnumerateSwapchainFormats: ret=%d count=%u\n", (int)ret,
+		         formatCountOutput ? *formatCountOutput : 0);
+		OutputDebugStringA(buf);
+	}
+#endif
+
+	return ret;
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo, XrSwapchain *out_swapchain)
 {
 	OXR_TRACE_MARKER();
+
+#ifdef XRT_OS_WINDOWS
+	{
+		char buf[256];
+		snprintf(buf, sizeof(buf),
+		         "[SRMonado] xrCreateSwapchain: API ENTRY %ux%u format=0x%llx usage=0x%llx\n",
+		         createInfo ? createInfo->width : 0, createInfo ? createInfo->height : 0,
+		         createInfo ? (unsigned long long)createInfo->format : 0,
+		         createInfo ? (unsigned long long)createInfo->usageFlags : 0);
+		OutputDebugStringA(buf);
+	}
+#endif
 
 	XrResult ret;
 	struct oxr_session *sess;
@@ -53,6 +85,9 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrCreateSwapchain");
 	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	if (sess->compositor == NULL) {
+#ifdef XRT_OS_WINDOWS
+		OutputDebugStringA("[SRMonado] xrCreateSwapchain: FAILED - headless session\n");
+#endif
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Is illegal in headless sessions");
 	}
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO);
@@ -139,10 +174,21 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 
 	ret = sess->create_swapchain(&log, sess, createInfo, &sc);
 	if (ret != XR_SUCCESS) {
+#ifdef XRT_OS_WINDOWS
+		{
+			char buf[256];
+			snprintf(buf, sizeof(buf), "[SRMonado] xrCreateSwapchain: FAILED ret=%d\n", (int)ret);
+			OutputDebugStringA(buf);
+		}
+#endif
 		return ret;
 	}
 
 	*out_swapchain = oxr_swapchain_to_openxr(sc);
+
+#ifdef XRT_OS_WINDOWS
+	OutputDebugStringA("[SRMonado] xrCreateSwapchain: SUCCESS\n");
+#endif
 
 	return oxr_session_success_result(sess);
 }
