@@ -509,6 +509,8 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 		// This matches SRHydra behavior.
 		if (sess->compositor_visible && sess->compositor_focused) {
 			oxr_session_change_state(log, sess, XR_SESSION_STATE_SYNCHRONIZED, 0);
+			U_LOG_W("oxr_session_begin: is_appcontainer=%d, deferring VISIBLE/FOCUSED=%s",
+			        sess->is_appcontainer, sess->is_appcontainer ? "yes" : "no");
 			if (!sess->is_appcontainer) {
 				// Native apps: immediate transition to FOCUSED
 				oxr_session_change_state(log, sess, XR_SESSION_STATE_VISIBLE, 0);
