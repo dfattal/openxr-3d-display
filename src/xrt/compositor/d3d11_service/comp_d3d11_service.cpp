@@ -2378,6 +2378,10 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 	sys->base.info.views[0].max.height_pixels = sys->view_height;
 	sys->base.info.views[1] = sys->base.info.views[0];
 
+	// Set supported blend modes (Chrome WebXR requires at least OPAQUE)
+	sys->base.info.supported_blend_modes[0] = XRT_BLEND_MODE_OPAQUE;
+	sys->base.info.supported_blend_mode_count = 1;
+
 	U_LOG_W("D3D11 service system compositor created: view=%ux%u/eye, stereo=%ux%u, output=%ux%u @ %.0fHz",
 	        sys->view_width, sys->view_height,
 	        sys->display_width, sys->display_height,
