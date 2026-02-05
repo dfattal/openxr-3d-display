@@ -126,6 +126,15 @@ oxr_xrSyncActions(XrSession session, const XrActionsSyncInfo *syncInfo)
 {
 	OXR_TRACE_MARKER();
 
+#ifdef XRT_OS_WINDOWS
+	{
+		char buf[256];
+		snprintf(buf, sizeof(buf), "[SRMonado] xrSyncActions: API ENTRY count=%u\n",
+		         syncInfo ? syncInfo->countActiveActionSets : 0);
+		OutputDebugStringA(buf);
+	}
+#endif
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrSyncActions");
@@ -181,6 +190,15 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 {
 	OXR_TRACE_MARKER();
 
+#ifdef XRT_OS_WINDOWS
+	{
+		char buf[256];
+		snprintf(buf, sizeof(buf), "[SRMonado] xrAttachSessionActionSets: API ENTRY count=%u\n",
+		         bindInfo ? bindInfo->countActionSets : 0);
+		OutputDebugStringA(buf);
+	}
+#endif
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrAttachSessionActionSets");
@@ -188,12 +206,18 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, bindInfo, XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO);
 
 	if (sess->act_set_attachments != NULL) {
+#ifdef XRT_OS_WINDOWS
+		OutputDebugStringA("[SRMonado] xrAttachSessionActionSets: FAILED - already attached\n");
+#endif
 		return oxr_error(&log, XR_ERROR_ACTIONSETS_ALREADY_ATTACHED,
 		                 "(session) has already had action sets "
 		                 "attached, can only attach action sets once.");
 	}
 
 	if (bindInfo->countActionSets == 0) {
+#ifdef XRT_OS_WINDOWS
+		OutputDebugStringA("[SRMonado] xrAttachSessionActionSets: FAILED - zero action sets\n");
+#endif
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
 		                 "(bindInfo->countActionSets == 0) must attach "
 		                 "at least one action set.");
@@ -204,7 +228,17 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 		OXR_VERIFY_ACTIONSET_NOT_NULL(&log, bindInfo->actionSets[i], act_set);
 	}
 
-	return oxr_session_attach_action_sets(&log, sess, bindInfo);
+	XrResult ret = oxr_session_attach_action_sets(&log, sess, bindInfo);
+
+#ifdef XRT_OS_WINDOWS
+	{
+		char buf[256];
+		snprintf(buf, sizeof(buf), "[SRMonado] xrAttachSessionActionSets: ret=%d\n", (int)ret);
+		OutputDebugStringA(buf);
+	}
+#endif
+
+	return ret;
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL

@@ -95,6 +95,15 @@ oxr_xrBeginSession(XrSession session, const XrSessionBeginInfo *beginInfo)
 {
 	OXR_TRACE_MARKER();
 
+#ifdef XRT_OS_WINDOWS
+	{
+		char buf[256];
+		snprintf(buf, sizeof(buf), "[SRMonado] xrBeginSession: API ENTRY viewConfig=%d\n",
+		         beginInfo ? (int)beginInfo->primaryViewConfigurationType : -1);
+		OutputDebugStringA(buf);
+	}
+#endif
+
 	struct oxr_session *sess;
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrBeginSession");
@@ -108,10 +117,23 @@ oxr_xrBeginSession(XrSession session, const XrSessionBeginInfo *beginInfo)
 
 	// Going to effectively double check this, but this gives us an early out.
 	if (oxr_frame_sync_is_session_running(&sess->frame_sync)) {
+#ifdef XRT_OS_WINDOWS
+		OutputDebugStringA("[SRMonado] xrBeginSession: FAILED - already running\n");
+#endif
 		return oxr_error(&log, XR_ERROR_SESSION_RUNNING, "Session is already running");
 	}
 
-	return oxr_session_begin(&log, sess, beginInfo);
+	XrResult ret = oxr_session_begin(&log, sess, beginInfo);
+
+#ifdef XRT_OS_WINDOWS
+	{
+		char buf[256];
+		snprintf(buf, sizeof(buf), "[SRMonado] xrBeginSession: ret=%d\n", (int)ret);
+		OutputDebugStringA(buf);
+	}
+#endif
+
+	return ret;
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL
