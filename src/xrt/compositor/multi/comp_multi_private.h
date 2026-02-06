@@ -31,6 +31,10 @@ struct comp_target;
 struct leiasr;
 struct leiasr_eye_pair;
 
+#ifdef XRT_OS_WINDOWS
+struct comp_d3d11_window;
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -253,6 +257,14 @@ struct multi_compositor
 		bool composite_initialized;              //!< True if composite resources are ready
 
 		//! @}
+#endif
+
+#ifdef XRT_OS_WINDOWS
+		//! Self-created window when no external HWND provided (Windows only)
+		struct comp_d3d11_window *own_window;
+
+		//! True if we created the window ourselves (must destroy on end_session)
+		bool owns_window;
 #endif
 
 		//! True if per-session resources are initialized
