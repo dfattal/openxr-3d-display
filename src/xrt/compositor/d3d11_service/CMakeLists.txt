@@ -17,15 +17,13 @@ add_library(
 	# Include layer accumulator directly (it has no Vulkan dependencies)
 	../util/comp_layer_accum.c
 	../util/comp_layer_accum.h
-	# Include window module for dedicated-thread message pump
-	../d3d11/comp_d3d11_window.cpp
-	../d3d11/comp_d3d11_window.h
 	)
 
 target_link_libraries(
 	comp_d3d11_service
 	PRIVATE
 		xrt-interfaces
+		comp_win32_window
 		aux_util
 		aux_os
 		aux_math
@@ -42,8 +40,3 @@ if(XRT_HAVE_LEIA_SR)
 	target_link_libraries(comp_d3d11_service PRIVATE drv_leiasr)
 endif()
 
-# Link to qwerty driver for Win32 input from service window
-if(XRT_BUILD_DRIVER_QWERTY)
-	target_link_libraries(comp_d3d11_service PRIVATE drv_qwerty drv_qwerty_includes)
-	target_compile_definitions(comp_d3d11_service PRIVATE XRT_BUILD_DRIVER_QWERTY)
-endif()

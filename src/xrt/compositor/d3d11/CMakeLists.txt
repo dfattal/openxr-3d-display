@@ -16,8 +16,6 @@ if(WIN32 AND XRT_HAVE_D3D11)
 		comp_d3d11_swapchain.h
 		comp_d3d11_target.cpp
 		comp_d3d11_target.h
-		comp_d3d11_window.cpp
-		comp_d3d11_window.h
 		)
 
 	target_link_libraries(
@@ -25,6 +23,7 @@ if(WIN32 AND XRT_HAVE_D3D11)
 		PUBLIC xrt-interfaces
 		PRIVATE
 			comp_util
+			comp_win32_window
 			aux_util
 			aux_os
 			aux_math
@@ -34,12 +33,6 @@ if(WIN32 AND XRT_HAVE_D3D11)
 		)
 
 	target_include_directories(comp_d3d11 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
-
-	# Link to qwerty driver for Win32 input from main window
-	if(XRT_BUILD_DRIVER_QWERTY)
-		target_link_libraries(comp_d3d11 PRIVATE drv_qwerty drv_qwerty_includes)
-		target_compile_definitions(comp_d3d11 PRIVATE XRT_BUILD_DRIVER_QWERTY)
-	endif()
 
 	# Link to SR SDK D3D11 weaver if available
 	# drv_leiasr exports XRT_HAVE_LEIA_SR_D3D11 as PUBLIC when D3D11 weaver is available

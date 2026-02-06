@@ -32,6 +32,10 @@
 #include "leiasr/leiasr.h"
 #endif
 
+#ifdef XRT_OS_WINDOWS
+#include "comp_d3d11_window.h"
+#endif
+
 #include <math.h>
 #include <stdio.h>
 #include <assert.h>
@@ -507,6 +511,20 @@ multi_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin
 					c->external_window_handle = mc->xsi.external_window_handle;
 				}
 			}
+		} else {
+			// No external window - create our own for SR display output
+			U_LOG_W("No external HWND provided, creating self-owned window for Vulkan compositor");
+			struct comp_d3d11_window *own_win = NULL;
+			xrt_result_t xret = comp_d3d11_window_create(1920, 1080, &own_win);
+			if (xret == XRT_SUCCESS && own_win != NULL) {
+				mc->session_render.own_window = own_win;
+				mc->session_render.owns_window = true;
+				mc->session_render.external_window_handle = comp_d3d11_window_get_hwnd(own_win);
+				U_LOG_W("Created self-owned window: HWND=%p",
+				        mc->session_render.external_window_handle);
+			} else {
+				U_LOG_E("Failed to create self-owned window: %d", xret);
+			}
 		}
 #endif
 		multi_system_compositor_update_session_status(mc->msc, true);
@@ -581,6 +599,13 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 			U_LOG_I("Cleaned up per-session render resources for HWND %p",
 			        mc->session_render.external_window_handle);
 		}
+#ifdef XRT_OS_WINDOWS
+		if (mc->session_render.owns_window && mc->session_render.own_window != NULL) {
+			comp_d3d11_window_destroy(&mc->session_render.own_window);
+			U_LOG_W("Destroyed self-owned window");
+		}
+		mc->session_render.owns_window = false;
+#endif
 		mc->session_render.external_window_handle = NULL;
 
 		multi_system_compositor_update_session_status(mc->msc, false);
@@ -1083,6 +1108,15 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 		}
 		mc->session_render.initialized = false;
 	}
+
+#ifdef XRT_OS_WINDOWS
+	// Destroy self-owned window if we created one
+	if (mc->session_render.owns_window && mc->session_render.own_window != NULL) {
+		comp_d3d11_window_destroy(&mc->session_render.own_window);
+		mc->session_render.owns_window = false;
+		U_LOG_W("Destroyed self-owned window in compositor destroy");
+	}
+#endif
 
 	os_mutex_lock(&mc->msc->list_and_timing_lock);
 

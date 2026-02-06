@@ -329,6 +329,27 @@ if(XRT_MODULE_COMPOSITOR_NULL)
 endif()
 
 ###
+# Shared Win32 window utility (pure Win32, no D3D11 dependency)
+#
+if(WIN32)
+	add_library(
+		comp_win32_window STATIC
+		d3d11/comp_d3d11_window.cpp
+		d3d11/comp_d3d11_window.h
+		)
+	target_link_libraries(
+		comp_win32_window
+		PUBLIC xrt-interfaces
+		PRIVATE aux_util aux_os
+		)
+	target_include_directories(comp_win32_window PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/d3d11)
+	if(XRT_BUILD_DRIVER_QWERTY)
+		target_link_libraries(comp_win32_window PRIVATE drv_qwerty drv_qwerty_includes)
+		target_compile_definitions(comp_win32_window PRIVATE XRT_BUILD_DRIVER_QWERTY)
+	endif()
+endif()
+
+###
 # Multi client compositor library
 #
 
@@ -347,6 +368,11 @@ target_include_directories(comp_multi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # drv_leiasr exports XRT_HAVE_LEIA_SR_VULKAN as PUBLIC when Vulkan SR is available
 if(XRT_HAVE_LEIA_SR)
 	target_link_libraries(comp_multi PRIVATE drv_leiasr)
+endif()
+
+# Link comp_multi to shared Win32 window for self-owned window creation
+if(WIN32)
+	target_link_libraries(comp_multi PRIVATE comp_win32_window)
 endif()
 
 if(XRT_MODULE_COMPOSITOR_MAIN)
