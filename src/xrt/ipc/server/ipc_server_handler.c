@@ -224,46 +224,28 @@ ipc_try_get_sr_view_poses(struct ipc_server *s,
 		}
 	}
 
-	struct xrt_pose player_pose = XRT_POSE_IDENTITY;
-	bool have_player_transform = false;
+	// World head position comes from qwerty device (default y=1.6m for standing)
+	// SR eye positions are in SCREEN-RELATIVE coordinates, not world coordinates!
+	// They should only be used for Kooima FOV calculation and IPD, not head position.
+	struct xrt_vec3 world_head_pos;
+	struct xrt_quat world_head_ori;
 	if (xret == XRT_SUCCESS &&
 	    (qwerty_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT)) {
-		// Subtract initial position (1.6m height) to get offset
-		player_pose.position.x = qwerty_relation.pose.position.x;
-		player_pose.position.y = qwerty_relation.pose.position.y - 1.6f;
-		player_pose.position.z = qwerty_relation.pose.position.z;
-		player_pose.orientation = qwerty_relation.pose.orientation;
-
-		bool pos_changed = player_pose.position.x != 0.0f ||
-		                   player_pose.position.y != 0.0f ||
-		                   player_pose.position.z != 0.0f;
-		bool ori_changed = player_pose.orientation.x != 0.0f ||
-		                   player_pose.orientation.y != 0.0f ||
-		                   player_pose.orientation.z != 0.0f ||
-		                   player_pose.orientation.w != 1.0f;
-		have_player_transform = pos_changed || ori_changed;
+		// Use qwerty device pose directly as head position in world
+		world_head_pos = qwerty_relation.pose.position;
+		world_head_ori = qwerty_relation.pose.orientation;
+	} else {
+		// Fallback: standing eye height
+		world_head_pos = (struct xrt_vec3){0.0f, 1.6f, 0.0f};
+		world_head_ori = (struct xrt_quat)XRT_QUAT_IDENTITY;
 	}
 
-	// Compute head position as midpoint between eyes
-	struct xrt_vec3 local_head_pos = {
+	// SR eye midpoint is used for computing eye offsets (IPD), not world position
+	struct xrt_vec3 sr_head_midpoint = {
 	    (left_eye.x + right_eye.x) / 2.0f,
 	    (left_eye.y + right_eye.y) / 2.0f,
 	    (left_eye.z + right_eye.z) / 2.0f,
 	};
-
-	// Apply player transform
-	struct xrt_vec3 world_head_pos;
-	struct xrt_quat world_head_ori;
-	if (have_player_transform) {
-		math_quat_rotate_vec3(&player_pose.orientation, &local_head_pos, &world_head_pos);
-		world_head_pos.x += player_pose.position.x;
-		world_head_pos.y += player_pose.position.y;
-		world_head_pos.z += player_pose.position.z;
-		world_head_ori = player_pose.orientation;
-	} else {
-		world_head_pos = local_head_pos;
-		world_head_ori = (struct xrt_quat)XRT_QUAT_IDENTITY;
-	}
 
 	// Set head relation
 	out_head_relation->pose.position = world_head_pos;
@@ -274,31 +256,26 @@ ipc_try_get_sr_view_poses(struct ipc_server *s,
 	                                    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT;
 
 	// Compute view poses (eye positions relative to head)
+	// Eye offsets come from SR tracking (provides IPD and vertical offset)
 	struct xrt_vec3 local_left_offset = {
-	    left_eye.x - local_head_pos.x,
-	    left_eye.y - local_head_pos.y,
-	    left_eye.z - local_head_pos.z,
+	    left_eye.x - sr_head_midpoint.x,
+	    left_eye.y - sr_head_midpoint.y,
+	    0.0f,  // z offset is 0 (eyes are at same depth as head center)
 	};
 	struct xrt_vec3 local_right_offset = {
-	    right_eye.x - local_head_pos.x,
-	    right_eye.y - local_head_pos.y,
-	    right_eye.z - local_head_pos.z,
+	    right_eye.x - sr_head_midpoint.x,
+	    right_eye.y - sr_head_midpoint.y,
+	    0.0f,
 	};
 
-	if (have_player_transform) {
-		struct xrt_vec3 rotated_left, rotated_right;
-		math_quat_rotate_vec3(&player_pose.orientation, &local_left_offset, &rotated_left);
-		math_quat_rotate_vec3(&player_pose.orientation, &local_right_offset, &rotated_right);
-		out_poses[0].position = rotated_left;
-		out_poses[1].position = rotated_right;
-		out_poses[0].orientation = player_pose.orientation;
-		out_poses[1].orientation = player_pose.orientation;
-	} else {
-		out_poses[0].position = local_left_offset;
-		out_poses[1].position = local_right_offset;
-		out_poses[0].orientation = (struct xrt_quat)XRT_QUAT_IDENTITY;
-		out_poses[1].orientation = (struct xrt_quat)XRT_QUAT_IDENTITY;
-	}
+	// Apply head orientation to eye offsets
+	struct xrt_vec3 rotated_left, rotated_right;
+	math_quat_rotate_vec3(&world_head_ori, &local_left_offset, &rotated_left);
+	math_quat_rotate_vec3(&world_head_ori, &local_right_offset, &rotated_right);
+	out_poses[0].position = rotated_left;
+	out_poses[1].position = rotated_right;
+	out_poses[0].orientation = world_head_ori;
+	out_poses[1].orientation = world_head_ori;
 
 	// Compute Kooima FOV
 	ipc_compute_kooima_fov(&left_eye, screen_width_m, screen_height_m, &out_fovs[0]);
@@ -306,20 +283,14 @@ ipc_try_get_sr_view_poses(struct ipc_server *s,
 
 	// Log periodically
 	static int log_counter = 0;
-	if (++log_counter >= 60) {
+	if (++log_counter >= 300) {  // Every ~5 sec at 60fps
 		log_counter = 0;
 		float left_h = (out_fovs[0].angle_right - out_fovs[0].angle_left) * 180.0f / 3.14159265f;
 		float left_v = (out_fovs[0].angle_up - out_fovs[0].angle_down) * 180.0f / 3.14159265f;
-		IPC_WARN(s, "IPC SR view poses: eye L=(%.3f,%.3f,%.3f) R=(%.3f,%.3f,%.3f), FOV H=%.1f° V=%.1f°",
+		IPC_WARN(s, "IPC SR: head=(%.2f,%.2f,%.2f) SR eye L=(%.3f,%.3f,%.3f) FOV H=%.1f° V=%.1f°",
+		         world_head_pos.x, world_head_pos.y, world_head_pos.z,
 		         left_eye.x, left_eye.y, left_eye.z,
-		         right_eye.x, right_eye.y, right_eye.z,
 		         left_h, left_v);
-		if (have_player_transform) {
-			IPC_WARN(s, "  Player transform: pos=(%.3f,%.3f,%.3f) ori=(%.3f,%.3f,%.3f,%.3f)",
-			         player_pose.position.x, player_pose.position.y, player_pose.position.z,
-			         player_pose.orientation.x, player_pose.orientation.y,
-			         player_pose.orientation.z, player_pose.orientation.w);
-		}
 	}
 
 	return true;
