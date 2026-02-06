@@ -554,9 +554,8 @@ struct VS_OUTPUT
 // so the weaver receives sRGB-encoded values (matching SR Hydra's behavior).
 float3 linear_to_srgb(float3 linear_color)
 {
-    // Standard sRGB encode: pow(x, 1/2.2) approximation
-    // SR Hydra uses pow(Color, 1/2.333) which is similar
-    return pow(abs(linear_color), 1.0 / 2.2);
+    // Use SR Hydra's gamma exponent (2.333) for consistent color output
+    return pow(abs(linear_color), 1.0 / 2.333);
 }
 
 float4 PSMain(VS_OUTPUT input) : SV_Target

@@ -2191,26 +2191,40 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		sys->context->OMSetDepthStencilState(sys->depth_disabled.get(), 0);
 
 		// Create default view poses and FOVs for each eye
-		// Note: In a full implementation, these would come from tracking
 		struct xrt_pose view_poses[2];
 		struct xrt_fov fovs[2];
 
-		// Default identity poses
+		// Get eye positions from SR weaver for proper convergence plane
+		// Default: 64mm IPD, 60cm from screen (z=0.6)
+		struct xrt_vec3 left_eye = {-0.032f, 0.0f, 0.6f};
+		struct xrt_vec3 right_eye = {0.032f, 0.0f, 0.6f};
+
+#ifdef XRT_HAVE_LEIA_SR_D3D11
+		if (sys->weaver != nullptr) {
+			float left[3], right[3];
+			if (leiasr_d3d11_get_predicted_eye_positions(sys->weaver, left, right)) {
+				left_eye.x = left[0];
+				left_eye.y = left[1];
+				left_eye.z = left[2];
+				right_eye.x = right[0];
+				right_eye.y = right[1];
+				right_eye.z = right[2];
+			}
+		}
+#endif
+
+		// Identity orientation for both eyes
 		view_poses[0].orientation.x = 0.0f;
 		view_poses[0].orientation.y = 0.0f;
 		view_poses[0].orientation.z = 0.0f;
 		view_poses[0].orientation.w = 1.0f;
-		view_poses[0].position.x = -0.032f;  // IPD/2
-		view_poses[0].position.y = 0.0f;
-		view_poses[0].position.z = 0.0f;
+		view_poses[0].position = left_eye;
 
 		view_poses[1].orientation.x = 0.0f;
 		view_poses[1].orientation.y = 0.0f;
 		view_poses[1].orientation.z = 0.0f;
 		view_poses[1].orientation.w = 1.0f;
-		view_poses[1].position.x = 0.032f;  // IPD/2
-		view_poses[1].position.y = 0.0f;
-		view_poses[1].position.z = 0.0f;
+		view_poses[1].position = right_eye;
 
 		// Default symmetric FOV (roughly 90 degrees)
 		const float fov_angle = 0.785f;  // ~45 degrees
