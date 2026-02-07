@@ -315,6 +315,14 @@ struct d3d11_service_system
 
 	//! Logging level
 	enum u_logging_level log_level;
+
+	//! Active compositor (for eye position queries)
+	//! Points to the most recently active client's compositor.
+	//! Set during layer_commit, cleared on compositor destroy.
+	struct d3d11_service_compositor *active_compositor;
+
+	//! Mutex for active_compositor access
+	std::mutex active_compositor_mutex;
 };
 
 
@@ -2127,6 +2135,12 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
+	// Track this as the active compositor for eye position queries
+	{
+		std::lock_guard<std::mutex> active_lock(sys->active_compositor_mutex);
+		sys->active_compositor = c;
+	}
+
 	// Log frame submission (first frame and every 60 frames)
 	static uint32_t frame_count = 0;
 	if (frame_count == 0 || frame_count % 60 == 0) {
@@ -2576,15 +2590,33 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		viewport.MaxDepth = 1.0f;
 		sys->context->RSSetViewports(1, &viewport);
 
-		// Check window validity before weaving (helps diagnose "window handle is invalid" errors)
-		static bool window_check_done = false;
-		if (!window_check_done) {
-			if (!leiasr_d3d11_check_window_valid(c->render.weaver, c->render.hwnd)) {
-				U_LOG_W("SR weave: Window validity check failed - weaving may not work correctly");
-			} else {
-				U_LOG_W("SR weave: Window %p passed validity check", c->render.hwnd);
+		// Check window validity every frame before weaving
+		// If window was closed, skip weaving and signal session loss
+		bool window_valid = true;
+		if (c->render.owns_window && c->render.window != nullptr) {
+			// For owned windows, check via the window object
+			window_valid = comp_d3d11_window_is_valid(c->render.window);
+		} else if (c->render.hwnd != nullptr) {
+			// For external windows, check if HWND is still valid
+			window_valid = IsWindow(c->render.hwnd) != FALSE;
+		}
+
+		if (!window_valid) {
+			static bool logged_window_closed = false;
+			if (!logged_window_closed) {
+				logged_window_closed = true;
+				U_LOG_W("SR weave: Window closed, skipping weave and signaling session loss");
 			}
-			window_check_done = true;
+
+			// Signal session loss via session event sink
+			if (c->xses != nullptr) {
+				union xrt_session_event xse = XRT_STRUCT_INIT;
+				xse.type = XRT_SESSION_EVENT_LOSS_PENDING;
+				xrt_session_event_sink_push(c->xses, &xse);
+			}
+
+			// Skip weaving and present - return early
+			return XRT_SUCCESS;
 		}
 
 		// Perform weaving
@@ -2620,8 +2652,17 @@ static void
 compositor_destroy(struct xrt_compositor *xc)
 {
 	struct d3d11_service_compositor *c = d3d11_service_compositor_from_xrt(xc);
+	struct d3d11_service_system *sys = c->sys;
 
 	U_LOG_W("Destroying D3D11 service compositor for client");
+
+	// Clear active compositor if it's this one
+	{
+		std::lock_guard<std::mutex> lock(sys->active_compositor_mutex);
+		if (sys->active_compositor == c) {
+			sys->active_compositor = nullptr;
+		}
+	}
 
 	// Clean up per-client render resources (window, swap chain, weaver)
 	fini_client_render_resources(&c->render);
@@ -3032,33 +3073,49 @@ comp_d3d11_service_get_predicted_eye_positions(struct xrt_system_compositor *xsy
                                                 struct xrt_vec3 *out_left,
                                                 struct xrt_vec3 *out_right)
 {
-	// NOTE: With per-client weavers, we no longer have a system-level weaver.
-	// Use the static query which internally uses shared SR resources.
-	(void)xsysc;
-
-	if (out_left == NULL || out_right == NULL) {
+	if (xsysc == NULL || out_left == NULL || out_right == NULL) {
 		return false;
 	}
 
-#ifdef XRT_HAVE_LEIA_SR_D3D11
-	float left[3], right[3];
-	if (leiasr_static_get_predicted_eye_positions(left, right)) {
-		out_left->x = left[0];
-		out_left->y = left[1];
-		out_left->z = left[2];
-		out_right->x = right[0];
-		out_right->y = right[1];
-		out_right->z = right[2];
+	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
 
-		// Log periodically for debugging
-		static int log_counter = 0;
-		if (++log_counter >= 60) {
-			log_counter = 0;
-			U_LOG_W("IPC SR eye positions: L=(%.3f,%.3f,%.3f) R=(%.3f,%.3f,%.3f)",
-			        out_left->x, out_left->y, out_left->z,
-			        out_right->x, out_right->y, out_right->z);
+#ifdef XRT_HAVE_LEIA_SR_D3D11
+	// Get the active compositor's weaver for eye position prediction
+	struct leiasr_d3d11 *weaver = nullptr;
+	{
+		std::lock_guard<std::mutex> lock(sys->active_compositor_mutex);
+		if (sys->active_compositor != nullptr && sys->active_compositor->render.weaver != nullptr) {
+			weaver = sys->active_compositor->render.weaver;
 		}
-		return true;
+	}
+
+	if (weaver != nullptr) {
+		float left[3], right[3];
+		if (leiasr_d3d11_get_predicted_eye_positions(weaver, left, right)) {
+			out_left->x = left[0];
+			out_left->y = left[1];
+			out_left->z = left[2];
+			out_right->x = right[0];
+			out_right->y = right[1];
+			out_right->z = right[2];
+
+			// Log periodically for debugging
+			static int log_counter = 0;
+			if (++log_counter >= 60) {
+				log_counter = 0;
+				U_LOG_W("IPC SR eye positions (from weaver): L=(%.3f,%.3f,%.3f) R=(%.3f,%.3f,%.3f)",
+				        out_left->x, out_left->y, out_left->z,
+				        out_right->x, out_right->y, out_right->z);
+			}
+			return true;
+		}
+	}
+
+	// Log if we have no active weaver
+	static bool logged_no_weaver = false;
+	if (!logged_no_weaver) {
+		logged_no_weaver = true;
+		U_LOG_W("comp_d3d11_service_get_predicted_eye_positions: no active weaver available");
 	}
 #endif
 
@@ -3070,21 +3127,40 @@ comp_d3d11_service_get_display_dimensions(struct xrt_system_compositor *xsysc,
                                            float *out_width_m,
                                            float *out_height_m)
 {
-	// NOTE: Display dimensions are static and don't require a weaver instance.
-	// Use the static query which reads from SR SDK config.
-	(void)xsysc;
-
-	if (out_width_m == NULL || out_height_m == NULL) {
+	if (xsysc == NULL || out_width_m == NULL || out_height_m == NULL) {
 		return false;
 	}
 
+	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
+
 #ifdef XRT_HAVE_LEIA_SR_D3D11
+	// Try to get display dimensions from active compositor's weaver first
+	struct leiasr_d3d11 *weaver = nullptr;
+	{
+		std::lock_guard<std::mutex> lock(sys->active_compositor_mutex);
+		if (sys->active_compositor != nullptr && sys->active_compositor->render.weaver != nullptr) {
+			weaver = sys->active_compositor->render.weaver;
+		}
+	}
+
+	if (weaver != nullptr) {
+		struct leiasr_display_dimensions dims = {0};
+		if (leiasr_d3d11_get_display_dimensions(weaver, &dims) && dims.valid) {
+			*out_width_m = dims.width_m;
+			*out_height_m = dims.height_m;
+			return true;
+		}
+	}
+
+	// Fall back to static query (works even without active weaver)
 	struct leiasr_display_dimensions dims = {0};
 	if (leiasr_static_get_display_dimensions(&dims) && dims.valid) {
 		*out_width_m = dims.width_m;
 		*out_height_m = dims.height_m;
 		return true;
 	}
+#else
+	(void)sys;
 #endif
 
 	return false;
