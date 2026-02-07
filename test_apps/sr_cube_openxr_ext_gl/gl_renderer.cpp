@@ -218,8 +218,10 @@ static void SetMatrix(GLuint program, const char* name, const XMMATRIX& m) {
     if (loc >= 0) {
         XMFLOAT4X4 mat;
         XMStoreFloat4x4(&mat, m);
-        // DirectXMath is row-major; GLSL expects column-major. Pass transpose=GL_TRUE.
-        glUniformMatrix4fv_(loc, 1, GL_TRUE, &mat._11);
+        // GL_FALSE: row-major DirectXMath data read as column-major by GLSL = implicit
+        // transpose. Shader's uTransform*v then computes M^T*v, matching HLSL cbuffer
+        // behavior where column-major default also auto-transposes row-major XMMATRIX.
+        glUniformMatrix4fv_(loc, 1, GL_FALSE, &mat._11);
     }
 }
 
