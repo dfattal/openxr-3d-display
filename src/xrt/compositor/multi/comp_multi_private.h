@@ -30,6 +30,7 @@
 struct comp_target;
 struct leiasr;
 struct leiasr_eye_pair;
+struct xrt_system_devices;
 
 #ifdef XRT_OS_WINDOWS
 struct comp_d3d11_window;
@@ -127,6 +128,9 @@ struct multi_compositor
 
 	//! Owning system compositor.
 	struct multi_system_compositor *msc;
+
+	//! System devices for qwerty input forwarding to self-owned window
+	struct xrt_system_devices *xsysd;
 
 	//! Used to implement wait frame, only used for in process.
 	struct os_precise_sleeper frame_sleeper;
