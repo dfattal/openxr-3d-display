@@ -919,7 +919,7 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 		vk->vkCmdBlitImage(cmd,
 		                   src_vk_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		                   mc->session_render.composite_images[eye], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		                   1, &blit, VK_FILTER_LINEAR);
+		                   1, &blit, VK_FILTER_NEAREST);
 
 		// Transition source back to SHADER_READ_ONLY
 		VkImageMemoryBarrier src_restore = {
@@ -1259,7 +1259,7 @@ blit_flip_eye(struct vk_bundle *vk, VkCommandBuffer cmd,
 	vk->vkCmdBlitImage(cmd,
 	                    src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 	                    dst_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	                    1, &blit, VK_FILTER_LINEAR);
+	                    1, &blit, VK_FILTER_NEAREST);
 
 	VkImageMemoryBarrier post_barriers[2] = {
 	    {
