@@ -1528,6 +1528,11 @@ oxr_session_allocate_and_init(struct oxr_logger *log,
 			xrt_syscomp_set_state((SESS)->sys->xsysc, &(SESS)->xcn->base, true, true);                     \
 			xrt_syscomp_set_z_order((SESS)->sys->xsysc, &(SESS)->xcn->base, 0);                            \
 		}                                                                                                      \
+		/* Pass system devices to multi_compositor for qwerty input */                                         \
+		{                                                                                                      \
+			struct multi_compositor *_mc = multi_compositor(&(SESS)->xcn->base);                            \
+			_mc->xsysd = (SESS)->sys->xsysd;                                                              \
+		}                                                                                                      \
 	} while (false)
 
 #define OXR_SESSION_ALLOCATE_AND_INIT(LOG, SYS, GFX_TYPE, OUT)                                                         \

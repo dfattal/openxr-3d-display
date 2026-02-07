@@ -522,6 +522,11 @@ multi_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin
 				mc->session_render.external_window_handle = comp_d3d11_window_get_hwnd(own_win);
 				U_LOG_W("Created self-owned window: HWND=%p",
 				        mc->session_render.external_window_handle);
+
+				// Enable qwerty keyboard/mouse input on the self-owned window
+				if (mc->xsysd != NULL) {
+					comp_d3d11_window_set_system_devices(own_win, mc->xsysd);
+				}
 			} else {
 				U_LOG_E("Failed to create self-owned window: %d", xret);
 			}
