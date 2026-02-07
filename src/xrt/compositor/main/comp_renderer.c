@@ -1063,7 +1063,7 @@ blit_flip_eye(struct vk_bundle *vk,
 	vk->vkCmdBlitImage(cmd,
 	                    src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 	                    dst_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	                    1, &blit, VK_FILTER_LINEAR);
+	                    1, &blit, VK_FILTER_NEAREST);
 
 	// Transition source back to SHADER_READ_ONLY
 	VkImageMemoryBarrier src_restore = {
@@ -1169,6 +1169,8 @@ do_weaving(struct comp_renderer *r,
 			VkImageView weaveLeft = leftImageView;
 			VkImageView weaveRight = rightImageView;
 
+			render_gfx_begin(render);
+
 			// If the projection layer has flip_y (e.g. OpenGL textures with bottom-left origin),
 			// blit into intermediate images with flipped Y before passing to SR weaver.
 			if (layer->data.flip_y) {
@@ -1193,7 +1195,6 @@ do_weaving(struct comp_renderer *r,
 				}
 			}
 
-			render_gfx_begin(render);
 			leiasr_weave(r->leiasr, commandBuffer, weaveLeft, weaveRight, viewport, imageWidth, imageHeight, imageFormat, framebuffer, framebufferWidth, framebufferHeight, framebufferFormat);
 			render_gfx_end(render);
 		}
