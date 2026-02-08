@@ -518,7 +518,7 @@ init_composite_resources(struct multi_compositor *mc, struct vk_bundle *vk, uint
 	VkPipelineRasterizationStateCreateInfo rs = {
 	    .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 	    .polygonMode = VK_POLYGON_MODE_FILL,
-	    .cullMode = VK_CULL_MODE_BACK_BIT,
+	    .cullMode = VK_CULL_MODE_NONE, // 2D compositing — no culling (shader Y-flip reverses winding)
 	    .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
 	    .lineWidth = 1.0f,
 	};
