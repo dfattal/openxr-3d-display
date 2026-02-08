@@ -295,7 +295,9 @@ get_session_layer_view(struct multi_layer_entry *layer,
                        int *out_width,
                        int *out_height,
                        VkFormat *out_format,
-                       VkImageView *out_image_view)
+                       VkImageView *out_image_view,
+                       VkImage *out_image,
+                       uint32_t *out_array_index)
 {
 	const struct xrt_layer_data *layer_data = &layer->data;
 
@@ -324,6 +326,8 @@ get_session_layer_view(struct multi_layer_entry *layer,
 	*out_height = vd->sub.rect.extent.h;
 	*out_format = (VkFormat)sc->vkic.info.format;
 	*out_image_view = get_image_view(image, layer_data->flags, array_index);
+	*out_image = sc->vkic.images[vd->sub.image_index].handle;
+	*out_array_index = array_index;
 
 	return (*out_image_view != VK_NULL_HANDLE);
 }
@@ -862,9 +866,13 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 	int imgW = 0, imgH = 0;
 	VkFormat imgFmt = VK_FORMAT_UNDEFINED;
 	VkImageView leftProjView = VK_NULL_HANDLE, rightProjView = VK_NULL_HANDLE;
+	VkImage leftProjImage = VK_NULL_HANDLE, rightProjImage = VK_NULL_HANDLE;
+	uint32_t leftProjArray = 0, rightProjArray = 0;
 
-	if (!get_session_layer_view(proj_layer, 0, &imgW, &imgH, &imgFmt, &leftProjView) ||
-	    !get_session_layer_view(proj_layer, 1, &imgW, &imgH, &imgFmt, &rightProjView)) {
+	if (!get_session_layer_view(proj_layer, 0, &imgW, &imgH, &imgFmt, &leftProjView, &leftProjImage,
+	                            &leftProjArray) ||
+	    !get_session_layer_view(proj_layer, 1, &imgW, &imgH, &imgFmt, &rightProjView, &rightProjImage,
+	                            &rightProjArray)) {
 		U_LOG_W("[composite] Could not extract projection views");
 		return false;
 	}
@@ -897,6 +905,49 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 	                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 	                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 	                         0, 0, NULL, 0, NULL, 2, barriers_to_attach);
+
+	// Step 1b: Transition swapchain (app) images UNDEFINED → SHADER_READ_ONLY
+	// These images were created by the null compositor on THIS VkDevice but are shared
+	// with the app via external memory. The app writes to its imported copies; the data
+	// is in GPU memory but the compositor-side layout was never set (still UNDEFINED).
+	// Using oldLayout=UNDEFINED is safe here: it's a metadata-only update on our own
+	// VkImages, not a transfer or blit that would cause VK_ERROR_DEVICE_LOST on Intel.
+	{
+		VkImage proj_images[2] = {leftProjImage, rightProjImage};
+		VkImageMemoryBarrier sc_barriers[2];
+		int sc_barrier_count = 0;
+		for (int eye = 0; eye < 2; eye++) {
+			if (proj_images[eye] == VK_NULL_HANDLE) {
+				continue;
+			}
+			// Check for duplicate (left and right may use same VkImage with different array layers)
+			bool duplicate = false;
+			for (int j = 0; j < sc_barrier_count; j++) {
+				if (sc_barriers[j].image == proj_images[eye]) {
+					duplicate = true;
+					break;
+				}
+			}
+			if (duplicate) {
+				continue;
+			}
+			sc_barriers[sc_barrier_count++] = (VkImageMemoryBarrier){
+			    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			    .srcAccessMask = 0,
+			    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+			    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			    .image = proj_images[eye],
+			    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, VK_REMAINING_ARRAY_LAYERS},
+			};
+		}
+		if (sc_barrier_count > 0) {
+			vk->vkCmdPipelineBarrier(cmd,
+			                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			                         0, 0, NULL, 0, NULL, (uint32_t)sc_barrier_count, sc_barriers);
+		}
+	}
 
 	// UBO stride for sub-allocation from the persistent UBO buffer
 	VkDeviceSize ubo_stride = sizeof(struct xrt_normalized_rect) + sizeof(struct xrt_matrix_4x4);
@@ -957,7 +1008,7 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 			VkDescriptorImageInfo img_desc = {
 			    .sampler = mc->session_render.composite_sampler,
 			    .imageView = proj_views[eye],
-			    .imageLayout = VK_IMAGE_LAYOUT_GENERAL, // imported image — no layout transitions
+			    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 			};
 
 			VkWriteDescriptorSet writes[2] = {
@@ -1104,7 +1155,7 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 			VkDescriptorImageInfo img_desc = {
 			    .sampler = mc->session_render.composite_sampler,
 			    .imageView = ws_view,
-			    .imageLayout = VK_IMAGE_LAYOUT_GENERAL, // imported image — no layout transitions
+			    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 			};
 
 			VkWriteDescriptorSet writes[2] = {
@@ -1317,6 +1368,143 @@ recreate_session_swapchain(struct multi_compositor *mc, struct vk_bundle *vk)
 }
 
 /*!
+ * Ensure intermediate flip images exist for Y-flipping GL textures before weaving.
+ * Allocates two single-eye images with TRANSFER_DST + SAMPLED usage.
+ * Recreates if size or format changed.
+ */
+static bool
+ensure_session_flip_images(struct multi_compositor *mc, struct vk_bundle *vk, int width, int height, VkFormat format)
+{
+	if (mc->session_render.flip_initialized && mc->session_render.flip_width == width &&
+	    mc->session_render.flip_height == height && mc->session_render.flip_format == format) {
+		return true;
+	}
+
+	if (mc->session_render.flip_initialized) {
+		for (int i = 0; i < 2; i++) {
+			if (mc->session_render.flip_views[i] != VK_NULL_HANDLE)
+				vk->vkDestroyImageView(vk->device, mc->session_render.flip_views[i], NULL);
+			if (mc->session_render.flip_images[i] != VK_NULL_HANDLE)
+				vk->vkDestroyImage(vk->device, mc->session_render.flip_images[i], NULL);
+			if (mc->session_render.flip_memories[i] != VK_NULL_HANDLE)
+				vk->vkFreeMemory(vk->device, mc->session_render.flip_memories[i], NULL);
+		}
+		mc->session_render.flip_initialized = false;
+	}
+
+	VkExtent2D extent = {(uint32_t)width, (uint32_t)height};
+	VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	VkImageSubresourceRange range = {
+	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .levelCount = 1,
+	    .layerCount = 1,
+	};
+
+	for (int i = 0; i < 2; i++) {
+		VkResult ret = vk_create_image_simple(vk, extent, format, usage,
+		                                      &mc->session_render.flip_memories[i],
+		                                      &mc->session_render.flip_images[i]);
+		if (ret != VK_SUCCESS) {
+			U_LOG_E("[per-session] Failed to create flip image %d: %s", i, vk_result_string(ret));
+			return false;
+		}
+
+		ret = vk_create_view(vk, mc->session_render.flip_images[i], VK_IMAGE_VIEW_TYPE_2D, format, range,
+		                     &mc->session_render.flip_views[i]);
+		if (ret != VK_SUCCESS) {
+			U_LOG_E("[per-session] Failed to create flip image view %d: %s", i, vk_result_string(ret));
+			return false;
+		}
+	}
+
+	mc->session_render.flip_width = width;
+	mc->session_render.flip_height = height;
+	mc->session_render.flip_format = format;
+	mc->session_render.flip_initialized = true;
+
+	U_LOG_W("[per-session] Created flip images: %dx%d format=%d", width, height, format);
+	return true;
+}
+
+/*!
+ * Blit a source imported image into a flip intermediate image with Y-flipped coordinates.
+ * Source: GENERAL -> TRANSFER_SRC -> GENERAL (imported image, must return to GENERAL)
+ * Dest:   UNDEFINED -> TRANSFER_DST -> SHADER_READ_ONLY (flip image, ready for weaver sampling)
+ */
+static void
+session_blit_flip_eye(struct vk_bundle *vk,
+                      VkCommandBuffer cmd,
+                      VkImage src_image,
+                      VkImage dst_image,
+                      int width,
+                      int height,
+                      uint32_t array_index)
+{
+	VkImageMemoryBarrier pre_barriers[2] = {
+	    {
+	        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	        .srcAccessMask = 0,
+	        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+	        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+	        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	        .image = src_image,
+	        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	        .srcAccessMask = 0,
+	        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+	        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+	        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	        .image = dst_image,
+	        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+	    },
+	};
+	vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL,
+	                         0, NULL, 2, pre_barriers);
+
+	VkImageBlit blit = {
+	    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, array_index, 1},
+	    .srcOffsets =
+	        {
+	            {0, height, 0},
+	            {width, 0, 1},
+	        },
+	    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+	    .dstOffsets =
+	        {
+	            {0, 0, 0},
+	            {width, height, 1},
+	        },
+	};
+	vk->vkCmdBlitImage(cmd, src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst_image,
+	                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_NEAREST);
+
+	VkImageMemoryBarrier post_barriers[2] = {
+	    {
+	        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+	        .dstAccessMask = 0,
+	        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+	        .image = src_image,
+	        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+	        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+	        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	        .image = dst_image,
+	        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+	    },
+	};
+	vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+	                         NULL, 0, NULL, 2, post_barriers);
+}
+
+/*!
  * Render a single per-session client to its own comp_target using SR weaving.
  *
  * @param mc The multi_compositor with per-session rendering
@@ -1374,9 +1562,13 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	VkFormat imageFormat = VK_FORMAT_UNDEFINED;
 	VkImageView leftImageView = VK_NULL_HANDLE;
 	VkImageView rightImageView = VK_NULL_HANDLE;
+	VkImage leftImage = VK_NULL_HANDLE, rightImage = VK_NULL_HANDLE;
+	uint32_t leftArrayIndex = 0, rightArrayIndex = 0;
 
-	bool leftOk = get_session_layer_view(layer, 0, &imageWidth, &imageHeight, &imageFormat, &leftImageView);
-	bool rightOk = get_session_layer_view(layer, 1, &imageWidth, &imageHeight, &imageFormat, &rightImageView);
+	bool leftOk = get_session_layer_view(layer, 0, &imageWidth, &imageHeight, &imageFormat, &leftImageView,
+	                                     &leftImage, &leftArrayIndex);
+	bool rightOk = get_session_layer_view(layer, 1, &imageWidth, &imageHeight, &imageFormat, &rightImageView,
+	                                      &rightImage, &rightArrayIndex);
 
 	if (!leftOk || !rightOk) {
 		U_LOG_W("[per-session] Could not extract stereo views for per-session rendering");
@@ -1457,27 +1649,52 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	}
 	U_LOG_W("[per-session] Command buffer started");
 
-	// TODO: Window-space overlay compositing disabled while investigating
-	// VK_IMAGE_LAYOUT_GENERAL sampling issue on Intel Iris Xe (images read as black).
-	// Raw imported views go directly to the weaver for now.
 	VkImageView weaveLeft = leftImageView;
 	VkImageView weaveRight = rightImageView;
 	int weaveWidth = imageWidth;
 	int weaveHeight = imageHeight;
 
-	if (false && (needs_compositing || layer->data.flip_y)) {
-		U_LOG_W("[per-session] Compositing layers to intermediate targets (overlays=%d, flip_y=%d)...",
-		        needs_compositing, layer->data.flip_y);
-		VkImageView compLeft = VK_NULL_HANDLE, compRight = VK_NULL_HANDLE;
-		if (composite_layers_to_intermediate(mc, vk, cmd, &compLeft, &compRight)) {
-			weaveLeft = compLeft;
-			weaveRight = compRight;
-			weaveWidth = (int)mc->session_render.composite_width;
-			weaveHeight = (int)mc->session_render.composite_height;
-			U_LOG_W("[per-session] Using composited per-eye views: %dx%d", weaveWidth, weaveHeight);
+	if (layer->data.flip_y) {
+		// GL textures need Y-flip: blit into intermediate images with flipped Y.
+		// This also transitions the flip images to SHADER_READ_ONLY_OPTIMAL
+		// (proper barrier for weaver sampling) and returns source to GENERAL.
+		if (ensure_session_flip_images(mc, vk, imageWidth, imageHeight, imageFormat)) {
+			session_blit_flip_eye(vk, cmd, leftImage, mc->session_render.flip_images[0], imageWidth,
+			                     imageHeight, leftArrayIndex);
+			session_blit_flip_eye(vk, cmd, rightImage, mc->session_render.flip_images[1], imageWidth,
+			                     imageHeight, rightArrayIndex);
+			weaveLeft = mc->session_render.flip_views[0];
+			weaveRight = mc->session_render.flip_views[1];
+			U_LOG_W("[per-session] Y-flip blit done, using flip views for weaving");
 		} else {
-			U_LOG_W("[per-session] Compositing failed, falling back to direct projection views");
+			U_LOG_W("[per-session] Failed to create flip images, using raw views (will be upside-down)");
 		}
+	} else {
+		// Non-GL path: transition imported images GENERAL -> SHADER_READ_ONLY for weaver sampling
+		VkImageMemoryBarrier input_barriers[2] = {
+		    {
+		        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		        .srcAccessMask = 0,
+		        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+		        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+		        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		        .image = leftImage,
+		        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+		    },
+		    {
+		        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		        .srcAccessMask = 0,
+		        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+		        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+		        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		        .image = rightImage,
+		        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+		    },
+		};
+		uint32_t barrier_count = (leftImage == rightImage) ? 1 : 2;
+		vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, barrier_count,
+		                         input_barriers);
 	}
 
 	// Get the framebuffer for the current swapchain image
