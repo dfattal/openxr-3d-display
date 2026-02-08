@@ -1366,7 +1366,9 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	U_LOG_W("[per-session] Acquiring target swapchain image...");
 	uint32_t buffer_index = 0;
 	VkResult ret = comp_target_acquire(ct, &buffer_index);
-	if (ret != VK_SUCCESS) {
+	if (ret == VK_SUBOPTIMAL_KHR) {
+		U_LOG_W("[per-session] Swapchain suboptimal (window resized?), continuing");
+	} else if (ret != VK_SUCCESS) {
 		U_LOG_E("[per-session] Failed to acquire per-session target image: %s", vk_result_string(ret));
 		return;
 	}
