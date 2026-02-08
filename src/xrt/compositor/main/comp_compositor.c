@@ -216,7 +216,7 @@ target_service_create_from_window(struct comp_target_service *service,
 	    .color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
 	    .present_mode = VK_PRESENT_MODE_FIFO_KHR,
 	    .format_count = 1,
-	    .formats = {VK_FORMAT_B8G8R8A8_SRGB},
+	    .formats = {VK_FORMAT_R8G8B8A8_SRGB},
 	};
 
 	comp_target_create_images(ct, &info);
