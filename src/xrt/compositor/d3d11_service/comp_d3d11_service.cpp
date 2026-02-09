@@ -1340,10 +1340,11 @@ init_client_render_resources(struct d3d11_service_system *sys,
 			res->weaver = nullptr;
 		} else {
 			U_LOG_W("SR weaver created successfully for client");
-			// Configure sRGB conversion: stereo texture contains sRGB-encoded data
-			// (from blit shader gamma encoding), back buffer is UNORM
-			leiasr_d3d11_set_srgb_conversion(res->weaver, true, true);
-			U_LOG_W("SR weaver: configured sRGB conversion (read=true, write=true)");
+			// Don't enable weaver sRGB conversion - the blit shader already handles
+			// gamma encoding with pow(1/2.333) to match SR Hydra's expected input.
+			// Enabling weaver sRGB would cause double conversion.
+			leiasr_d3d11_set_srgb_conversion(res->weaver, false, false);
+			U_LOG_W("SR weaver: sRGB conversion disabled (shader handles gamma)");
 		}
 	}
 #endif
@@ -2302,6 +2303,17 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		float right_src_h = static_cast<float>(layer->data.proj.v[1].sub.rect.extent.h);
 
 		// Use shader-based blit for SRGB textures, CopySubresourceRegion for non-SRGB
+		// Log which path is used (first frame only)
+		static bool logged_blit_path = false;
+		if (!logged_blit_path) {
+			U_LOG_W("Blit path: left_is_srgb=%d, blit_vs=%p, srv=%p -> %s",
+			        left_is_srgb, (void*)sys->blit_vs.get(),
+			        (void*)sc_left->images[left_index].srv.get(),
+			        (left_is_srgb && sys->blit_vs && sc_left->images[left_index].srv)
+			            ? "SHADER BLIT (gamma encode)" : "COPY (no conversion)");
+			logged_blit_path = true;
+		}
+
 		if (left_is_srgb && sys->blit_vs && sc_left->images[left_index].srv) {
 			// Create SRGB SRV if needed for proper gamma handling
 			// The existing SRV might not be SRGB format, so we create a temp one
