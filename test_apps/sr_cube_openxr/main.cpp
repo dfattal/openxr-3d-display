@@ -7,7 +7,7 @@
  * This application demonstrates OpenXR without the XR_EXT_session_target extension.
  * Monado will create its own window for rendering.
  *
- * Input is handled by Monado's qwerty driver (QWERTY_ENABLE=true):
+ * Input is handled by Monado's qwerty driver:
  * - WASD: Move camera
  * - Mouse drag: Look around
  * - ESC: Close window and exit
@@ -75,7 +75,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     LOG_INFO("=== SR Cube OpenXR Application ===");
     LOG_INFO("OpenXR standard mode (Monado creates window)");
-    LOG_INFO("Input handled by Monado's qwerty driver (set QWERTY_ENABLE=true)");
+    LOG_INFO("Input handled by Monado's qwerty driver");
 
     // Add SRMonado to DLL search path
     {
