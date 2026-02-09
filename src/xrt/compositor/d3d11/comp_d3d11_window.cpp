@@ -41,8 +41,8 @@
 // Environment variable to start in windowed mode
 DEBUG_GET_ONCE_BOOL_OPTION(start_windowed, "XRT_COMPOSITOR_START_WINDOWED", false)
 
-// Environment variable to enable qwerty input from the main window
-DEBUG_GET_ONCE_BOOL_OPTION(qwerty_enable, "QWERTY_ENABLE", false)
+// Qwerty input is always enabled for non-session-target apps (Monado-owned window)
+// DEBUG_GET_ONCE_BOOL_OPTION(qwerty_enable, "QWERTY_ENABLE", false)
 
 // Window class name
 static WCHAR szWindowClass[] = L"MonadoD3D11";
@@ -476,13 +476,9 @@ comp_d3d11_window_create(uint32_t width, uint32_t height, struct comp_d3d11_wind
 	w->requested_width = width > 0 ? width : 1920;
 	w->requested_height = height > 0 ? height : 1080;
 	w->xsysd = NULL;
-	w->qwerty_enabled = debug_get_bool_option_qwerty_enable();
+	w->qwerty_enabled = true;  // Always enabled for Monado-owned windows
 
-	if (w->qwerty_enabled) {
-		U_LOG_W("D3D11 window: QWERTY input ENABLED (QWERTY_ENABLE=true)");
-	} else {
-		U_LOG_W("D3D11 window: QWERTY input DISABLED (set QWERTY_ENABLE=true to enable)");
-	}
+	U_LOG_W("D3D11 window: QWERTY input ENABLED");
 
 	U_LOG_W("D3D11 window: Creating window on dedicated thread (%ux%u)", w->requested_width, w->requested_height);
 
@@ -682,11 +678,7 @@ comp_d3d11_window_set_system_devices(struct comp_d3d11_window *window,
 
 	if (xsysd != NULL) {
 		U_LOG_W("D3D11 window: xsysd has %u devices", (unsigned)xsysd->xdev_count);
-		if (window->qwerty_enabled) {
-			U_LOG_W("D3D11 window: System devices set - QWERTY input active");
-			U_LOG_W("D3D11 window: Controls: WASDQE=move, Arrows=rotate, RightClick+Drag=look, Shift=sprint");
-		} else {
-			U_LOG_W("D3D11 window: xsysd set but QWERTY input disabled (set QWERTY_ENABLE=true)");
-		}
+		U_LOG_W("D3D11 window: System devices set - QWERTY input active");
+		U_LOG_W("D3D11 window: Controls: WASDQE=move, Arrows=rotate, RightClick+Drag=look, Shift=sprint");
 	}
 }
