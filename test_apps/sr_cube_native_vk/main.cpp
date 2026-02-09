@@ -458,7 +458,7 @@ static void RenderThreadFunc(HWND hwnd, VulkanState* vk) {
         g_srWeaver->setScissorRect(weaverRect);
         g_srWeaver->setCommandBuffer(cmd);
         g_srWeaver->setInputViewTexture(vk->viewImageView, VK_NULL_HANDLE,
-            (int)(vk->viewWidth * 2), (int)(vk->viewHeight), vk->swapchainFormat);
+            (int)(vk->viewWidth), (int)(vk->viewHeight), vk->swapchainFormat);
         g_srWeaver->setOutputFrameBuffer(vk->swapchainFramebuffers[imageIndex],
             (int)vk->swapchainExtent.width, (int)vk->swapchainExtent.height,
             vk->swapchainFormat);
