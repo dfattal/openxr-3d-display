@@ -1218,7 +1218,7 @@ recreate_session_swapchain(struct multi_compositor *mc, struct vk_bundle *vk)
 	struct comp_target_create_images_info info = {
 	    .image_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 	    .format_count = 1,
-	    .formats = {VK_FORMAT_R8G8B8A8_SRGB},
+	    .formats = {VK_FORMAT_B8G8R8A8_SRGB},
 	    .extent = {ct->width, ct->height}, // Will be overridden by surface caps
 	    .color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
 	    .present_mode = VK_PRESENT_MODE_FIFO_KHR,
