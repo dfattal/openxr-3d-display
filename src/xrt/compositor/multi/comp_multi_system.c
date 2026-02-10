@@ -1679,6 +1679,45 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	int weaveWidth = imageWidth;
 	int weaveHeight = imageHeight;
 
+	// If window-space overlay layers are present, composite all layers into
+	// intermediate per-eye images first, then use those for the SBS blit.
+	bool composited = false;
+	bool blit_flip_y = layer->data.flip_y;
+	if (needs_compositing) {
+		VkImageView comp_left_view = VK_NULL_HANDLE, comp_right_view = VK_NULL_HANDLE;
+		if (composite_layers_to_intermediate(mc, vk, cmd, &comp_left_view, &comp_right_view)) {
+			// Use composited images as SBS blit sources instead of raw projection images.
+			// Compositing already applied flip_y, so disable it for the blit.
+			leftImage = mc->session_render.composite_images[0];
+			rightImage = mc->session_render.composite_images[1];
+			leftArrayIndex = 0;
+			rightArrayIndex = 0;
+			blit_flip_y = false;
+			composited = true;
+
+			// Transition composited images SHADER_READ_ONLY → GENERAL
+			// so session_blit_sbs can transition them GENERAL → TRANSFER_SRC.
+			VkImageMemoryBarrier readToGeneral[2];
+			for (int e = 0; e < 2; e++) {
+				readToGeneral[e] = (VkImageMemoryBarrier){
+				    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+				    .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+				    .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+				    .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				    .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+				    .image = mc->session_render.composite_images[e],
+				    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+				};
+			}
+			vk->vkCmdPipelineBarrier(cmd,
+			                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+			                         0, 0, NULL, 0, NULL, 2, readToGeneral);
+
+			U_LOG_W("[per-session] Composited %u layers into intermediate images", mc->delivered.layer_count);
+		}
+	}
+
 	// Both GL and VK paths blit shared images into a local SBS (side-by-side) image.
 	// This serves two purposes:
 	// 1. Creates a compositor-owned local copy, avoiding cross-device CCS coherency
@@ -1686,16 +1725,17 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	// 2. The blit's GENERAL->TRANSFER_SRC transition reconciles CCS metadata on
 	//    the compositor's device after the app's device wrote to the shared images.
 	// GL path flips Y (GL is Y-up, VK is Y-down). VK path copies without flip.
+	// When composited, flip_y is already applied so blit_flip_y is false.
 	// The weaver's SBS mode (right=VK_NULL_HANDLE) reads left half as left eye,
 	// right half as right eye.
 	if (ensure_session_flip_images(mc, vk, imageWidth, imageHeight, imageFormat)) {
 		session_blit_sbs(vk, cmd, leftImage, leftArrayIndex, rightImage, rightArrayIndex,
-		                 mc->session_render.flip_sbs_image, imageWidth, imageHeight, layer->data.flip_y);
+		                 mc->session_render.flip_sbs_image, imageWidth, imageHeight, blit_flip_y);
 		weaveLeft = mc->session_render.flip_sbs_view;
 		weaveRight = VK_NULL_HANDLE;
 		weaveWidth = imageWidth * 2;
-		U_LOG_W("[per-session] SBS blit done (flip_y=%d), using SBS view (%dx%d) for weaving",
-		        layer->data.flip_y, weaveWidth, weaveHeight);
+		U_LOG_W("[per-session] SBS blit done (flip_y=%d, composited=%d), using SBS view (%dx%d) for weaving",
+		        blit_flip_y, composited, weaveWidth, weaveHeight);
 	} else {
 		U_LOG_W("[per-session] Failed to create SBS image, using raw views");
 	}
