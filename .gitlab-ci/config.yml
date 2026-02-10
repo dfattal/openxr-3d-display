@@ -138,15 +138,6 @@ distributions:
               CMAKE_BUILD_TYPE: Debug
               CMAKE_TOOLCHAIN_FILE: .gitlab-ci/i386.cmake
 
-      - codename: bullseye
-        tag: "2025-01-08"
-        script: bullseye_backports.sh
-        deb_version_suffix: bpo11
-        packages:
-          <<: *default_debian_packages
-        build_jobs:
-          - name: "debian:bullseye:cmake"
-
 
       # This one is pretty minimal, compared to the others.
       # Though, we now install the android SDK in it...

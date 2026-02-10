@@ -50,16 +50,6 @@ else
     echo "Skipping bookworm - no artifact found"
 fi
 
-# bullseye
-if [ -f "incoming/bullseye.distro" ]; then
-    VERSION=$(cat incoming/bullseye.distro)
-    echo "Signing and processing bullseye: ${VERSION}"
-    debsign -k "${MONADO_GPG_FINGERPRINT}" -p "gpg --batch --no-tty --yes --pinentry-mode loopback --passphrase ${MONADO_GPG_PASSPHRASE}" "incoming/monado_${VERSION}_amd64.changes"
-    reprepro -V --ignore=wrongdistribution -b repo include bullseye "incoming/monado_${VERSION}_amd64.changes"
-else
-    echo "Skipping bullseye - no artifact found"
-fi
-
 # jammy
 if [ -f "incoming/jammy.distro" ]; then
     VERSION=$(cat incoming/jammy.distro)
