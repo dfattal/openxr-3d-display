@@ -46,7 +46,7 @@ SRMonado is built from Monado's codebase, which was designed for **VR headsets**
 |-----------------|-----------------|
 | Exclusive HMD hardware access | It's just a monitor - no exclusive access needed |
 | Persistent head tracking state | Eye tracking is handled by SR Tracker Service (Leia's service) |
-| Single display output shared by apps | XR_EXT_session_target gives each app its own window |
+| Single display output shared by apps | XR_EXT_win32_window_binding gives each app its own window |
 
 For Leia SR, tracking state is already shared via **Leia's SR Tracker Service** (part of SR SDK), not Monado:
 
@@ -96,7 +96,7 @@ SRMonado has two compositor implementations:
 | Compositor | Default? | Requirements | SR Weaver |
 |------------|----------|--------------|-----------|
 | Vulkan | Yes | None | `leia_interlacer_vulkan` |
-| D3D11 Native | No | Opt-in + XR_EXT_session_target | `leiasr_d3d11` |
+| D3D11 Native | No | Opt-in + XR_EXT_win32_window_binding | `leiasr_d3d11` |
 
 ### Default: Vulkan Compositor
 
@@ -121,13 +121,13 @@ App (D3D11) → D3D11 Compositor → leiasr_d3d11 weaver → Display
 ```
 
 **Requirements for D3D11 native compositor:**
-- Must use `XR_EXT_session_target` (provide your own HWND)
+- Must use `XR_EXT_win32_window_binding` (provide your own HWND)
 - Must be in-process mode (default)
 - Must set the environment variable
 
 ## Using Existing OpenXR Apps (Blender, etc.)
 
-Existing OpenXR applications that don't know about `XR_EXT_session_target` will still work:
+Existing OpenXR applications that don't know about `XR_EXT_win32_window_binding` will still work:
 
 ```
 Blender.exe starts
@@ -145,7 +145,7 @@ SRMonadoClient.dll loads into Blender's process (in-process mode)
 Runtime creates its own window for 3D output
 ```
 
-However, without `XR_EXT_session_target`:
+However, without `XR_EXT_win32_window_binding`:
 
 | Aspect | With Extension | Without (Blender, etc.) |
 |--------|----------------|------------------------|
@@ -154,9 +154,9 @@ However, without `XR_EXT_session_target`:
 | Multi-app | Multiple apps can run | Typically one app at a time |
 | D3D11 native compositor | Available | Not available |
 
-## Using the XR_EXT_session_target Extension
+## Using the XR_EXT_win32_window_binding Extension
 
-The `XR_EXT_session_target` extension allows your app to provide its own window (HWND) to the runtime. This enables:
+The `XR_EXT_win32_window_binding` extension allows your app to provide its own window (HWND) to the runtime. This enables:
 
 - **Direct input handling** - Your app receives keyboard/mouse/gamepad events
 - **Windowed 3D output** - Interlaced 3D rendered to your window
@@ -175,7 +175,7 @@ std::vector<XrExtensionProperties> extensions(extensionCount, {XR_TYPE_EXTENSION
 xrEnumerateInstanceExtensionProperties(nullptr, extensionCount, &extensionCount, extensions.data());
 
 for (const auto& ext : extensions) {
-    if (strcmp(ext.extensionName, "XR_EXT_session_target") == 0) {
+    if (strcmp(ext.extensionName, "XR_EXT_win32_window_binding") == 0) {
         // Extension is available!
     }
 }
@@ -193,7 +193,7 @@ for (const auto& ext : extensions) {
 
 2. **Request the extension** when creating the instance:
    ```c
-   const char* extensions[] = { "XR_EXT_session_target", ... };
+   const char* extensions[] = { "XR_EXT_win32_window_binding", ... };
    XrInstanceCreateInfo createInfo = {
        .enabledExtensionCount = 1,
        .enabledExtensionNames = extensions,
@@ -204,9 +204,9 @@ for (const auto& ext : extensions) {
 
 3. **Pass your HWND** when creating the session:
    ```c
-   #include <openxr/XR_EXT_session_target.h>
+   #include <openxr/XR_EXT_win32_window_binding.h>
 
-   XrSessionTargetCreateInfoEXT targetInfo = {
+   XrWin32WindowBindingCreateInfoEXT targetInfo = {
        .type = XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT,
        .next = nullptr,
        .windowHandle = myWindow,  // Your HWND
@@ -288,7 +288,7 @@ Or from the install directory after running the installer:
 
 ### Extension not found
 
-Ensure you're requesting `"XR_EXT_session_target"` in `enabledExtensionNames` when calling `xrCreateInstance()`.
+Ensure you're requesting `"XR_EXT_win32_window_binding"` in `enabledExtensionNames` when calling `xrCreateInstance()`.
 
 ### No 3D effect visible
 
@@ -406,7 +406,7 @@ If Chrome WebXR shows a blank screen or crashes:
 
 ## Further Reading
 
-- `doc/XR_EXT_session_target/` - Detailed extension documentation
+- `doc/extensions/` - Detailed extension documentation
 - `test_apps/session_target_test/` - Example source code
 - `src/xrt/state_trackers/oxr/oxr_session.c` - Extension implementation
 - `src/xrt/compositor/d3d11_service/` - D3D11 service compositor implementation

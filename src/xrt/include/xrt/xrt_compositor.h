@@ -2420,6 +2420,18 @@ struct xrt_system_compositor_info
 	//! Whether this compositor is running in service/IPC mode (compositor in separate process).
 	//! When true, in-process compositors like D3D11 native cannot be used.
 	bool is_service_mode;
+
+	//! Physical display width in meters (from SR SDK). 0 if unknown.
+	float display_width_m;
+
+	//! Physical display height in meters (from SR SDK). 0 if unknown.
+	float display_height_m;
+
+	//! Recommended horizontal view scale: sr_recommended_w / display_pixel_w. 0 if unknown.
+	float recommended_view_scale_x;
+
+	//! Recommended vertical view scale: sr_recommended_h / display_pixel_h. 0 if unknown.
+	float recommended_view_scale_y;
 };
 
 struct xrt_system_compositor;

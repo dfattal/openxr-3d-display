@@ -685,18 +685,6 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 	}
 #endif // XRT_OS_ANDROID
 
-	// Check for pending render resolution change from D3D11 compositor (pull model).
-	// The compositor stores pending dims on resize; we query and push to the OXR event queue.
-#if defined(XRT_HAVE_LEIA_SR_D3D11) && defined(XRT_HAVE_D3D11_NATIVE_COMPOSITOR)
-	if (sess->is_d3d11_native_compositor && sess->xcn != NULL) {
-		uint32_t new_w = 0, new_h = 0;
-		if (comp_d3d11_compositor_get_pending_render_resolution(&sess->xcn->base, &new_w, &new_h)) {
-#ifdef OXR_HAVE_EXT_dynamic_render_resolution
-			oxr_event_push_XrEventDataRenderResolutionChangedEXT(log, sess, new_w, new_h);
-#endif
-		}
-	}
-#endif
 
 	bool read_more_events = true;
 	while (read_more_events) {
@@ -761,14 +749,6 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 			oxr_event_push_XrEventDataUserPresenceChangedEXT(log, sess,
 			                                                 xse.presence_change.is_user_present);
 #endif // OXR_HAVE_EXT_user_presence
-			break;
-		case XRT_SESSION_EVENT_RENDER_RESOLUTION_CHANGE:
-#ifdef OXR_HAVE_EXT_dynamic_render_resolution
-			oxr_event_push_XrEventDataRenderResolutionChangedEXT(
-			    log, sess,
-			    xse.render_resolution.width,
-			    xse.render_resolution.height);
-#endif // OXR_HAVE_EXT_dynamic_render_resolution
 			break;
 		default: U_LOG_W("unhandled event type! %d", xse.type); break;
 		}
@@ -1793,9 +1773,9 @@ oxr_session_create(struct oxr_logger *log,
 	}
 
 #ifdef XRT_OS_WINDOWS
-	// Parse XR_EXT_session_target extension - allows app to provide its own window
-	const XrSessionTargetCreateInfoEXT *target_info = OXR_GET_INPUT_FROM_CHAIN(
-	    createInfo, XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT, XrSessionTargetCreateInfoEXT);
+	// Parse XR_EXT_win32_window_binding extension - allows app to provide its own window
+	const XrWin32WindowBindingCreateInfoEXT *target_info = OXR_GET_INPUT_FROM_CHAIN(
+	    createInfo, XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT, XrWin32WindowBindingCreateInfoEXT);
 	if (target_info && target_info->windowHandle) {
 		xsi.external_window_handle = (void *)target_info->windowHandle;
 	}

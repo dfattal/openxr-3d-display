@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  SR Cube OpenXR Ext D3D12 - OpenXR with XR_EXT_session_target (D3D12)
+ * @brief  SR Cube OpenXR Ext D3D12 - OpenXR with XR_EXT_win32_window_binding (D3D12)
  *
  * D3D12 port of sr_cube_openxr_ext. Projection layer only, no HUD/quad layer.
  */

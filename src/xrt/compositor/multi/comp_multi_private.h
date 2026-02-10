@@ -210,7 +210,7 @@ struct multi_compositor
 	float current_refresh_rate_hz;
 
 	/*!
-	 * Per-session rendering resources for XR_EXT_session_target.
+	 * Per-session rendering resources for XR_EXT_win32_window_binding.
 	 * When external_window_handle is set, this session renders to its own window.
 	 */
 	struct
@@ -289,9 +289,6 @@ struct multi_compositor
 		bool flip_initialized;
 		//! @}
 
-		//! Last render resolution sent to app (to avoid duplicate events)
-		uint32_t last_notified_render_width;
-		uint32_t last_notified_render_height;
 #endif
 
 #ifdef XRT_OS_WINDOWS

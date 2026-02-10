@@ -136,8 +136,11 @@ t_instance_create_system(struct xrt_instance *xinst,
 #ifdef XRT_HAVE_LEIA_SR
 		// Query SR display for recommended view dimensions and refresh rate
 		// This ensures apps create properly-sized swapchains and correct frame pacing
+		uint32_t sr_native_width = 0;
+		uint32_t sr_native_height = 0;
 		if (leiasr_query_recommended_view_dimensions(5.0, &sr_rec_width, &sr_rec_height,
-		                                             &sr_refresh_rate_hz, NULL, NULL)) {
+		                                             &sr_refresh_rate_hz, &sr_native_width,
+		                                             &sr_native_height)) {
 			U_LOG_I("Using SR recommended view dimensions: %ux%u per eye, %.0f Hz", sr_rec_width,
 			        sr_rec_height, sr_refresh_rate_hz);
 		} else {
@@ -210,6 +213,32 @@ out:
 	if (xsysc != NULL) {
 		// Tell the system about the system compositor.
 		u_system_set_system_compositor(usys, xsysc);
+
+#ifdef XRT_HAVE_LEIA_SR
+		// Populate display info for XR_EXT_display_info extension.
+		// Scale factors are static: sr_recommended / display_pixels.
+		{
+			uint32_t di_sr_w = 0, di_sr_h = 0, di_nat_w = 0, di_nat_h = 0;
+			float di_refresh = 0.0f;
+			if (leiasr_query_recommended_view_dimensions(5.0, &di_sr_w, &di_sr_h, &di_refresh,
+			                                             &di_nat_w, &di_nat_h) &&
+			    di_nat_w > 0 && di_nat_h > 0) {
+				xsysc->info.recommended_view_scale_x = (float)di_sr_w / (float)di_nat_w;
+				xsysc->info.recommended_view_scale_y = (float)di_sr_h / (float)di_nat_h;
+				U_LOG_W("XR_EXT_display_info: scale=%.4f x %.4f (sr=%ux%u, native=%ux%u)",
+				        xsysc->info.recommended_view_scale_x,
+				        xsysc->info.recommended_view_scale_y, di_sr_w, di_sr_h, di_nat_w, di_nat_h);
+			}
+
+			struct leiasr_display_dimensions dims = {0};
+			if (leiasr_static_get_display_dimensions(&dims) && dims.valid) {
+				xsysc->info.display_width_m = dims.width_m;
+				xsysc->info.display_height_m = dims.height_m;
+				U_LOG_W("XR_EXT_display_info: display=%.4f x %.4f m",
+				        dims.width_m, dims.height_m);
+			}
+		}
+#endif
 
 		assert(out_xsysc != NULL);
 		*out_xsysc = xsysc;

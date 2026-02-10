@@ -502,26 +502,26 @@
 
 
 /*
- * XR_EXT_session_target
+ * XR_EXT_win32_window_binding
  */
-#if defined(XR_EXT_session_target) && defined(XR_USE_PLATFORM_WIN32)
-#define OXR_HAVE_EXT_session_target
-#define OXR_EXTENSION_SUPPORT_EXT_session_target(_) \
-    _(EXT_session_target, EXT_SESSION_TARGET)
+#if defined(XR_EXT_win32_window_binding) && defined(XR_USE_PLATFORM_WIN32)
+#define OXR_HAVE_EXT_win32_window_binding
+#define OXR_EXTENSION_SUPPORT_EXT_win32_window_binding(_) \
+    _(EXT_win32_window_binding, EXT_WIN32_WINDOW_BINDING)
 #else
-#define OXR_EXTENSION_SUPPORT_EXT_session_target(_)
+#define OXR_EXTENSION_SUPPORT_EXT_win32_window_binding(_)
 #endif
 
 
 /*
- * XR_EXT_dynamic_render_resolution
+ * XR_EXT_display_info
  */
-#if defined(XR_EXT_dynamic_render_resolution)
-#define OXR_HAVE_EXT_dynamic_render_resolution
-#define OXR_EXTENSION_SUPPORT_EXT_dynamic_render_resolution(_) \
-    _(EXT_dynamic_render_resolution, EXT_DYNAMIC_RENDER_RESOLUTION)
+#if defined(XR_EXT_display_info)
+#define OXR_HAVE_EXT_display_info
+#define OXR_EXTENSION_SUPPORT_EXT_display_info(_) \
+    _(EXT_display_info, EXT_DISPLAY_INFO)
 #else
-#define OXR_EXTENSION_SUPPORT_EXT_dynamic_render_resolution(_)
+#define OXR_EXTENSION_SUPPORT_EXT_display_info(_)
 #endif
 
 
@@ -996,8 +996,8 @@
     OXR_EXTENSION_SUPPORT_EXT_samsung_odyssey_controller(_) \
     OXR_EXTENSION_SUPPORT_EXT_user_presence(_) \
     OXR_EXTENSION_SUPPORT_EXT_win32_appcontainer_compatible(_) \
-    OXR_EXTENSION_SUPPORT_EXT_session_target(_) \
-    OXR_EXTENSION_SUPPORT_EXT_dynamic_render_resolution(_) \
+    OXR_EXTENSION_SUPPORT_EXT_win32_window_binding(_) \
+    OXR_EXTENSION_SUPPORT_EXT_display_info(_) \
     OXR_EXTENSION_SUPPORT_BD_controller_interaction(_) \
     OXR_EXTENSION_SUPPORT_FB_body_tracking(_) \
     OXR_EXTENSION_SUPPORT_FB_composition_layer_alpha_blend(_) \

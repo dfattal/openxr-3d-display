@@ -7,7 +7,7 @@
 # Apps:
 #   sr_cube_native         - Native SR SDK (no OpenXR) - requires LeiaSR SDK
 #   sr_cube_openxr         - OpenXR standard mode (Monado creates window)
-#   sr_cube_openxr_ext     - OpenXR with XR_EXT_session_target (app creates window, D3D11)
+#   sr_cube_openxr_ext     - OpenXR with XR_EXT_win32_window_binding (app creates window, D3D11)
 #   sr_cube_openxr_ext_d3d12 - D3D12 port of sr_cube_openxr_ext
 #   sr_cube_openxr_ext_gl  - OpenGL port of sr_cube_openxr_ext
 #   sr_cube_openxr_ext_vk  - Vulkan port of sr_cube_openxr_ext (requires Vulkan SDK)

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  OpenXR session management for OpenGL with XR_EXT_session_target
+ * @brief  OpenXR session management for OpenGL with XR_EXT_win32_window_binding
  */
 
 #pragma once
@@ -11,7 +11,7 @@
 #include "xr_session_common.h"
 #include <GL/gl.h>
 
-// Initialize OpenXR instance with OpenGL + session_target extensions
+// Initialize OpenXR instance with OpenGL + win32_window_binding extensions
 bool InitializeOpenXR(XrSessionManager& xr);
 
 // Get OpenGL graphics requirements (min/max GL version)

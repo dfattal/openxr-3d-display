@@ -115,11 +115,6 @@ struct comp_d3d11_compositor
 
 
 
-	//! Pending render resolution change (set on resize, cleared when queried).
-	bool render_resize_pending;
-	uint32_t pending_render_width;
-	uint32_t pending_render_height;
-
 	//! Thread safety.
 	std::mutex mutex;
 };
@@ -380,11 +375,6 @@ d3d11_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 								uint32_t new_vh = (uint32_t)((float)sr_h * ratio);
 
 								comp_d3d11_renderer_resize(c->renderer, new_vw, new_vh);
-
-								// Signal pending render resolution change for app notification
-								c->render_resize_pending = true;
-								c->pending_render_width = new_vw;
-								c->pending_render_height = new_vh;
 							}
 						}
 #endif
@@ -812,7 +802,7 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 
 	// Handle window: use provided HWND or create our own
 	if (hwnd != nullptr) {
-		// App provided window via XR_EXT_session_target
+		// App provided window via XR_EXT_win32_window_binding
 		c->hwnd = static_cast<HWND>(hwnd);
 		U_LOG_I("Using app-provided window handle: %p", hwnd);
 	} else {
@@ -1267,30 +1257,6 @@ comp_d3d11_compositor_get_window_metrics(struct xrt_compositor *xc,
 #else
 	return false;
 #endif
-}
-
-extern "C" bool
-comp_d3d11_compositor_get_pending_render_resolution(struct xrt_compositor *xc,
-                                                     uint32_t *out_width,
-                                                     uint32_t *out_height)
-{
-	if (xc == nullptr || out_width == nullptr || out_height == nullptr) {
-		return false;
-	}
-
-	struct comp_d3d11_compositor *c = d3d11_comp(xc);
-
-	std::lock_guard<std::mutex> lock(c->mutex);
-
-	if (!c->render_resize_pending) {
-		return false;
-	}
-
-	*out_width = c->pending_render_width;
-	*out_height = c->pending_render_height;
-	c->render_resize_pending = false;
-
-	return true;
 }
 
 extern "C" void

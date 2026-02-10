@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  OpenXR session management for Vulkan with XR_EXT_session_target
+ * @brief  OpenXR session management for Vulkan with XR_EXT_win32_window_binding
  */
 
 #include "xr_session.h"
@@ -37,20 +37,24 @@ bool InitializeOpenXR(XrSessionManager& xr) {
     XR_CHECK(xrEnumerateInstanceExtensionProperties(nullptr, extensionCount, &extensionCount, extensions.data()));
 
     bool hasVulkan = false;
-    xr.hasSessionTargetExt = false;
+    xr.hasWin32WindowBindingExt = false;
 
     for (const auto& ext : extensions) {
         LOG_DEBUG("  %s (v%u)", ext.extensionName, ext.extensionVersion);
         if (strcmp(ext.extensionName, XR_KHR_VULKAN_ENABLE_EXTENSION_NAME) == 0) {
             hasVulkan = true;
         }
-        if (strcmp(ext.extensionName, XR_EXT_SESSION_TARGET_EXTENSION_NAME) == 0) {
-            xr.hasSessionTargetExt = true;
+        if (strcmp(ext.extensionName, XR_EXT_WIN32_WINDOW_BINDING_EXTENSION_NAME) == 0) {
+            xr.hasWin32WindowBindingExt = true;
+        }
+        if (strcmp(ext.extensionName, XR_EXT_DISPLAY_INFO_EXTENSION_NAME) == 0) {
+            xr.hasDisplayInfoExt = true;
         }
     }
 
     LOG_INFO("XR_KHR_vulkan_enable: %s", hasVulkan ? "AVAILABLE" : "NOT FOUND");
-    LOG_INFO("XR_EXT_session_target: %s", xr.hasSessionTargetExt ? "AVAILABLE" : "NOT FOUND");
+    LOG_INFO("XR_EXT_win32_window_binding: %s", xr.hasWin32WindowBindingExt ? "AVAILABLE" : "NOT FOUND");
+    LOG_INFO("XR_EXT_display_info: %s", xr.hasDisplayInfoExt ? "AVAILABLE" : "NOT FOUND");
 
     if (!hasVulkan) {
         LOG_ERROR("XR_KHR_vulkan_enable extension not available");
@@ -59,8 +63,11 @@ bool InitializeOpenXR(XrSessionManager& xr) {
 
     std::vector<const char*> enabledExtensions;
     enabledExtensions.push_back(XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
-    if (xr.hasSessionTargetExt) {
-        enabledExtensions.push_back(XR_EXT_SESSION_TARGET_EXTENSION_NAME);
+    if (xr.hasWin32WindowBindingExt) {
+        enabledExtensions.push_back(XR_EXT_WIN32_WINDOW_BINDING_EXTENSION_NAME);
+    }
+    if (xr.hasDisplayInfoExt) {
+        enabledExtensions.push_back(XR_EXT_DISPLAY_INFO_EXTENSION_NAME);
     }
 
     XrInstanceCreateInfo createInfo = {XR_TYPE_INSTANCE_CREATE_INFO};
@@ -78,6 +85,23 @@ bool InitializeOpenXR(XrSessionManager& xr) {
     XrSystemGetInfo systemInfo = {XR_TYPE_SYSTEM_GET_INFO};
     systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     XR_CHECK_LOG(xrGetSystem(xr.instance, &systemInfo, &xr.systemId));
+
+    // Query display info via XR_EXT_display_info
+    if (xr.hasDisplayInfoExt) {
+        XrSystemProperties sysProps = {XR_TYPE_SYSTEM_PROPERTIES};
+        XrDisplayInfoEXT displayInfo = {(XrStructureType)XR_TYPE_DISPLAY_INFO_EXT};
+        sysProps.next = &displayInfo;
+        XrResult diResult = xrGetSystemProperties(xr.instance, xr.systemId, &sysProps);
+        if (XR_SUCCEEDED(diResult)) {
+            xr.recommendedViewScaleX = displayInfo.recommendedViewScaleX;
+            xr.recommendedViewScaleY = displayInfo.recommendedViewScaleY;
+            xr.displayWidthM = displayInfo.displaySizeMeters.width;
+            xr.displayHeightM = displayInfo.displaySizeMeters.height;
+            LOG_INFO("Display info: scale=%.3fx%.3f, size=%.3fx%.3fm",
+                xr.recommendedViewScaleX, xr.recommendedViewScaleY,
+                xr.displayWidthM, xr.displayHeightM);
+        }
+    }
 
     uint32_t viewCount = 0;
     XR_CHECK(xrEnumerateViewConfigurationViews(xr.instance, xr.systemId, xr.viewConfigType, 0, &viewCount, nullptr));
@@ -305,7 +329,7 @@ bool CreateVulkanDevice(VkPhysicalDevice physDevice, uint32_t queueFamilyIndex,
 bool CreateSession(XrSessionManager& xr, VkInstance vkInstance, VkPhysicalDevice physDevice,
     VkDevice device, uint32_t queueFamilyIndex, uint32_t queueIndex, HWND hwnd)
 {
-    LOG_INFO("Creating OpenXR session with Vulkan + XR_EXT_session_target...");
+    LOG_INFO("Creating OpenXR session with Vulkan + XR_EXT_win32_window_binding...");
 
     xr.windowHandle = hwnd;
 
@@ -316,12 +340,12 @@ bool CreateSession(XrSessionManager& xr, VkInstance vkInstance, VkPhysicalDevice
     vkBinding.queueFamilyIndex = queueFamilyIndex;
     vkBinding.queueIndex = queueIndex;
 
-    XrSessionTargetCreateInfoEXT sessionTarget = {XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT};
+    XrWin32WindowBindingCreateInfoEXT sessionTarget = {XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT};
     sessionTarget.windowHandle = hwnd;
 
-    if (xr.hasSessionTargetExt && hwnd) {
+    if (xr.hasWin32WindowBindingExt && hwnd) {
         vkBinding.next = &sessionTarget;
-        LOG_INFO("Using XR_EXT_session_target with window handle");
+        LOG_INFO("Using XR_EXT_win32_window_binding with window handle");
     }
 
     XrSessionCreateInfo sessionInfo = {XR_TYPE_SESSION_CREATE_INFO};

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  OpenXR session management for D3D12 with XR_EXT_session_target
+ * @brief  OpenXR session management for D3D12 with XR_EXT_win32_window_binding
  */
 
 #pragma once
@@ -12,7 +12,7 @@
 #define XR_USE_GRAPHICS_API_D3D12
 #include "xr_session_common.h"
 
-// Initialize OpenXR instance with D3D12 + session_target extensions
+// Initialize OpenXR instance with D3D12 + win32_window_binding extensions
 bool InitializeOpenXR(XrSessionManager& xr);
 
 // Get D3D12 graphics requirements (adapter LUID + min feature level)

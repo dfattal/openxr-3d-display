@@ -138,7 +138,7 @@ compositor_init_renderer(struct comp_compositor *c);
 #ifdef XRT_OS_WINDOWS
 /*!
  * Initialize window target from an external HWND.
- * Used when the application provides its own window via XR_EXT_session_target.
+ * Used when the application provides its own window via XR_EXT_win32_window_binding.
  */
 static bool
 compositor_init_window_from_external(struct comp_compositor *c, void *hwnd)
@@ -281,7 +281,7 @@ compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_sessi
 	// clang-format off
 	if (c->deferred_surface) {
 #ifdef XRT_OS_WINDOWS
-		// Use external HWND if provided (XR_EXT_session_target)
+		// Use external HWND if provided (XR_EXT_win32_window_binding)
 		if (c->external_window_handle != NULL) {
 			if (!compositor_init_window_from_external(c, c->external_window_handle) ||
 			    !compositor_init_swapchain(c) ||
