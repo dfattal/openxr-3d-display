@@ -1550,16 +1550,16 @@ vk_cb_get_buffer_external_handle_type(struct vk_bundle *vk);
  * @ingroup aux_vk
  */
 #define VK_CSCI_FORMATS(THING_COLOR, THING_DS, THING_D, THING_S)                                                       \
-	/* color formats */                                                                                            \
-	THING_COLOR(R16G16B16A16_UNORM)  /* OGL VK */                                                                  \
-	THING_COLOR(R16G16B16A16_SFLOAT) /* OGL VK */                                                                  \
-	THING_COLOR(R16G16B16_UNORM)     /* OGL VK - Uncommon. */                                                      \
-	THING_COLOR(R16G16B16_SFLOAT)    /* OGL VK - Uncommon. */                                                      \
+	/* color formats - SRGB first (preferred per OpenXR spec) */                                                   \
 	THING_COLOR(R8G8B8A8_SRGB)       /* OGL VK */                                                                  \
 	THING_COLOR(B8G8R8A8_SRGB)       /* VK */                                                                      \
-	THING_COLOR(R8G8B8_SRGB)         /* OGL VK - Uncommon. */                                                      \
+	THING_COLOR(R16G16B16A16_UNORM)  /* OGL VK */                                                                  \
+	THING_COLOR(R16G16B16A16_SFLOAT) /* OGL VK */                                                                  \
 	THING_COLOR(R8G8B8A8_UNORM)      /* OGL VK - Bad color precision. */                                           \
 	THING_COLOR(B8G8R8A8_UNORM)      /* VK     - Bad color precision. */                                           \
+	THING_COLOR(R16G16B16_UNORM)     /* OGL VK - Uncommon. */                                                      \
+	THING_COLOR(R16G16B16_SFLOAT)    /* OGL VK - Uncommon. */                                                      \
+	THING_COLOR(R8G8B8_SRGB)         /* OGL VK - Uncommon. */                                                      \
 	THING_COLOR(R8G8B8_UNORM)        /* OGL VK - Uncommon. Bad color precision. */                                 \
 	THING_COLOR(B8G8R8_UNORM)        /* VK     - Uncommon. Bad color precision. */                                 \
 	THING_COLOR(R5G6B5_UNORM_PACK16) /* OLG VK - Bad color precision. */                                           \

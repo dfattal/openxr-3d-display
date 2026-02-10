@@ -359,9 +359,11 @@ init_composite_resources(struct multi_compositor *mc, struct vk_bundle *vk, uint
 	U_LOG_W("[composite] Initializing composite resources: %ux%u per eye, format=%d", width, height, format);
 
 	// Create per-eye composite images (separate images for clean weaver input)
+	// TRANSFER_SRC needed because session_blit_sbs uses these as vkCmdBlitImage source.
 	VkExtent2D eye_extent = {.width = width, .height = height};
 	VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-	                          VK_IMAGE_USAGE_SAMPLED_BIT;
+	                          VK_IMAGE_USAGE_SAMPLED_BIT |
+	                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
 	VkImageSubresourceRange eye_range = {
 	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1812,11 +1814,17 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	}
 	U_LOG_W("[per-session] Command buffer ended");
 
-	// Submit command buffer with fence for async completion
-	// Signal the render_complete semaphore so comp_target_present can wait on it
+	// Submit command buffer with fence for async completion.
+	// Wait on present_complete (signaled by vkAcquireNextImageKHR) before writing
+	// to the swapchain image, and signal render_complete for comp_target_present.
+	VkSemaphore wait_sem = ct->semaphores.present_complete;
+	VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	VkSemaphore signal_sem = ct->semaphores.render_complete;
 	VkSubmitInfo submit_info = {
 	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .waitSemaphoreCount = (wait_sem != VK_NULL_HANDLE) ? 1 : 0,
+	    .pWaitSemaphores = (wait_sem != VK_NULL_HANDLE) ? &wait_sem : NULL,
+	    .pWaitDstStageMask = (wait_sem != VK_NULL_HANDLE) ? &wait_stage : NULL,
 	    .commandBufferCount = 1,
 	    .pCommandBuffers = &cmd,
 	    .signalSemaphoreCount = (signal_sem != VK_NULL_HANDLE) ? 1 : 0,

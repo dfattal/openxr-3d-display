@@ -520,8 +520,14 @@ comp_swapchain_create_init(struct comp_swapchain *sc,
 
 	set_common_fields(sc, destroy_func, vk, cscs, xsccp->image_count);
 
+	// The compositor needs TRANSFER_SRC on swapchain images for the per-session
+	// SBS blit path (session_blit_sbs uses vkCmdBlitImage with these as source).
+	// Apps may not request this flag, so add it unconditionally.
+	struct xrt_swapchain_create_info modified_info = *info;
+	modified_info.bits |= XRT_SWAPCHAIN_USAGE_TRANSFER_SRC;
+
 	// Use the image helper to allocate the images.
-	ret = vk_ic_allocate(vk, info, xsccp->image_count, &sc->vkic);
+	ret = vk_ic_allocate(vk, &modified_info, xsccp->image_count, &sc->vkic);
 	if (ret == VK_ERROR_FEATURE_NOT_PRESENT) {
 		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 	}
