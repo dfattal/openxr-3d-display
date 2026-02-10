@@ -1,10 +1,10 @@
-# XR_EXT_session_target
+# XR_EXT_win32_window_binding
 
 | Property | Value |
 |----------|-------|
-| Extension Name | `XR_EXT_session_target` |
-| Spec Version | 2 |
-| Type Values | `XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT` (1000999001), `XR_TYPE_COMPOSITION_LAYER_WINDOW_SPACE_EXT` (1000999002) |
+| Extension Name | `XR_EXT_win32_window_binding` |
+| Spec Version | 1 |
+| Type Values | `XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT` (1000999001), `XR_TYPE_COMPOSITION_LAYER_WINDOW_SPACE_EXT` (1000999002) |
 | Author | Leia Inc. |
 | Platform | Windows (Win32). Linux/Android reserved for future use. |
 
@@ -12,7 +12,7 @@
 
 ## 1. Overview
 
-`XR_EXT_session_target` allows an OpenXR application to provide its own window handle (HWND on Windows) to the runtime when creating a session. When present, the runtime renders into the application's window instead of creating its own, and the application retains control of input, lifecycle, and the message pump. The extension also defines `XrCompositionLayerWindowSpaceEXT`, a composition layer type positioned in fractional window coordinates for HUD/UI overlays that scale automatically with the window.
+`XR_EXT_win32_window_binding` allows an OpenXR application to provide its own window handle (HWND on Windows) to the runtime when creating a session. When present, the runtime renders into the application's window instead of creating its own, and the application retains control of input, lifecycle, and the message pump. The extension also defines `XrCompositionLayerWindowSpaceEXT`, a composition layer type positioned in fractional window coordinates for HUD/UI overlays that scale automatically with the window.
 
 The target use case is **desktop 3D light field displays** (autostereoscopic monitors) where the user interacts via keyboard, mouse, and gamepad rather than VR controllers.
 
@@ -85,7 +85,7 @@ A first-person application on a 3D display needs to combine two independent pose
 
 In standard OpenXR, every composition layer is positioned in 3D space relative to a reference space. "Window coordinates" have no meaning because the runtime may not even have a window.
 
-When a session is created with `XR_EXT_session_target`, a contract is established: a window exists, it has pixel dimensions, and those dimensions are known to the runtime. This makes fractional window coordinates meaningful and allows `XrCompositionLayerWindowSpaceEXT` to position a HUD overlay as "30% from the left edge, 70% of the window width" — coordinates that automatically adapt when the window is resized.
+When a session is created with `XR_EXT_win32_window_binding`, a contract is established: a window exists, it has pixel dimensions, and those dimensions are known to the runtime. This makes fractional window coordinates meaningful and allows `XrCompositionLayerWindowSpaceEXT` to position a HUD overlay as "30% from the left edge, 70% of the window width" — coordinates that automatically adapt when the window is resized.
 
 The two concepts are inseparable: window-space layers only make sense when there is a window, and session targeting is what guarantees there is one.
 
@@ -96,21 +96,21 @@ The two concepts are inseparable: window-space layers only make sense when there
 ### 3.1 Defines
 
 ```c
-#define XR_EXT_session_target                          1
-#define XR_EXT_session_target_SPEC_VERSION             2
-#define XR_EXT_SESSION_TARGET_EXTENSION_NAME           "XR_EXT_session_target"
-#define XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT         ((XrStructureType)1000999001)
+#define XR_EXT_win32_window_binding                          1
+#define XR_EXT_win32_window_binding_SPEC_VERSION             1
+#define XR_EXT_WIN32_WINDOW_BINDING_EXTENSION_NAME           "XR_EXT_win32_window_binding"
+#define XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT         ((XrStructureType)1000999001)
 #define XR_TYPE_COMPOSITION_LAYER_WINDOW_SPACE_EXT     ((XrStructureType)1000999002)
 ```
 
-### 3.2 XrSessionTargetCreateInfoEXT
+### 3.2 XrWin32WindowBindingCreateInfoEXT
 
 ```c
-typedef struct XrSessionTargetCreateInfoEXT {
-    XrStructureType             type;           // Must be XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT
+typedef struct XrWin32WindowBindingCreateInfoEXT {
+    XrStructureType             type;           // Must be XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT
     const void* XR_MAY_ALIAS    next;           // Pointer to next structure in chain
     void*                       windowHandle;   // HWND of the target window (Windows)
-} XrSessionTargetCreateInfoEXT;
+} XrWin32WindowBindingCreateInfoEXT;
 ```
 
 **Chaining:** This structure is placed in the `next` chain of `XrSessionCreateInfo`.
@@ -119,7 +119,7 @@ typedef struct XrSessionTargetCreateInfoEXT {
 
 | Field | Description |
 |-------|-------------|
-| `type` | Must be `XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT` |
+| `type` | Must be `XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT` |
 | `next` | `NULL` or pointer to next structure in chain |
 | `windowHandle` | Platform window handle. On Windows, cast from `HWND`. Must be a valid window that remains alive for the session's lifetime. |
 
@@ -161,7 +161,7 @@ typedef struct XrCompositionLayerWindowSpaceEXT {
 | `width`, `height` | Size of the layer as a fraction of the window dimensions |
 | `disparity` | Horizontal pixel shift between left and right eye views, expressed as a fraction of window width. `0.0` = at screen depth, negative values push toward the viewer |
 
-**Validity requirement:** The session must have been created with `XrSessionTargetCreateInfoEXT` providing a valid window handle. Submitting this layer type on a session without a target window is undefined behavior.
+**Validity requirement:** The session must have been created with `XrWin32WindowBindingCreateInfoEXT` providing a valid window handle. Submitting this layer type on a session without a target window is undefined behavior.
 
 **Rendering behavior:**
 
@@ -209,9 +209,9 @@ HWND myWindow = CreateWindowEx(
     NULL, NULL, hInstance, NULL);
 ShowWindow(myWindow, SW_SHOW);
 
-// 2. Chain XrSessionTargetCreateInfoEXT to xrCreateSession
-XrSessionTargetCreateInfoEXT targetInfo = {
-    .type = XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT,
+// 2. Chain XrWin32WindowBindingCreateInfoEXT to xrCreateSession
+XrWin32WindowBindingCreateInfoEXT targetInfo = {
+    .type = XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT,
     .next = NULL,
     .windowHandle = (void*)myWindow,
 };
@@ -354,7 +354,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 ### 4.4 Fallback Behavior
 
-When the `XrSessionTargetCreateInfoEXT` structure is absent from the `next` chain (or `windowHandle` is NULL), the runtime uses its pre-existing behavior:
+When the `XrWin32WindowBindingCreateInfoEXT` structure is absent from the `next` chain (or `windowHandle` is NULL), the runtime uses its pre-existing behavior:
 
 | Condition | Render Path |
 |-----------|-------------|
@@ -374,14 +374,14 @@ End-to-end path from the application to the display:
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │  Application                                                          │
-│    xrCreateSession(XrSessionTargetCreateInfoEXT { windowHandle })     │
+│    xrCreateSession(XrWin32WindowBindingCreateInfoEXT { windowHandle })     │
 │    xrEndFrame(projectionLayer + optional windowSpaceLayer)            │
 └────────────────────────────────┬─────────────────────────────────────┘
                                  |
                                  v
 ┌──────────────────────────────────────────────────────────────────────┐
 │  oxr_session.c : oxr_session_create()                                 │
-│    - Parses XrSessionTargetCreateInfoEXT from next chain              │
+│    - Parses XrWin32WindowBindingCreateInfoEXT from next chain              │
 │    - Stores HWND in xrt_session_info.external_window_handle           │
 └────────────────────────────────┬─────────────────────────────────────┘
                                  |
@@ -650,7 +650,7 @@ The D3D11 immediate device context is **single-threaded by design**. Application
 
 | File | Purpose |
 |------|---------|
-| `src/external/openxr_includes/openxr/XR_EXT_session_target.h` | Extension header: struct definitions, type constants, defines |
+| `src/external/openxr_includes/openxr/XR_EXT_win32_window_binding.h` | Extension header: struct definitions, type constants, defines |
 
 ### Core Interfaces
 
@@ -663,7 +663,7 @@ The D3D11 immediate device context is **single-threaded by design**. Application
 
 | File | Purpose |
 |------|---------|
-| `src/xrt/state_trackers/oxr/oxr_session.c` | Parses `XrSessionTargetCreateInfoEXT`, window-adaptive Kooima FOV, eye tracking integration |
+| `src/xrt/state_trackers/oxr/oxr_session.c` | Parses `XrWin32WindowBindingCreateInfoEXT`, window-adaptive Kooima FOV, eye tracking integration |
 | `src/xrt/state_trackers/oxr/oxr_session_frame_end.c` | Handles `XrCompositionLayerWindowSpaceEXT` submission |
 | `src/xrt/state_trackers/oxr/oxr_session_gfx_d3d11_native.c` | D3D11 native session creation path |
 | `src/xrt/state_trackers/oxr/oxr_extension_support.h` | Extension registration |
@@ -733,7 +733,7 @@ The D3D11 immediate device context is **single-threaded by design**. Application
 
 | Directory | Description |
 |-----------|-------------|
-| `test_apps/sr_cube_openxr_ext/` | D3D11 test app using `XR_EXT_session_target` with WM_PAINT drag handling |
+| `test_apps/sr_cube_openxr_ext/` | D3D11 test app using `XR_EXT_win32_window_binding` with WM_PAINT drag handling |
 | `test_apps/sr_cube_openxr_ext_vk/` | Vulkan variant |
 | `test_apps/sr_cube_openxr_ext_gl/` | OpenGL variant |
 | `test_apps/sr_cube_openxr_ext_d3d12/` | D3D12 variant |
@@ -747,6 +747,6 @@ The D3D11 immediate device context is **single-threaded by design**. Application
 
 - **Multi-app simultaneous testing** — Validate two per-session apps rendering to different windows at the same time
 - **Async weaving** — Replace `vkQueueWaitIdle()` with fence-based synchronization for better throughput
-- **WebXR / browser integration** — Browser passes canvas backing surface as window handle via `XR_EXT_session_target`; requires browser vendor cooperation
+- **WebXR / browser integration** — Browser passes canvas backing surface as window handle via `XR_EXT_win32_window_binding`; requires browser vendor cooperation
 - **Linux / Android platform support** — Extend `windowHandle` to accept XCB/Wayland/ANativeWindow handles
-- **Khronos standardization** — Propose `XR_EXT_session_target` for inclusion in the OpenXR specification
+- **Khronos standardization** — Propose `XR_EXT_win32_window_binding` for inclusion in the OpenXR specification

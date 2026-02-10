@@ -585,6 +585,28 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 	}
 #endif // OXR_HAVE_META_body_tracking_calibration
 
+#ifdef OXR_HAVE_EXT_display_info
+	XrDisplayInfoEXT *display_info = NULL;
+	if (sys->inst->extensions.EXT_display_info) {
+		display_info = OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_DISPLAY_INFO_EXT, XrDisplayInfoEXT);
+	}
+
+	if (display_info) {
+		display_info->displaySizeMeters.width = info ? info->display_width_m : 0.0f;
+		display_info->displaySizeMeters.height = info ? info->display_height_m : 0.0f;
+		display_info->recommendedViewScaleX = info ? info->recommended_view_scale_x : 1.0f;
+		display_info->recommendedViewScaleY = info ? info->recommended_view_scale_y : 1.0f;
+		// Nominal viewer pose: 0.5m in front of display center, facing display
+		display_info->nominalViewerPoseInDisplaySpace.position.x = 0.0f;
+		display_info->nominalViewerPoseInDisplaySpace.position.y = 0.0f;
+		display_info->nominalViewerPoseInDisplaySpace.position.z = 0.5f;
+		display_info->nominalViewerPoseInDisplaySpace.orientation.x = 0.0f;
+		display_info->nominalViewerPoseInDisplaySpace.orientation.y = 0.0f;
+		display_info->nominalViewerPoseInDisplaySpace.orientation.z = 0.0f;
+		display_info->nominalViewerPoseInDisplaySpace.orientation.w = 1.0f;
+	}
+#endif // OXR_HAVE_EXT_display_info
+
 	return XR_SUCCESS;
 }
 

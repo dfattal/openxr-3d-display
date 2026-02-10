@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  SR Cube OpenXR Ext VK - OpenXR with XR_EXT_session_target (Vulkan)
+ * @brief  SR Cube OpenXR Ext VK - OpenXR with XR_EXT_win32_window_binding (Vulkan)
  *
  * Vulkan port of sr_cube_openxr_ext. Projection layer only, no HUD/quad layer.
  */
@@ -271,9 +271,9 @@ static void RenderThreadFunc(
                                 LOG_INFO("[FRAME] HUD: Acquired image %u", hudImageIndex);
                                 std::wstring sessionText = L"Session: ";
                                 sessionText += FormatSessionState((int)xr->sessionState);
-                                std::wstring modeText = xr->hasSessionTargetExt ?
-                                    L"XR_EXT_session_target: ACTIVE (Vulkan)" :
-                                    L"XR_EXT_session_target: NOT AVAILABLE (Vulkan)";
+                                std::wstring modeText = xr->hasWin32WindowBindingExt ?
+                                    L"XR_EXT_win32_window_binding: ACTIVE (Vulkan)" :
+                                    L"XR_EXT_win32_window_binding: NOT AVAILABLE (Vulkan)";
                                 std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
                                     xr->swapchains[0].width, xr->swapchains[0].height);
                                 std::wstring eyeText = FormatEyeTrackingInfo(xr->eyePosX, xr->eyePosY, xr->eyePosZ, xr->eyeTrackingActive);

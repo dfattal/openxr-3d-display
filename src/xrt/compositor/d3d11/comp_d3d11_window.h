@@ -5,7 +5,7 @@
  * @brief  D3D11 compositor self-created window management.
  *
  * This module provides window creation for the D3D11 native compositor
- * when XR_EXT_session_target is NOT used. This allows apps like Blender
+ * when XR_EXT_win32_window_binding is NOT used. This allows apps like Blender
  * that don't provide a window handle to still use the D3D11 native compositor.
  *
  * @author David Fattal

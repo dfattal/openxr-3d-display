@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Header for XR_EXT_session_target extension
+ * @brief  Header for XR_EXT_win32_window_binding extension
  * @author David Fattal
  * @ingroup external_openxr
  *
@@ -15,8 +15,8 @@
  * - Application control over window input (keyboard, mouse)
  * - Multiple OpenXR applications on the same display
  */
-#ifndef XR_EXT_SESSION_TARGET_H
-#define XR_EXT_SESSION_TARGET_H 1
+#ifndef XR_EXT_WIN32_WINDOW_BINDING_H
+#define XR_EXT_WIN32_WINDOW_BINDING_H 1
 
 #include <openxr/openxr.h>
 
@@ -24,13 +24,13 @@
 extern "C" {
 #endif
 
-#define XR_EXT_session_target 1
-#define XR_EXT_session_target_SPEC_VERSION 2
-#define XR_EXT_SESSION_TARGET_EXTENSION_NAME "XR_EXT_session_target"
+#define XR_EXT_win32_window_binding 1
+#define XR_EXT_win32_window_binding_SPEC_VERSION 1
+#define XR_EXT_WIN32_WINDOW_BINDING_EXTENSION_NAME "XR_EXT_win32_window_binding"
 
 // Use a value in the vendor extension range (1000000000+)
 // This should be replaced with an official Khronos-assigned value if the extension is standardized
-#define XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT ((XrStructureType)1000999001)
+#define XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT ((XrStructureType)1000999001)
 #define XR_TYPE_COMPOSITION_LAYER_WINDOW_SPACE_EXT ((XrStructureType)1000999002)
 
 /*!
@@ -46,15 +46,15 @@ extern "C" {
  *
  * @extends XrSessionCreateInfo
  */
-typedef struct XrSessionTargetCreateInfoEXT {
-    XrStructureType             type;           //!< Must be XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT
+typedef struct XrWin32WindowBindingCreateInfoEXT {
+    XrStructureType             type;           //!< Must be XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT
     const void* XR_MAY_ALIAS    next;           //!< Pointer to next structure in chain
 #ifdef _WIN32
     void*                       windowHandle;   //!< HWND of the target window (Windows only)
 #else
     void*                       windowHandle;   //!< Platform-specific window handle (reserved)
 #endif
-} XrSessionTargetCreateInfoEXT;
+} XrWin32WindowBindingCreateInfoEXT;
 
 /*!
  * @brief Composition layer positioned in fractional window coordinates.
@@ -68,7 +68,7 @@ typedef struct XrSessionTargetCreateInfoEXT {
  * (passes through the weaver like any other layer).
  *
  * This layer type is only valid when the session was created with
- * XrSessionTargetCreateInfoEXT (i.e., rendering to an application-provided window).
+ * XrWin32WindowBindingCreateInfoEXT (i.e., rendering to an application-provided window).
  *
  * @extends XrFrameEndInfo (submitted as a composition layer)
  */
@@ -89,4 +89,4 @@ typedef struct XrCompositionLayerWindowSpaceEXT {
 }
 #endif
 
-#endif // XR_EXT_SESSION_TARGET_H
+#endif // XR_EXT_WIN32_WINDOW_BINDING_H

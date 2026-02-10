@@ -33,7 +33,7 @@
 #include "oxr_chain.h"
 #include "oxr_xret.h"
 
-#include <openxr/XR_EXT_session_target.h>
+#include <openxr/XR_EXT_win32_window_binding.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1175,11 +1175,11 @@ verify_window_space_layer(struct oxr_session *sess,
                           struct xrt_device *head,
                           uint64_t timestamp)
 {
-	// Window-space layers require a session created with XR_EXT_session_target
+	// Window-space layers require a session created with XR_EXT_win32_window_binding
 	if (!sess->is_d3d11_native_compositor && !sess->has_external_window) {
 		return oxr_error(log, XR_ERROR_LAYER_INVALID,
 		                 "(frameEndInfo->layers[%u]) window-space layer requires session created with "
-		                 "XR_EXT_session_target",
+		                 "XR_EXT_win32_window_binding",
 		                 layer_index);
 	}
 

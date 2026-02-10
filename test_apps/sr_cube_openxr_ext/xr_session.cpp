@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  OpenXR session management with XR_EXT_session_target extension
+ * @brief  OpenXR session management with XR_EXT_win32_window_binding extension
  */
 
 #include "xr_session.h"
@@ -68,43 +68,43 @@ bool InitializeOpenXR(XrSessionManager& xr) {
     // Log all extensions and check for required ones
     LOG_INFO("Available extensions:");
     bool hasD3D11 = false;
-    xr.hasSessionTargetExt = false;
+    xr.hasWin32WindowBindingExt = false;
 
     for (const auto& ext : extensions) {
         LOG_DEBUG("  %s (v%u)", ext.extensionName, ext.extensionVersion);
         if (strcmp(ext.extensionName, XR_KHR_D3D11_ENABLE_EXTENSION_NAME) == 0) {
             hasD3D11 = true;
         }
-        if (strcmp(ext.extensionName, XR_EXT_SESSION_TARGET_EXTENSION_NAME) == 0) {
-            xr.hasSessionTargetExt = true;
+        if (strcmp(ext.extensionName, XR_EXT_WIN32_WINDOW_BINDING_EXTENSION_NAME) == 0) {
+            xr.hasWin32WindowBindingExt = true;
         }
-        if (strcmp(ext.extensionName, XR_EXT_DYNAMIC_RENDER_RESOLUTION_EXTENSION_NAME) == 0) {
-            xr.hasDynamicRenderResolutionExt = true;
+        if (strcmp(ext.extensionName, XR_EXT_DISPLAY_INFO_EXTENSION_NAME) == 0) {
+            xr.hasDisplayInfoExt = true;
         }
     }
 
     LOG_INFO("XR_KHR_D3D11_enable: %s", hasD3D11 ? "AVAILABLE" : "NOT FOUND");
-    LOG_INFO("XR_EXT_session_target: %s", xr.hasSessionTargetExt ? "AVAILABLE" : "NOT FOUND");
-    LOG_INFO("XR_EXT_dynamic_render_resolution: %s", xr.hasDynamicRenderResolutionExt ? "AVAILABLE" : "NOT FOUND");
+    LOG_INFO("XR_EXT_win32_window_binding: %s", xr.hasWin32WindowBindingExt ? "AVAILABLE" : "NOT FOUND");
+    LOG_INFO("XR_EXT_display_info: %s", xr.hasDisplayInfoExt ? "AVAILABLE" : "NOT FOUND");
 
     if (!hasD3D11) {
         LOG_ERROR("XR_KHR_D3D11_enable extension not available - cannot continue");
         return false;
     }
 
-    if (!xr.hasSessionTargetExt) {
-        LOG_WARN("XR_EXT_session_target extension not available - window targeting disabled");
+    if (!xr.hasWin32WindowBindingExt) {
+        LOG_WARN("XR_EXT_win32_window_binding extension not available - window targeting disabled");
         LOG_WARN("The runtime will create its own window instead of using the app window");
     }
 
     // Build list of extensions to enable
     std::vector<const char*> enabledExtensions;
     enabledExtensions.push_back(XR_KHR_D3D11_ENABLE_EXTENSION_NAME);
-    if (xr.hasSessionTargetExt) {
-        enabledExtensions.push_back(XR_EXT_SESSION_TARGET_EXTENSION_NAME);
+    if (xr.hasWin32WindowBindingExt) {
+        enabledExtensions.push_back(XR_EXT_WIN32_WINDOW_BINDING_EXTENSION_NAME);
     }
-    if (xr.hasDynamicRenderResolutionExt) {
-        enabledExtensions.push_back(XR_EXT_DYNAMIC_RENDER_RESOLUTION_EXTENSION_NAME);
+    if (xr.hasDisplayInfoExt) {
+        enabledExtensions.push_back(XR_EXT_DISPLAY_INFO_EXTENSION_NAME);
     }
 
     LOG_INFO("Enabling %zu extensions", enabledExtensions.size());
@@ -138,6 +138,23 @@ bool InitializeOpenXR(XrSessionManager& xr) {
     XR_CHECK_LOG(xrGetSystem(xr.instance, &systemInfo, &xr.systemId));
     LOG_INFO("System ID: %llu", (unsigned long long)xr.systemId);
 
+    // Query display info via XR_EXT_display_info
+    if (xr.hasDisplayInfoExt) {
+        XrSystemProperties sysProps = {XR_TYPE_SYSTEM_PROPERTIES};
+        XrDisplayInfoEXT displayInfo = {(XrStructureType)XR_TYPE_DISPLAY_INFO_EXT};
+        sysProps.next = &displayInfo;
+        XrResult diResult = xrGetSystemProperties(xr.instance, xr.systemId, &sysProps);
+        if (XR_SUCCEEDED(diResult)) {
+            xr.recommendedViewScaleX = displayInfo.recommendedViewScaleX;
+            xr.recommendedViewScaleY = displayInfo.recommendedViewScaleY;
+            xr.displayWidthM = displayInfo.displaySizeMeters.width;
+            xr.displayHeightM = displayInfo.displaySizeMeters.height;
+            LOG_INFO("Display info: scale=%.3fx%.3f, size=%.3fx%.3fm",
+                xr.recommendedViewScaleX, xr.recommendedViewScaleY,
+                xr.displayWidthM, xr.displayHeightM);
+        }
+    }
+
     // Get view configuration views
     LOG_INFO("Enumerating view configuration views...");
     uint32_t viewCount = 0;
@@ -160,7 +177,7 @@ bool InitializeOpenXR(XrSessionManager& xr) {
 }
 
 bool CreateSession(XrSessionManager& xr, ID3D11Device* d3d11Device, HWND hwnd) {
-    LOG_INFO("Creating OpenXR session with XR_EXT_session_target...");
+    LOG_INFO("Creating OpenXR session with XR_EXT_win32_window_binding...");
     LOG_INFO("  D3D11 Device: 0x%p", d3d11Device);
     LOG_INFO("  Window handle (HWND): 0x%p", hwnd);
 
@@ -171,17 +188,17 @@ bool CreateSession(XrSessionManager& xr, ID3D11Device* d3d11Device, HWND hwnd) {
     d3d11Binding.device = d3d11Device;
 
     // Session target extension - chain it to the D3D11 binding
-    XrSessionTargetCreateInfoEXT sessionTarget = {XR_TYPE_SESSION_TARGET_CREATE_INFO_EXT};
+    XrWin32WindowBindingCreateInfoEXT sessionTarget = {XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT};
     sessionTarget.windowHandle = hwnd;
 
-    if (xr.hasSessionTargetExt && hwnd) {
+    if (xr.hasWin32WindowBindingExt && hwnd) {
         // Chain: sessionInfo -> d3d11Binding -> sessionTarget
         d3d11Binding.next = &sessionTarget;
-        LOG_INFO("Using XR_EXT_session_target with window handle");
-        LOG_INFO("  Chain: XrSessionCreateInfo -> XrGraphicsBindingD3D11KHR -> XrSessionTargetCreateInfoEXT");
+        LOG_INFO("Using XR_EXT_win32_window_binding with window handle");
+        LOG_INFO("  Chain: XrSessionCreateInfo -> XrGraphicsBindingD3D11KHR -> XrWin32WindowBindingCreateInfoEXT");
     } else {
-        LOG_WARN("NOT using XR_EXT_session_target (hasExt=%d, hwnd=%p)",
-            xr.hasSessionTargetExt, hwnd);
+        LOG_WARN("NOT using XR_EXT_win32_window_binding (hasExt=%d, hwnd=%p)",
+            xr.hasWin32WindowBindingExt, hwnd);
         LOG_WARN("Runtime will create its own window for rendering");
     }
 

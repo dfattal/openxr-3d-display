@@ -1186,7 +1186,7 @@ fini_client_render_resources(struct d3d11_client_render_resources *res)
  * Initialize per-client render resources.
  *
  * @param sys The system compositor (provides device, dimensions)
- * @param external_hwnd External window handle from XR_EXT_session_target, or NULL
+ * @param external_hwnd External window handle from XR_EXT_win32_window_binding, or NULL
  * @param xsysd System devices for qwerty input (may be NULL)
  * @param res Output render resources struct
  * @return XRT_SUCCESS on success
@@ -1203,7 +1203,7 @@ init_client_render_resources(struct d3d11_service_system *sys,
 
 	// Get or create window
 	if (external_hwnd != nullptr) {
-		// Use app-provided window (XR_EXT_session_target)
+		// Use app-provided window (XR_EXT_win32_window_binding)
 		res->hwnd = (HWND)external_hwnd;
 		res->owns_window = false;
 		res->window = nullptr;
@@ -2862,7 +2862,7 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 	std::memset(&c->layer_accum, 0, sizeof(c->layer_accum));
 
 	// Initialize per-client render resources (window, swap chain, weaver)
-	// Get external window handle if app provided one via XR_EXT_session_target
+	// Get external window handle if app provided one via XR_EXT_win32_window_binding
 	void *external_hwnd = nullptr;
 	if (xsi != nullptr) {
 		external_hwnd = xsi->external_window_handle;
@@ -3159,6 +3159,21 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 	sys->base.info.supported_blend_modes[0] = XRT_BLEND_MODE_OPAQUE;
 	sys->base.info.supported_blend_mode_count = 1;
 
+	// Populate display info for XR_EXT_display_info
+#ifdef XRT_HAVE_LEIA_SR_D3D11
+	if (sr_native_width > 0 && sr_native_height > 0) {
+		sys->base.info.recommended_view_scale_x = (float)sr_view_width / (float)sr_native_width;
+		sys->base.info.recommended_view_scale_y = (float)sr_view_height / (float)sr_native_height;
+	}
+	{
+		struct leiasr_display_dimensions dims = {0};
+		if (leiasr_static_get_display_dimensions(&dims) && dims.valid) {
+			sys->base.info.display_width_m = dims.width_m;
+			sys->base.info.display_height_m = dims.height_m;
+		}
+	}
+#endif
+
 	U_LOG_W("D3D11 service system compositor created: view=%ux%u/eye, stereo=%ux%u, output=%ux%u @ %.0fHz",
 	        sys->view_width, sys->view_height,
 	        sys->display_width, sys->display_height,
@@ -3299,7 +3314,7 @@ comp_d3d11_service_owns_window(struct xrt_system_compositor *xsysc)
 {
 	// NOTE: With per-client windows, this function now applies to the default
 	// behavior. IPC clients (no external_window_handle) always get Monado windows.
-	// Native compositor clients can provide their own via XR_EXT_session_target.
+	// Native compositor clients can provide their own via XR_EXT_win32_window_binding.
 	// For IPC path (which calls this), we always create windows, so return true.
 	(void)xsysc;
 	return true;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  SR Cube OpenXR Ext GL - OpenXR with XR_EXT_session_target (OpenGL)
+ * @brief  SR Cube OpenXR Ext GL - OpenXR with XR_EXT_win32_window_binding (OpenGL)
  *
  * OpenGL port of sr_cube_openxr_ext. Projection layer + window-space HUD overlay.
  */
@@ -317,9 +317,11 @@ static void RenderThreadFunc(
                         XrView rawViews[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
                         xrLocateViews(xr->session, &locateInfo, &viewState, 2, &viewCount, rawViews);
 
-                        // Use recommended render dimensions (updated by dynamic resolution events)
-                        uint32_t renderW = xr->recommendedRenderWidth;
-                        uint32_t renderH = xr->recommendedRenderHeight;
+                        // Compute render dims from window size and display scale factors
+                        uint32_t renderW = (uint32_t)(windowW * xr->recommendedViewScaleX);
+                        uint32_t renderH = (uint32_t)(windowH * xr->recommendedViewScaleY);
+                        if (renderW > xr->swapchains[0].width) renderW = xr->swapchains[0].width;
+                        if (renderH > xr->swapchains[0].height) renderH = xr->swapchains[0].height;
 
                         rendered = true;
                         for (int eye = 0; eye < 2; eye++) {
@@ -356,11 +358,15 @@ static void RenderThreadFunc(
                             if (AcquireHudSwapchainImage(*xr, hudImageIndex)) {
                                 std::wstring sessionText = L"Session: ";
                                 sessionText += FormatSessionState((int)xr->sessionState);
-                                std::wstring modeText = xr->hasSessionTargetExt ?
-                                    L"XR_EXT_session_target: ACTIVE (OpenGL)" :
-                                    L"XR_EXT_session_target: NOT AVAILABLE (OpenGL)";
+                                std::wstring modeText = xr->hasWin32WindowBindingExt ?
+                                    L"XR_EXT_win32_window_binding: ACTIVE (OpenGL)" :
+                                    L"XR_EXT_win32_window_binding: NOT AVAILABLE (OpenGL)";
+                                uint32_t dispRenderW = (uint32_t)(windowW * xr->recommendedViewScaleX);
+                                uint32_t dispRenderH = (uint32_t)(windowH * xr->recommendedViewScaleY);
+                                if (dispRenderW > xr->swapchains[0].width) dispRenderW = xr->swapchains[0].width;
+                                if (dispRenderH > xr->swapchains[0].height) dispRenderH = xr->swapchains[0].height;
                                 std::wstring perfText = FormatPerformanceInfo(perfStats.fps, perfStats.frameTimeMs,
-                                    xr->recommendedRenderWidth, xr->recommendedRenderHeight,
+                                    dispRenderW, dispRenderH,
                                     windowW, windowH);
                                 std::wstring eyeText = FormatEyeTrackingInfo(
                                     xr->eyePosX, xr->eyePosY, xr->eyePosZ, xr->eyeTrackingActive);

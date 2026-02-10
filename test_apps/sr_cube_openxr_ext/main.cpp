@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  SR Cube OpenXR Ext - OpenXR with XR_EXT_session_target extension
+ * @brief  SR Cube OpenXR Ext - OpenXR with XR_EXT_win32_window_binding extension
  *
- * This application demonstrates OpenXR with the XR_EXT_session_target extension.
+ * This application demonstrates OpenXR with the XR_EXT_win32_window_binding extension.
  * The application creates and controls its own window for rendering.
  */
 
@@ -32,7 +32,7 @@ static const char* APP_NAME = "sr_cube_openxr_ext";
 
 // Window settings
 static const wchar_t* WINDOW_CLASS = L"SRCubeOpenXRExtClass";
-static const wchar_t* WINDOW_TITLE = L"SR Cube OpenXR Ext - XR_EXT_session_target (Press ESC to exit)";
+static const wchar_t* WINDOW_TITLE = L"SR Cube OpenXR Ext - XR_EXT_win32_window_binding (Press ESC to exit)";
 
 // Global state (single-threaded — all accessed from the main thread only)
 static InputState g_inputState;
@@ -307,14 +307,18 @@ static void RenderOneFrame(RenderState& rs) {
                             RenderText(*rs.textOverlay, renderer.device.Get(), hudTexture,
                                 stateText, px, 12, tw, 26);
 
-                            std::wstring extText = xr.hasSessionTargetExt ?
-                                L"XR_EXT_session_target: ACTIVE" :
-                                L"XR_EXT_session_target: NOT AVAILABLE";
+                            std::wstring extText = xr.hasWin32WindowBindingExt ?
+                                L"XR_EXT_win32_window_binding: ACTIVE" :
+                                L"XR_EXT_win32_window_binding: NOT AVAILABLE";
                             RenderText(*rs.textOverlay, renderer.device.Get(), hudTexture,
                                 extText, px, 42, tw, 22, true);
 
+                            uint32_t dispRenderW = (uint32_t)(g_windowWidth * xr.recommendedViewScaleX);
+                            uint32_t dispRenderH = (uint32_t)(g_windowHeight * xr.recommendedViewScaleY);
+                            if (dispRenderW > xr.swapchains[0].width) dispRenderW = xr.swapchains[0].width;
+                            if (dispRenderH > xr.swapchains[0].height) dispRenderH = xr.swapchains[0].height;
                             std::wstring perfText = FormatPerformanceInfo(rs.perfStats->fps, rs.perfStats->frameTimeMs,
-                                xr.recommendedRenderWidth, xr.recommendedRenderHeight,
+                                dispRenderW, dispRenderH,
                                 g_windowWidth, g_windowHeight);
                             RenderText(*rs.textOverlay, renderer.device.Get(), hudTexture,
                                 perfText, px, 74, tw, 88, true);
@@ -337,9 +341,11 @@ static void RenderOneFrame(RenderState& rs) {
                             ID3D11RenderTargetView* rtv = nullptr;
                             CreateRenderTargetView(renderer, swapchainTexture, &rtv);
 
-                            // Use recommended render dims (may be smaller than swapchain after resize)
-                            uint32_t renderW = xr.recommendedRenderWidth;
-                            uint32_t renderH = xr.recommendedRenderHeight;
+                            // Compute render dims from window size and display scale factors
+                            uint32_t renderW = (uint32_t)(g_windowWidth * xr.recommendedViewScaleX);
+                            uint32_t renderH = (uint32_t)(g_windowHeight * xr.recommendedViewScaleY);
+                            if (renderW > xr.swapchains[eye].width) renderW = xr.swapchains[eye].width;
+                            if (renderH > xr.swapchains[eye].height) renderH = xr.swapchains[eye].height;
 
                             D3D11_VIEWPORT vp = {};
                             vp.Width = (FLOAT)renderW;
@@ -409,10 +415,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     LOG_INFO("=== SR Cube OpenXR Ext Application ===");
-    LOG_INFO("OpenXR with XR_EXT_session_target extension");
+    LOG_INFO("OpenXR with XR_EXT_win32_window_binding extension");
     LOG_INFO("Application creates and controls its own window");
 
-    // Create window FIRST (needed for XR_EXT_session_target)
+    // Create window FIRST (needed for XR_EXT_win32_window_binding)
     HWND hwnd = CreateAppWindow(hInstance, g_windowWidth, g_windowHeight);
     if (!hwnd) {
         LOG_ERROR("Failed to create window");
@@ -445,12 +451,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     // Check for session target extension
-    if (!xr.hasSessionTargetExt) {
-        LOG_WARN("XR_EXT_session_target not available - runtime will create its own window");
-        MessageBox(hwnd, L"XR_EXT_session_target extension not available.\nRuntime will create its own window.",
+    if (!xr.hasWin32WindowBindingExt) {
+        LOG_WARN("XR_EXT_win32_window_binding not available - runtime will create its own window");
+        MessageBox(hwnd, L"XR_EXT_win32_window_binding extension not available.\nRuntime will create its own window.",
             L"Warning", MB_OK | MB_ICONWARNING);
     } else {
-        LOG_INFO("XR_EXT_session_target extension is available - using app window");
+        LOG_INFO("XR_EXT_win32_window_binding extension is available - using app window");
     }
 
     // Get the required GPU adapter LUID from OpenXR
@@ -483,8 +489,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // Create OpenXR session WITH window handle (XR_EXT_session_target)
-    LOG_INFO("Creating OpenXR session with XR_EXT_session_target (HWND: 0x%p)...", hwnd);
+    // Create OpenXR session WITH window handle (XR_EXT_win32_window_binding)
+    LOG_INFO("Creating OpenXR session with XR_EXT_win32_window_binding (HWND: 0x%p)...", hwnd);
     if (!CreateSession(xr, renderer.device.Get(), hwnd)) {
         LOG_ERROR("OpenXR session creation failed");
         MessageBox(hwnd, L"Failed to create OpenXR session", L"Error", MB_OK | MB_ICONERROR);
@@ -565,7 +571,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     LOG_INFO("");
     LOG_INFO("=== Entering main loop ===");
-    LOG_INFO("XR rendering happens in the application window (XR_EXT_session_target)");
+    LOG_INFO("XR rendering happens in the application window (XR_EXT_win32_window_binding)");
     LOG_INFO("Single-threaded: message pump + render on the main thread (WM_PAINT during drag/resize)");
     LOG_INFO("Controls: WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset, P=Parallax, TAB=HUD, F11=Fullscreen, ESC=Quit");
     LOG_INFO("");

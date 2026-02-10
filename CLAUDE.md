@@ -85,15 +85,15 @@ This fork adds LeiaSR SDK integration for eye-tracked light field displays:
 A native D3D11 compositor (`src/xrt/compositor/d3d11/`) added to solve Intel GPU interop issues where D3D11→Vulkan texture import fails. Features:
 - Direct D3D11 rendering pipeline bypassing Vulkan entirely
 - Integrates with LeiaSR D3D11 weaver for light field interlacing
-- Supports app-provided windows via XR_EXT_session_target extension
+- Supports app-provided windows via XR_EXT_win32_window_binding extension
 - Controlled by `OXR_ENABLE_D3D11_NATIVE_COMPOSITOR` env var (default: enabled)
 
-### XR_EXT_session_target Extension
+### XR_EXT_win32_window_binding Extension
 Custom OpenXR extension allowing apps to pass window handles (HWND) to the runtime:
-- Apps chain `XrSessionTargetCreateInfoEXT` to `XrSessionCreateInfo`
+- Apps chain `XrWin32WindowBindingCreateInfoEXT` to `XrSessionCreateInfo`
 - Runtime renders into the app's window instead of creating its own
 - Enables windowed mode, multi-app scenarios, and app-controlled input
-- Header: `src/external/openxr_includes/openxr/XR_EXT_session_target.h`
+- Header: `src/external/openxr_includes/openxr/XR_EXT_win32_window_binding.h`
 - Integration: `src/xrt/state_trackers/oxr/oxr_session.c`
 
 ## Development Notes

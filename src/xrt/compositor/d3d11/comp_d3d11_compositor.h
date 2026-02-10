@@ -31,7 +31,7 @@ extern "C" {
  * into Vulkan fails with VK_ERROR_FORMAT_NOT_SUPPORTED.
  *
  * @param xdev The device we are displaying to.
- * @param hwnd The window handle from XR_EXT_session_target (or NULL for fullscreen).
+ * @param hwnd The window handle from XR_EXT_win32_window_binding (or NULL for fullscreen).
  * @param d3d11_device The D3D11 device from the application's graphics binding.
  * @param out_xc Pointer to receive the created compositor.
  *
@@ -93,26 +93,6 @@ comp_d3d11_compositor_get_display_dimensions(struct xrt_compositor *xc,
 bool
 comp_d3d11_compositor_get_window_metrics(struct xrt_compositor *xc,
                                           struct leiasr_window_metrics *out_metrics);
-
-/*!
- * Check for a pending render resolution change event.
- *
- * Returns true if a resize occurred since the last call, writing the new
- * recommended per-eye render dimensions to @p out_width / @p out_height.
- * The pending flag is cleared after a successful read.
- *
- * @param xc         The compositor.
- * @param out_width  Pointer to receive the new recommended width per eye.
- * @param out_height Pointer to receive the new recommended height per eye.
- *
- * @return true if a resolution change was pending, false otherwise.
- *
- * @ingroup comp_d3d11
- */
-bool
-comp_d3d11_compositor_get_pending_render_resolution(struct xrt_compositor *xc,
-                                                     uint32_t *out_width,
-                                                     uint32_t *out_height);
 
 /*!
  * Set the system devices for the debug GUI (needed for qwerty driver support).

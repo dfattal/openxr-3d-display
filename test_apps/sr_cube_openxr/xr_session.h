@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  OpenXR session management (standard mode, no session_target extension)
+ * @brief  OpenXR session management (standard mode, no win32_window_binding extension)
  *
- * This version does NOT use the XR_EXT_session_target extension.
+ * This version does NOT use the XR_EXT_win32_window_binding extension.
  * OpenXR/Monado will create its own window for rendering.
  */
 
@@ -14,7 +14,7 @@
 #define XR_USE_GRAPHICS_API_D3D11
 #include "xr_session_common.h"
 
-// Initialize OpenXR instance (D3D11 only, no session_target extension)
+// Initialize OpenXR instance (D3D11 only, no win32_window_binding extension)
 bool InitializeOpenXR(XrSessionManager& xr);
 
 // Get the D3D11 graphics requirements (adapter LUID)

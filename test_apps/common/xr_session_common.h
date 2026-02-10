@@ -25,8 +25,8 @@
 #define XR_USE_PLATFORM_WIN32
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
-#include <openxr/XR_EXT_session_target.h>
-#include <openxr/XR_EXT_dynamic_render_resolution.h>
+#include <openxr/XR_EXT_win32_window_binding.h>
+#include <openxr/XR_EXT_display_info.h>
 #include <DirectXMath.h>
 #include <vector>
 #include <string>
@@ -72,12 +72,14 @@ struct XrSessionManager {
     bool exitRequested = false;
 
     // Extension support (used by ext app, ignored by non-ext app)
-    bool hasSessionTargetExt = false;
-    bool hasDynamicRenderResolutionExt = false;
+    bool hasWin32WindowBindingExt = false;
+    bool hasDisplayInfoExt = false;
 
-    // Current recommended render resolution per eye (updated by extension event)
-    uint32_t recommendedRenderWidth = 0;
-    uint32_t recommendedRenderHeight = 0;
+    // Display info from XR_EXT_display_info (static display properties)
+    float recommendedViewScaleX = 1.0f;
+    float recommendedViewScaleY = 1.0f;
+    float displayWidthM = 0.0f;
+    float displayHeightM = 0.0f;
 
     // Window handle for session target (used by ext app, ignored by non-ext app)
     HWND windowHandle = nullptr;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  OpenXR session management (standard mode, no session_target extension)
+ * @brief  OpenXR session management (standard mode, no win32_window_binding extension)
  */
 
 #include "xr_session.h"
@@ -72,24 +72,24 @@ bool InitializeOpenXR(XrSessionManager& xr) {
         if (strcmp(ext.extensionName, XR_KHR_D3D11_ENABLE_EXTENSION_NAME) == 0) {
             hasD3D11 = true;
         }
-        if (strcmp(ext.extensionName, XR_EXT_DYNAMIC_RENDER_RESOLUTION_EXTENSION_NAME) == 0) {
-            xr.hasDynamicRenderResolutionExt = true;
+        if (strcmp(ext.extensionName, XR_EXT_DISPLAY_INFO_EXTENSION_NAME) == 0) {
+            xr.hasDisplayInfoExt = true;
         }
     }
 
     LOG_INFO("XR_KHR_D3D11_enable: %s", hasD3D11 ? "AVAILABLE" : "NOT FOUND");
-    LOG_INFO("XR_EXT_dynamic_render_resolution: %s", xr.hasDynamicRenderResolutionExt ? "AVAILABLE" : "NOT FOUND");
+    LOG_INFO("XR_EXT_display_info: %s", xr.hasDisplayInfoExt ? "AVAILABLE" : "NOT FOUND");
 
     if (!hasD3D11) {
         LOG_ERROR("XR_KHR_D3D11_enable extension not available - cannot continue");
         return false;
     }
 
-    // Enable D3D11 and dynamic render resolution (NOT session_target)
+    // Enable D3D11 and display info (NOT win32_window_binding)
     std::vector<const char*> enabledExtensions;
     enabledExtensions.push_back(XR_KHR_D3D11_ENABLE_EXTENSION_NAME);
-    if (xr.hasDynamicRenderResolutionExt) {
-        enabledExtensions.push_back(XR_EXT_DYNAMIC_RENDER_RESOLUTION_EXTENSION_NAME);
+    if (xr.hasDisplayInfoExt) {
+        enabledExtensions.push_back(XR_EXT_DISPLAY_INFO_EXTENSION_NAME);
     }
 
     LOG_INFO("Enabling %zu extensions:", enabledExtensions.size());
@@ -115,6 +115,23 @@ bool InitializeOpenXR(XrSessionManager& xr) {
     systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     XR_CHECK_LOG(xrGetSystem(xr.instance, &systemInfo, &xr.systemId));
     LOG_INFO("System ID: %llu", (unsigned long long)xr.systemId);
+
+    // Query display info via XR_EXT_display_info
+    if (xr.hasDisplayInfoExt) {
+        XrSystemProperties sysProps = {XR_TYPE_SYSTEM_PROPERTIES};
+        XrDisplayInfoEXT displayInfo = {(XrStructureType)XR_TYPE_DISPLAY_INFO_EXT};
+        sysProps.next = &displayInfo;
+        XrResult diResult = xrGetSystemProperties(xr.instance, xr.systemId, &sysProps);
+        if (XR_SUCCEEDED(diResult)) {
+            xr.recommendedViewScaleX = displayInfo.recommendedViewScaleX;
+            xr.recommendedViewScaleY = displayInfo.recommendedViewScaleY;
+            xr.displayWidthM = displayInfo.displaySizeMeters.width;
+            xr.displayHeightM = displayInfo.displaySizeMeters.height;
+            LOG_INFO("Display info: scale=%.3fx%.3f, size=%.3fx%.3fm",
+                xr.recommendedViewScaleX, xr.recommendedViewScaleY,
+                xr.displayWidthM, xr.displayHeightM);
+        }
+    }
 
     LOG_INFO("Enumerating view configuration views...");
     uint32_t viewCount = 0;

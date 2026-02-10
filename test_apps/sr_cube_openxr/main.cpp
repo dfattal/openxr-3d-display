@@ -4,7 +4,7 @@
  * @file
  * @brief  SR Cube OpenXR - Standard OpenXR mode (Monado creates window)
  *
- * This application demonstrates OpenXR without the XR_EXT_session_target extension.
+ * This application demonstrates OpenXR without the XR_EXT_win32_window_binding extension.
  * Monado will create its own window for rendering.
  *
  * Input is handled by Monado's qwerty driver:
@@ -238,9 +238,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                 ID3D11RenderTargetView* rtv = nullptr;
                                 CreateRenderTargetView(renderer, swapchainTexture, &rtv);
 
-                                // Use recommended render dims (may be smaller than swapchain after resize)
-                                uint32_t renderW = xr.recommendedRenderWidth;
-                                uint32_t renderH = xr.recommendedRenderHeight;
+                                // Compute render dims from swapchain size and display scale factors
+                                // (non-ext app is fullscreen, so swapchain size == display pixel size)
+                                uint32_t renderW = (uint32_t)(xr.swapchains[eye].width * xr.recommendedViewScaleX);
+                                uint32_t renderH = (uint32_t)(xr.swapchains[eye].height * xr.recommendedViewScaleY);
+                                if (renderW > xr.swapchains[eye].width) renderW = xr.swapchains[eye].width;
+                                if (renderH > xr.swapchains[eye].height) renderH = xr.swapchains[eye].height;
 
                                 D3D11_VIEWPORT vp = {};
                                 vp.Width = (FLOAT)renderW;

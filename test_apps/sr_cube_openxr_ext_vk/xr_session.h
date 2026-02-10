@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  OpenXR session management for Vulkan with XR_EXT_session_target
+ * @brief  OpenXR session management for Vulkan with XR_EXT_win32_window_binding
  */
 
 #pragma once
@@ -12,7 +12,7 @@
 #define XR_USE_GRAPHICS_API_VULKAN
 #include "xr_session_common.h"
 
-// Initialize OpenXR instance with Vulkan + session_target extensions
+// Initialize OpenXR instance with Vulkan + win32_window_binding extensions
 bool InitializeOpenXR(XrSessionManager& xr);
 
 // Get Vulkan graphics requirements and set up Vulkan instance/device per OpenXR spec
@@ -36,6 +36,6 @@ bool CreateVulkanDevice(VkPhysicalDevice physDevice, uint32_t queueFamilyIndex,
     const std::vector<const char*>& deviceExtensions,
     VkDevice& device, VkQueue& graphicsQueue);
 
-// Create OpenXR session with Vulkan binding + session_target
+// Create OpenXR session with Vulkan binding + win32_window_binding
 bool CreateSession(XrSessionManager& xr, VkInstance vkInstance, VkPhysicalDevice physDevice,
     VkDevice device, uint32_t queueFamilyIndex, uint32_t queueIndex, HWND hwnd);

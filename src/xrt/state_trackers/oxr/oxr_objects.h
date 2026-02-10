@@ -1830,7 +1830,7 @@ struct oxr_session
 	//! True if using D3D11 native compositor (not multi_compositor).
 	bool is_d3d11_native_compositor;
 
-	//! True if session was created with an external window handle (XR_EXT_session_target).
+	//! True if session was created with an external window handle (XR_EXT_win32_window_binding).
 	bool has_external_window;
 
 	//! True if XR_EXT_win32_appcontainer_compatible was enabled (Chrome WebXR).
@@ -2998,13 +2998,6 @@ struct oxr_plane_detector_ext
 };
 #endif // OXR_HAVE_EXT_plane_detection
 
-#ifdef OXR_HAVE_EXT_dynamic_render_resolution
-XrResult
-oxr_event_push_XrEventDataRenderResolutionChangedEXT(struct oxr_logger *log,
-                                                      struct oxr_session *sess,
-                                                      uint32_t width,
-                                                      uint32_t height);
-#endif // OXR_HAVE_EXT_dynamic_render_resolution
 
 #ifdef OXR_HAVE_EXT_user_presence
 XrResult
