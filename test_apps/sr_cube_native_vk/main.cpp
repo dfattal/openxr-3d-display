@@ -339,6 +339,9 @@ static void RenderThreadFunc(HWND hwnd, VulkanState* vk) {
             g_srWeaver->getPredictedEyePositions(leftPos, rightPos);
             leftEye = leia::vec3f(leftPos[0], leftPos[1], leftPos[2]);
             rightEye = leia::vec3f(rightPos[0], rightPos[1], rightPos[2]);
+            // Negate Y to match SR Vulkan reference app coordinate convention
+            leftEye.y *= -1.0f;
+            rightEye.y *= -1.0f;
         }
 
         // Apply parallax toggle
@@ -401,12 +404,12 @@ static void RenderThreadFunc(HWND hwnd, VulkanState* vk) {
 
         // Render stereo views (left eye = left half, right eye = right half of SBS texture)
         for (int eye = 0; eye < 2; eye++) {
-            // Set viewport for this eye (Y-flip via negative height)
+            // Set viewport for this eye (no Y-flip, matching SR Vulkan reference app)
             VkViewport viewport = {};
             viewport.x = (float)(eye * (int)vk->viewWidth);
-            viewport.y = (float)vk->viewHeight;
+            viewport.y = 0.0f;
             viewport.width = (float)vk->viewWidth;
-            viewport.height = -(float)vk->viewHeight;
+            viewport.height = (float)vk->viewHeight;
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
             vkCmdSetViewport(cmd, 0, 1, &viewport);

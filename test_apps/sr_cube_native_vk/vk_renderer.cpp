@@ -409,14 +409,21 @@ bool CreateSwapchain(VulkanState& vk, uint32_t width, uint32_t height) {
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
     vkGetPhysicalDeviceSurfaceFormatsKHR(vk.physicalDevice, vk.surface, &formatCount, formats.data());
 
+    // Prefer R8G8B8A8_SRGB (matches SR Vulkan weaver reference app's sRGBHardware mode)
     VkSurfaceFormatKHR chosen = formats[0];
     for (auto& fmt : formats) {
-        if (fmt.format == VK_FORMAT_B8G8R8A8_UNORM && fmt.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        if (fmt.format == VK_FORMAT_R8G8B8A8_SRGB && fmt.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             chosen = fmt;
             break;
         }
-        if (fmt.format == VK_FORMAT_B8G8R8A8_UNORM) {
-            chosen = fmt;
+    }
+    // Fallback: try R8G8B8A8_UNORM
+    if (chosen.format != VK_FORMAT_R8G8B8A8_SRGB) {
+        for (auto& fmt : formats) {
+            if (fmt.format == VK_FORMAT_R8G8B8A8_UNORM && fmt.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                chosen = fmt;
+                break;
+            }
         }
     }
     vk.swapchainFormat = chosen.format;
