@@ -953,17 +953,19 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 				struct xrt_matrix_4x4 mvp;
 			} ubo_data;
 
-			// UV post_transform: identity or flip_y
+			// UV post_transform: use projection view's norm_rect to sample
+			// only the sub-image region of the swapchain. This handles apps
+			// that render at a smaller resolution than the swapchain (e.g.
+			// GL apps using recommendedViewScale < 1.0).
+			const struct xrt_layer_projection_view_data *pvd = &proj_layer->data.proj.v[eye];
+			ubo_data.post_transform.x = pvd->sub.norm_rect.x;
+			ubo_data.post_transform.y = pvd->sub.norm_rect.y;
+			ubo_data.post_transform.w = pvd->sub.norm_rect.w;
+			ubo_data.post_transform.h = pvd->sub.norm_rect.h;
+
 			if (proj_layer->data.flip_y) {
-				ubo_data.post_transform.x = 0.0f;
-				ubo_data.post_transform.y = 1.0f;
-				ubo_data.post_transform.w = 1.0f;
-				ubo_data.post_transform.h = -1.0f;
-			} else {
-				ubo_data.post_transform.x = 0.0f;
-				ubo_data.post_transform.y = 0.0f;
-				ubo_data.post_transform.w = 1.0f;
-				ubo_data.post_transform.h = 1.0f;
+				ubo_data.post_transform.y += ubo_data.post_transform.h;
+				ubo_data.post_transform.h = -ubo_data.post_transform.h;
 			}
 			ubo_data.mvp = mvp;
 
