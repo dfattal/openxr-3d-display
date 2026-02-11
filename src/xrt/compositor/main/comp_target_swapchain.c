@@ -827,7 +827,7 @@ comp_target_swapchain_create_images(struct comp_target *ct,
 		} else if (create_vblank_event_thread(ct)) {
 			COMP_INFO(ct->c, "Started vblank event thread!");
 		} else {
-			COMP_ERROR(ct->c, "Failed to register vblank event");
+			COMP_ERROR(ct->c, "Failed to start vblank event thread!");
 		}
 	} else {
 		COMP_INFO(ct->c, "Not using vblank event thread!");
