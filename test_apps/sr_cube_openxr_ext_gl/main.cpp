@@ -30,8 +30,10 @@ using namespace DirectX;
 
 static const char* APP_NAME = "sr_cube_openxr_ext_gl";
 
-// HUD overlay width as fraction of window width (height computed to preserve HUD aspect ratio)
+// HUD overlay fractions: WIDTH_FRACTION anchors how wide the HUD appears on screen;
+// HEIGHT_FRACTION sets the HUD texture pixel height (aspect ratio preserved dynamically).
 static const float HUD_WIDTH_FRACTION = 0.30f;
+static const float HUD_HEIGHT_FRACTION = 0.35f;
 
 static const wchar_t* WINDOW_CLASS = L"SRCubeOpenXRExtGLClass";
 static const wchar_t* WINDOW_TITLE = L"SR Cube OpenXR Ext OpenGL (Press ESC to exit)";
