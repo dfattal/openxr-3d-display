@@ -83,6 +83,9 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 
 	oxr_interaction_profile_array_clear(&inst->profiles);
 
+	// Maybe a no-op, needs to happen before path_store if not.
+	oxr_instance_path_cache_fini(&inst->path_cache);
+
 	oxr_path_store_fini(&inst->path_store);
 
 	u_hashset_destroy(&inst->action_sets.name_store);
@@ -115,12 +118,6 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 	free(inst);
 
 	return XR_SUCCESS;
-}
-
-static void
-cache_path(struct oxr_logger *log, struct oxr_instance *inst, const char *str, XrPath *out_path)
-{
-	oxr_path_get_or_create(log, inst, str, strlen(str), out_path);
 }
 
 static bool
@@ -293,6 +290,12 @@ oxr_instance_create(struct oxr_logger *log,
 		return oxr_error(log, ret, "Failed to init path store");
 	}
 
+	// Cache certain often looked up paths.
+	ret = oxr_instance_path_cache_init(&inst->path_cache, &inst->path_store);
+	if (ret != XR_SUCCESS) {
+		return oxr_error(log, ret, "Failed to init action path cache");
+	}
+
 	h_ret = u_hashset_create(&inst->action_sets.name_store);
 	if (h_ret != 0) {
 		oxr_instance_destroy(log, &inst->handle);
@@ -303,19 +306,6 @@ oxr_instance_create(struct oxr_logger *log,
 	if (h_ret != 0) {
 		oxr_instance_destroy(log, &inst->handle);
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create loc_store hashset");
-	}
-
-
-	// Cache certain often looked up paths.
-
-
-#define CACHE_SUBACTION_PATHS(NAME, NAME_CAPS, PATH) cache_path(log, inst, PATH, &inst->path_cache.NAME);
-	OXR_FOR_EACH_SUBACTION_PATH_DETAILED(CACHE_SUBACTION_PATHS)
-
-#undef CACHE_SUBACTION_PATHS
-
-	for (uint32_t i = 0; i < OXR_BINDINGS_PROFILE_TEMPLATE_COUNT; i++) {
-		cache_path(log, inst, profile_templates[i].path, &profile_templates[i].path_cache);
 	}
 
 	// fill in our application info - @todo - replicate all createInfo

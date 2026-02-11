@@ -80,6 +80,7 @@ oxr_interaction_profile_array_find_by_path(const struct oxr_interaction_profile_
 
 bool
 oxr_interaction_profile_array_find_by_device_name(const struct oxr_interaction_profile_array *array,
+                                                  const struct oxr_instance_path_cache *cache,
                                                   enum xrt_device_name name,
                                                   struct oxr_interaction_profile **out_p)
 {
@@ -112,7 +113,7 @@ oxr_interaction_profile_array_find_by_device_name(const struct oxr_interaction_p
 
 		bool found = oxr_interaction_profile_array_find_by_path( //
 		    array,                                               //
-		    profile_templates[i].path_cache,                     //
+		    cache->template_paths[i],                            //
 		    out_p);                                              //
 
 		/*
@@ -131,6 +132,7 @@ oxr_interaction_profile_array_find_by_device_name(const struct oxr_interaction_p
 
 bool
 oxr_interaction_profile_array_find_by_device(const struct oxr_interaction_profile_array *array,
+                                             const struct oxr_instance_path_cache *cache,
                                              struct xrt_device *xdev,
                                              struct oxr_interaction_profile **out_p)
 {
@@ -144,6 +146,7 @@ oxr_interaction_profile_array_find_by_device(const struct oxr_interaction_profil
 	// Have bindings for this device's interaction profile been suggested?
 	found = oxr_interaction_profile_array_find_by_device_name( //
 	    array,                                                 //
+	    cache,                                                 //
 	    xdev->name,                                            //
 	    out_p);                                                //
 	if (found) {
@@ -156,6 +159,7 @@ oxr_interaction_profile_array_find_by_device(const struct oxr_interaction_profil
 
 		found = oxr_interaction_profile_array_find_by_device_name( //
 		    array,                                                 //
+		    cache,                                                 //
 		    xbp->name,                                             //
 		    out_p);                                                //
 		if (found) {

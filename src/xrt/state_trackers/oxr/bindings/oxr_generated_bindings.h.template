@@ -80,8 +80,6 @@ struct profile_template
 			uint32_t minor;
 		} promoted;
 	} openxr_version;
-	//! path_cache is an INVALID value until oxr_instance_create initializes it.
-	XrPath path_cache;
 
 	path_verify_fn_t subpath_fn;
 	path_verify_fn_t dpad_path_fn;

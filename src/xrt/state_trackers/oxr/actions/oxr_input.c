@@ -890,15 +890,21 @@ get_binding(struct oxr_logger *log,
 }
 
 static bool
-get_by_name(struct oxr_session *sess, enum xrt_device_name name, struct oxr_interaction_profile **out_p)
+get_by_name(const struct oxr_interaction_profile_array *array,
+            const struct oxr_instance_path_cache *cache,
+            enum xrt_device_name name,
+            struct oxr_interaction_profile **out_p)
 {
-	return oxr_interaction_profile_array_find_by_device_name(&sess->profiles_on_attachment, name, out_p);
+	return oxr_interaction_profile_array_find_by_device_name(array, cache, name, out_p);
 }
 
 static bool
-get_by_device(struct oxr_session *sess, struct xrt_device *xdev, struct oxr_interaction_profile **out_p)
+get_by_device(const struct oxr_interaction_profile_array *array,
+              const struct oxr_instance_path_cache *cache,
+              struct xrt_device *xdev,
+              struct oxr_interaction_profile **out_p)
 {
-	return oxr_interaction_profile_array_find_by_device(&sess->profiles_on_attachment, xdev, out_p);
+	return oxr_interaction_profile_array_find_by_device(array, cache, xdev, out_p);
 }
 
 static void
@@ -907,11 +913,15 @@ oxr_find_profiles_from_roles(struct oxr_logger *log,
                              const struct oxr_roles *roles,
                              struct oxr_profiles_per_subaction *out_profiles)
 {
+	// Convenience.
+	const struct oxr_instance_path_cache *cache = &sess->sys->inst->path_cache;
+	const struct oxr_interaction_profile_array *array = &sess->profiles_on_attachment;
+
 #define FIND_PROFILE(X)                                                                                                \
-	if (!get_by_name(sess, GET_PROFILE_NAME_BY_ROLE(roles, X), &out_profiles->X)) {                                \
+	if (!get_by_name(array, cache, GET_PROFILE_NAME_BY_ROLE(roles, X), &out_profiles->X)) {                        \
 		struct xrt_device *xdev = GET_XDEV_BY_ROLE(roles, X);                                                  \
 		if (xdev != NULL) {                                                                                    \
-			get_by_device(sess, xdev, &out_profiles->X);                                                   \
+			get_by_device(array, cache, xdev, &out_profiles->X);                                           \
 		}                                                                                                      \
 	}
 

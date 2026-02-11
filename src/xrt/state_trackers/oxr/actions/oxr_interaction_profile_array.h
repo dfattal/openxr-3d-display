@@ -106,6 +106,7 @@ oxr_interaction_profile_array_find_by_path(const struct oxr_interaction_profile_
  */
 bool
 oxr_interaction_profile_array_find_by_device_name(const struct oxr_interaction_profile_array *array,
+                                                  const struct oxr_instance_path_cache *cache,
                                                   enum xrt_device_name name,
                                                   struct oxr_interaction_profile **out_p) XRT_NONNULL_ALL;
 
@@ -121,6 +122,7 @@ oxr_interaction_profile_array_find_by_device_name(const struct oxr_interaction_p
  */
 bool
 oxr_interaction_profile_array_find_by_device(const struct oxr_interaction_profile_array *array,
+                                             const struct oxr_instance_path_cache *cache,
                                              struct xrt_device *xdev,
                                              struct oxr_interaction_profile **out_p) XRT_NONNULL_FIRST;
 

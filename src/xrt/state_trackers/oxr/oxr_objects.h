@@ -40,6 +40,7 @@
 #include "actions/oxr_subaction.h"
 #include "actions/oxr_dpad_state.h"
 #include "actions/oxr_interaction_profile_array.h"
+#include "actions/oxr_instance_path_cache.h"
 
 
 #if defined(XRT_HAVE_D3D11) || defined(XRT_HAVE_D3D12)
@@ -1257,14 +1258,8 @@ struct oxr_instance
 
 	struct oxr_session *sessions;
 
-	struct
-	{
-
-#define SUBACTION_PATH_MEMBER(X) XrPath X;
-		OXR_FOR_EACH_SUBACTION_PATH(SUBACTION_PATH_MEMBER)
-
-#undef SUBACTION_PATH_MEMBER
-	} path_cache;
+	//! Path cache for actions, needs path_store to work.
+	struct oxr_instance_path_cache path_cache;
 
 	struct
 	{

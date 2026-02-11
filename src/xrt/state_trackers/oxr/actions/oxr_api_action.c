@@ -236,15 +236,21 @@ oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
 #endif
 
 	struct profile_template *interaction_profile_template = NULL;
-	for (uint32_t i = 0; i < ARRAY_SIZE(profile_templates); i++) {
-		if (ip == profile_templates[i].path_cache) {
-			subpath_fn = profile_templates[i].subpath_fn;
-			dpad_path_fn = profile_templates[i].dpad_path_fn;
-			dpad_emulator_fn = profile_templates[i].dpad_emulator_fn;
-			ext_verify_fn = profile_templates[i].ext_verify_fn;
-			interaction_profile_template = &profile_templates[i];
-			break;
+
+	static_assert(OXR_BINDINGS_PROFILE_TEMPLATE_COUNT == ARRAY_SIZE(profile_templates), "Must match");
+	static_assert(OXR_BINDINGS_PROFILE_TEMPLATE_COUNT == ARRAY_SIZE(inst->path_cache.template_paths), "Must match");
+
+	for (size_t i = 0; i < OXR_BINDINGS_PROFILE_TEMPLATE_COUNT; i++) {
+		if (ip != inst->path_cache.template_paths[i]) {
+			continue;
 		}
+
+		subpath_fn = profile_templates[i].subpath_fn;
+		dpad_path_fn = profile_templates[i].dpad_path_fn;
+		dpad_emulator_fn = profile_templates[i].dpad_emulator_fn;
+		ext_verify_fn = profile_templates[i].ext_verify_fn;
+		interaction_profile_template = &profile_templates[i];
+		break;
 	}
 
 	if (interaction_profile_template == NULL) {

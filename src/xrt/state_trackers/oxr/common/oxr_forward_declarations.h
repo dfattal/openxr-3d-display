@@ -35,6 +35,7 @@ struct oxr_logger;
 struct oxr_sink_logger;
 struct oxr_extension_status;
 struct oxr_instance;
+struct oxr_instance_path_cache;
 struct oxr_path;
 struct oxr_path_store;
 struct oxr_system;
