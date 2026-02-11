@@ -368,7 +368,7 @@ do_update_timings_google_display_timing(struct comp_target_swapchain *cts)
 static void
 do_update_timings_vblank_thread(struct comp_target_swapchain *cts)
 {
-	if (!cts->vblank.has_started) {
+	if (!cts->vblank.thread_running) {
 		return;
 	}
 
@@ -575,7 +575,7 @@ create_vblank_event_thread(struct comp_target *ct)
 	COMP_DEBUG(ct->c, "Started vblank (first pixel out) event thread.");
 
 	// Set this here.
-	cts->vblank.has_started = true;
+	cts->vblank.thread_running = true;
 
 	return true;
 }
@@ -822,7 +822,7 @@ comp_target_swapchain_create_images(struct comp_target *ct,
 	}
 
 	if (vk->has_EXT_display_control && cts->display != VK_NULL_HANDLE) {
-		if (cts->vblank.has_started) {
+		if (cts->vblank.thread_running) {
 			// Already running.
 		} else if (create_vblank_event_thread(ct)) {
 			COMP_INFO(ct->c, "Started vblank event thread!");
@@ -934,7 +934,7 @@ comp_target_swapchain_present(struct comp_target *ct,
 
 
 #ifdef VK_EXT_display_control
-	if (cts->vblank.has_started) {
+	if (cts->vblank.thread_running) {
 		os_thread_helper_lock(&cts->vblank.event_thread);
 		if (!cts->vblank.should_wait) {
 			cts->vblank.should_wait = true;
@@ -1099,10 +1099,10 @@ comp_target_swapchain_cleanup(struct comp_target_swapchain *cts)
 	struct vk_bundle *vk = get_vk(cts);
 
 	// Thread if it has been started must be stopped first.
-	if (cts->vblank.has_started) {
+	if (cts->vblank.thread_running) {
 		// Destroy also stops the thread.
 		os_thread_helper_destroy(&cts->vblank.event_thread);
-		cts->vblank.has_started = false;
+		cts->vblank.thread_running = false;
 	}
 
 	destroy_image_views(cts);

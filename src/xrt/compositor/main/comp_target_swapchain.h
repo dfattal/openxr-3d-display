@@ -92,7 +92,7 @@ struct comp_target_swapchain
 	struct
 	{
 		//! Must only be accessed from main compositor thread.
-		bool has_started;
+		bool thread_running;
 
 		//! Protected by event_thread lock.
 		bool should_wait;
