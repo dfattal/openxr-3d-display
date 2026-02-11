@@ -142,19 +142,10 @@ void RenderText(
     hr = d2dRenderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &textBrush);
     if (FAILED(hr)) return;
 
-    // Create brush for background
-    ComPtr<ID2D1SolidColorBrush> bgBrush;
-    hr = d2dRenderTarget->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.5f), &bgBrush);
-    if (FAILED(hr)) return;
-
     // Draw
     d2dRenderTarget->BeginDraw();
 
-    // Draw semi-transparent background
-    D2D1_RECT_F bgRect = D2D1::RectF(x - 5, y - 2, x + width + 5, y + height + 2);
-    d2dRenderTarget->FillRectangle(bgRect, bgBrush.Get());
-
-    // Draw text
+    // Draw text (no per-text background - the overall HUD container background is sufficient)
     D2D1_RECT_F textRect = D2D1::RectF(x, y, x + width, y + height);
     d2dRenderTarget->DrawText(
         text.c_str(),
