@@ -311,7 +311,8 @@ static void RenderThreadFunc(
                         leftViewMatrix, leftProjMatrix,
                         rightViewMatrix, rightProjMatrix,
                         inputSnapshot.cameraPosX, inputSnapshot.cameraPosY, inputSnapshot.cameraPosZ,
-                        inputSnapshot.yaw, inputSnapshot.pitch)) {
+                        inputSnapshot.yaw, inputSnapshot.pitch,
+                        inputSnapshot.zoomScale)) {
 
                         // Get raw view poses for projection views.
                         // Use DISPLAY space when available: it is physically anchored to the
@@ -356,33 +357,23 @@ static void RenderThreadFunc(
                             // float screenWidthM = xr->displayWidthM * (float)renderW / (float)xr->swapchains[0].width;
                             // float screenHeightM = xr->displayHeightM * (float)renderH / (float)xr->swapchains[0].height;
 
-                            leftProjMatrix = ComputeKooimaProjection(
-                                rawViews[0].pose.position, screenWidthM, screenHeightM, 0.01f, 100.0f);
-                            rightProjMatrix = ComputeKooimaProjection(
-                                rawViews[1].pose.position, screenWidthM, screenHeightM, 0.01f, 100.0f);
-                            for (int e = 0; e < 2; e++)
-                                appFov[e] = ComputeKooimaFov(
-                                    rawViews[e].pose.position, screenWidthM, screenHeightM);
-
-                            // Display-center zoom: scale raw eye positions in the view
-                            // matrix to move the camera toward the display center.
+                            // Display-center zoom: scale eye positions and screen size by
+                            // 1/zoomScale. These cancel in Kooima (same ratio), but are kept
+                            // explicit for upcoming baseline/parallax/perspective modifiers.
                             float zs = inputSnapshot.zoomScale;
-                            if (zs != 1.0f) {
-                                XMVECTOR playerOri = XMQuaternionRotationRollPitchYaw(
-                                    inputSnapshot.pitch, inputSnapshot.yaw, 0);
-                                float zoomShift = 1.0f / zs - 1.0f;
-                                for (int e = 0; e < 2; e++) {
-                                    XMVECTOR rawPos = XMVectorSet(
-                                        rawViews[e].pose.position.x,
-                                        rawViews[e].pose.position.y,
-                                        rawViews[e].pose.position.z, 0);
-                                    XMVECTOR deltaWorld = XMVector3Rotate(rawPos, playerOri) * zoomShift;
-                                    XMMATRIX& vm = (e == 0) ? leftViewMatrix : rightViewMatrix;
-                                    XMVECTOR deltaEye = XMVector3TransformNormal(deltaWorld, vm);
-                                    XMFLOAT3 d;
-                                    XMStoreFloat3(&d, deltaEye);
-                                    vm = vm * XMMatrixTranslation(-d.x, -d.y, -d.z);
-                                }
+                            for (int e = 0; e < 2; e++) {
+                                XrVector3f eyePos = rawViews[e].pose.position;
+                                eyePos.x /= zs;
+                                eyePos.y /= zs;
+                                eyePos.z /= zs;
+                                if (e == 0)
+                                    leftProjMatrix = ComputeKooimaProjection(
+                                        eyePos, screenWidthM / zs, screenHeightM / zs, 0.01f, 100.0f);
+                                else
+                                    rightProjMatrix = ComputeKooimaProjection(
+                                        eyePos, screenWidthM / zs, screenHeightM / zs, 0.01f, 100.0f);
+                                appFov[e] = ComputeKooimaFov(
+                                    eyePos, screenWidthM / zs, screenHeightM / zs);
                             }
                         }
 
