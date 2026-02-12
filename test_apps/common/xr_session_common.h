@@ -138,7 +138,8 @@ bool LocateViews(
     float playerPosY = 0.0f,
     float playerPosZ = 0.0f,
     float playerYaw = 0.0f,
-    float playerPitch = 0.0f
+    float playerPitch = 0.0f,
+    float zoomScale = 1.0f
 );
 
 // Acquire swapchain image for rendering

@@ -394,7 +394,8 @@ bool LocateViews(
     float playerPosY,
     float playerPosZ,
     float playerYaw,
-    float playerPitch
+    float playerPitch,
+    float zoomScale
 ) {
     XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
     locateInfo.viewConfigurationType = xr.viewConfigType;
@@ -425,10 +426,13 @@ bool LocateViews(
     XMVECTOR playerPos = XMVectorSet(playerPosX, playerPosY, playerPosZ, 0.0f);
 
     for (int i = 0; i < 2; i++) {
-        // Transform position: worldPos = playerOrientation * localPos + playerPosition
+        // Transform position: worldPos = playerOrientation * (localPos/zoomScale) + playerPosition
+        // Zoom scales the eye position toward the display center (origin of display space),
+        // reducing stereo baseline and parallax for a magnification effect.
         XMVECTOR localPos = XMVectorSet(
             views[i].pose.position.x, views[i].pose.position.y,
             views[i].pose.position.z, 0.0f);
+        localPos = localPos / zoomScale;
         XMVECTOR worldPos = XMVector3Rotate(localPos, playerOri) + playerPos;
 
         // Transform orientation: worldOri = playerOrientation * localOrientation
