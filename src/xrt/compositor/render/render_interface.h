@@ -57,8 +57,9 @@ extern "C" {
 /*!
  * Max number of layers for layer squasher, can be different from
  * @ref XRT_MAX_LAYERS as the render module is separate from the compositor.
+ * It has to match RENDER_MAX_LAYERS in the layer.comp shader.
  */
-#define RENDER_MAX_LAYERS (XRT_MAX_LAYERS)
+#define RENDER_MAX_LAYERS (128)
 
 /*!
  * The maximum number samplers per view that can be used by the compute shader

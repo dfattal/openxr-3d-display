@@ -12,6 +12,8 @@
 
 #define LAYER ubo.layers[layer]
 
+#define RENDER_MAX_LAYERS (128) // has to match RENDER_MAX_LAYERS in render_interface.h
+
 struct layer_data
 {
 	uint layer_type;
@@ -40,8 +42,7 @@ layout(constant_id = 1) const bool do_timewarp = false;
 layout(constant_id = 2) const bool do_color_correction = true;
 
 //! This is always set by the render_resource pipeline creation code to the actual limit.
-layout(constant_id = 3) const int RENDER_MAX_LAYERS = 128;
-layout(constant_id = 4) const int SAMPLER_ARRAY_SIZE = 16;
+layout(constant_id = 3) const int SAMPLER_ARRAY_SIZE = 16;
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 

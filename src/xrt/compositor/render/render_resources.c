@@ -291,7 +291,6 @@ struct compute_layer_params
 {
 	VkBool32 do_timewarp;
 	VkBool32 do_color_correction;
-	uint32_t max_layers;
 	uint32_t image_array_size;
 };
 
@@ -319,8 +318,7 @@ create_compute_layer_pipeline(struct vk_bundle *vk,
 	VkSpecializationMapEntry entries[] = {
 	    ENTRY(1, do_timewarp),         //
 	    ENTRY(2, do_color_correction), //
-	    ENTRY(3, max_layers),          //
-	    ENTRY(4, image_array_size),    //
+	    ENTRY(3, image_array_size),    //
 	};
 #undef ENTRY
 
@@ -876,7 +874,6 @@ render_resources_init(struct render_resources *r,
 	struct compute_layer_params layer_params = {
 	    .do_timewarp = false,
 	    .do_color_correction = true,
-	    .max_layers = RENDER_MAX_LAYERS,
 	    .image_array_size = r->compute.layer.image_array_size,
 	};
 
@@ -895,7 +892,6 @@ render_resources_init(struct render_resources *r,
 	struct compute_layer_params layer_timewarp_params = {
 	    .do_timewarp = true,
 	    .do_color_correction = true,
-	    .max_layers = RENDER_MAX_LAYERS,
 	    .image_array_size = r->compute.layer.image_array_size,
 	};
 
