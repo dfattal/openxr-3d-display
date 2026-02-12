@@ -135,7 +135,7 @@ zero-parallax depth, stereo comfort, and content framing. Stereo rendering is th
 
 | Mode | Behavior | Camera Model Owned By |
 |---|---|---|
-| **RENDER_READY** | Runtime returns converged, comfortable stereo view/projection pairs. | Runtime |
+| **RENDER_READY** | Runtime returns converged, comfortable stereo view poses and FOV angles. The application still builds its own projection matrix from the FOV. | Runtime |
 | **RAW** | Runtime returns raw tracked eye positions in display space; `orientation` is identity; `fov` is advisory. | Application |
 
 **Ownership rules:**
@@ -148,8 +148,10 @@ zero-parallax depth, stereo comfort, and content framing. Stereo rendering is th
 In RAW mode the application builds its own projection (typically Kooima off-axis frustum)
 from the eye positions and display geometry. This gives engines full control over the
 camera model, matching how Unity and Unreal handle 3D display integration. In
-RENDER_READY mode the runtime provides pre-built view/projection, suitable for legacy
-apps and WebXR.
+RENDER_READY mode the runtime provides pre-built view poses and FOV angles with
+convergence and comfort adjustments applied; the application still constructs the
+projection matrix from the returned `XrFovf`, but the camera model is runtime-owned.
+This mode is suitable for legacy apps and WebXR.
 
 ### Relationship Between the Extensions
 
@@ -245,7 +247,7 @@ shift.
 | `y` | `float` | Top edge position as a fraction of window height, in `[0, 1]`. |
 | `width` | `float` | Layer width as a fraction of window width, in `(0, 1]`. |
 | `height` | `float` | Layer height as a fraction of window height, in `(0, 1]`. |
-| `disparity` | `float` | Horizontal shift per eye as a fraction of window width. `0` = screen depth (zero parallax); negative = toward viewer. |
+| `disparity` | `float` | Horizontal shift per eye as a fraction of window width. `0` = screen depth (zero parallax); negative = toward viewer. See [Disparity Guidance](#disparity-guidance). |
 
 ```c
 typedef struct XrCompositionLayerWindowSpaceEXT {
@@ -267,6 +269,34 @@ typedef struct XrCompositionLayerWindowSpaceEXT {
 - `subImage.swapchain` **must** be a valid `XrSwapchain`.
 - `x`, `y`, `width`, `height` **should** define a region within `[0, 1]` window-space
   coordinates. The runtime **may** clamp values outside this range.
+
+#### Disparity Guidance
+
+The `disparity` field controls the perceived depth of the window-space layer. It is
+specified as a fraction of window width and is an **artistic/UX choice** made by the
+application — there is no single correct value.
+
+**Sign convention:**
+- `disparity = 0.0` — layer appears at screen depth (zero parallax). Recommended default
+  for most HUD and UI overlays.
+- `disparity < 0` — layer appears to float in front of the screen (toward the viewer).
+- `disparity > 0` — layer appears behind the screen surface.
+
+**Recommended ranges:**
+| Use Case | Typical Disparity | Perceived Effect |
+|---|---|---|
+| Flat HUD / status overlay | `0.0` | Pinned to screen surface. No stereo conflict. |
+| Subtle pop-out | `-0.005` to `-0.01` | Gentle float above content. Comfortable for extended viewing. |
+| Strong pop-out (alerts) | `-0.02` to `-0.05` | Noticeable depth separation. Use sparingly. |
+| Behind-screen elements | `+0.005` to `+0.02` | Recessed into the scene. |
+
+**Guidelines:**
+- Values beyond `+/- 0.10` (10% of window width) produce extreme parallax and may cause
+  discomfort. Avoid for sustained UI elements.
+- For text-heavy overlays, `0.0` is strongly recommended to avoid stereo rivalry on fine
+  detail.
+- The optimal disparity is resolution-independent because it is expressed as a fraction of
+  window width, not in pixels.
 
 ### New Functions
 
@@ -388,13 +418,13 @@ No known IP claims.
 ### Overview
 
 This extension exposes the physical properties of a tracked 3D display to the application:
-the display's physical dimensions, its nominal viewer pose, and recommended per-eye render
+the display's physical dimensions, its nominal viewer pose, and recommended render
 resolution scale factors. It also introduces a DISPLAY reference space anchored to the
 physical screen.
 
 With this information the application can:
 - Build its own camera model (Kooima off-axis projection) from raw tracked eye positions.
-- Compute per-eye render resolution dynamically as the window resizes.
+- Compute render resolution dynamically as the window resizes.
 - Locate views and submit layers in display-anchored coordinates.
 
 This extension is **platform-independent**. It works on any platform that supports OpenXR,
@@ -531,8 +561,9 @@ viewer position.
 
 ### Recommended View Scale
 
-The `recommendedViewScaleX` and `recommendedViewScaleY` fields specify how to compute
-optimal per-eye render resolution from the current window size:
+The `recommendedViewScaleX` and `recommendedViewScaleY` fields are a **single pair shared
+by both eyes**. They specify how to compute the optimal render resolution for each eye's
+texture from the current window size:
 
 ```
 renderWidth  = (uint32_t)(windowWidth  * recommendedViewScaleX)
@@ -545,6 +576,9 @@ renderHeight = (uint32_t)(windowHeight * recommendedViewScaleY)
   `sr_recommended_width / display_pixel_width`).
 - They do **not** change with window resize. The formula above naturally produces the
   correct render resolution for any window size.
+- **Both eyes use the same scale factors.** The scale encodes a static display property
+  (ratio of optimal render resolution to native pixels), which is identical for left and
+  right eyes.
 - **Anisotropic scaling is intentional and supported**: `scaleX` may differ from `scaleY`
   because the optimal horizontal and vertical resolutions may have different ratios to
   native pixels (e.g., light field displays often need higher horizontal resolution for
@@ -591,12 +625,16 @@ and `(eyeX, eyeY, eyeZ)` is the eye position in DISPLAY space from `XrView.pose.
 When `XR_EXT_display_info` is **not** enabled (or when explicitly overridden), the runtime
 returns views in **RENDER_READY mode**:
 
-- `XrView.pose` — pre-built view pose with convergence and comfort adjustments applied.
-- `XrView.fov` — pre-built field-of-view angles for direct use in projection matrix
-  construction.
+- `XrView.pose` — view pose with convergence and comfort adjustments applied by the
+  runtime. Includes runtime-side debug/qwerty input controls for scene navigation.
+- `XrView.fov` — field-of-view angles derived from the runtime's internal camera model.
+  The application constructs a standard symmetric or asymmetric projection matrix from
+  these angles (the runtime does **not** return a projection matrix directly — only FOV
+  angles, per the core OpenXR `XrView` structure).
 
 This mode is suitable for legacy OpenXR applications and WebXR, which expect the runtime
-to provide ready-to-use stereo view/projection pairs.
+to own the camera model. The application still builds its own projection matrix from the
+returned `XrFovf` using the standard OpenXR projection formula.
 
 ### Example Code: Querying Display Info
 
@@ -633,6 +671,18 @@ if (XR_SUCCEEDED(result)) {
 ```
 
 ### Example Code: Kooima Asymmetric Frustum Projection
+
+> **Note — Reference Implementation, Not Normative API**
+>
+> The Kooima projection code below is provided as **example/reference code** for
+> implementers, not as a shipped API or header-only library. Engine plugins (Unity,
+> Unreal) will implement their own versions. Native application developers are expected
+> to copy, adapt, or rewrite this math to suit their needs.
+>
+> This is intentional: the extension provides raw eye positions and display geometry as
+> **primitives**. How the application converts these into a projection matrix is entirely
+> up to the application. Developers may wish to modify perspective, baseline, parallax
+> budget, or near/far planes in ways that a fixed runtime function cannot anticipate.
 
 This function computes the off-axis projection matrix from a tracked eye position and the
 physical display geometry, both obtained from `XR_EXT_display_info`:
@@ -870,6 +920,18 @@ that compose naturally with any window size via simple multiplication:
 `renderWidth = windowWidth * scaleX`. This eliminates the need for resize notifications
 and makes the API simpler.
 
+*Alternative considered*: Let the runtime handle render resolution entirely via
+`XrViewConfigurationView.recommendedImageRectWidth/Height` (the standard OpenXR mechanism).
+The runtime already knows the window size and controls swapchain dimensions. However,
+exposing scale factors to the application provides better separation of concern in windowed
+mode: the application knows its own window dimensions (it owns the window via
+`XR_EXT_win32_window_binding`), so a simple multiply gives the optimal texture size without
+the runtime needing to track window resize events, recompute the ratio of window size to
+monitor native resolution, and re-scale the SR SDK's recommended render size. The app-side
+formula `windowWidth * scaleX` is trivial, deterministic, and requires no runtime round-trip.
+This also lets the application intentionally deviate from the recommended resolution for
+performance scaling.
+
 ---
 
 **RESOLVED 2: XrSpace vs. explicit struct for the display coordinate frame.**
@@ -904,6 +966,47 @@ avoids adding a new API entry point and leverages the existing `next` chain mech
 with the graphics context (the runtime needs both the GPU device and the target window).
 Chaining `SessionCreateInfo → GraphicsBinding → WindowBinding` keeps related information
 together and mirrors how multi-part session configuration works in OpenXR.
+
+---
+
+**RESOLVED 5: App-side vs. runtime-side projection matrix calculation.**
+
+*Problem*: Should the runtime compute the Kooima projection matrix internally and return
+it to the application (more future-proof — tweaking the runtime adjusts all apps without
+recompilation), or should the application compute projection from raw eye positions and
+display geometry (more flexible — apps control their own camera model)?
+
+*Resolution*: **App-side projection in RAW mode; runtime-side FOV in RENDER_READY mode.**
+Both approaches coexist:
+
+- **RAW mode** (extension enabled): the runtime provides raw eye positions and display
+  geometry as primitives. The application (or engine plugin) builds its own projection
+  matrix. This gives engines and native apps full control over perspective, baseline,
+  parallax budget, convergence tuning, and near/far planes — parameters that vary across
+  applications and that a fixed runtime function cannot anticipate.
+
+- **RENDER_READY mode** (extension not enabled): the runtime computes view poses and FOV
+  angles internally using its own Kooima implementation. Legacy apps and WebXR get
+  functional stereo without implementing any projection math. Runtime updates can improve
+  the camera model for all RENDER_READY consumers without app recompilation.
+
+This split follows the principle that **extensions empower, defaults protect**: enabling
+the extension opts into full app-side control; not enabling it keeps the runtime in charge.
+
+---
+
+**RESOLVED 6: Kooima projection delivery mechanism.**
+
+*Problem*: Should the Kooima projection math be shipped as a header-only library, a
+runtime API function, or example code?
+
+*Resolution*: **Example/reference code in the specification and test apps.** Engine plugins
+(Unity, Unreal) will implement their own optimized versions. Native app developers copy and
+adapt the reference code. This is intentional: the extension provides geometric primitives
+(eye positions, display dimensions), and the math to convert them into a projection matrix
+is straightforward (5 lines of similar-triangle arithmetic). Shipping it as a runtime API
+would prevent applications from modifying perspective, baseline, or parallax behavior —
+exactly the flexibility that motivated the RAW mode design.
 
 ---
 
@@ -987,7 +1090,7 @@ for eye tracking and light field interlacing.
 | **Kooima projection** | An off-axis asymmetric frustum projection algorithm where the near plane is aligned to a physical screen and the eye position is offset from screen center. Named after Robert Kooima's 2009 paper. |
 | **Canonical display pyramid** | The geometric frustum defined by the display rectangle (base) and nominal viewer position (apex). Anchors zero-parallax and stereo comfort. |
 | **RAW mode** | View mode where the runtime returns raw tracked eye positions and identity orientation, leaving camera model construction to the application. |
-| **RENDER_READY mode** | View mode where the runtime returns pre-built view/projection pairs with convergence and comfort adjustments applied. |
+| **RENDER_READY mode** | View mode where the runtime returns view poses and FOV angles with convergence and comfort adjustments applied. The application still builds its own projection matrix from the FOV angles. |
 | **Window-space coordinates** | Fractional coordinates in `[0, 1]` relative to the target window's dimensions. Used by `XrCompositionLayerWindowSpaceEXT`. |
 | **DISPLAY space** | A reference space anchored to the physical display center, with +X right, +Y up, +Z toward the viewer. Not affected by recentering. |
 | **Nominal viewer pose** | A static, design-time expectation of the viewer's position relative to the display. Not tracked; defines the apex of the canonical display pyramid. |
