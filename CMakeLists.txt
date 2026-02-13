@@ -332,7 +332,7 @@ option_with_deps(XRT_HAVE_LIBUSB "Enable libusb (used for most drivers)" DEPENDS
 option_with_deps(XRT_HAVE_LIBUVC "Enable libuvc video driver" DEPENDS LIBUVC_FOUND XRT_HAVE_LIBUSB)
 option_with_deps(XRT_HAVE_REALSENSE "Enable RealSense support" DEPENDS realsense2_FOUND)
 option_with_deps(XRT_HAVE_OPENVR "Enable OpenVR support" DEPENDS OPENVR_FOUND)
-option_with_deps(XRT_BUILD_DRIVER_UVC "Enable userspace UVC driver" OFF DEPENDS XRT_HAVE_LIBUSB)
+option_with_deps(XRT_BUILD_DRIVER_UVC "Enable userspace UVC driver" DEPENDS XRT_HAVE_LIBUSB)
 
 # Drivers to build (sorted)
 option_with_deps(XRT_BUILD_DRIVER_ANDROID "Enable Android sensors driver" DEPENDS ANDROID)
@@ -357,6 +357,7 @@ option_with_deps(XRT_BUILD_DRIVER_QWERTY "Enable Qwerty driver" DEPENDS XRT_HAVE
 option_with_deps(XRT_BUILD_DRIVER_REALSENSE "Enable RealSense device driver" DEPENDS XRT_HAVE_REALSENSE)
 option_with_deps(XRT_BUILD_DRIVER_REMOTE "Enable remote debugging driver" DEPENDS "XRT_HAVE_LINUX OR ANDROID OR WIN32")
 option_with_deps(XRT_BUILD_DRIVER_RIFT "Enable Oculus Rift (DK2/CV1) device driver" DEPENDS XRT_HAVE_INTERNAL_HID)
+option_with_deps(XRT_BUILD_DRIVER_RIFT_SENSOR "Enable Oculus Rift Sensor (DK2/CV1) device driver" DEPENDS XRT_BUILD_DRIVER_RIFT XRT_BUILD_DRIVER_UVC XRT_HAVE_LIBUSB)
 option_with_deps(XRT_BUILD_DRIVER_RIFT_S "Enable Oculus Rift S device driver" DEPENDS XRT_HAVE_V4L2)
 option_with_deps(XRT_BUILD_DRIVER_ROKID "Enable Rokid driver" DEPENDS "XRT_HAVE_LIBUSB")
 option_with_deps(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE "Enable SteamVR Lighthouse driver" DEPENDS XRT_HAVE_LINUX XRT_MODULE_AUX_VIVE)
@@ -467,6 +468,7 @@ list(
 	"REALSENSE"
 	"REMOTE"
 	"RIFT"
+	"RIFT_SENSOR"
 	"RIFT_S"
 	"ROKID"
 	"SURVIVE"
@@ -715,6 +717,7 @@ message(STATUS "#    DRIVER_QWERTY:               ${XRT_BUILD_DRIVER_QWERTY}")
 message(STATUS "#    DRIVER_REALSENSE:            ${XRT_BUILD_DRIVER_REALSENSE}")
 message(STATUS "#    DRIVER_REMOTE:               ${XRT_BUILD_DRIVER_REMOTE}")
 message(STATUS "#    DRIVER_RIFT:                 ${XRT_BUILD_DRIVER_RIFT}")
+message(STATUS "#    DRIVER_RIFT_SENSOR:          ${XRT_BUILD_DRIVER_RIFT_SENSOR}")
 message(STATUS "#    DRIVER_RIFT_S:               ${XRT_BUILD_DRIVER_RIFT_S}")
 message(STATUS "#    DRIVER_ROKID:                ${XRT_BUILD_DRIVER_ROKID}")
 message(STATUS "#    DRIVER_SIMULATED:            ${XRT_BUILD_DRIVER_SIMULATED}")

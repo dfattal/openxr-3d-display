@@ -310,6 +310,33 @@ if(XRT_BUILD_DRIVER_RIFT)
 	list(APPEND ENABLED_HEADSET_DRIVERS rift)
 endif()
 
+if(XRT_BUILD_DRIVER_RIFT_SENSOR)
+	add_library(
+		drv_rift_sensor STATIC
+		rift_sensor/ar0134.c
+		rift_sensor/ar0134.h
+		rift_sensor/esp570.c
+		rift_sensor/esp570.h
+		rift_sensor/esp770u.c
+		rift_sensor/esp770u.h
+		rift_sensor/mt9v034.c
+		rift_sensor/mt9v034.h
+		)
+	target_include_directories(drv_rift_sensor SYSTEM PRIVATE)
+	target_link_libraries(
+		drv_rift_sensor
+		PRIVATE
+			xrt-interfaces
+			aux_util
+			aux_util_sink
+			aux_math
+			drv_includes
+			drv_uvc
+			${LIBUSB1_LIBRARIES}
+		)
+	target_include_directories(drv_rift_sensor PUBLIC ${LIBUSB1_INCLUDE_DIRS})
+endif()
+
 if(XRT_BUILD_DRIVER_RIFT_S)
 	add_library(
 		drv_rift_s STATIC
