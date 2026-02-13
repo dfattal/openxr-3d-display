@@ -45,7 +45,7 @@
 	 (((uint64_t)x & (uint64_t)0x000000FF00000000ULL) >> 8) |                                                      \
 	 (((uint64_t)x & (uint64_t)0x0000FF0000000000ULL) >> 24) |                                                     \
 	 (((uint64_t)x & (uint64_t)0x00FF000000000000ULL) >> 40) |                                                     \
-	 (((uint64_t)x & (uint64_t)0xFF00000000000000ULL) >> 56)) |
+	 (((uint64_t)x & (uint64_t)0xFF00000000000000ULL) >> 56))
 #define __cpu_to_be64(x) __be64_to_cpu(x)
 
 #define __le64 uint64_t
@@ -53,12 +53,12 @@
 #define __le16 uint16_t
 #define __u8 uint8_t
 #define __s8 int8_t
-#define __cpu_to_le16
-#define __le16_to_cpu
-#define __cpu_to_le32
-#define __le32_to_cpu
-#define __cpu_to_le64
-#define __le64_to_cpu
+#define __cpu_to_le16(x) (x)
+#define __le16_to_cpu(x) (x)
+#define __cpu_to_le32(x) (x)
+#define __le32_to_cpu(x) (x)
+#define __cpu_to_le64(x) (x)
+#define __le64_to_cpu(x) (x)
 
 #endif
 
