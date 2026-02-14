@@ -986,6 +986,11 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 
 	// Step 2: For each eye — begin render pass, draw projection quad, draw overlays, end render pass.
 	// CCS reconciliation was already performed above. Imported images are sampled using GENERAL.
+	//
+	// Descriptor set allocation: ds[0]=eye0 projection, ds[1]=eye1 projection,
+	// ds[2..N]=overlay draws (unique per eye×overlay to avoid aliasing, since
+	// vkUpdateDescriptorSets is immediate and GPU reads final host state).
+	uint32_t ws_desc_index = 2; // overlays start after both projection descriptor sets
 	for (int eye = 0; eye < 2; eye++) {
 		// --- Projection layer: fullscreen opaque quad (descriptor set 0) ---
 		{
@@ -1103,8 +1108,7 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 		                            0, 1, &proj_ds, 0, NULL);
 		vk->vkCmdDraw(cmd, 4, 1, 0, 0);
 
-		// --- Overlay layers: alpha-blended quads (descriptor sets 1+) ---
-		uint32_t ws_desc_index = 1; // start after projection descriptor set
+		// --- Overlay layers: alpha-blended quads (descriptor sets 2+) ---
 		for (uint32_t li = 0; li < mc->delivered.layer_count; li++) {
 			struct multi_layer_entry *layer = &mc->delivered.layers[li];
 			if (layer->data.type != XRT_LAYER_WINDOW_SPACE) {
@@ -1170,8 +1174,8 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 
 			ubo_data.mvp = mvp;
 
-			// Write UBO data — overlays use slots after projection (2 slots for projection eyes)
-			uint32_t ubo_index = 2 + (ws_desc_index - 1) * 2 + eye;
+			// Write UBO data — each draw has a unique UBO slot matching its descriptor set index
+			uint32_t ubo_index = ws_desc_index;
 			VkDeviceSize ubo_offset = ubo_index * ubo_stride;
 			memcpy((uint8_t *)mc->session_render.composite_ubo_mapped + ubo_offset,
 			       &ubo_data, sizeof(ubo_data));
