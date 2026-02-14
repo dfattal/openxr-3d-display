@@ -418,6 +418,10 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrStructureTypeToString2KHR, KHR_extended_struct_name_lengths);
 #endif // OXR_HAVE_KHR_extended_struct_name_lengths
 
+#ifdef OXR_HAVE_EXT_display_info
+	ENTRY_IF_EXT(xrRequestDisplayModeEXT, EXT_display_info);
+#endif
+
 #ifdef OXR_HAVE_KHR_locate_spaces
 	ENTRY_IF_EXT(xrLocateSpacesKHR, KHR_locate_spaces);
 #endif

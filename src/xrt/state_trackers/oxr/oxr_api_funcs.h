@@ -765,6 +765,12 @@ oxr_xrSuggestBodyTrackingCalibrationOverrideMETA(XrBodyTrackerFB bodyTracker,
                                                  const XrBodyTrackingCalibrationInfoMETA *calibrationInfo);
 #endif
 
+#ifdef OXR_HAVE_EXT_display_info
+//! OpenXR API function @ep{xrRequestDisplayModeEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrRequestDisplayModeEXT(XrSession session, XrDisplayModeEXT displayMode);
+#endif
+
 /*!
  * @}
  */

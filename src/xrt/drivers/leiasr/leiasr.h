@@ -165,6 +165,25 @@ bool
 leiasr_get_window_metrics(struct leiasr *leiasr,
                            struct leiasr_window_metrics *out_metrics);
 
+/*!
+ * Request display mode switch (2D/3D) via SR SwitchableLensHint.
+ *
+ * @param leiasr The leiasr instance.
+ * @param enable_3d true to switch to 3D mode, false for 2D mode.
+ * @return true on success.
+ */
+bool
+leiasr_request_display_mode(struct leiasr *leiasr, bool enable_3d);
+
+/*!
+ * Check if the SR display supports 2D/3D mode switching.
+ *
+ * @param leiasr The leiasr instance.
+ * @return true if SwitchableLensHint is available.
+ */
+bool
+leiasr_supports_display_mode_switch(struct leiasr *leiasr);
+
 #ifdef __cplusplus
 }
 #endif

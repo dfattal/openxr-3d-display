@@ -1583,6 +1583,21 @@ multi_compositor_get_window_metrics(struct multi_compositor *mc, struct leiasr_w
 
 	return leiasr_get_window_metrics(mc->session_render.weaver, out_metrics);
 }
+
+bool
+multi_compositor_request_display_mode(struct multi_compositor *mc, bool enable_3d)
+{
+	if (mc == NULL) {
+		return false;
+	}
+
+	// Check if session has per-session rendering with a weaver
+	if (!mc->session_render.initialized || mc->session_render.weaver == NULL) {
+		return false;
+	}
+
+	return leiasr_request_display_mode(mc->session_render.weaver, enable_3d);
+}
 #endif
 
 xrt_result_t

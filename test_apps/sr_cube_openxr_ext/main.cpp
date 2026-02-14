@@ -257,6 +257,16 @@ static void RenderOneFrame(RenderState& rs) {
         g_inputState.fullscreenToggleRequested = false;
     }
 
+    // Handle display mode toggle (V key)
+    if (g_inputState.displayModeToggleRequested) {
+        g_inputState.displayModeToggleRequested = false;
+        if (xr.pfnRequestDisplayModeEXT && xr.session != XR_NULL_HANDLE) {
+            XrDisplayModeEXT mode = g_inputState.displayMode3D ?
+                XR_DISPLAY_MODE_3D_EXT : XR_DISPLAY_MODE_2D_EXT;
+            xr.pfnRequestDisplayModeEXT(xr.session, mode);
+        }
+    }
+
     // Update scene (cube rotation)
     UpdateScene(renderer, rs.perfStats->deltaTime);
 
@@ -363,6 +373,11 @@ static void RenderOneFrame(RenderState& rs) {
                             std::wstring modeText = xr.hasWin32WindowBindingExt ?
                                 L"XR_EXT_win32_window_binding: ACTIVE (D3D11)" :
                                 L"XR_EXT_win32_window_binding: NOT AVAILABLE (D3D11)";
+                            if (xr.supportsDisplayModeSwitch) {
+                                modeText += g_inputState.displayMode3D ?
+                                    L"\nDisplay Mode: 3D [V=Toggle]" :
+                                    L"\nDisplay Mode: 2D [V=Toggle]";
+                            }
 
                             uint32_t dispRenderW = (uint32_t)(g_windowWidth * xr.recommendedViewScaleX);
                             uint32_t dispRenderH = (uint32_t)(g_windowHeight * xr.recommendedViewScaleY);
@@ -636,7 +651,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     LOG_INFO("=== Entering main loop ===");
     LOG_INFO("XR rendering happens in the application window (XR_EXT_win32_window_binding)");
     LOG_INFO("Single-threaded: message pump + render on the main thread (WM_PAINT during drag/resize)");
-    LOG_INFO("Controls: WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset, P=Parallax, TAB=HUD, F11=Fullscreen, ESC=Quit");
+    LOG_INFO("Controls: WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset, P=Parallax, V=2D/3D, TAB=HUD, F11=Fullscreen, ESC=Quit");
     LOG_INFO("");
 
     PerformanceStats perfStats = {};

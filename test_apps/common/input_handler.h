@@ -61,6 +61,10 @@ struct InputState {
 
     // HUD visibility toggle (TAB key)
     bool hudVisible = true;
+
+    // Display mode toggle (V key)
+    bool displayMode3D = true;
+    bool displayModeToggleRequested = false;
 };
 
 // Process a Win32 message and update input state
