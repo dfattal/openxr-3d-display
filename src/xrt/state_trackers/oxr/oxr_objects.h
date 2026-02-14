@@ -824,6 +824,14 @@ oxr_session_end(struct oxr_logger *log, struct oxr_session *sess);
 XrResult
 oxr_session_request_exit(struct oxr_logger *log, struct oxr_session *sess);
 
+#ifdef OXR_HAVE_EXT_display_info
+/*!
+ * Request display mode switch (2D/3D).
+ */
+XrResult
+oxr_session_request_display_mode(struct oxr_logger *log, struct oxr_session *sess, bool enable_3d);
+#endif
+
 XRT_CHECK_RESULT XrResult
 oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess);
 
@@ -1832,6 +1840,9 @@ struct oxr_session
 
 	//! True if session was created with an external window handle (XR_EXT_win32_window_binding).
 	bool has_external_window;
+
+	//! True if display is currently in 3D mode (set by xrRequestDisplayModeEXT).
+	bool display_mode_3d;
 
 	//! True if XR_EXT_win32_appcontainer_compatible was enabled (Chrome WebXR).
 	//! Used to delay session state transitions for AppContainer sandbox compatibility.

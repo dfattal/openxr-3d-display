@@ -3191,6 +3191,7 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 			sys->base.info.display_width_m = dims.width_m;
 			sys->base.info.display_height_m = dims.height_m;
 		}
+		sys->base.info.supports_display_mode_switch = true;
 	}
 #endif
 

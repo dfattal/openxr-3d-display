@@ -2441,6 +2441,9 @@ struct xrt_system_compositor_info
 
 	//! Nominal viewer Z position in display space (meters). 0 if unknown.
 	float nominal_viewer_z_m;
+
+	//! True if display supports 2D/3D mode switching (SR SwitchableLensHint).
+	bool supports_display_mode_switch;
 };
 
 struct xrt_system_compositor;

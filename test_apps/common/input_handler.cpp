@@ -135,6 +135,10 @@ bool UpdateInputState(InputState& state, UINT msg, WPARAM wParam, LPARAM lParam)
         case VK_TAB:
             state.hudVisible = !state.hudVisible;
             break;
+        case 'V':
+            state.displayMode3D = !state.displayMode3D;
+            state.displayModeToggleRequested = true;
+            break;
         }
         return true;
 

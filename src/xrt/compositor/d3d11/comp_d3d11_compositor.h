@@ -95,6 +95,18 @@ comp_d3d11_compositor_get_window_metrics(struct xrt_compositor *xc,
                                           struct leiasr_window_metrics *out_metrics);
 
 /*!
+ * Request display mode switch (2D/3D) via SR SwitchableLensHint.
+ *
+ * @param xc The compositor.
+ * @param enable_3d true to switch to 3D mode, false for 2D mode.
+ * @return true on success.
+ *
+ * @ingroup comp_d3d11
+ */
+bool
+comp_d3d11_compositor_request_display_mode(struct xrt_compositor *xc, bool enable_3d);
+
+/*!
  * Set the system devices for the debug GUI (needed for qwerty driver support).
  *
  * This should be called after creating the compositor when xsysd is available.

@@ -87,6 +87,10 @@ struct XrSessionManager {
     float nominalViewerY = 0.0f;
     float nominalViewerZ = 0.5f;
 
+    // Display mode switching (XR_EXT_display_info v4)
+    bool supportsDisplayModeSwitch = false;
+    PFN_xrRequestDisplayModeEXT pfnRequestDisplayModeEXT = nullptr;
+
     // Window handle for session target (used by ext app, ignored by non-ext app)
     HWND windowHandle = nullptr;
 

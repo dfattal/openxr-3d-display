@@ -593,6 +593,19 @@ multi_compositor_get_display_dimensions(struct multi_compositor *mc, float *out_
  */
 bool
 multi_compositor_get_window_metrics(struct multi_compositor *mc, struct leiasr_window_metrics *out_metrics);
+
+/*!
+ * Request display mode switch (2D/3D) via SR SwitchableLensHint.
+ *
+ * @param mc The multi_compositor (must have per-session rendering initialized)
+ * @param enable_3d true to switch to 3D mode, false for 2D mode.
+ * @return true on success.
+ *
+ * @ingroup comp_multi
+ * @private @memberof multi_compositor
+ */
+bool
+multi_compositor_request_display_mode(struct multi_compositor *mc, bool enable_3d);
 #endif
 
 

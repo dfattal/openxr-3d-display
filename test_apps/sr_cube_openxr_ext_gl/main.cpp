@@ -315,6 +315,7 @@ static void RenderThreadFunc(
             resetRequested = g_inputState.resetViewRequested;
             g_inputState.resetViewRequested = false;
             g_inputState.fullscreenToggleRequested = false;
+            g_inputState.displayModeToggleRequested = false;
             windowW = g_windowWidth;
             windowH = g_windowHeight;
         }
@@ -331,6 +332,15 @@ static void RenderThreadFunc(
                 g_inputState.yaw = inputSnapshot.yaw;
                 g_inputState.pitch = inputSnapshot.pitch;
                 g_inputState.zoomScale = inputSnapshot.zoomScale;
+            }
+        }
+
+        // Handle display mode toggle (V key)
+        if (inputSnapshot.displayModeToggleRequested) {
+            if (xr->pfnRequestDisplayModeEXT && xr->session != XR_NULL_HANDLE) {
+                XrDisplayModeEXT mode = inputSnapshot.displayMode3D ?
+                    XR_DISPLAY_MODE_3D_EXT : XR_DISPLAY_MODE_2D_EXT;
+                xr->pfnRequestDisplayModeEXT(xr->session, mode);
             }
         }
 
@@ -464,6 +474,11 @@ static void RenderThreadFunc(
                                 std::wstring modeText = xr->hasWin32WindowBindingExt ?
                                     L"XR_EXT_win32_window_binding: ACTIVE (OpenGL)" :
                                     L"XR_EXT_win32_window_binding: NOT AVAILABLE (OpenGL)";
+                                if (xr->supportsDisplayModeSwitch) {
+                                    modeText += inputSnapshot.displayMode3D ?
+                                        L"\nDisplay Mode: 3D [V=Toggle]" :
+                                        L"\nDisplay Mode: 2D [V=Toggle]";
+                                }
                                 uint32_t dispRenderW = (uint32_t)(windowW * xr->recommendedViewScaleX);
                                 uint32_t dispRenderH = (uint32_t)(windowH * xr->recommendedViewScaleY);
                                 if (dispRenderW > xr->swapchains[0].width) dispRenderW = xr->swapchains[0].width;
@@ -725,7 +740,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     LOG_INFO("");
     LOG_INFO("=== Entering main loop ===");
-    LOG_INFO("Controls: WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset, TAB=HUD, F11=Fullscreen, ESC=Quit");
+    LOG_INFO("Controls: WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset, V=2D/3D, TAB=HUD, F11=Fullscreen, ESC=Quit");
     LOG_INFO("");
 
     // Release GL context from main thread before handing to render thread

@@ -13,6 +13,7 @@
 
 #include <sr/weaver/vkweaver.h>
 #include <sr/world/display/display.h>
+#include <sr/sense/display/switchablehint.h>
 #include <sr/utility/exception.h>
 
 #include <windows.h>
@@ -38,6 +39,7 @@ struct leiasr
 	// SR SDK objects
 	SR::SRContext *context = nullptr;
 	SR::IVulkanWeaver1 *weaver = nullptr;
+	SR::SwitchableLensHint *lens_hint = nullptr;
 
 	// Display dimensions in meters (for Kooima FOV calculation)
 	float display_width_m = 0.0f;
@@ -170,6 +172,17 @@ CreateSRContext(double maxTime, leiasr &sr)
 		double curTime = (double)GetTickCount64() / 1000.0;
 		if ((curTime - startTime) > maxTime)
 			break;
+	}
+
+	// Create SwitchableLensHint for 2D/3D mode switching
+	if (sr.context != nullptr && displayReady) {
+		try {
+			sr.lens_hint = new SR::SwitchableLensHint(*sr.context);
+			U_LOG_W("SR SwitchableLensHint created successfully");
+		} catch (...) {
+			sr.lens_hint = nullptr;
+			U_LOG_W("SR SwitchableLensHint not available on this display");
+		}
 	}
 
 	// Return if we have a valid context and device is ready.
@@ -318,6 +331,12 @@ leiasr_destroy(struct leiasr *leiasr)
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
+	}
+
+	// Clean up SwitchableLensHint before context
+	if (leiasr->lens_hint != nullptr) {
+		delete leiasr->lens_hint;
+		leiasr->lens_hint = nullptr;
 	}
 
 	// Clean up context (this triggers weaver destruction in SR SDK)
@@ -619,6 +638,37 @@ leiasr_get_window_metrics(struct leiasr *leiasr,
 	out_metrics->valid = true;
 
 	return true;
+}
+
+bool
+leiasr_request_display_mode(struct leiasr *leiasr, bool enable_3d)
+{
+	if (leiasr == nullptr || leiasr->lens_hint == nullptr) {
+		return false;
+	}
+
+	try {
+		if (enable_3d) {
+			leiasr->lens_hint->enable();
+		} else {
+			leiasr->lens_hint->disable();
+		}
+		U_LOG_W("SR display mode switched to %s", enable_3d ? "3D" : "2D");
+		return true;
+	} catch (...) {
+		U_LOG_E("Failed to switch SR display mode to %s", enable_3d ? "3D" : "2D");
+		return false;
+	}
+}
+
+bool
+leiasr_supports_display_mode_switch(struct leiasr *leiasr)
+{
+	if (leiasr == nullptr) {
+		return false;
+	}
+
+	return leiasr->lens_hint != nullptr;
 }
 
 } // extern "C"

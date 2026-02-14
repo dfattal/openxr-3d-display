@@ -1240,6 +1240,24 @@ comp_d3d11_compositor_get_window_metrics(struct xrt_compositor *xc,
 #endif
 }
 
+extern "C" bool
+comp_d3d11_compositor_request_display_mode(struct xrt_compositor *xc, bool enable_3d)
+{
+	if (xc == nullptr) {
+		return false;
+	}
+
+	struct comp_d3d11_compositor *c = d3d11_comp(xc);
+
+#ifdef XRT_HAVE_LEIA_SR_D3D11
+	if (c->weaver != nullptr) {
+		return leiasr_d3d11_request_display_mode(c->weaver, enable_3d);
+	}
+#endif
+
+	return false;
+}
+
 extern "C" void
 comp_d3d11_compositor_set_system_devices(struct xrt_compositor *xc,
                                           struct xrt_system_devices *xsysd)

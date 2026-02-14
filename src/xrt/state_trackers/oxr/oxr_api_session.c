@@ -1305,3 +1305,24 @@ oxr_xrGetPlanePolygonBufferEXT(XrPlaneDetectorEXT planeDetector,
 }
 
 #endif // OXR_HAVE_EXT_plane_detection
+
+#ifdef OXR_HAVE_EXT_display_info
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrRequestDisplayModeEXT(XrSession session, XrDisplayModeEXT displayMode)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrRequestDisplayModeEXT");
+
+	if (displayMode != XR_DISPLAY_MODE_2D_EXT && displayMode != XR_DISPLAY_MODE_3D_EXT) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Invalid displayMode %d", (int)displayMode);
+	}
+
+	bool enable_3d = (displayMode == XR_DISPLAY_MODE_3D_EXT);
+	return oxr_session_request_display_mode(&log, sess, enable_3d);
+}
+
+#endif // OXR_HAVE_EXT_display_info

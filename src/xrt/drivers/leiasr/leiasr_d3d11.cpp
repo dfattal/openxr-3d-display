@@ -13,6 +13,7 @@
 
 #include <sr/weaver/dx11weaver.h>
 #include <sr/world/display/display.h>
+#include <sr/sense/display/switchablehint.h>
 #include <sr/utility/exception.h>
 
 #include <d3d11.h>
@@ -30,6 +31,7 @@ struct leiasr_d3d11
 	// SR SDK objects
 	SR::SRContext *context = nullptr;
 	SR::IDX11Weaver1 *weaver = nullptr;
+	SR::SwitchableLensHint *lens_hint = nullptr;
 
 	// D3D11 resources (references, not owned)
 	ID3D11Device *device = nullptr;
@@ -171,6 +173,15 @@ create_sr_context(double max_time, leiasr_d3d11 &sr)
 		return false;
 	}
 
+	// Create SwitchableLensHint for 2D/3D mode switching
+	try {
+		sr.lens_hint = new SR::SwitchableLensHint(*sr.context);
+		U_LOG_W("SR D3D11 SwitchableLensHint created successfully");
+	} catch (...) {
+		sr.lens_hint = nullptr;
+		U_LOG_W("SR D3D11 SwitchableLensHint not available on this display");
+	}
+
 	return true;
 }
 
@@ -237,6 +248,12 @@ leiasr_d3d11_destroy(struct leiasr_d3d11 **leiasr_ptr)
 	}
 
 	leiasr_d3d11 *sr = *leiasr_ptr;
+
+	// Destroy SwitchableLensHint before weaver/context
+	if (sr->lens_hint != nullptr) {
+		delete sr->lens_hint;
+		sr->lens_hint = nullptr;
+	}
 
 	// Destroy weaver (SR SDK restores the app's original WndProc)
 	if (sr->weaver != nullptr) {
@@ -712,6 +729,37 @@ leiasr_static_get_display_dimensions(struct leiasr_display_dimensions *out_dims)
 	}
 
 	return success;
+}
+
+bool
+leiasr_d3d11_request_display_mode(struct leiasr_d3d11 *leiasr, bool enable_3d)
+{
+	if (leiasr == nullptr || leiasr->lens_hint == nullptr) {
+		return false;
+	}
+
+	try {
+		if (enable_3d) {
+			leiasr->lens_hint->enable();
+		} else {
+			leiasr->lens_hint->disable();
+		}
+		U_LOG_W("SR D3D11 display mode switched to %s", enable_3d ? "3D" : "2D");
+		return true;
+	} catch (...) {
+		U_LOG_E("Failed to switch SR D3D11 display mode to %s", enable_3d ? "3D" : "2D");
+		return false;
+	}
+}
+
+bool
+leiasr_d3d11_supports_display_mode_switch(struct leiasr_d3d11 *leiasr)
+{
+	if (leiasr == nullptr) {
+		return false;
+	}
+
+	return leiasr->lens_hint != nullptr;
 }
 
 } // extern "C"
