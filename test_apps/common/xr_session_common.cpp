@@ -492,11 +492,11 @@ bool ReleaseSwapchainImage(XrSessionManager& xr, int eye) {
     return XR_SUCCEEDED(xrReleaseSwapchainImage(xr.swapchains[eye].swapchain, &releaseInfo));
 }
 
-bool EndFrame(XrSessionManager& xr, XrTime displayTime, const XrCompositionLayerProjectionView* views) {
+bool EndFrame(XrSessionManager& xr, XrTime displayTime, const XrCompositionLayerProjectionView* views, uint32_t viewCount) {
     XrCompositionLayerProjection projectionLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
     // Submit layers in DISPLAY space (physically anchored) when available, LOCAL otherwise.
     projectionLayer.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
-    projectionLayer.viewCount = 2;
+    projectionLayer.viewCount = viewCount;
     projectionLayer.views = views;
 
     const XrCompositionLayerBaseHeader* layers[] = {
@@ -596,12 +596,13 @@ bool EndFrameWithWindowSpaceHud(
     XrTime displayTime,
     const XrCompositionLayerProjectionView* projViews,
     float hudX, float hudY, float hudWidth, float hudHeight,
-    float hudDisparity
+    float hudDisparity,
+    uint32_t viewCount
 ) {
     // Projection layer — use DISPLAY space (physically anchored) when available
     XrCompositionLayerProjection projectionLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
     projectionLayer.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
-    projectionLayer.viewCount = 2;
+    projectionLayer.viewCount = viewCount;
     projectionLayer.views = projViews;
 
     // Window-space HUD layer

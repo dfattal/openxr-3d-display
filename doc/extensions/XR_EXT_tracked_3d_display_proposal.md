@@ -766,6 +766,35 @@ override the automatic behavior. Use cases include:
 - Deferring 3D mode activation until the application has finished loading.
 - Implementing a user-facing 2D/3D toggle.
 
+#### Mono Submission in 2D Mode
+
+When the display is in 2D mode, the application **may** submit a single-view projection
+layer (`viewCount == 1`) to `xrEndFrame`, even though the session view configuration is
+`XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO`. This enables the application to render a
+single full-resolution view instead of two reduced-resolution stereo views, yielding a
+significant quality improvement for 2D content.
+
+**Runtime behavior:**
+- `xrLocateViews` still returns 2 views regardless of display mode. The application uses
+  the returned eye positions to compute a center-eye camera position (or any position it
+  chooses).
+- `xrEndFrame` accepts `viewCount == 1` projection layers when in 2D mode. In 3D mode,
+  `viewCount` must equal the view configuration's view count (2 for `PRIMARY_STEREO`).
+- The compositor renders the single view to fill the full display output and skips light
+  field interlacing (weaving), since 2D mode does not use the lenticular optics.
+
+**Application responsibilities:**
+- Detect 2D mode (via a prior call to `xrRequestDisplayModeEXT` or an application toggle).
+- Create or reuse a swapchain at full window/display resolution for the mono view.
+- Render a single view using a center-eye camera position and full-resolution viewport.
+- Submit `viewCount == 1` with the single projection view to `xrEndFrame`.
+- When switching back to 3D mode, resume submitting `viewCount == 2` with per-eye stereo
+  views at the recommended scaled resolution.
+
+**Backward compatibility:**
+- Applications that always submit `viewCount == 2` continue to work in both 2D and 3D
+  modes. The runtime blits the stereo content as before.
+
 #### Implementation Notes
 
 The runtime translates `xrRequestDisplayModeEXT` into the appropriate vendor SDK call:
@@ -800,6 +829,32 @@ if (displayInfo.supportsDisplayModeSwitch) {
 
     // Switch back to 3D when menu closes
     xrRequestDisplayModeEXT(session, XR_DISPLAY_MODE_3D_EXT);
+}
+
+// Example: mono submission in 2D mode
+if (!displayMode3D) {
+    // xrLocateViews still returns 2 views — compute center eye
+    XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+    // ... xrLocateViews(session, ..., 2, &viewCount, views) ...
+    XrVector3f centerEye;
+    centerEye.x = (views[0].pose.position.x + views[1].pose.position.x) * 0.5f;
+    centerEye.y = (views[0].pose.position.y + views[1].pose.position.y) * 0.5f;
+    centerEye.z = (views[0].pose.position.z + views[1].pose.position.z) * 0.5f;
+
+    // Render 1 view at full window resolution (no stereo scale factors)
+    // ... render to monoSwapchain at windowWidth x windowHeight ...
+
+    // Submit single projection view
+    XrCompositionLayerProjectionView monoView = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
+    monoView.subImage.swapchain = monoSwapchain;
+    monoView.subImage.imageRect = {{0, 0}, {(int32_t)windowWidth, (int32_t)windowHeight}};
+    monoView.pose.position = centerEye;
+    monoView.fov = /* center-eye FOV */;
+
+    XrCompositionLayerProjection projLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    projLayer.viewCount = 1;  // Mono submission — accepted in 2D mode
+    projLayer.views = &monoView;
+    // ... xrEndFrame with projLayer ...
 }
 ```
 

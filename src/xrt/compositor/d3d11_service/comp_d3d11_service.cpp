@@ -2346,6 +2346,16 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		sys->context->ClearRenderTargetView(c->render.stereo_rtv.get(), clear_color);
 	}
 
+	// Detect mono submission from first projection layer
+	bool is_mono = false;
+	for (uint32_t i = 0; i < c->layer_accum.layer_count; i++) {
+		if (c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION ||
+		    c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION_DEPTH) {
+			is_mono = (c->layer_accum.layers[i].data.view_count == 1);
+			break;
+		}
+	}
+
 	// Render projection layers to stereo texture (via copy)
 	for (uint32_t i = 0; i < c->layer_accum.layer_count; i++) {
 		struct comp_layer *layer = &c->layer_accum.layers[i];
@@ -2355,31 +2365,36 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			continue;
 		}
 
-		// Get left and right swapchains
-		struct xrt_swapchain *xsc_left = layer->sc_array[0];
-		struct xrt_swapchain *xsc_right = layer->sc_array[1];
+		bool layer_is_mono = (layer->data.view_count == 1);
 
-		if (xsc_left == nullptr || xsc_right == nullptr) {
+		// Get swapchain(s) — mono has only sc_array[0]
+		struct xrt_swapchain *xsc_left = layer->sc_array[0];
+		struct xrt_swapchain *xsc_right = layer_is_mono ? nullptr : layer->sc_array[1];
+
+		if (xsc_left == nullptr || (!layer_is_mono && xsc_right == nullptr)) {
 			U_LOG_W("Projection layer missing swapchain");
 			continue;
 		}
 
 		struct d3d11_service_swapchain *sc_left = d3d11_service_swapchain_from_xrt(xsc_left);
-		struct d3d11_service_swapchain *sc_right = d3d11_service_swapchain_from_xrt(xsc_right);
+		struct d3d11_service_swapchain *sc_right = layer_is_mono ? nullptr :
+		    d3d11_service_swapchain_from_xrt(xsc_right);
 
 		// Get image indices from layer data
 		uint32_t left_index = layer->data.proj.v[0].sub.image_index;
-		uint32_t right_index = layer->data.proj.v[1].sub.image_index;
+		uint32_t right_index = layer_is_mono ? 0 : layer->data.proj.v[1].sub.image_index;
 
-		if (left_index >= sc_left->image_count || right_index >= sc_right->image_count) {
+		if (left_index >= sc_left->image_count ||
+		    (!layer_is_mono && right_index >= sc_right->image_count)) {
 			U_LOG_W("Invalid image index in projection layer");
 			continue;
 		}
 
 		ID3D11Texture2D *left_tex = sc_left->images[left_index].texture.get();
-		ID3D11Texture2D *right_tex = sc_right->images[right_index].texture.get();
+		ID3D11Texture2D *right_tex = layer_is_mono ? nullptr :
+		    sc_right->images[right_index].texture.get();
 
-		if (left_tex == nullptr || right_tex == nullptr) {
+		if (left_tex == nullptr || (!layer_is_mono && right_tex == nullptr)) {
 			U_LOG_W("Missing texture in projection layer");
 			continue;
 		}
@@ -2399,7 +2414,8 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 				U_LOG_W("layer_commit: Failed to acquire left mutex: 0x%08lx", hr);
 			}
 		}
-		if (sc_right != sc_left && sc_right->service_created && sc_right->images[right_index].keyed_mutex) {
+		if (!layer_is_mono && sc_right != sc_left && sc_right->service_created &&
+		    sc_right->images[right_index].keyed_mutex) {
 			HRESULT hr = sc_right->images[right_index].keyed_mutex->AcquireSync(0, mutex_timeout_ms);
 			if (SUCCEEDED(hr)) {
 				right_mutex_acquired = true;
@@ -2416,23 +2432,37 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		bool left_is_srgb = is_srgb_format(left_desc.Format);
 
 		D3D11_TEXTURE2D_DESC right_desc = {};
-		right_tex->GetDesc(&right_desc);
-		bool right_is_srgb = is_srgb_format(right_desc.Format);
+		bool right_is_srgb = false;
+		if (!layer_is_mono) {
+			right_tex->GetDesc(&right_desc);
+			right_is_srgb = is_srgb_format(right_desc.Format);
+		}
 
 		// Log projection layer rect values for debugging SR weaving
 		// Log first frame and every 60 frames
 		static uint32_t proj_log_count = 0;
 		if (proj_log_count == 0 || proj_log_count % 60 == 0) {
-			U_LOG_W("Projection layer %u: left rect=(%d,%d %dx%d) right rect=(%d,%d %dx%d) array=[%u,%u]",
-			        i,
-			        layer->data.proj.v[0].sub.rect.offset.w, layer->data.proj.v[0].sub.rect.offset.h,
-			        layer->data.proj.v[0].sub.rect.extent.w, layer->data.proj.v[0].sub.rect.extent.h,
-			        layer->data.proj.v[1].sub.rect.offset.w, layer->data.proj.v[1].sub.rect.offset.h,
-			        layer->data.proj.v[1].sub.rect.extent.w, layer->data.proj.v[1].sub.rect.extent.h,
-			        layer->data.proj.v[0].sub.array_index, layer->data.proj.v[1].sub.array_index);
-			U_LOG_W("  stereo_texture=%ux%u, view_width=%u, view_height=%u, left_fmt=%u(srgb=%d), right_fmt=%u(srgb=%d)",
-			        sys->display_width, sys->display_height, sys->view_width, sys->view_height,
-			        left_desc.Format, left_is_srgb, right_desc.Format, right_is_srgb);
+			if (layer_is_mono) {
+				U_LOG_W("Projection layer %u (MONO): rect=(%d,%d %dx%d) array=%u",
+				        i,
+				        layer->data.proj.v[0].sub.rect.offset.w, layer->data.proj.v[0].sub.rect.offset.h,
+				        layer->data.proj.v[0].sub.rect.extent.w, layer->data.proj.v[0].sub.rect.extent.h,
+				        layer->data.proj.v[0].sub.array_index);
+				U_LOG_W("  stereo_texture=%ux%u, view_width=%u, view_height=%u, fmt=%u(srgb=%d)",
+				        sys->display_width, sys->display_height, sys->view_width, sys->view_height,
+				        left_desc.Format, left_is_srgb);
+			} else {
+				U_LOG_W("Projection layer %u: left rect=(%d,%d %dx%d) right rect=(%d,%d %dx%d) array=[%u,%u]",
+				        i,
+				        layer->data.proj.v[0].sub.rect.offset.w, layer->data.proj.v[0].sub.rect.offset.h,
+				        layer->data.proj.v[0].sub.rect.extent.w, layer->data.proj.v[0].sub.rect.extent.h,
+				        layer->data.proj.v[1].sub.rect.offset.w, layer->data.proj.v[1].sub.rect.offset.h,
+				        layer->data.proj.v[1].sub.rect.extent.w, layer->data.proj.v[1].sub.rect.extent.h,
+				        layer->data.proj.v[0].sub.array_index, layer->data.proj.v[1].sub.array_index);
+				U_LOG_W("  stereo_texture=%ux%u, view_width=%u, view_height=%u, left_fmt=%u(srgb=%d), right_fmt=%u(srgb=%d)",
+				        sys->display_width, sys->display_height, sys->view_width, sys->view_height,
+				        left_desc.Format, left_is_srgb, right_desc.Format, right_is_srgb);
+			}
 		}
 		proj_log_count++;
 
@@ -2442,10 +2472,10 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		float left_src_w = static_cast<float>(layer->data.proj.v[0].sub.rect.extent.w);
 		float left_src_h = static_cast<float>(layer->data.proj.v[0].sub.rect.extent.h);
 
-		float right_src_x = static_cast<float>(layer->data.proj.v[1].sub.rect.offset.w);
-		float right_src_y = static_cast<float>(layer->data.proj.v[1].sub.rect.offset.h);
-		float right_src_w = static_cast<float>(layer->data.proj.v[1].sub.rect.extent.w);
-		float right_src_h = static_cast<float>(layer->data.proj.v[1].sub.rect.extent.h);
+		float right_src_x = layer_is_mono ? 0.0f : static_cast<float>(layer->data.proj.v[1].sub.rect.offset.w);
+		float right_src_y = layer_is_mono ? 0.0f : static_cast<float>(layer->data.proj.v[1].sub.rect.offset.h);
+		float right_src_w = layer_is_mono ? 0.0f : static_cast<float>(layer->data.proj.v[1].sub.rect.extent.w);
+		float right_src_h = layer_is_mono ? 0.0f : static_cast<float>(layer->data.proj.v[1].sub.rect.extent.h);
 
 		// Use shader-based blit for SRGB textures, CopySubresourceRegion for non-SRGB
 		// Log which path is used (first frame only)
@@ -2508,24 +2538,37 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			    &left_box);
 		}
 
-		// Handle right eye similarly
-		if (right_is_srgb && sys->blit_vs && sc_right->images[right_index].srv) {
-			wil::com_ptr<ID3D11ShaderResourceView> srgb_srv;
-			D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-			srv_desc.Format = get_srgb_format(right_desc.Format);
-			srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-			srv_desc.Texture2D.MipLevels = 1;
-			srv_desc.Texture2D.MostDetailedMip = 0;
+		// Handle right eye (skip for mono — single view already fills full width)
+		if (!layer_is_mono) {
+			if (right_is_srgb && sys->blit_vs && sc_right->images[right_index].srv) {
+				wil::com_ptr<ID3D11ShaderResourceView> srgb_srv;
+				D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+				srv_desc.Format = get_srgb_format(right_desc.Format);
+				srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+				srv_desc.Texture2D.MipLevels = 1;
+				srv_desc.Texture2D.MostDetailedMip = 0;
 
-			HRESULT hr = sys->device->CreateShaderResourceView(right_tex, &srv_desc, srgb_srv.put());
-			if (SUCCEEDED(hr)) {
-				blit_to_stereo_texture(sys, &c->render, srgb_srv.get(),
-				                       right_src_x, right_src_y, right_src_w, right_src_h,
-				                       static_cast<float>(right_desc.Width), static_cast<float>(right_desc.Height),
-				                       static_cast<float>(sys->view_width), 0.0f,
-				                       true);  // is_srgb = true
+				HRESULT hr = sys->device->CreateShaderResourceView(right_tex, &srv_desc, srgb_srv.put());
+				if (SUCCEEDED(hr)) {
+					blit_to_stereo_texture(sys, &c->render, srgb_srv.get(),
+					                       right_src_x, right_src_y, right_src_w, right_src_h,
+					                       static_cast<float>(right_desc.Width), static_cast<float>(right_desc.Height),
+					                       static_cast<float>(sys->view_width), 0.0f,
+					                       true);  // is_srgb = true
+				} else {
+					U_LOG_W("Failed to create SRGB SRV for right eye, falling back to copy");
+					D3D11_BOX right_box = {};
+					right_box.left = static_cast<UINT>(right_src_x);
+					right_box.top = static_cast<UINT>(right_src_y);
+					right_box.right = static_cast<UINT>(right_src_x + right_src_w);
+					right_box.bottom = static_cast<UINT>(right_src_y + right_src_h);
+					right_box.front = 0;
+					right_box.back = 1;
+					sys->context->CopySubresourceRegion(c->render.stereo_texture.get(), 0, sys->view_width, 0, 0,
+					                                     right_tex, layer->data.proj.v[1].sub.array_index, &right_box);
+				}
 			} else {
-				U_LOG_W("Failed to create SRGB SRV for right eye, falling back to copy");
+				// Non-SRGB: use fast CopySubresourceRegion
 				D3D11_BOX right_box = {};
 				right_box.left = static_cast<UINT>(right_src_x);
 				right_box.top = static_cast<UINT>(right_src_y);
@@ -2533,33 +2576,22 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 				right_box.bottom = static_cast<UINT>(right_src_y + right_src_h);
 				right_box.front = 0;
 				right_box.back = 1;
-				sys->context->CopySubresourceRegion(c->render.stereo_texture.get(), 0, sys->view_width, 0, 0,
-				                                     right_tex, layer->data.proj.v[1].sub.array_index, &right_box);
-			}
-		} else {
-			// Non-SRGB: use fast CopySubresourceRegion
-			D3D11_BOX right_box = {};
-			right_box.left = static_cast<UINT>(right_src_x);
-			right_box.top = static_cast<UINT>(right_src_y);
-			right_box.right = static_cast<UINT>(right_src_x + right_src_w);
-			right_box.bottom = static_cast<UINT>(right_src_y + right_src_h);
-			right_box.front = 0;
-			right_box.back = 1;
 
-			sys->context->CopySubresourceRegion(
-			    c->render.stereo_texture.get(),
-			    0,                            // dst subresource
-			    sys->view_width, 0, 0,        // dst x, y, z (right half)
-			    right_tex,
-			    layer->data.proj.v[1].sub.array_index,  // src subresource
-			    &right_box);
+				sys->context->CopySubresourceRegion(
+				    c->render.stereo_texture.get(),
+				    0,                            // dst subresource
+				    sys->view_width, 0, 0,        // dst x, y, z (right half)
+				    right_tex,
+				    layer->data.proj.v[1].sub.array_index,  // src subresource
+				    &right_box);
+			}
 		}
 
 		// Release KeyedMutex after reading
 		if (left_mutex_acquired) {
 			sc_left->images[left_index].keyed_mutex->ReleaseSync(0);
 		}
-		if (right_mutex_acquired) {
+		if (!layer_is_mono && right_mutex_acquired) {
 			sc_right->images[right_index].keyed_mutex->ReleaseSync(0);
 		}
 
@@ -2641,13 +2673,21 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			fovs[view].angle_down = -fov_angle;
 		}
 
-		// Render UI layers for each eye
-		for (uint32_t view_index = 0; view_index < 2; view_index++) {
-			// Set viewport for this eye
+		// Render UI layers for each view (1 for mono, 2 for stereo)
+		uint32_t ui_view_count = is_mono ? 1 : 2;
+		for (uint32_t view_index = 0; view_index < ui_view_count; view_index++) {
+			// Set viewport for this view
 			D3D11_VIEWPORT viewport = {};
-			viewport.TopLeftX = static_cast<float>(view_index * sys->view_width);
+			if (is_mono) {
+				// MONO: single viewport spanning full stereo texture width
+				viewport.TopLeftX = 0.0f;
+				viewport.Width = static_cast<float>(sys->view_width * 2);
+			} else {
+				// STEREO: side-by-side
+				viewport.TopLeftX = static_cast<float>(view_index * sys->view_width);
+				viewport.Width = static_cast<float>(sys->view_width);
+			}
 			viewport.TopLeftY = 0.0f;
-			viewport.Width = static_cast<float>(sys->view_width);
 			viewport.Height = static_cast<float>(sys->view_height);
 			viewport.MinDepth = 0.0f;
 			viewport.MaxDepth = 1.0f;
@@ -2701,7 +2741,8 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 #ifdef XRT_HAVE_LEIA_SR_D3D11
 	// Weave stereo texture through SR weaver for light field display
-	if (c->render.weaver != nullptr && c->render.stereo_srv) {
+	// Skip weaving for mono — display is in 2D mode, no interlacing needed
+	if (!is_mono && c->render.weaver != nullptr && c->render.stereo_srv) {
 		// Set input stereo texture
 		leiasr_d3d11_set_input_texture(
 		    c->render.weaver,
