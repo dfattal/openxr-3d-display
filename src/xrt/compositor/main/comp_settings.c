@@ -96,13 +96,15 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 
 		// Fallback
 		add_format(s, VK_FORMAT_B8G8R8A8_SRGB);
-#elif defined(XRT_OS_LINUX) || defined(XRT_OS_WINDOWS)
+#elif defined(XRT_OS_LINUX) || defined(XRT_OS_WINDOWS) || defined(XRT_OS_MACOS)
 		/*
 		 * On Linux the most ubiquitous sRGB format is B8G8R8A8_SRGB.
 		 * https://vulkan.gpuinfo.org/listsurfaceformats.php?platform=linux
 		 *
 		 * On Windows the most ubiquitous sRGB format is B8G8R8A8_SRGB.
 		 * https://vulkan.gpuinfo.org/listsurfaceformats.php?platform=windows
+		 *
+		 * On macOS via MoltenVK, B8G8R8A8_SRGB is well supported.
 		 */
 		add_format(s, VK_FORMAT_B8G8R8A8_SRGB);
 

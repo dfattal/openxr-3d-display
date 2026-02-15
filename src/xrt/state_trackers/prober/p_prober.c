@@ -1220,6 +1220,11 @@ p_open_hid_interface(struct xrt_prober *xp,
 	(void)ret;
 	U_LOG_E("HID devices not yet supported on Windows, cannot open interface (%i)", hid_iface);
 	return -1;
+#elif defined(XRT_OS_MACOS)
+	(void)pdev;
+	(void)ret;
+	U_LOG_E("HID devices not yet supported on macOS, cannot open interface (%i)", hid_iface);
+	return -1;
 #else
 #error "no port of hid code"
 #endif
