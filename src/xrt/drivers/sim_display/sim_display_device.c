@@ -97,7 +97,7 @@ sim_display_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 	if (name != XRT_INPUT_GENERIC_HEAD_POSE) {
 		U_LOG_E("Unknown input name: 0x%08x", name);
-		return XRT_ERROR_DEVICE_NOT_FOUND;
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
 	// Static pose: viewer at nominal position in front of the display.

@@ -172,7 +172,7 @@ sim_display_processor_create(enum sim_display_output_mode mode,
                              struct xrt_display_processor **out_xdp)
 {
 	if (out_xdp == NULL) {
-		return XRT_ERROR_DEVICE_NOT_FOUND;
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
 	struct sim_display_processor *sdp = calloc(1, sizeof(*sdp));
@@ -199,7 +199,7 @@ sim_display_processor_create(enum sim_display_output_mode mode,
 	default:
 		U_LOG_E("Unknown sim display output mode: %d", (int)mode);
 		free(sdp);
-		return XRT_ERROR_DEVICE_NOT_FOUND;
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
 	*out_xdp = &sdp->base;
