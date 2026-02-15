@@ -87,7 +87,7 @@ sim_display_open_system_impl(struct xrt_builder *xb,
 {
 	struct xrt_device *head = sim_display_hmd_create();
 	if (head == NULL) {
-		return XRT_ERROR_DEVICE_NOT_FOUND;
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
 	// Add to device list.

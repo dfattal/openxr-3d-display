@@ -95,7 +95,7 @@ leia_display_processor_create(struct leiasr *leiasr,
                                struct xrt_display_processor **out_xdp)
 {
 	if (leiasr == NULL || out_xdp == NULL) {
-		return XRT_ERROR_DEVICE_NOT_FOUND;
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
 	struct leia_display_processor *ldp =
