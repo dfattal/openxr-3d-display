@@ -375,12 +375,19 @@ static void RenderOneFrame(RenderState& rs) {
                                 L"XR_EXT_win32_window_binding: NOT AVAILABLE (D3D11)";
                             if (xr.supportsDisplayModeSwitch) {
                                 modeText += g_inputState.displayMode3D ?
-                                    L"\nDisplay Mode: 3D [V=Toggle]" :
-                                    L"\nDisplay Mode: 2D [V=Toggle]";
+                                    L"\nDisplay Mode: 3D Stereo [V=Toggle]" :
+                                    L"\nDisplay Mode: 2D Mono [V=Toggle]";
                             }
 
-                            uint32_t dispRenderW = (uint32_t)(g_windowWidth * xr.recommendedViewScaleX);
-                            uint32_t dispRenderH = (uint32_t)(g_windowHeight * xr.recommendedViewScaleY);
+                            uint32_t dispRenderW, dispRenderH;
+                            if (!g_inputState.displayMode3D) {
+                                // Mono: full window resolution
+                                dispRenderW = g_windowWidth;
+                                dispRenderH = g_windowHeight;
+                            } else {
+                                dispRenderW = (uint32_t)(g_windowWidth * xr.recommendedViewScaleX);
+                                dispRenderH = (uint32_t)(g_windowHeight * xr.recommendedViewScaleY);
+                            }
                             if (dispRenderW > xr.swapchains[0].width) dispRenderW = xr.swapchains[0].width;
                             if (dispRenderH > xr.swapchains[0].height) dispRenderH = xr.swapchains[0].height;
                             std::wstring perfText = FormatPerformanceInfo(rs.perfStats->fps, rs.perfStats->frameTimeMs,
@@ -408,8 +415,50 @@ static void RenderOneFrame(RenderState& rs) {
                         }
                     }
 
-                    // Render each eye
-                    for (int eye = 0; eye < 2; eye++) {
+                    // Determine mono vs stereo rendering
+                    bool monoMode = !g_inputState.displayMode3D;
+                    int eyeCount = monoMode ? 1 : 2;
+
+                    // For mono: compute center eye position and projection
+                    XMMATRIX monoViewMatrix, monoProjMatrix;
+                    XrFovf monoFov = {};
+                    XrPosef monoPose = rawViews[0].pose;
+                    if (monoMode) {
+                        // Center eye = average of left and right eye positions
+                        monoPose.position.x = (rawViews[0].pose.position.x + rawViews[1].pose.position.x) * 0.5f;
+                        monoPose.position.y = (rawViews[0].pose.position.y + rawViews[1].pose.position.y) * 0.5f;
+                        monoPose.position.z = (rawViews[0].pose.position.z + rawViews[1].pose.position.z) * 0.5f;
+
+                        if (useAppProjection) {
+                            XrVector3f centerEye = monoPose.position;
+                            float pxSizeX = xr.displayWidthM / (float)xr.swapchains[0].width;
+                            float pxSizeY = xr.displayHeightM / (float)xr.swapchains[0].height;
+                            float winW_m = (float)g_windowWidth * pxSizeX;
+                            float winH_m = (float)g_windowHeight * pxSizeY;
+                            float minDisp = fminf(xr.displayWidthM, xr.displayHeightM);
+                            float minWin  = fminf(winW_m, winH_m);
+                            float vs = minDisp / minWin;
+                            float screenWidthM  = winW_m * vs;
+                            float screenHeightM = winH_m * vs;
+                            float zs = g_inputState.zoomScale;
+                            centerEye.x /= zs;
+                            centerEye.y /= zs;
+                            centerEye.z /= zs;
+                            monoProjMatrix = ComputeKooimaProjection(
+                                centerEye, screenWidthM / zs, screenHeightM / zs, 0.01f, 100.0f);
+                            monoFov = ComputeKooimaFov(
+                                centerEye, screenWidthM / zs, screenHeightM / zs);
+                        } else {
+                            // Use average of left/right view/proj matrices
+                            monoProjMatrix = leftProjMatrix;  // Close enough for 2D
+                            monoFov = rawViews[0].fov;
+                        }
+                        // View matrix: use LocateViews result for center eye
+                        monoViewMatrix = leftViewMatrix;  // Recomputed from center position by LocateViews
+                    }
+
+                    // Render each view (1 for mono, 2 for stereo)
+                    for (int eye = 0; eye < eyeCount; eye++) {
                         uint32_t imageIndex;
                         if (AcquireSwapchainImage(xr, eye, imageIndex)) {
                             ID3D11Texture2D* swapchainTexture = rs.swapchainImages[eye][imageIndex].texture;
@@ -417,9 +466,15 @@ static void RenderOneFrame(RenderState& rs) {
                             ID3D11RenderTargetView* rtv = nullptr;
                             CreateRenderTargetView(renderer, swapchainTexture, &rtv);
 
-                            // Compute render dims from window size and display scale factors
-                            uint32_t renderW = (uint32_t)(g_windowWidth * xr.recommendedViewScaleX);
-                            uint32_t renderH = (uint32_t)(g_windowHeight * xr.recommendedViewScaleY);
+                            // Compute render dims: mono uses full window res, stereo uses scaled
+                            uint32_t renderW, renderH;
+                            if (monoMode) {
+                                renderW = g_windowWidth;
+                                renderH = g_windowHeight;
+                            } else {
+                                renderW = (uint32_t)(g_windowWidth * xr.recommendedViewScaleX);
+                                renderH = (uint32_t)(g_windowHeight * xr.recommendedViewScaleY);
+                            }
                             if (renderW > xr.swapchains[eye].width) renderW = xr.swapchains[eye].width;
                             if (renderH > xr.swapchains[eye].height) renderH = xr.swapchains[eye].height;
 
@@ -434,8 +489,10 @@ static void RenderOneFrame(RenderState& rs) {
                             renderer.context->ClearDepthStencilView(rs.depthDSVs[eye].Get(),
                                 D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
-                            XMMATRIX viewMatrix = (eye == 0) ? leftViewMatrix : rightViewMatrix;
-                            XMMATRIX projMatrix = (eye == 0) ? leftProjMatrix : rightProjMatrix;
+                            XMMATRIX viewMatrix = monoMode ? monoViewMatrix :
+                                ((eye == 0) ? leftViewMatrix : rightViewMatrix);
+                            XMMATRIX projMatrix = monoMode ? monoProjMatrix :
+                                ((eye == 0) ? leftProjMatrix : rightProjMatrix);
 
                             // Extension apps: cube base rests on grid at y=0
                             // Cube is 0.06m, so center at y=0.03 puts base at y=0
@@ -458,14 +515,17 @@ static void RenderOneFrame(RenderState& rs) {
                             };
                             projectionViews[eye].subImage.imageArrayIndex = 0;
 
-                            projectionViews[eye].pose = rawViews[eye].pose;
-                            projectionViews[eye].fov = useAppProjection ? appFov[eye] : rawViews[eye].fov;
+                            projectionViews[eye].pose = monoMode ? monoPose : rawViews[eye].pose;
+                            projectionViews[eye].fov = monoMode ? monoFov :
+                                (useAppProjection ? appFov[eye] : rawViews[eye].fov);
                         }
                     }
                 }
             }
 
             // Submit frame with window-space HUD layer if visible
+            // submitViewCount: 1 for mono (2D mode), 2 for stereo (3D mode)
+            uint32_t submitViewCount = g_inputState.displayMode3D ? 2 : 1;
             if (hudSubmitted) {
                 float hudAR = (float)HUD_PIXEL_WIDTH / (float)HUD_PIXEL_HEIGHT;
                 float windowAR = (g_windowWidth > 0 && g_windowHeight > 0) ? (float)g_windowWidth / (float)g_windowHeight : 1.0f;
@@ -473,9 +533,9 @@ static void RenderOneFrame(RenderState& rs) {
                 float fracH = fracW * windowAR / hudAR;
                 if (fracH > 1.0f) { fracH = 1.0f; fracW = hudAR / windowAR; }
                 EndFrameWithWindowSpaceHud(xr, frameState.predictedDisplayTime, projectionViews,
-                    0.0f, 0.0f, fracW, fracH, 0.0f);
+                    0.0f, 0.0f, fracW, fracH, 0.0f, submitViewCount);
             } else {
-                EndFrame(xr, frameState.predictedDisplayTime, projectionViews);
+                EndFrame(xr, frameState.predictedDisplayTime, projectionViews, submitViewCount);
             }
         }
     } else {

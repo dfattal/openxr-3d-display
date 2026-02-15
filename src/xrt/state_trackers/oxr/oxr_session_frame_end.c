@@ -607,10 +607,14 @@ verify_projection_layer(struct oxr_session *sess,
 		}
 		break;
 	case XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO:
+		if (proj->viewCount == 1 && !sess->display_mode_3d) {
+			// 2D mode: mono submission allowed
+			break;
+		}
 		if (proj->viewCount != 2) {
 			return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
 			                 "(frameEndInfo->layers[%u]->viewCount == %u) must be 2 for "
-			                 "XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO",
+			                 "XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO (or 1 in 2D mode)",
 			                 layer_index, proj->viewCount);
 		}
 		break;

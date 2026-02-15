@@ -572,7 +572,17 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	}
 #endif
 
-	// Render layers to side-by-side stereo texture
+	// Detect mono submission from first projection layer
+	bool is_mono = false;
+	for (uint32_t i = 0; i < c->layer_accum.layer_count; i++) {
+		if (c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION ||
+		    c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION_DEPTH) {
+			is_mono = (c->layer_accum.layers[i].data.view_count == 1);
+			break;
+		}
+	}
+
+	// Render layers to side-by-side stereo texture (or full-width mono)
 	xrt_result_t xret = comp_d3d11_renderer_draw(c->renderer, &c->layer_accum, &left_eye, &right_eye);
 	if (xret != XRT_SUCCESS) {
 		U_LOG_E("Failed to render layers");
@@ -599,7 +609,8 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	bool weaving_done = false;
 
 #ifdef XRT_HAVE_LEIA_SR_D3D11
-	if (c->weaver != nullptr && leiasr_d3d11_is_ready(c->weaver)) {
+	// Skip weaving for mono — display is in 2D mode, no interlacing needed
+	if (!is_mono && c->weaver != nullptr && leiasr_d3d11_is_ready(c->weaver)) {
 		// Get stereo texture SRV from renderer
 		void *stereo_srv = comp_d3d11_renderer_get_stereo_srv(c->renderer);
 

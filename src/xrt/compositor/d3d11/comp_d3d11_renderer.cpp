@@ -1003,13 +1003,30 @@ comp_d3d11_renderer_draw(struct comp_d3d11_renderer *renderer,
 		fovs[view].angle_down = -fov_angle;
 	}
 
-	// Render each eye
-	for (uint32_t view_index = 0; view_index < 2; view_index++) {
-		// Set viewport for this eye
+	// Determine effective view count from first projection layer
+	uint32_t effective_views = 2;
+	for (uint32_t i = 0; i < layers->layer_count; i++) {
+		if (layers->layers[i].data.type == XRT_LAYER_PROJECTION ||
+		    layers->layers[i].data.type == XRT_LAYER_PROJECTION_DEPTH) {
+			effective_views = layers->layers[i].data.view_count;
+			break;
+		}
+	}
+
+	// Render each view (1 for mono, 2 for stereo)
+	for (uint32_t view_index = 0; view_index < effective_views; view_index++) {
+		// Set viewport for this view
 		D3D11_VIEWPORT viewport = {};
-		viewport.TopLeftX = static_cast<float>(view_index * renderer->view_width);
+		if (effective_views == 1) {
+			// MONO: single viewport spanning full stereo texture width
+			viewport.TopLeftX = 0.0f;
+			viewport.Width = static_cast<float>(renderer->view_width * 2);
+		} else {
+			// STEREO: side-by-side
+			viewport.TopLeftX = static_cast<float>(view_index * renderer->view_width);
+			viewport.Width = static_cast<float>(renderer->view_width);
+		}
 		viewport.TopLeftY = 0.0f;
-		viewport.Width = static_cast<float>(renderer->view_width);
 		viewport.Height = static_cast<float>(renderer->view_height);
 		viewport.MinDepth = 0.0f;
 		viewport.MaxDepth = 1.0f;
