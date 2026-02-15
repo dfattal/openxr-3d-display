@@ -397,7 +397,7 @@ do_print(const char *file, int line, const char *func, enum u_logging_level leve
 	} else {
 		__android_log_write(prio, storage_tag, storage);
 	}
-#elif defined XRT_OS_WINDOWS || defined XRT_OS_LINUX
+#elif defined XRT_OS_WINDOWS || defined XRT_OS_LINUX || defined XRT_OS_MACOS
 
 	// We want a newline, so add it, then null-terminate again.
 	storage[printed++] = '\n';
