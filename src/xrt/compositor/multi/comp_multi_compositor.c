@@ -31,6 +31,9 @@
 // Vulkan helpers needed for Y-flip SBS cleanup (not Leia-specific)
 #include "vk/vk_helpers.h"
 
+// sim_display processor for development without SR hardware
+#include "sim_display/sim_display_interface.h"
+
 #ifdef XRT_HAVE_LEIA_SR_VULKAN
 #include "leia/leia_sr.h"
 #include "leia/leia_display_processor.h"
@@ -553,9 +556,17 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 
 	assert(mc->state.session_active);
 	if (mc->state.session_active) {
-		// Clean up per-session render resources (Phase 3)
+		// Clean up per-session render resources
 		if (mc->session_render.initialized) {
-#ifdef XRT_HAVE_LEIA_SR_VULKAN
+			// Mark as not initialized under the compositor lock FIRST.
+			// This prevents the compositor render thread from entering
+			// render_session_to_own_target while we tear down resources.
+			// If a render is in progress (holding the lock), we block
+			// here until it completes.
+			os_mutex_lock(&mc->msc->list_and_timing_lock);
+			mc->session_render.initialized = false;
+			os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
 			struct vk_bundle *vk = comp_target_service_get_vk(mc->msc->target_service);
 
 			// Wait for any pending GPU work to complete before cleanup
@@ -566,7 +577,30 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 				mc->session_render.fenced_buffer = -1;
 			}
 
-			// Destroy fences
+			// Destroy display processor before underlying weaver
+			xrt_display_processor_destroy(&mc->session_render.display_processor);
+
+#ifdef XRT_HAVE_LEIA_SR_VULKAN
+			// Destroy per-session SR weaver
+			if (mc->session_render.weaver != NULL) {
+				leiasr_destroy(mc->session_render.weaver);
+				mc->session_render.weaver = NULL;
+				U_LOG_I("Destroyed per-session SR weaver for HWND %p",
+				        mc->session_render.external_window_handle);
+			}
+
+			// Destroy per-session shaders and pipeline cache
+			if (vk != NULL && mc->session_render.shaders_loaded) {
+				render_shaders_fini(&mc->session_render.shaders, vk);
+				mc->session_render.shaders_loaded = false;
+			}
+			if (vk != NULL && mc->session_render.pipeline_cache != VK_NULL_HANDLE) {
+				vk->vkDestroyPipelineCache(vk->device, mc->session_render.pipeline_cache, NULL);
+				mc->session_render.pipeline_cache = VK_NULL_HANDLE;
+			}
+#endif
+
+			// Destroy fences (generic Vulkan)
 			if (vk != NULL && mc->session_render.fences != NULL) {
 				for (uint32_t i = 0; i < mc->session_render.buffer_count; i++) {
 					if (mc->session_render.fences[i] != VK_NULL_HANDLE) {
@@ -580,20 +614,8 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 			// Free command buffer array (command buffers destroyed with pool)
 			free(mc->session_render.cmd_buffers);
 			mc->session_render.cmd_buffers = NULL;
-			mc->session_render.buffer_count = 0;
 
-			// Destroy display processor before underlying weaver
-			xrt_display_processor_destroy(&mc->session_render.display_processor);
-
-			// Destroy per-session SR weaver
-			if (mc->session_render.weaver != NULL) {
-				leiasr_destroy(mc->session_render.weaver);
-				mc->session_render.weaver = NULL;
-				U_LOG_I("Destroyed per-session SR weaver for HWND %p",
-				        mc->session_render.external_window_handle);
-			}
-
-			// Destroy weaver framebuffers and render pass
+			// Destroy framebuffers and render pass
 			if (vk != NULL && mc->session_render.framebuffers != NULL) {
 				for (uint32_t i = 0; i < mc->session_render.buffer_count; i++) {
 					if (mc->session_render.framebuffers[i] != VK_NULL_HANDLE) {
@@ -604,33 +626,23 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 			}
 			free(mc->session_render.framebuffers);
 			mc->session_render.framebuffers = NULL;
+			mc->session_render.buffer_count = 0;
 
-			if (mc->session_render.weaver_render_pass != VK_NULL_HANDLE) {
+			if (mc->session_render.render_pass != VK_NULL_HANDLE) {
 				if (vk != NULL) {
-					vk->vkDestroyRenderPass(vk->device, mc->session_render.weaver_render_pass,
-					                        NULL);
+					vk->vkDestroyRenderPass(vk->device, mc->session_render.render_pass, NULL);
 				}
-				mc->session_render.weaver_render_pass = VK_NULL_HANDLE;
+				mc->session_render.render_pass = VK_NULL_HANDLE;
 			}
 
-			// Destroy the command pool used by the weaver
-			if (mc->session_render.weaver_cmd_pool != VK_NULL_HANDLE) {
+			// Destroy command pool
+			if (mc->session_render.cmd_pool != VK_NULL_HANDLE) {
 				if (vk != NULL) {
-					vk->vkDestroyCommandPool(vk->device, mc->session_render.weaver_cmd_pool, NULL);
+					vk->vkDestroyCommandPool(vk->device, mc->session_render.cmd_pool, NULL);
 				}
-				mc->session_render.weaver_cmd_pool = VK_NULL_HANDLE;
+				mc->session_render.cmd_pool = VK_NULL_HANDLE;
 			}
 
-			// Destroy per-session shaders and pipeline cache
-			if (vk != NULL && mc->session_render.shaders_loaded) {
-				render_shaders_fini(&mc->session_render.shaders, vk);
-				mc->session_render.shaders_loaded = false;
-			}
-			if (vk != NULL && mc->session_render.pipeline_cache != VK_NULL_HANDLE) {
-				vk->vkDestroyPipelineCache(vk->device, mc->session_render.pipeline_cache, NULL);
-				mc->session_render.pipeline_cache = VK_NULL_HANDLE;
-			}
-#endif
 			// Destroy per-session target using the service
 			if (mc->session_render.target != NULL && mc->msc->target_service != NULL) {
 				comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
@@ -638,7 +650,6 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 				        mc->session_render.external_window_handle);
 			}
 
-			mc->session_render.initialized = false;
 			U_LOG_I("Cleaned up per-session render resources for HWND %p",
 			        mc->session_render.external_window_handle);
 		}
@@ -1069,7 +1080,13 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 
 	// Clean up per-session render resources if still initialized
 	if (mc->session_render.initialized) {
-#ifdef XRT_HAVE_LEIA_SR_VULKAN
+		// Mark as not initialized under the compositor lock FIRST.
+		// This prevents the compositor render thread from entering
+		// render_session_to_own_target while we tear down resources.
+		os_mutex_lock(&mc->msc->list_and_timing_lock);
+		mc->session_render.initialized = false;
+		os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
 		struct vk_bundle *vk = comp_target_service_get_vk(mc->msc->target_service);
 
 		// Wait for any pending GPU work to complete before cleanup
@@ -1080,9 +1097,12 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 			mc->session_render.fenced_buffer = -1;
 		}
 
+		// Destroy display processor before underlying weaver
+		xrt_display_processor_destroy(&mc->session_render.display_processor);
+
+#ifdef XRT_HAVE_LEIA_SR_VULKAN
 		// Destroy composite resources (intermediate pre-weaving targets)
 		if (vk != NULL && mc->session_render.composite_initialized) {
-			// Destroy UBO buffer and memory
 			if (mc->session_render.composite_ubo_buffer != VK_NULL_HANDLE) {
 				vk->vkDestroyBuffer(vk->device, mc->session_render.composite_ubo_buffer, NULL);
 			}
@@ -1111,7 +1131,6 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 					vk->vkFreeMemory(vk->device, mc->session_render.composite_memories[i], NULL);
 				}
 			}
-			// Destroy per-session shaders and pipeline cache
 			if (mc->session_render.shaders_loaded) {
 				render_shaders_fini(&mc->session_render.shaders, vk);
 				mc->session_render.shaders_loaded = false;
@@ -1123,7 +1142,13 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 			mc->session_render.composite_initialized = false;
 		}
 
-		// Destroy fences
+		if (mc->session_render.weaver != NULL) {
+			leiasr_destroy(mc->session_render.weaver);
+			mc->session_render.weaver = NULL;
+		}
+#endif
+
+		// Destroy fences (generic Vulkan)
 		if (vk != NULL && mc->session_render.fences != NULL) {
 			for (uint32_t i = 0; i < mc->session_render.buffer_count; i++) {
 				if (mc->session_render.fences[i] != VK_NULL_HANDLE) {
@@ -1134,20 +1159,10 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 		free(mc->session_render.fences);
 		mc->session_render.fences = NULL;
 
-		// Free command buffer array (command buffers destroyed with pool)
 		free(mc->session_render.cmd_buffers);
 		mc->session_render.cmd_buffers = NULL;
-		mc->session_render.buffer_count = 0;
 
-		// Destroy display processor before underlying weaver
-		xrt_display_processor_destroy(&mc->session_render.display_processor);
-
-		if (mc->session_render.weaver != NULL) {
-			leiasr_destroy(mc->session_render.weaver);
-			mc->session_render.weaver = NULL;
-		}
-
-		// Destroy weaver framebuffers and render pass
+		// Destroy framebuffers and render pass
 		if (vk != NULL && mc->session_render.framebuffers != NULL) {
 			for (uint32_t i = 0; i < mc->session_render.buffer_count; i++) {
 				if (mc->session_render.framebuffers[i] != VK_NULL_HANDLE) {
@@ -1157,39 +1172,36 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 		}
 		free(mc->session_render.framebuffers);
 		mc->session_render.framebuffers = NULL;
+		mc->session_render.buffer_count = 0;
 
-		if (mc->session_render.weaver_render_pass != VK_NULL_HANDLE) {
+		if (mc->session_render.render_pass != VK_NULL_HANDLE) {
 			if (vk != NULL) {
-				vk->vkDestroyRenderPass(vk->device, mc->session_render.weaver_render_pass, NULL);
+				vk->vkDestroyRenderPass(vk->device, mc->session_render.render_pass, NULL);
 			}
-			mc->session_render.weaver_render_pass = VK_NULL_HANDLE;
+			mc->session_render.render_pass = VK_NULL_HANDLE;
 		}
 
-		if (mc->session_render.weaver_cmd_pool != VK_NULL_HANDLE) {
+		if (mc->session_render.cmd_pool != VK_NULL_HANDLE) {
 			if (vk != NULL) {
-				vk->vkDestroyCommandPool(vk->device, mc->session_render.weaver_cmd_pool, NULL);
+				vk->vkDestroyCommandPool(vk->device, mc->session_render.cmd_pool, NULL);
 			}
-			mc->session_render.weaver_cmd_pool = VK_NULL_HANDLE;
+			mc->session_render.cmd_pool = VK_NULL_HANDLE;
 		}
-#endif
+
 		// Destroy SBS flip image (Y-flip before display processing — not vendor-specific)
-		{
-			struct vk_bundle *flip_vk = comp_target_service_get_vk(mc->msc->target_service);
-			if (flip_vk != NULL && mc->session_render.flip_initialized) {
-				if (mc->session_render.flip_sbs_view != VK_NULL_HANDLE)
-					flip_vk->vkDestroyImageView(flip_vk->device, mc->session_render.flip_sbs_view, NULL);
-				if (mc->session_render.flip_sbs_image != VK_NULL_HANDLE)
-					flip_vk->vkDestroyImage(flip_vk->device, mc->session_render.flip_sbs_image, NULL);
-				if (mc->session_render.flip_sbs_memory != VK_NULL_HANDLE)
-					flip_vk->vkFreeMemory(flip_vk->device, mc->session_render.flip_sbs_memory, NULL);
-				mc->session_render.flip_initialized = false;
-			}
+		if (vk != NULL && mc->session_render.flip_initialized) {
+			if (mc->session_render.flip_sbs_view != VK_NULL_HANDLE)
+				vk->vkDestroyImageView(vk->device, mc->session_render.flip_sbs_view, NULL);
+			if (mc->session_render.flip_sbs_image != VK_NULL_HANDLE)
+				vk->vkDestroyImage(vk->device, mc->session_render.flip_sbs_image, NULL);
+			if (mc->session_render.flip_sbs_memory != VK_NULL_HANDLE)
+				vk->vkFreeMemory(vk->device, mc->session_render.flip_sbs_memory, NULL);
+			mc->session_render.flip_initialized = false;
 		}
 
 		if (mc->session_render.target != NULL && mc->msc->target_service != NULL) {
 			comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
 		}
-		mc->session_render.initialized = false;
 	}
 
 #ifdef XRT_OS_WINDOWS
@@ -1335,69 +1347,33 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 
 	U_LOG_W("Created per-session comp_target for HWND %p", mc->session_render.external_window_handle);
 
-#ifdef XRT_HAVE_LEIA_SR_VULKAN
-	// Create per-session SR weaver
-	U_LOG_W("Getting Vulkan bundle for per-session weaver...");
+	//
+	// GENERIC VULKAN SETUP (not SR-specific)
+	// Command pool, command buffers, fences, render pass, framebuffers
+	//
+
 	struct vk_bundle *vk = comp_target_service_get_vk(mc->msc->target_service);
 	if (vk == NULL) {
-		U_LOG_E("Failed to get Vulkan bundle for per-session weaver");
+		U_LOG_E("Failed to get Vulkan bundle for per-session rendering");
 		comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
 		return false;
 	}
 	U_LOG_W("Got Vulkan bundle: device=%p, physical=%p, queue=%p",
 	        (void *)vk->device, (void *)vk->physical_device, (void *)vk->main_queue->queue);
 
-	// Create command pool for weaver
-	U_LOG_W("Creating command pool for per-session weaver...");
+	// Create command pool
 	VkCommandPoolCreateInfo pool_info = {
 	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 	    .queueFamilyIndex = vk->main_queue->family_index,
 	    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
 	};
 
-	VkCommandPool cmd_pool;
-	VkResult vk_ret = vk->vkCreateCommandPool(vk->device, &pool_info, NULL, &cmd_pool);
+	VkResult vk_ret = vk->vkCreateCommandPool(vk->device, &pool_info, NULL, &mc->session_render.cmd_pool);
 	if (vk_ret != VK_SUCCESS) {
-		U_LOG_E("Failed to create command pool for per-session weaver: %d", vk_ret);
+		U_LOG_E("Failed to create command pool: %d", vk_ret);
 		comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
 		return false;
 	}
-	U_LOG_W("Command pool created: %p", (void *)cmd_pool);
-
-	U_LOG_W("Creating per-session SR weaver (leiasr_create)...");
-	ret = leiasr_create(1000.0,                                     // maxTime
-	                    vk->device,                                 // Vulkan device
-	                    vk->physical_device,                        // Physical device
-	                    vk->main_queue->queue,                      // Graphics queue
-	                    cmd_pool,                                   // Command pool
-	                    mc->session_render.external_window_handle,  // Window handle
-	                    &mc->session_render.weaver);                // Output weaver
-
-	U_LOG_W("leiasr_create returned %d, weaver=%p", ret, (void *)mc->session_render.weaver);
-
-	if (ret != XRT_SUCCESS) {
-		U_LOG_E("Failed to create per-session SR weaver: %d", ret);
-		vk->vkDestroyCommandPool(vk->device, cmd_pool, NULL);
-		comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
-		return false;
-	}
-
-	U_LOG_W("Storing command pool...");
-	// Store command pool for cleanup
-	mc->session_render.weaver_cmd_pool = cmd_pool;
-	U_LOG_W("Command pool stored, weaver init complete");
-
-	// Wrap the SR weaver in a generic display processor
-	{
-		xrt_result_t dp_ret = leia_display_processor_create(
-		    mc->session_render.weaver, &mc->session_render.display_processor);
-		if (dp_ret != XRT_SUCCESS) {
-			U_LOG_W("Failed to create per-session display processor, continuing without");
-			mc->session_render.display_processor = NULL;
-		}
-	}
-
-	U_LOG_W("Created per-session SR weaver for HWND %p", mc->session_render.external_window_handle);
 
 	// Allocate command buffer ring and fences (one per swapchain image)
 	uint32_t image_count = mc->session_render.target->image_count;
@@ -1407,11 +1383,8 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 	mc->session_render.fences = U_TYPED_ARRAY_CALLOC(VkFence, image_count);
 	if (mc->session_render.cmd_buffers == NULL || mc->session_render.fences == NULL) {
 		U_LOG_E("Failed to allocate command buffer/fence arrays");
-		xrt_display_processor_destroy(&mc->session_render.display_processor);
-		leiasr_destroy(mc->session_render.weaver);
-		mc->session_render.weaver = NULL;
-		vk->vkDestroyCommandPool(vk->device, cmd_pool, NULL);
-		mc->session_render.weaver_cmd_pool = VK_NULL_HANDLE;
+		vk->vkDestroyCommandPool(vk->device, mc->session_render.cmd_pool, NULL);
+		mc->session_render.cmd_pool = VK_NULL_HANDLE;
 		comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
 		free(mc->session_render.cmd_buffers);
 		free(mc->session_render.fences);
@@ -1420,10 +1393,9 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 		return false;
 	}
 
-	// Allocate command buffers
 	VkCommandBufferAllocateInfo cb_alloc_info = {
 	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-	    .commandPool = cmd_pool,
+	    .commandPool = mc->session_render.cmd_pool,
 	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
 	    .commandBufferCount = image_count,
 	};
@@ -1431,11 +1403,8 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 	vk_ret = vk->vkAllocateCommandBuffers(vk->device, &cb_alloc_info, mc->session_render.cmd_buffers);
 	if (vk_ret != VK_SUCCESS) {
 		U_LOG_E("Failed to allocate command buffers: %d", vk_ret);
-		xrt_display_processor_destroy(&mc->session_render.display_processor);
-		leiasr_destroy(mc->session_render.weaver);
-		mc->session_render.weaver = NULL;
-		vk->vkDestroyCommandPool(vk->device, cmd_pool, NULL);
-		mc->session_render.weaver_cmd_pool = VK_NULL_HANDLE;
+		vk->vkDestroyCommandPool(vk->device, mc->session_render.cmd_pool, NULL);
+		mc->session_render.cmd_pool = VK_NULL_HANDLE;
 		comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
 		free(mc->session_render.cmd_buffers);
 		free(mc->session_render.fences);
@@ -1454,15 +1423,11 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 		vk_ret = vk->vkCreateFence(vk->device, &fence_info, NULL, &mc->session_render.fences[i]);
 		if (vk_ret != VK_SUCCESS) {
 			U_LOG_E("Failed to create fence %u: %d", i, vk_ret);
-			// Clean up already-created fences
 			for (uint32_t j = 0; j < i; j++) {
 				vk->vkDestroyFence(vk->device, mc->session_render.fences[j], NULL);
 			}
-			xrt_display_processor_destroy(&mc->session_render.display_processor);
-			leiasr_destroy(mc->session_render.weaver);
-			mc->session_render.weaver = NULL;
-			vk->vkDestroyCommandPool(vk->device, cmd_pool, NULL);
-			mc->session_render.weaver_cmd_pool = VK_NULL_HANDLE;
+			vk->vkDestroyCommandPool(vk->device, mc->session_render.cmd_pool, NULL);
+			mc->session_render.cmd_pool = VK_NULL_HANDLE;
 			comp_target_service_destroy(mc->msc->target_service, &mc->session_render.target);
 			free(mc->session_render.cmd_buffers);
 			free(mc->session_render.fences);
@@ -1476,8 +1441,7 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 	mc->session_render.fenced_buffer = -1;
 	U_LOG_W("Created %u command buffers and fences for per-session rendering", image_count);
 
-	// Create render pass for weaver output (single color attachment, no depth)
-	// Must be compatible with SR SDK's internal render pass expectations
+	// Create render pass (single color attachment, no depth)
 	struct comp_target *ct = mc->session_render.target;
 	VkAttachmentDescription color_attachment = {
 	    .format = ct->format,
@@ -1509,13 +1473,12 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 	    .pSubpasses = &subpass,
 	};
 
-	vk_ret = vk->vkCreateRenderPass(vk->device, &rp_info, NULL, &mc->session_render.weaver_render_pass);
+	vk_ret = vk->vkCreateRenderPass(vk->device, &rp_info, NULL, &mc->session_render.render_pass);
 	if (vk_ret != VK_SUCCESS) {
-		U_LOG_E("Failed to create weaver render pass: %d", vk_ret);
-		// Continue without framebuffers - weaving will fail but won't crash init
+		U_LOG_E("Failed to create render pass: %d", vk_ret);
+		// Continue without framebuffers
 	} else {
-		U_LOG_W("Created weaver render pass: %p (format=%d)", (void *)mc->session_render.weaver_render_pass,
-		        ct->format);
+		U_LOG_W("Created render pass: %p (format=%d)", (void *)mc->session_render.render_pass, ct->format);
 
 		// Create framebuffers for each swapchain image
 		mc->session_render.framebuffers = U_TYPED_ARRAY_CALLOC(VkFramebuffer, image_count);
@@ -1523,7 +1486,7 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 			for (uint32_t i = 0; i < image_count; i++) {
 				VkFramebufferCreateInfo fb_info = {
 				    .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-				    .renderPass = mc->session_render.weaver_render_pass,
+				    .renderPass = mc->session_render.render_pass,
 				    .attachmentCount = 1,
 				    .pAttachments = &ct->images[i].view,
 				    .width = ct->width,
@@ -1534,14 +1497,76 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 				vk_ret = vk->vkCreateFramebuffer(vk->device, &fb_info, NULL,
 				                                  &mc->session_render.framebuffers[i]);
 				if (vk_ret != VK_SUCCESS) {
-					U_LOG_E("Failed to create weaver framebuffer %u: %d", i, vk_ret);
+					U_LOG_E("Failed to create framebuffer %u: %d", i, vk_ret);
 					mc->session_render.framebuffers[i] = VK_NULL_HANDLE;
 				}
 			}
-			U_LOG_W("Created %u weaver framebuffers (%ux%u)", image_count, ct->width, ct->height);
+			U_LOG_W("Created %u framebuffers (%ux%u)", image_count, ct->width, ct->height);
+		}
+	}
+
+	//
+	// SR-SPECIFIC: Create SR weaver (only when SR SDK is available)
+	//
+
+#ifdef XRT_HAVE_LEIA_SR_VULKAN
+	{
+		U_LOG_W("Creating per-session SR weaver (leiasr_create)...");
+		xrt_result_t sr_ret = leiasr_create(1000.0,                                     // maxTime
+		                                    vk->device,                                 // Vulkan device
+		                                    vk->physical_device,                        // Physical device
+		                                    vk->main_queue->queue,                      // Graphics queue
+		                                    mc->session_render.cmd_pool,                // Command pool
+		                                    mc->session_render.external_window_handle,  // Window handle
+		                                    &mc->session_render.weaver);                // Output weaver
+
+		if (sr_ret != XRT_SUCCESS) {
+			U_LOG_W("Failed to create per-session SR weaver: %d (continuing without)", sr_ret);
+			mc->session_render.weaver = NULL;
+		} else {
+			U_LOG_W("Created per-session SR weaver for HWND %p",
+			        mc->session_render.external_window_handle);
 		}
 	}
 #endif
+
+	//
+	// DISPLAY PROCESSOR SELECTION
+	// sim_display takes priority (if enabled), otherwise use Leia SR
+	//
+
+	{
+		const char *sim_enable = getenv("SIM_DISPLAY_ENABLE");
+		if (sim_enable != NULL && strcmp(sim_enable, "1") == 0) {
+			// Parse SIM_DISPLAY_OUTPUT mode
+			enum sim_display_output_mode mode = SIM_DISPLAY_OUTPUT_SBS;
+			const char *mode_str = getenv("SIM_DISPLAY_OUTPUT");
+			if (mode_str != NULL) {
+				if (strcmp(mode_str, "anaglyph") == 0) {
+					mode = SIM_DISPLAY_OUTPUT_ANAGLYPH;
+				} else if (strcmp(mode_str, "blend") == 0) {
+					mode = SIM_DISPLAY_OUTPUT_BLEND;
+				}
+			}
+
+			xrt_result_t dp_ret = sim_display_processor_create(
+			    mode, vk, (int32_t)ct->format, &mc->session_render.display_processor);
+			if (dp_ret != XRT_SUCCESS) {
+				U_LOG_W("Failed to create sim display processor, continuing without");
+				mc->session_render.display_processor = NULL;
+			}
+		}
+#ifdef XRT_HAVE_LEIA_SR_VULKAN
+		else if (mc->session_render.weaver != NULL) {
+			xrt_result_t dp_ret = leia_display_processor_create(
+			    mc->session_render.weaver, &mc->session_render.display_processor);
+			if (dp_ret != XRT_SUCCESS) {
+				U_LOG_W("Failed to create per-session display processor, continuing without");
+				mc->session_render.display_processor = NULL;
+			}
+		}
+#endif
+	}
 
 	U_LOG_W("Setting session_render.initialized = true...");
 	mc->session_render.initialized = true;
