@@ -87,20 +87,34 @@ u_file_open_file_in_config_dir(const char *filename, const char *mode)
 
 	auto file_path_string = (config_path / filename).string();
 	FILE *file = nullptr;
+#ifdef XRT_OS_WINDOWS
 	errno_t ret = fopen_s(&file, file_path_string.c_str(), mode);
 	if (ret == 0) {
 		return file;
 	}
+#else
+	file = fopen(file_path_string.c_str(), mode);
+	if (file != nullptr) {
+		return file;
+	}
+#endif
 
 	// Try creating the path.
 	auto directory = (config_path / filename).parent_path();
 	fs::create_directories(directory);
 
 	// Do not report error.
+#ifdef XRT_OS_WINDOWS
 	ret = fopen_s(&file, file_path_string.c_str(), mode);
 	if (ret == 0) {
 		return file;
 	}
+#else
+	file = fopen(file_path_string.c_str(), mode);
+	if (file != nullptr) {
+		return file;
+	}
+#endif
 
 	return nullptr;
 }
