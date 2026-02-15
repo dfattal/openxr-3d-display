@@ -30,8 +30,8 @@ else()
 	target_compile_options(xrt-optimized-math INTERFACE $<IF:$<CONFIG:Debug>,-O2,-O3>)
 endif()
 
-if(NOT WIN32)
-	# Even clang's gnu-style driver on windows doesn't accept this argument.
+if(NOT WIN32 AND NOT APPLE)
+	# GNU ld flag; not accepted by MSVC linker or macOS Apple ld.
 
 	set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined")
 	set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,--no-undefined")
