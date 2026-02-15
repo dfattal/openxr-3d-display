@@ -38,6 +38,19 @@ extern "C" {
 struct xrt_builder *
 t_builder_leia_create(void);
 
+/*!
+ * Create a Leia 3D display HMD device.
+ *
+ * Queries SR SDK for display dimensions and resolution when available,
+ * otherwise uses hardcoded defaults.
+ *
+ * @return A new xrt_device, or NULL on failure.
+ *
+ * @ingroup drv_leia
+ */
+struct xrt_device *
+leia_hmd_create(void);
+
 #ifdef __cplusplus
 }
 #endif

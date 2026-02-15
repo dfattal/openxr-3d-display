@@ -545,6 +545,12 @@ if(XRT_HAVE_LEIA_SR)
 	# Start with empty source list - weavers are added conditionally based on available SR libraries
 	set(LEIA_SOURCES)
 
+	# Common sources (device, interface, types) — always present
+	list(APPEND LEIA_SOURCES
+		leia/leia_device.c
+		leia/leia_interface.h
+		leia/leia_types.h)
+
 	# Check for Vulkan weaver support (SimulatedRealityVulkanBeta.lib)
 	set(LEIA_SR_VULKAN_AVAILABLE FALSE)
 	if(EXISTS "${SR_PATH}/lib/SimulatedRealityVulkanBeta.lib")
@@ -580,7 +586,7 @@ if(XRT_HAVE_LEIA_SR)
 
 		# Core SR libraries (always needed)
 		target_link_libraries(drv_leia PRIVATE
-			xrt-interfaces aux_util aux_os
+			xrt-interfaces aux_util aux_os aux_math
 			${SR_PATH}/lib/SimulatedRealityCore.lib
 			${SR_PATH}/lib/SimulatedRealityDisplays.lib
 			${SR_PATH}/third_party/OpenCV/lib/x64/opencv_world343.lib
@@ -604,6 +610,13 @@ if(XRT_HAVE_LEIA_SR)
 
 		# Eye tracking is handled by the weaver's getPredictedEyePositions() - no separate library needed
 
+		# CNSDK support (Android interlacing) — added to drv_leia when both SDKs available
+		if(XRT_HAVE_CNSDK)
+			target_sources(drv_leia PRIVATE leia/leia_cnsdk.cpp leia/leia_cnsdk.h)
+			target_link_libraries(drv_leia PRIVATE CNSDK::leiaSDK)
+			target_compile_definitions(drv_leia PUBLIC XRT_HAVE_CNSDK)
+		endif()
+
 		# Export availability for other CMake components (targets/common needs this)
 		set(LEIA_SR_VULKAN_AVAILABLE ${LEIA_SR_VULKAN_AVAILABLE} CACHE INTERNAL "LeiaSR Vulkan weaver available")
 		set(LEIA_SR_D3D11_AVAILABLE ${LEIA_SR_D3D11_AVAILABLE} CACHE INTERNAL "LeiaSR D3D11 weaver available")
@@ -614,6 +627,22 @@ if(XRT_HAVE_LEIA_SR)
 		set(XRT_HAVE_LEIA_SR OFF PARENT_SCOPE)
 	endif()
 endif(XRT_HAVE_LEIA_SR)
+
+# CNSDK-only build (Android) — create drv_leia if SR SDK is not available
+if(XRT_HAVE_CNSDK AND NOT TARGET drv_leia)
+	add_library(drv_leia STATIC
+		leia/leia_device.c
+		leia/leia_interface.h
+		leia/leia_types.h
+		leia/leia_cnsdk.cpp
+		leia/leia_cnsdk.h)
+	target_link_libraries(drv_leia PRIVATE
+		xrt-interfaces aux_util aux_os aux_math
+		CNSDK::leiaSDK
+		PUBLIC drv_includes)
+	target_compile_definitions(drv_leia PUBLIC XRT_HAVE_CNSDK)
+	list(APPEND ENABLED_DRIVERS drv_leia)
+endif()
 
 # Simulation 3D display driver (always available, enabled by SIM_DISPLAY_ENABLE=1)
 add_library(

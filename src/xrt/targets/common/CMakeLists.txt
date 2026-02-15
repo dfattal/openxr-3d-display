@@ -64,6 +64,12 @@ if(XRT_BUILD_DRIVER_XREAL_AIR)
 	target_link_libraries(target_lists PRIVATE drv_xreal_air)
 endif()
 
+# Leia 3D display builder (only when SR SDK is available)
+if(XRT_HAVE_LEIA_SR)
+	target_sources(target_lists PRIVATE target_builder_leia.c)
+	target_link_libraries(target_lists PRIVATE drv_leia)
+endif()
+
 # Sim display builder (always available, guards itself via env var)
 target_sources(target_lists PRIVATE target_builder_sim_display.c)
 target_link_libraries(target_lists PRIVATE drv_sim_display)

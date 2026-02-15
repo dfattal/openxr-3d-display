@@ -50,9 +50,7 @@
 #include "vk/vk_image_readback_to_xf_pool.h"
 
 #ifdef XRT_HAVE_CNSDK
-#include <leia/sdk/core.h>
-#include <leia/sdk/core.interlacer.vulkan.h>
-#include <leia/common/version.h>
+#include "leia/leia_cnsdk.h"
 #endif
 
 #ifdef XRT_HAVE_LEIA_SR_VULKAN
@@ -89,9 +87,6 @@ DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL
  * Private struct(s).
  *
  */
-
-struct leia_core;
-struct leia_interlacer;
 
 /*!
  * What is the source of the FoV values used for the final image that the
@@ -169,8 +164,7 @@ struct comp_renderer
 	//! If NULL, standard Monado distortion is used.
 	struct xrt_display_processor *display_processor;
 
-	struct leia_core* cnsdk;
-	struct leia_interlacer* interlacer;
+	struct leia_cnsdk *cnsdk;
 
 #ifdef XRT_HAVE_LEIA_SR_VULKAN
 	struct leiasr* leiasr;
@@ -585,21 +579,7 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	renderer_ensure_images_and_renderings(r, false);
 
 #ifdef XRT_HAVE_CNSDK
-	leia_platform_on_library_load();
-
-	struct leia_core_init_configuration* config = leia_core_init_configuration_alloc(CNSDK_VERSION);
-#ifdef XRT_OS_ANDROID
-	leia_core_init_configuration_set_platform_android_java_vm(config, (JavaVM*)android_globals_get_vm());
-	leia_core_init_configuration_set_platform_android_handle(config, LEIA_CORE_ANDROID_HANDLE_ACTIVITY, (jobject)android_globals_get_activity());
-#endif
-	leia_core_init_configuration_set_platform_log_level(config, kLeiaLogLevelTrace);
-	leia_core_init_configuration_set_enable_validation(config, true);
-	r->cnsdk = leia_core_init_async(config);
-	if (r->cnsdk)
-	{
-		leia_core_set_backlight(r->cnsdk, true);
-	}
-	leia_core_init_configuration_free(config);
+	leia_cnsdk_create(&r->cnsdk);
 #endif
 
 	struct vk_bundle *vk = &r->c->base.vk;
@@ -916,17 +896,7 @@ renderer_fini(struct comp_renderer *r)
 	chl_scratch_free_resources(&r->c->scratch, &r->c->nr);
 
 #ifdef XRT_HAVE_CNSDK
-	if (r->interlacer) {
-		leia_interlacer_release(r->interlacer);
-		r->interlacer = NULL;
-	}
-
-	if (r->cnsdk) {
-		leia_core_release(r->cnsdk);
-		r->cnsdk = NULL;
-	}
-
-	leia_platform_on_library_unload();
+	leia_cnsdk_destroy(&r->cnsdk);
 #endif // XRT_HAVE_CNSDK
 
 	// Destroy generic display processor before vendor-specific resources
@@ -1131,31 +1101,22 @@ do_weaving(struct comp_renderer *r,
 {
 
 #ifdef XRT_HAVE_CNSDK
-	if (!r->interlacer && leia_core_is_initialized(r->cnsdk)) {
-		struct leia_interlacer_init_configuration *ic = leia_interlacer_init_configuration_alloc();
-		leia_interlacer_init_configuration_set_use_atlas_for_views(ic, false);
-		r->interlacer = leia_interlacer_vulkan_initialize(
-		    r->cnsdk, ic, r->c->base.vk.device, r->c->base.vk.physical_device, VK_FORMAT_B8G8R8A8_SRGB,
-		    r->c->target->format, VK_FORMAT_D32_SFLOAT, 3);
-		leia_interlacer_init_configuration_free(ic);
-	}
-	if (r->interlacer) {
-		// Get swapchain images.
-		const struct comp_swapchain_image *left = &layer->sc_array[0]->images[lvd->sub.image_index];
-		const struct comp_swapchain_image *right = &layer->sc_array[1]->images[rvd->sub.image_index];
-
-		// Get swapchain image views.
-		VkImageView imageViewLeft = get_image_view(left, layer->data.flags, lvd->sub.array_index);
-		VkImageView imageViewRight = get_image_view(right, layer->data.flags, rvd->sub.array_index);
-
-		// Perform interlacing.
-		leia_interlacer_set_flip_input_uv_vertical(r->interlacer, true);
-		leia_interlacer_vulkan_set_view_for_texture_array(r->interlacer, 0, imageViewLeft, 0);
-		leia_interlacer_vulkan_set_view_for_texture_array(r->interlacer, 1, imageViewRight, 0);
-		leia_interlacer_set_shader_debug_mode(r->interlacer, LEIA_SHADER_DEBUG_MODE_NONE);
-		leia_interlacer_vulkan_do_post_process(
-		    r->interlacer, rtr->data.width, rtr->data.height, false, rtr->framebuffer,
-		    r->c->target->images[r->acquired_buffer].handle, NULL, NULL, NULL, 0);
+	if (r->cnsdk != NULL) {
+		int iw = 0, ih = 0;
+		VkFormat ifmt = VK_FORMAT_UNDEFINED;
+		VkImageView leftView = VK_NULL_HANDLE, rightView = VK_NULL_HANDLE;
+		bool lok = getLayerInfo(r, 0, &iw, &ih, &ifmt, &leftView);
+		bool rok = getLayerInfo(r, 1, &iw, &ih, &ifmt, &rightView);
+		if (lok && rok) {
+			leia_cnsdk_weave(r->cnsdk,
+			                 r->c->base.vk.device,
+			                 r->c->base.vk.physical_device,
+			                 leftView, rightView,
+			                 r->c->target->format,
+			                 rtr->data.width, rtr->data.height,
+			                 rtr->framebuffer,
+			                 r->c->target->images[r->acquired_buffer].handle);
+		}
 	}
 #endif
 
