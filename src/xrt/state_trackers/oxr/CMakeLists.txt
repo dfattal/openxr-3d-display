@@ -162,6 +162,9 @@ endif()
 
 target_include_directories(
 	st_oxr
-	PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
+	PRIVATE
+		${CMAKE_CURRENT_BINARY_DIR}
+		# multi/comp_multi_private.h is used for qwerty input device support
+		${CMAKE_CURRENT_SOURCE_DIR}/../../compositor
 	INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/..
 	)

@@ -58,8 +58,9 @@
 #include "leia/leia_types.h"
 #endif
 
-#ifdef XRT_HAVE_LEIA_SR_VULKAN
 #include "multi/comp_multi_private.h"
+
+#ifdef XRT_HAVE_LEIA_SR_VULKAN
 #include "leia/leia_sr.h"
 #endif
 
