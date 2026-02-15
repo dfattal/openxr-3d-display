@@ -55,6 +55,10 @@
 #define T_BUILDER_WMR
 #endif
 
+#if defined(XRT_HAVE_LEIA_SR) || defined(XRT_DOXYGEN)
+#define T_BUILDER_LEIA
+#endif
+
 // Always enabled — sim_display guards itself via SIM_DISPLAY_ENABLE env var
 #define T_BUILDER_SIM_DISPLAY
 
@@ -144,6 +148,14 @@ t_builder_simula_create(void);
  */
 struct xrt_builder *
 t_builder_wmr_create(void);
+#endif
+
+#ifdef T_BUILDER_LEIA
+/*!
+ * Builder for Leia 3D light field displays (SR SDK / CNSDK).
+ */
+struct xrt_builder *
+t_builder_leia_create(void);
 #endif
 
 #ifdef T_BUILDER_SIM_DISPLAY

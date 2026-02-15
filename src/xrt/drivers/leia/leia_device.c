@@ -1,0 +1,232 @@
+// Copyright 2025, Leia Inc.
+// SPDX-License-Identifier: BSL-1.0
+/*!
+ * @file
+ * @brief  Leia 3D display HMD device.
+ *
+ * Creates an xrt_device representing a Leia light field display.
+ * When SR SDK is available (Windows), queries the hardware for
+ * pixel dimensions, refresh rate, and physical size.  Otherwise
+ * falls back to sensible defaults.
+ *
+ * @author David Fattal
+ * @ingroup drv_leia
+ */
+
+#include "leia_interface.h"
+
+#include "xrt/xrt_device.h"
+
+#include "os/os_time.h"
+
+#include "math/m_api.h"
+#include "math/m_mathinclude.h"
+
+#include "util/u_debug.h"
+#include "util/u_device.h"
+#include "util/u_distortion_mesh.h"
+#include "util/u_logging.h"
+#include "util/u_misc.h"
+#include "util/u_var.h"
+
+#ifdef XRT_HAVE_LEIA_SR_D3D11
+#include "leia_sr_d3d11.h"
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+
+/*
+ *
+ * Structs and helpers.
+ *
+ */
+
+/*!
+ * Leia 3D display device.
+ * @implements xrt_device
+ * @ingroup drv_leia
+ */
+struct leia_hmd
+{
+	struct xrt_device base;
+
+	//! Stationary pose (looking at the display from nominal distance).
+	struct xrt_pose pose;
+
+	//! Physical display dimensions in meters.
+	float display_width_m;
+	float display_height_m;
+
+	//! Nominal viewer distance in meters.
+	float nominal_z_m;
+
+	enum u_logging_level log_level;
+};
+
+static inline struct leia_hmd *
+leia_hmd(struct xrt_device *xdev)
+{
+	return (struct leia_hmd *)xdev;
+}
+
+
+/*
+ *
+ * xrt_device interface methods.
+ *
+ */
+
+static xrt_result_t
+leia_hmd_get_tracked_pose(struct xrt_device *xdev,
+                          enum xrt_input_name name,
+                          int64_t at_timestamp_ns,
+                          struct xrt_space_relation *out_relation)
+{
+	struct leia_hmd *hmd = leia_hmd(xdev);
+
+	if (name != XRT_INPUT_GENERIC_HEAD_POSE) {
+		U_LOG_E("Unknown input name: 0x%08x", name);
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
+	}
+
+	// Static pose: viewer at nominal position in front of the display.
+	out_relation->pose = hmd->pose;
+	out_relation->relation_flags = (enum xrt_space_relation_flags)(
+	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+	    XRT_SPACE_RELATION_POSITION_VALID_BIT |
+	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+	    XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
+
+	return XRT_SUCCESS;
+}
+
+static void
+leia_hmd_destroy(struct xrt_device *xdev)
+{
+	struct leia_hmd *hmd = leia_hmd(xdev);
+
+	u_var_remove_root(hmd);
+	u_device_free(&hmd->base);
+}
+
+
+/*
+ *
+ * Creation function.
+ *
+ */
+
+struct xrt_device *
+leia_hmd_create(void)
+{
+	// Default values — used when SR SDK is not available.
+	int pixel_w = 3840;
+	int pixel_h = 2160;
+	float refresh_hz = 60.0f;
+	float display_w_m = 0.344f;
+	float display_h_m = 0.194f;
+	float nominal_z = 0.65f;
+
+#ifdef XRT_HAVE_LEIA_SR_D3D11
+	{
+		uint32_t view_w = 0, view_h = 0;
+		float hz = 0.0f;
+		uint32_t native_w = 0, native_h = 0;
+		if (leiasr_query_recommended_view_dimensions(5.0, &view_w, &view_h, &hz, &native_w, &native_h)) {
+			// SR gives per-view width; full display is native res.
+			if (native_w > 0 && native_h > 0) {
+				pixel_w = (int)native_w;
+				pixel_h = (int)native_h;
+			}
+			if (hz > 0.0f) {
+				refresh_hz = hz;
+			}
+		}
+
+		struct leiasr_display_dimensions dims;
+		if (leiasr_static_get_display_dimensions(&dims) && dims.valid) {
+			display_w_m = dims.width_m;
+			display_h_m = dims.height_m;
+			if (dims.nominal_z_m > 0.0f) {
+				nominal_z = dims.nominal_z_m;
+			}
+		}
+	}
+#endif
+
+	enum u_device_alloc_flags flags =
+	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
+	struct leia_hmd *hmd = U_DEVICE_ALLOCATE(struct leia_hmd, flags, 1, 0);
+
+	// Store config.
+	hmd->display_width_m = display_w_m;
+	hmd->display_height_m = display_h_m;
+	hmd->nominal_z_m = nominal_z;
+	hmd->log_level = U_LOGGING_INFO;
+
+	// xrt_device methods.
+	hmd->base.update_inputs = u_device_noop_update_inputs;
+	hmd->base.get_tracked_pose = leia_hmd_get_tracked_pose;
+	hmd->base.get_view_poses = u_device_get_view_poses;
+	hmd->base.get_visibility_mask = u_device_get_visibility_mask;
+	hmd->base.destroy = leia_hmd_destroy;
+	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
+	hmd->base.device_type = XRT_DEVICE_TYPE_HMD;
+
+	// Static pose: centered, at nominal viewing distance.
+	hmd->pose.orientation.w = 1.0f;
+	hmd->pose.position.z = -nominal_z; // Negative Z = looking at display
+
+	hmd->base.hmd->view_count = 2;
+
+	snprintf(hmd->base.str, XRT_DEVICE_NAME_LEN, "Leia 3D Display");
+	snprintf(hmd->base.serial, XRT_DEVICE_NAME_LEN, "leia_display_0");
+
+	// Head pose input.
+	hmd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
+
+	// Display geometry using helper struct.
+	struct u_device_simple_info info;
+	info.display.w_pixels = pixel_w;
+	info.display.h_pixels = pixel_h;
+	info.display.w_meters = display_w_m;
+	info.display.h_meters = display_h_m;
+	info.lens_horizontal_separation_meters = 0.063f; // ~63mm IPD
+	info.lens_vertical_position_meters = display_h_m / 2.0f;
+
+	// Compute FOV from display geometry and viewing distance.
+	float half_fov_h = atanf((display_w_m / 2.0f) / nominal_z);
+	float half_fov_v = atanf((display_h_m / 2.0f) / nominal_z);
+	info.fov[0] = half_fov_h * 2.0f;
+	info.fov[1] = half_fov_h * 2.0f;
+
+	(void)half_fov_v; // Used implicitly by u_device_setup_split_side_by_side
+
+	bool setup_ok = u_device_setup_split_side_by_side(&hmd->base, &info);
+	if (!setup_ok) {
+		U_LOG_E("Failed to setup Leia display device info");
+		leia_hmd_destroy(&hmd->base);
+		return NULL;
+	}
+
+	// No distortion for Leia display.
+	u_distortion_mesh_set_none(&hmd->base);
+
+	// Debug variables.
+	u_var_add_root(hmd, "Leia 3D Display", true);
+	u_var_add_pose(hmd, &hmd->pose, "pose");
+	u_var_add_f32(hmd, &hmd->display_width_m, "display_width_m");
+	u_var_add_f32(hmd, &hmd->display_height_m, "display_height_m");
+	u_var_add_f32(hmd, &hmd->nominal_z_m, "nominal_z_m");
+	u_var_add_log_level(hmd, &hmd->log_level, "log_level");
+
+	U_LOG_W("Created Leia 3D display: %dx%d px, %.3fx%.3f m, nominal Z=%.2f m, %.1f Hz",
+	        pixel_w, pixel_h, display_w_m, display_h_m, nominal_z, refresh_hz);
+
+	(void)refresh_hz; // Logged above; will be used for frame timing later.
+
+	return &hmd->base;
+}

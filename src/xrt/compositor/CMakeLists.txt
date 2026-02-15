@@ -305,18 +305,13 @@ if(XRT_MODULE_COMPOSITOR_MAIN)
 	endif()
 endif()
 
-if(XRT_HAVE_CNSDK)
-	target_compile_definitions(comp_main PUBLIC XRT_HAVE_CNSDK)
-	target_link_libraries(comp_main PUBLIC CNSDK::leiaSDK)
-endif()
-
-if(XRT_HAVE_LEIA_SR)
+# drv_leia exports XRT_HAVE_CNSDK, XRT_HAVE_LEIA_SR_VULKAN, and/or
+# XRT_HAVE_LEIA_SR_D3D11 as PUBLIC compile definitions.
+# CNSDK::leiaSDK flows through drv_leia (no direct link needed here).
+if(XRT_HAVE_LEIA_SR OR XRT_HAVE_CNSDK)
 	if(NOT TARGET drv_leia)
 		message(FATAL_ERROR "no drv_leia target")
 	endif()
-
-	# drv_leia exports XRT_HAVE_LEIA_SR_VULKAN and/or XRT_HAVE_LEIA_SR_D3D11
-	# as PUBLIC compile definitions based on available SR libraries
 	target_link_libraries(comp_main PUBLIC drv_leia)
 endif()
 
