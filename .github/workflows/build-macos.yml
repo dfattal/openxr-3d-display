@@ -134,9 +134,17 @@ jobs:
           SCRIPT
           chmod +x _package/SRMonado-macOS/run_sim_cube.sh
 
+      - name: Build macOS installer (.pkg)
+        run: |
+          chmod +x installer/macos/build_installer.sh
+          chmod +x installer/macos/create_app_bundle.sh
+          ./installer/macos/build_installer.sh _package/SRMonado-macOS _package/SRMonado-Installer.pkg
+
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: SRMonado-macOS
           if-no-files-found: error
-          path: _package/SRMonado-macOS/
+          path: |
+            _package/SRMonado-macOS/
+            _package/SRMonado-Installer.pkg
