@@ -1,0 +1,54 @@
+# SRMonado macOS Installer
+
+## Install
+
+**Double-click** `SRMonado-Installer.pkg` to launch the macOS installer wizard, or install from the command line:
+
+```bash
+sudo installer -pkg SRMonado-Installer.pkg -target /
+```
+
+### What gets installed
+
+| Component | Location |
+|-----------|----------|
+| SRMonado Runtime | `/Library/Application Support/SRMonado/` |
+| OpenXR runtime registration | `/etc/xdg/openxr/1/active_runtime.json` |
+| SimCube OpenXR Test App | `/Applications/SimCubeOpenXR.app` |
+
+## Run the Test App
+
+Double-click **SimCubeOpenXR** in `/Applications`, or from the terminal:
+
+```bash
+open /Applications/SimCubeOpenXR.app
+```
+
+By default it uses anaglyph (red-cyan) output. To change:
+
+```bash
+SIM_DISPLAY_OUTPUT=sbs open /Applications/SimCubeOpenXR.app
+```
+
+Options: `anaglyph`, `sbs`, `blend`
+
+## Uninstall
+
+```bash
+sudo "/Library/Application Support/SRMonado/uninstall.sh"
+```
+
+This removes the runtime, test app, OpenXR registration, and installer receipts.
+
+## Build the Installer Locally
+
+```bash
+# 1. Build the runtime and test app
+./scripts/build_macos.sh
+
+# 2. Create the _package directory (mimics CI artifact layout)
+#    See .github/workflows/build-macos.yml for the full packaging steps
+
+# 3. Build the .pkg installer
+./installer/macos/build_installer.sh _package/SRMonado-macOS SRMonado-Installer.pkg
+```
