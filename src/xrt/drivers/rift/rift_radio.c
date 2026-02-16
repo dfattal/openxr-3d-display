@@ -260,7 +260,7 @@ rift_remote_create(struct rift_hmd *hmd)
 		return NULL;
 	}
 
-	strcpy(remote->base.str, "Oculus Rift Remote");
+	snprintf(remote->base.str, XRT_DEVICE_NAME_LEN, "Oculus Rift Remote");
 	remote->base.device_type = XRT_DEVICE_TYPE_GAMEPAD;
 	remote->base.name = XRT_DEVICE_RIFT_REMOTE;
 
@@ -308,18 +308,18 @@ rift_touch_controller_create(struct rift_hmd *hmd, enum rift_radio_device_type d
 
 	controller->base.tracking_origin = hmd->base.tracking_origin;
 
-	strcpy(controller->base.str, "Oculus Touch (Unknown)");
+	snprintf(controller->base.str, XRT_DEVICE_NAME_LEN, "Oculus Touch (Unknown)");
 	switch (device_type) {
 	case RIFT_RADIO_DEVICE_LEFT_TOUCH:
-		strcpy(controller->base.str, "Oculus Touch (Left)");
+		snprintf(controller->base.str, XRT_DEVICE_NAME_LEN, "Oculus Touch (Left)");
 		controller->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
 		break;
 	case RIFT_RADIO_DEVICE_RIGHT_TOUCH:
-		strcpy(controller->base.str, "Oculus Touch (Right)");
+		snprintf(controller->base.str, XRT_DEVICE_NAME_LEN, "Oculus Touch (Right)");
 		controller->base.device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
 		break;
 	case RIFT_RADIO_DEVICE_TRACKED_OBJECT:
-		strcpy(controller->base.str, "Oculus Touch (Tracked Object)");
+		snprintf(controller->base.str, XRT_DEVICE_NAME_LEN, "Oculus Touch (Tracked Object)");
 		controller->base.device_type = XRT_DEVICE_TYPE_ANY_HAND_CONTROLLER;
 		break;
 	default: break; return controller;
