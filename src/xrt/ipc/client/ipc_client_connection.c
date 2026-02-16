@@ -25,6 +25,7 @@
 #include "util/u_debug.h"
 #include "util/u_git_tag.h"
 #include "util/u_system_helpers.h"
+#include "util/u_truncate_printf.h"
 
 #include "shared/ipc_utils.h"
 #include "shared/ipc_protocol.h"
@@ -245,7 +246,8 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 
 	// Struct zero init at declaration.
 	addr.sun_family = AF_UNIX;
-	snprintf(addr.sun_path, dst_size, "%.s", sock_file);
+	// Use truncate here to avoid warnings.
+	u_truncate_snprintf(addr.sun_path, dst_size, "%s", sock_file);
 
 	ret = connect(socket, (struct sockaddr *)&addr, sizeof(addr));
 	if (ret < 0) {

@@ -22,6 +22,7 @@
 #include "util/u_debug.h"
 #include "util/u_trace_marker.h"
 #include "util/u_file.h"
+#include "util/u_truncate_printf.h"
 
 #include "shared/ipc_shmem.h"
 #include "server/ipc_server.h"
@@ -104,7 +105,8 @@ create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
 
 	// Struct zero init at declaration.
 	addr.sun_family = AF_UNIX;
-	snprintf(addr.sun_path, dst_size, "%.s", sock_file);
+	// Use truncate here to avoid warnings.
+	u_truncate_snprintf(addr.sun_path, dst_size, "%s", sock_file);
 
 	ret = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
 
