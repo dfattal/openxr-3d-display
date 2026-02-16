@@ -653,6 +653,9 @@ static const char *instance_extensions_common[] = {
 };
 
 static const char *optional_instance_extensions[] = {
+#ifdef VK_KHR_portability_enumeration
+    VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+#endif
 #ifdef VK_EXT_swapchain_colorspace
     VK_EXT_SWAPCHAIN_COLORSPACE_EXTENSION_NAME,
 #endif

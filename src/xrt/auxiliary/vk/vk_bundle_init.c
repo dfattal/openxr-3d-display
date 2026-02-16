@@ -181,6 +181,7 @@ vk_fill_in_has_instance_extensions(struct vk_bundle *vk, struct u_string_list *e
 	// beginning of GENERATED instance extension code - do not modify - used by scripts
 	// Reset before filling out.
 	vk->has_KHR_external_memory_capabilities = false;
+	vk->has_KHR_portability_enumeration = false;
 	vk->has_EXT_display_surface_counter = false;
 	vk->has_EXT_swapchain_colorspace = false;
 	vk->has_EXT_debug_utils = false;
@@ -197,6 +198,13 @@ vk_fill_in_has_instance_extensions(struct vk_bundle *vk, struct u_string_list *e
 			continue;
 		}
 #endif // defined(VK_KHR_external_memory_capabilities)
+
+#if defined(VK_KHR_portability_enumeration)
+		if (strcmp(ext, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0) {
+			vk->has_KHR_portability_enumeration = true;
+			continue;
+		}
+#endif // defined(VK_KHR_portability_enumeration)
 
 #if defined(VK_EXT_display_surface_counter)
 		if (strcmp(ext, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME) == 0) {

@@ -51,7 +51,12 @@ const char *xrt_gfx_vk_device_extensions = VK_KHR_DEDICATED_ALLOCATION_EXTENSION
 
 // Platform version of "external_fence" and "external_semaphore"
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
-    " " VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME " " VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME;
+#if !defined(XRT_OS_MACOS)
+    // FD sync extensions are optional on macOS — MoltenVK may not support them.
+    // They're handled as optional by oxr_vulkan.c's optional_device_extensions[].
+    " " VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME " " VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME
+#endif
+    ;
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE)
     " " VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME " " VK_KHR_EXTERNAL_FENCE_WIN32_EXTENSION_NAME;
