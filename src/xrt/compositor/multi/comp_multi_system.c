@@ -1749,6 +1749,9 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		return;
 	}
 
+	// Detect mono (2D) vs stereo (3D) submission
+	bool is_mono = (layer->data.view_count == 1);
+
 	// Extract left and right view info
 	int imageWidth = 0, imageHeight = 0;
 	VkFormat imageFormat = VK_FORMAT_UNDEFINED;
@@ -1759,11 +1762,14 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 
 	bool leftOk = get_session_layer_view(layer, 0, &imageWidth, &imageHeight, &imageFormat, &leftImageView,
 	                                     &leftImage, &leftArrayIndex);
-	bool rightOk = get_session_layer_view(layer, 1, &imageWidth, &imageHeight, &imageFormat, &rightImageView,
-	                                      &rightImage, &rightArrayIndex);
+	bool rightOk = false;
+	if (!is_mono) {
+		rightOk = get_session_layer_view(layer, 1, &imageWidth, &imageHeight, &imageFormat, &rightImageView,
+		                                 &rightImage, &rightArrayIndex);
+	}
 
-	if (!leftOk || !rightOk) {
-		U_LOG_W("[per-session] Could not extract stereo views for per-session rendering");
+	if (!leftOk || (!is_mono && !rightOk)) {
+		U_LOG_W("[per-session] Could not extract views for per-session rendering (mono=%d)", is_mono);
 		return;
 	}
 
@@ -1853,6 +1859,85 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		return;
 	}
 
+	// Mono (2D) path: blit single view directly to target, skip SBS and weaving.
+	// In 2D mode the app submits only one view (viewCount=1). We blit it
+	// directly to the presentation target without side-by-side packing or
+	// light-field interlacing (weaving).
+	if (is_mono) {
+		bool flip_y = layer->data.flip_y;
+		int src_top = flip_y ? imageHeight : 0;
+		int src_bot = flip_y ? 0 : imageHeight;
+
+		// Pre-barriers: source GENERAL → TRANSFER_SRC, target UNDEFINED → TRANSFER_DST
+		VkImageMemoryBarrier mono_pre[2] = {
+		    {
+		        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		        .srcAccessMask = 0,
+		        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+		        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+		        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		        .image = leftImage,
+		        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, leftArrayIndex, 1},
+		    },
+		    {
+		        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		        .srcAccessMask = 0,
+		        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+		        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+		        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		        .image = ct->images[buffer_index].handle,
+		        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+		    },
+		};
+		vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 2, mono_pre);
+
+		// Blit mono view to fill entire target
+		VkImageBlit mono_blit = {
+		    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, leftArrayIndex, 1},
+		    .srcOffsets = {{0, src_top, 0}, {imageWidth, src_bot, 1}},
+		    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+		    .dstOffsets = {{0, 0, 0}, {(int32_t)framebufferWidth, (int32_t)framebufferHeight, 1}},
+		};
+		vk->vkCmdBlitImage(cmd, leftImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		                   ct->images[buffer_index].handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+		                   &mono_blit, VK_FILTER_LINEAR);
+
+		// Post-barriers: source → GENERAL, target → PRESENT_SRC_KHR
+		VkImageMemoryBarrier mono_post[2] = {
+		    {
+		        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+		        .dstAccessMask = 0,
+		        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+		        .image = leftImage,
+		        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, leftArrayIndex, 1},
+		    },
+		    {
+		        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+		        .dstAccessMask = 0,
+		        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+		        .image = ct->images[buffer_index].handle,
+		        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+		    },
+		};
+		vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+		                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 2,
+		                         mono_post);
+
+		static bool mono_logged = false;
+		if (!mono_logged) {
+			U_LOG_W("[per-session] Mono (2D) blit: %dx%d -> %ux%u (flip_y=%d)", imageWidth,
+			        imageHeight, framebufferWidth, framebufferHeight, flip_y);
+			mono_logged = true;
+		}
+		goto submit_and_present;
+	}
+
+	// Stereo (3D) path: SBS blit + weaving/display processing
 	VkImageView weaveLeft = leftImageView;
 	VkImageView weaveRight = rightImageView;
 	int weaveWidth = imageWidth;
@@ -2017,6 +2102,7 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		                         0, 0, NULL, 0, NULL, 1, &post_weave_barrier);
 	}
 
+submit_and_present:
 	// End command buffer
 	ret = vk->vkEndCommandBuffer(cmd);
 	if (ret != VK_SUCCESS) {
