@@ -138,6 +138,9 @@ static const char *optional_device_extensions[] = {
 static VkResult
 select_instances_extensions(struct sdl_compositor *c, struct u_string_list *required, struct u_string_list *optional)
 {
+#ifdef VK_KHR_portability_enumeration
+	u_string_list_append(optional, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
 #ifdef VK_EXT_display_surface_counter
 	u_string_list_append(optional, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME);
 #endif

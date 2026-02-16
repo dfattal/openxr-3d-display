@@ -219,8 +219,16 @@ create_instance(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_arg
 	    .apiVersion = vk_args->required_instance_version,
 	};
 
+	VkInstanceCreateFlags instance_flags = 0;
+
+	// MoltenVK is a Vulkan portability driver — must opt in to enumerate it.
+	if (u_string_list_contains(instance_ext_list, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+		instance_flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+	}
+
 	VkInstanceCreateInfo instance_info = {
 	    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+	    .flags = instance_flags,
 	    .pApplicationInfo = &app_info,
 	    .enabledExtensionCount = u_string_list_get_size(instance_ext_list),
 	    .ppEnabledExtensionNames = u_string_list_get_data(instance_ext_list),
