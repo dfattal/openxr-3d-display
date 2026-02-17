@@ -143,7 +143,7 @@ win:container_prep:
 .monado.variables.debian:trixie-ndk:
   variables:
     FDO_DISTRIBUTION_VERSION: "trixie"
-    FDO_DISTRIBUTION_TAG: "2026-02-16"
+    FDO_DISTRIBUTION_TAG: "2026-02-18"
     FDO_REPO_SUFFIX: ndk
 
 # Variables for build and usage of Ubuntu jammy image
@@ -204,7 +204,7 @@ debian:trixie-ndk:container_prep:
     - .fdo.container-build@debian # from ci-templates
 
   variables:
-    FDO_DISTRIBUTION_PACKAGES: 'ca-certificates cmake default-jdk-headless git glslang-tools libeigen3-dev meson ninja-build pkg-config python3 unzip wget'
+    FDO_DISTRIBUTION_PACKAGES: 'ca-certificates clang-tidy cmake default-jdk-headless git glslang-tools libeigen3-dev meson ninja-build pkg-config python3 unzip wget'
     FDO_DISTRIBUTION_EXEC: 'env FDO_CI_CONCURRENT=${FDO_CI_CONCURRENT} bash .gitlab-ci/android_container_prep.sh'
 
 # Make Ubuntu jammy image
@@ -358,7 +358,7 @@ debian:trixie:
   artifacts:
     untracked: true
     paths:
-      - build/doc/html/
+      - build
 
 debian:trixie:opencv-off:
   stage: build
@@ -453,6 +453,9 @@ ndk:arm64-v8a:
   script:
     - .gitlab-ci/prebuild.sh
     - .gitlab-ci/ci-cmake-build.sh -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=26 -DCMAKE_TOOLCHAIN_FILE=/opt/android-ndk/build/cmake/android.toolchain.cmake -DEigen3_DIR=/usr/share/eigen3/cmake/
+  artifacts:
+    paths:
+      - build
 
 android:spotlessCheck:
   stage: build
@@ -650,17 +653,25 @@ ipc-32-64-compatibility:
     - diff -du "debian:bookworm/ipc-sizes.txt" "debian:bookworm:32bit/ipc-sizes.txt"
     - cmp "debian:bookworm/ipc-sizes.txt" "debian:bookworm:32bit/ipc-sizes.txt"
 
-clang-tidy:
+debian:trixie:clang-tidy:
   extends:
     - .build-rules
     - .monado.image.debian:trixie
   stage: check
-  dependencies:
-    - debian:trixie
   needs:
     - debian:trixie
   script:
     - run-clang-tidy -quiet -allow-no-checks -p build
+
+ndk:arm64-v8a:clang-tidy:
+  extends:
+    - .build-rules
+    - .monado.image.debian:trixie-ndk
+  stage: check
+  needs:
+    - ndk:arm64-v8a
+  script:
+    - run-clang-tidy -quiet -p build
 
 
 debian:trixie:package:

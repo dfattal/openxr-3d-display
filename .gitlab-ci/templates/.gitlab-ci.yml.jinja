@@ -206,17 +206,25 @@ ipc-32-64-compatibility:
     - diff -du "debian:bookworm/ipc-sizes.txt" "debian:bookworm:32bit/ipc-sizes.txt"
     - cmp "debian:bookworm/ipc-sizes.txt" "debian:bookworm:32bit/ipc-sizes.txt"
 
-clang-tidy:
+debian:trixie:clang-tidy:
   extends:
     - .build-rules
     - .monado.image.debian:trixie
   stage: check
-  dependencies:
-    - debian:trixie
   needs:
     - debian:trixie
   script:
     - run-clang-tidy -quiet -allow-no-checks -p build
+
+ndk:arm64-v8a:clang-tidy:
+  extends:
+    - .build-rules
+    - .monado.image.debian:trixie-ndk
+  stage: check
+  needs:
+    - ndk:arm64-v8a
+  script:
+    - run-clang-tidy -quiet -p build
 
 {% for distro in distributions -%} {%- for image in distro.images if "deb_version_suffix" in image %}
 
