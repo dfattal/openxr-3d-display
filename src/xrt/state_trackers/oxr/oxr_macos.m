@@ -13,11 +13,14 @@
  *
  * It also detects window close (close button) and Escape key, setting a
  * global flag that the compositor checks in wait_frame to trigger session loss.
+ *
+ * The window-closed atomic and its accessors (oxr_macos_window_closed,
+ * oxr_macos_reset_window_closed, oxr_macos_set_window_closed) live in
+ * comp_multi_system.c so both monado-service and libopenxr_monado can link them.
  */
 
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
-#include <stdatomic.h>
 #include <stdbool.h>
 
 #include "xrt/xrt_config_drivers.h"
@@ -27,35 +30,8 @@
 #endif
 #include "sim_display_interface.h"
 
-/*!
- * Global flag: set to true when the compositor window is closed or Escape
- * is pressed.  Checked by the compositor in multi_compositor_wait_frame()
- * to return XRT_ERROR_IPC_FAILURE and trigger graceful session shutdown.
- *
- * Atomic because it is written on the main thread (event pump) and read
- * on the compositor's background thread (wait_frame).
- */
-static atomic_bool g_macos_window_closed = false;
-
-/*!
- * Query whether the macOS compositor window has been closed.
- * Called from the compositor thread (multi_compositor_wait_frame).
- */
-bool
-oxr_macos_window_closed(void)
-{
-	return atomic_load(&g_macos_window_closed);
-}
-
-/*!
- * Reset the window-closed flag.  Called when a new session is created
- * so a previous session's close doesn't affect the new one.
- */
-void
-oxr_macos_reset_window_closed(void)
-{
-	atomic_store(&g_macos_window_closed, false);
-}
+// Defined in comp_multi_system.c (shared between monado-service and libopenxr_monado)
+extern void oxr_macos_set_window_closed(void);
 
 /*!
  * Pump macOS events on the main thread.
@@ -90,7 +66,7 @@ oxr_macos_pump_events(struct xrt_device **xdevs, uint32_t xdev_count)
 			// Detect Escape key.
 			if ([event type] == NSEventTypeKeyDown &&
 			    [event keyCode] == 53) { // 53 = Escape
-				atomic_store(&g_macos_window_closed, true);
+				oxr_macos_set_window_closed();
 			}
 
 			// 1/2/3 keys: switch sim_display output mode.
@@ -134,7 +110,7 @@ oxr_macos_pump_events(struct xrt_device **xdevs, uint32_t xdev_count)
 			if ([NSApp keyWindow] != nil) {
 				had_key_window = true;
 			} else if (had_key_window) {
-				atomic_store(&g_macos_window_closed, true);
+				oxr_macos_set_window_closed();
 			}
 		}
 
