@@ -120,7 +120,7 @@ socket_close(r_socket_t id)
 static inline r_socket_t
 socket_create(void)
 {
-	return socket(AF_INET, SOCK_STREAM, 0);
+	return socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
 }
 
 static inline int
@@ -248,7 +248,11 @@ do_accept(struct r_hub *r)
 	}
 
 	socklen_t addr_length = (socklen_t)sizeof(addr);
+#ifdef SOCK_CLOEXEC
+	ret = accept4(r->accept_fd, (struct sockaddr *)&addr, &addr_length, SOCK_CLOEXEC);
+#else
 	ret = accept(r->accept_fd, (struct sockaddr *)&addr, &addr_length);
+#endif
 	if (ret < 0) {
 		R_ERROR(r, "accept: " R_SOCKET_FMT, ret);
 		return ret;

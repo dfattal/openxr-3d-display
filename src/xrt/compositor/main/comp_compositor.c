@@ -356,6 +356,11 @@ compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display
 	// Note that this will just increment the reference count, rather than actually load it again,
 	// since we are linked for other symbols too.
 	void *android_handle = dlopen("libandroid.so", RTLD_NOW);
+	if (android_handle == NULL) {
+		U_LOG_E("failed to open libandroid.so");
+		return XRT_SUCCESS;
+	}
+
 	PF_SETFRAMERATE set_frame_rate = (PF_SETFRAMERATE)dlsym(android_handle, "ANativeWindow_setFrameRate");
 	if (!set_frame_rate) {
 		U_LOG_E("ANativeWindow_setFrameRate not found");

@@ -487,6 +487,10 @@ cemu_devices_create(struct xrt_device *head, struct xrt_device *hands, struct xr
 	struct cemu_device *cemud[2];
 
 	struct cemu_system *system = U_TYPED_CALLOC(struct cemu_system);
+	if (system == NULL) {
+		return 0;
+	}
+
 	system->in_hand = hands;
 	system->in_head = head;
 

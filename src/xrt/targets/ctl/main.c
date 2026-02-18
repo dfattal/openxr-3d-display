@@ -256,6 +256,10 @@ get_brightness(struct ipc_connection *ipc_c, int device_id)
 int
 set_brightness(struct ipc_connection *ipc_c, int device_id, const char *value)
 {
+	if (value == NULL) {
+		return 1;
+	}
+
 	const int length = strlen(value);
 	if (length == 0) {
 		return 1;

@@ -146,6 +146,8 @@ private:
 	            .window_title = "Monado Android Service",
 	            .open = U_DEBUG_GUI_OPEN_NEVER,
 	        },
+	    .exit_on_disconnect = false,
+	    .no_stdin = false,
 	};
 
 	const struct ipc_server_callbacks callbacks = {

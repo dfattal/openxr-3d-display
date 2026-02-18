@@ -131,7 +131,7 @@ is_experimental_vendor(std::string_view vendor)
  * Returns an ExtensionSortKey for comparison.
  */
 static ExtensionSortKey
-get_extension_sort_key(std::string_view name)
+get_extension_sort_key(const std::string_view name)
 {
 	// Find the first underscore to separate API prefix (e.g., "VK", "XR")
 	size_t first_underscore = name.find('_');
@@ -269,7 +269,7 @@ ExtensionListBuilder::sortForExtensions()
 	}
 
 	// Sort using our custom comparison function that works with std::string
-	auto cmp = [](const std::string &a, const std::string &b) {
+	auto cmp = [](const std::string_view a, const std::string_view b) {
 		return get_extension_sort_key(a) < get_extension_sort_key(b);
 	};
 	std::sort(strings.begin(), strings.end(), cmp);
