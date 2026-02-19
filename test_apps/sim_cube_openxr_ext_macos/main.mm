@@ -9,11 +9,13 @@
  * the runtime via the extension. The runtime renders into the app's
  * window instead of creating its own.
  *
- * Key differences from sim_cube_openxr:
- * - App creates and owns the NSWindow
- * - NSView with CAMetalLayer is passed to runtime via extension
- * - App runs the NSApplication event loop
- * - Keyboard input: ESC to quit, 1/2/3 for sim_display modes
+ * Features:
+ * - App creates and owns the NSWindow (XR_EXT_macos_window_binding)
+ * - Mouse drag camera, WASD/QE movement, scroll zoom
+ * - XR_EXT_display_info: Kooima projection, display metrics
+ * - 2D/3D toggle (V key) via xrRequestDisplayModeEXT
+ * - 1/2/3 keys for sim_display modes (SBS/anaglyph/blend)
+ * - Tab: toggle HUD overlay, Space: reset camera, ESC: quit
  */
 
 #import <Cocoa/Cocoa.h>
@@ -25,6 +27,7 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 #include <openxr/XR_EXT_macos_window_binding.h>
+#include <openxr/XR_EXT_display_info.h>
 
 #include <cmath>
 #include <csignal>
@@ -34,6 +37,8 @@
 #include <chrono>
 #include <vector>
 
+#include <dlfcn.h>
+#include <mach-o/dyld.h>
 #include <unistd.h>
 
 // ============================================================================
@@ -63,12 +68,92 @@
     } while (0)
 
 // ============================================================================
+// Input state (ported from test_apps/common/input_handler.h)
+// ============================================================================
+
+struct InputState {
+    // Mouse drag for camera look
+    bool dragging = false;
+    int dragStartX = 0;
+    int dragStartY = 0;
+    float yaw = 0.0f;
+    float pitch = 0.0f;
+
+    // WASD/QE movement keys (held state)
+    bool keyW = false, keyA = false, keyS = false, keyD = false;
+    bool keyE = false, keyQ = false;
+
+    // Camera position
+    float cameraPosX = 0.0f, cameraPosY = 0.0f, cameraPosZ = 0.0f;
+
+    // View reset
+    bool resetViewRequested = false;
+
+    // Scroll zoom
+    float zoomScale = 1.0f;
+
+    // HUD toggle (Tab)
+    bool hudVisible = true;
+
+    // Display mode toggle (V key)
+    bool displayMode3D = true;
+    bool displayModeToggleRequested = false;
+};
+
+// ============================================================================
 // Globals
 // ============================================================================
 
 static volatile bool g_running = true;
 static NSWindow *g_window = nil;
 static NSView *g_metalView = nil;
+static InputState g_input;
+
+// dlsym handle for sim_display live mode switching (Bug 4 fix)
+typedef void (*PFN_sim_display_set_output_mode)(int mode);
+static PFN_sim_display_set_output_mode g_pfnSetOutputMode = nullptr;
+
+// Current sim_display output mode (0=SBS, 1=anaglyph, 2=blend)
+// Tracks which mode the display processor is using so the app can
+// adjust render dimensions and Kooima FOV accordingly.
+// SBS: each eye = half width, Kooima uses half display width
+// Anaglyph/blend: each eye = full width, Kooima uses full display width
+static int g_currentOutputMode = 0;
+
+// Borderless fullscreen state
+static bool g_fullscreen = false;
+static NSRect g_savedWindowFrame = {};
+static NSUInteger g_savedWindowStyle = 0;
+
+static void ToggleBorderlessFullscreen() {
+    if (g_fullscreen) {
+        // Restore windowed mode
+        [g_window setStyleMask:g_savedWindowStyle];
+        [g_window setFrame:g_savedWindowFrame display:YES animate:NO];
+        [g_window setLevel:NSNormalWindowLevel];
+        g_fullscreen = false;
+        LOG_INFO("Exited fullscreen");
+    } else {
+        // Save state and go borderless fullscreen
+        g_savedWindowStyle = [g_window styleMask];
+        g_savedWindowFrame = [g_window frame];
+        NSScreen *screen = [g_window screen] ?: [NSScreen mainScreen];
+        [g_window setStyleMask:NSWindowStyleMaskBorderless];
+        [g_window setFrame:[screen frame] display:YES animate:NO];
+        [g_window setLevel:NSStatusWindowLevel]; // above menu bar
+        g_fullscreen = true;
+        LOG_INFO("Entered fullscreen");
+    }
+}
+
+// Performance stats
+static double g_avgFrameTime = 0.0;
+static uint64_t g_frameCount = 0;
+static float g_hudUpdateTimer = 0.0f;
+
+// Render/window dimensions for HUD
+static uint32_t g_renderW = 0, g_renderH = 0;
+static uint32_t g_windowW = 0, g_windowH = 0;
 
 // ============================================================================
 // Inline math — column-major float[16] matrices
@@ -98,6 +183,13 @@ static void mat4_translation(float* m, float tx, float ty, float tz) {
     m[12] = tx;
     m[13] = ty;
     m[14] = tz;
+}
+
+static void mat4_scale(float* m, float sx, float sy, float sz) {
+    mat4_identity(m);
+    m[0] = sx;
+    m[5] = sy;
+    m[10] = sz;
 }
 
 static void mat4_rotation_y(float* m, float angle) {
@@ -150,6 +242,77 @@ static void mat4_view_from_xr_pose(float* viewMat, XrPosef pose) {
     float invTrans[16];
     mat4_translation(invTrans, -pose.position.x, -pose.position.y, -pose.position.z);
     mat4_multiply(viewMat, invRot, invTrans);
+}
+
+// Quaternion from yaw/pitch (matches DirectX::XMQuaternionRotationRollPitchYaw(pitch, yaw, 0))
+static void quat_from_yaw_pitch(float yaw, float pitch, XrQuaternionf* out) {
+    float cy = cosf(yaw / 2.0f), sy = sinf(yaw / 2.0f);
+    float cp = cosf(pitch / 2.0f), sp = sinf(pitch / 2.0f);
+    out->w = cy * cp;
+    out->x = cy * sp;
+    out->y = sy * cp;
+    out->z = -sy * sp;
+}
+
+// Rotate vec3 by quaternion: v' = q * v * q^-1
+static void quat_rotate_vec3(XrQuaternionf q, float vx, float vy, float vz,
+    float* ox, float* oy, float* oz) {
+    float tx = 2.0f * (q.y * vz - q.z * vy);
+    float ty = 2.0f * (q.z * vx - q.x * vz);
+    float tz = 2.0f * (q.x * vy - q.y * vx);
+    *ox = vx + q.w * tx + (q.y * tz - q.z * ty);
+    *oy = vy + q.w * ty + (q.z * tx - q.x * tz);
+    *oz = vz + q.w * tz + (q.x * ty - q.y * tx);
+}
+
+// Hamilton product: a * b
+static XrQuaternionf quat_multiply(XrQuaternionf a, XrQuaternionf b) {
+    return {
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
+    };
+}
+
+// Kooima asymmetric frustum projection from eye position and screen extents
+// Reference: Robert Kooima, "Generalized Perspective Projection" (2009)
+static void mat4_kooima_projection(float* m, XrVector3f eyePos,
+    float screenWidthM, float screenHeightM, float nearZ, float farZ) {
+    float ez = eyePos.z;
+    if (ez <= 0.001f) ez = 0.65f;
+    float halfW = screenWidthM / 2.0f;
+    float halfH = screenHeightM / 2.0f;
+    float ex = eyePos.x, ey = eyePos.y;
+
+    float left   = nearZ * (-halfW - ex) / ez;
+    float right  = nearZ * ( halfW - ex) / ez;
+    float bottom = nearZ * (-halfH - ey) / ez;
+    float top    = nearZ * ( halfH - ey) / ez;
+    float w = right - left, h = top - bottom;
+
+    memset(m, 0, 16 * sizeof(float));
+    m[0]  = 2.0f * nearZ / w;
+    m[5]  = 2.0f * nearZ / h;
+    m[8]  = (right + left) / w;
+    m[9]  = (top + bottom) / h;
+    m[10] = -(farZ + nearZ) / (farZ - nearZ);
+    m[11] = -1.0f;
+    m[14] = -(2.0f * farZ * nearZ) / (farZ - nearZ);
+}
+
+// Compute Kooima FOV angles for layer submission
+static XrFovf compute_kooima_fov(XrVector3f eyePos, float screenWidthM, float screenHeightM) {
+    float ez = eyePos.z;
+    if (ez <= 0.001f) ez = 0.65f;
+    float halfW = screenWidthM / 2.0f;
+    float halfH = screenHeightM / 2.0f;
+    return {
+        atanf((-halfW - eyePos.x) / ez),
+        atanf(( halfW - eyePos.x) / ez),
+        atanf(( halfH - eyePos.y) / ez),
+        atanf((-halfH - eyePos.y) / ez)
+    };
 }
 
 // ============================================================================
@@ -734,32 +897,46 @@ static void RenderScene(VkRenderer& renderer, int eye, uint32_t imageIndex,
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Compute VP matrix
+    // Compute VP matrix (zoom is handled by eye position division, not here)
     float vp[16];
     mat4_multiply(vp, projMat, viewMat);
 
-    // Draw grid
-    float gridMvp[16];
-    memcpy(gridMvp, vp, sizeof(vp));
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer.gridPipeline);
-    vkCmdPushConstants(cmd, renderer.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, gridMvp);
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &renderer.gridVertexBuffer, &offset);
-    vkCmdDraw(cmd, renderer.gridVertexCount, 1, 0, 0);
+    // Draw grid — scale 5% so 10m grid becomes 0.5m, translate Y so it lands at Y=0
+    {
+        const float gridScale = 0.05f;
+        float gridWorld[16], gridScl[16], gridTrans[16];
+        mat4_scale(gridScl, gridScale, gridScale, gridScale);
+        mat4_translation(gridTrans, 0, gridScale, 0); // -1*0.05+0.05 = 0
+        mat4_multiply(gridWorld, gridTrans, gridScl);
+        float gridMvp[16];
+        mat4_multiply(gridMvp, vp, gridWorld);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer.gridPipeline);
+        vkCmdPushConstants(cmd, renderer.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, gridMvp);
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &renderer.gridVertexBuffer, &offset);
+        vkCmdDraw(cmd, renderer.gridVertexCount, 1, 0, 0);
+    }
 
-    // Draw cube
-    float model[16], rot[16], trans[16];
-    mat4_rotation_y(rot, renderer.cubeRotation);
-    mat4_translation(trans, 0, 0, -3);
-    mat4_multiply(model, trans, rot);
-    float mvp[16];
-    mat4_multiply(mvp, vp, model);
+    // Draw cube — 6cm cube centered at (0, 0.03, 0) on the display plane
+    {
+        const float cubeSize = 0.06f;
+        const float cubeHeight = cubeSize / 2.0f; // raise so base sits on grid at Y=0
+        float rot[16], scl[16], trans[16], model[16], tmp[16];
+        mat4_rotation_y(rot, renderer.cubeRotation);
+        mat4_scale(scl, cubeSize, cubeSize, cubeSize);
+        mat4_translation(trans, 0, cubeHeight, 0);
+        mat4_multiply(tmp, scl, rot);          // scale * rotate (column-major)
+        mat4_multiply(model, trans, tmp);       // translate * (scale * rotate)
+        float mvp[16];
+        mat4_multiply(mvp, vp, model);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer.cubePipeline);
-    vkCmdPushConstants(cmd, renderer.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, mvp);
-    vkCmdBindVertexBuffers(cmd, 0, 1, &renderer.cubeVertexBuffer, &offset);
-    vkCmdBindIndexBuffer(cmd, renderer.cubeIndexBuffer, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer.cubePipeline);
+        vkCmdPushConstants(cmd, renderer.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, mvp);
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &renderer.cubeVertexBuffer, &offset);
+        vkCmdBindIndexBuffer(cmd, renderer.cubeIndexBuffer, 0, VK_INDEX_TYPE_UINT16);
+        vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
+    }
 
     vkCmdEndRenderPass(cmd);
     vkEndCommandBuffer(cmd);
@@ -797,6 +974,43 @@ static void CleanupVkRenderer(VkRenderer& renderer) {
     if (renderer.pipelineLayout) vkDestroyPipelineLayout(renderer.device, renderer.pipelineLayout, nullptr);
     if (renderer.renderPass) vkDestroyRenderPass(renderer.device, renderer.renderPass, nullptr);
 }
+
+// ============================================================================
+// HUD overlay view (macOS native text overlay)
+// ============================================================================
+
+@interface HudOverlayView : NSView
+@property (nonatomic, copy) NSString *hudText;
+@end
+
+@implementation HudOverlayView
+- (instancetype)initWithFrame:(NSRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) { _hudText = @""; [self setWantsLayer:YES]; }
+    return self;
+}
+- (BOOL)isOpaque { return NO; }
+- (NSView *)hitTest:(NSPoint)point { (void)point; return nil; } // pass clicks through
+- (void)drawRect:(NSRect)dirtyRect {
+    (void)dirtyRect;
+    if (_hudText.length == 0) return;
+    NSBezierPath *bg = [NSBezierPath bezierPathWithRoundedRect:self.bounds xRadius:6 yRadius:6];
+    [[NSColor colorWithCalibratedRed:0 green:0 blue:0 alpha:0.75] setFill];
+    [bg fill];
+    NSFont *font = [NSFont fontWithName:@"Menlo" size:11];
+    if (!font) font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
+    NSDictionary *attrs = @{
+        NSFontAttributeName: font,
+        NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.9 green:0.9 blue:0.9 alpha:1.0]
+    };
+    NSRect textRect = NSInsetRect(self.bounds, 8, 8);
+    [_hudText drawWithRect:textRect
+                   options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine
+                attributes:attrs context:nil];
+}
+@end
+
+static HudOverlayView *g_hudView = nil;
 
 // ============================================================================
 // macOS Window + Metal View
@@ -839,6 +1053,12 @@ static bool CreateMacOSWindow(uint32_t width, uint32_t height) {
         [g_metalView setWantsLayer:YES];
 
         [g_window setContentView:g_metalView];
+
+        // HUD overlay (semi-transparent text overlay, positioned bottom-left)
+        NSRect hudFrame = NSMakeRect(10, 10, 420, 260);
+        g_hudView = [[HudOverlayView alloc] initWithFrame:hudFrame];
+        [g_metalView addSubview:g_hudView];
+
         [g_window makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
 
@@ -868,26 +1088,155 @@ static void PumpMacOSEvents() {
                                            untilDate:nil
                                               inMode:NSDefaultRunLoopMode
                                              dequeue:YES]) != nil) {
-            // Handle keyboard input
-            if ([event type] == NSEventTypeKeyDown) {
-                unichar ch = [[event characters] characterAtIndex:0];
-                if (ch == 27) { // ESC
-                    LOG_INFO("ESC pressed, requesting exit");
-                    g_running = false;
-                } else if (ch == '1') {
-                    setenv("SIM_DISPLAY_OUTPUT", "sbs", 1);
-                    LOG_INFO("Switched to SBS mode (takes effect on next session)");
-                } else if (ch == '2') {
-                    setenv("SIM_DISPLAY_OUTPUT", "anaglyph", 1);
-                    LOG_INFO("Switched to anaglyph mode (takes effect on next session)");
-                } else if (ch == '3') {
-                    setenv("SIM_DISPLAY_OUTPUT", "blend", 1);
-                    LOG_INFO("Switched to blend mode (takes effect on next session)");
+            NSEventType type = [event type];
+
+            if (type == NSEventTypeLeftMouseDown) {
+                // Only start drag if click is inside the content view (not title bar / resize edge).
+                // Window resize sends LeftMouseDown + LeftMouseDragged with large deltas that
+                // would otherwise spin the camera.
+                NSPoint loc = [event locationInWindow];
+                NSView *contentView = [g_window contentView];
+                NSPoint viewLoc = [contentView convertPoint:loc fromView:nil];
+                if (NSPointInRect(viewLoc, [contentView bounds])) {
+                    g_input.dragging = true;
+                    g_input.dragStartX = (int)loc.x;
+                    g_input.dragStartY = (int)loc.y;
+                    if ([event clickCount] >= 2) g_input.resetViewRequested = true;
+                }
+            } else if (type == NSEventTypeLeftMouseUp) {
+                g_input.dragging = false;
+            } else if (type == NSEventTypeMouseMoved || type == NSEventTypeLeftMouseDragged) {
+                if (g_input.dragging) {
+                    NSPoint loc = [event locationInWindow];
+                    int mx = (int)loc.x, my = (int)loc.y;
+                    g_input.yaw -= (mx - g_input.dragStartX) * 0.005f;
+                    g_input.pitch += (my - g_input.dragStartY) * 0.005f; // NSView Y is bottom-up
+                    if (g_input.pitch > 1.4f) g_input.pitch = 1.4f;
+                    if (g_input.pitch < -1.4f) g_input.pitch = -1.4f;
+                    g_input.dragStartX = mx;
+                    g_input.dragStartY = my;
+                }
+            } else if (type == NSEventTypeScrollWheel) {
+                float dy = (float)[event scrollingDeltaY];
+                float factor = (dy > 0) ? 1.1f : (1.0f / 1.1f);
+                g_input.zoomScale *= factor;
+                if (g_input.zoomScale < 0.1f) g_input.zoomScale = 0.1f;
+                if (g_input.zoomScale > 10.0f) g_input.zoomScale = 10.0f;
+            } else if (type == NSEventTypeKeyDown) {
+                // Cmd+Ctrl+F fullscreen toggle (keyCode 3 = 'f', ignores character remapping)
+                NSUInteger mods = [event modifierFlags];
+                if ([event keyCode] == 3 &&
+                    (mods & NSEventModifierFlagCommand) &&
+                    (mods & NSEventModifierFlagControl) &&
+                    ![event isARepeat]) {
+                    ToggleBorderlessFullscreen();
+                }
+                else if ([[event characters] length] > 0) {
+                    unichar ch = tolower([[event characters] characterAtIndex:0]);
+                    bool isRepeat = [event isARepeat];
+                    if (ch == 27) { g_running = false; }
+                    else if (ch == 'w') { g_input.keyW = true; }
+                    else if (ch == 'a') { g_input.keyA = true; }
+                    else if (ch == 's') { g_input.keyS = true; }
+                    else if (ch == 'd') { g_input.keyD = true; }
+                    else if (ch == 'e') { g_input.keyE = true; }
+                    else if (ch == 'q') { g_input.keyQ = true; }
+                    else if (ch == ' ') { g_input.resetViewRequested = true; }
+                    else if (ch == '\t' && !isRepeat) { g_input.hudVisible = !g_input.hudVisible; }
+                    else if (ch == 'v' && !isRepeat) {
+                        g_input.displayMode3D = !g_input.displayMode3D;
+                        g_input.displayModeToggleRequested = true;
+                    }
+                    else if (ch == '1' && !isRepeat) {
+                        g_currentOutputMode = 0;
+                        if (g_pfnSetOutputMode) {
+                            g_pfnSetOutputMode(0); // SIM_DISPLAY_OUTPUT_SBS
+                            LOG_INFO("Switched to SBS mode (live)");
+                        } else {
+                            setenv("SIM_DISPLAY_OUTPUT", "sbs", 1);
+                            LOG_INFO("Switched to SBS mode (restart required)");
+                        }
+                    }
+                    else if (ch == '2' && !isRepeat) {
+                        g_currentOutputMode = 1;
+                        if (g_pfnSetOutputMode) {
+                            g_pfnSetOutputMode(1); // SIM_DISPLAY_OUTPUT_ANAGLYPH
+                            LOG_INFO("Switched to anaglyph mode (live)");
+                        } else {
+                            setenv("SIM_DISPLAY_OUTPUT", "anaglyph", 1);
+                            LOG_INFO("Switched to anaglyph mode (restart required)");
+                        }
+                    }
+                    else if (ch == '3' && !isRepeat) {
+                        g_currentOutputMode = 2;
+                        if (g_pfnSetOutputMode) {
+                            g_pfnSetOutputMode(2); // SIM_DISPLAY_OUTPUT_BLEND
+                            LOG_INFO("Switched to blend mode (live)");
+                        } else {
+                            setenv("SIM_DISPLAY_OUTPUT", "blend", 1);
+                            LOG_INFO("Switched to blend mode (restart required)");
+                        }
+                    }
+                }
+            } else if (type == NSEventTypeKeyUp) {
+                if ([[event characters] length] > 0) {
+                    unichar ch = tolower([[event characters] characterAtIndex:0]);
+                    if (ch == 'w') g_input.keyW = false;
+                    else if (ch == 'a') g_input.keyA = false;
+                    else if (ch == 's') g_input.keyS = false;
+                    else if (ch == 'd') g_input.keyD = false;
+                    else if (ch == 'e') g_input.keyE = false;
+                    else if (ch == 'q') g_input.keyQ = false;
                 }
             }
-            [NSApp sendEvent:event];
+
+            // Forward non-key events to NSApp; skip key events to prevent beep
+            if (type != NSEventTypeKeyDown && type != NSEventTypeKeyUp) {
+                [NSApp sendEvent:event];
+            }
+        }
+
+        // Update window dimensions from actual drawable size (handles resize + fullscreen).
+        // Multiply by backingScaleFactor to get pixel dimensions matching the Vulkan
+        // surface extent (CAMetalLayer uses pixel dimensions on Retina).
+        if (g_window != nil) {
+            NSSize contentSize = [[g_window contentView] bounds].size;
+            CGFloat backingScale = [g_window backingScaleFactor];
+            g_windowW = (uint32_t)(contentSize.width * backingScale);
+            g_windowH = (uint32_t)(contentSize.height * backingScale);
         }
     }
+}
+
+// ============================================================================
+// Camera movement (ported from test_apps/common/input_handler.cpp)
+// ============================================================================
+
+static void UpdateCameraMovement(InputState& state, float deltaTime) {
+    if (state.resetViewRequested) {
+        state.cameraPosX = state.cameraPosY = state.cameraPosZ = 0.0f;
+        state.yaw = state.pitch = 0.0f;
+        state.zoomScale = 1.0f;
+        state.resetViewRequested = false;
+        return;
+    }
+
+    const float moveSpeed = 0.1f;
+    XrQuaternionf ori;
+    quat_from_yaw_pitch(state.yaw, state.pitch, &ori);
+
+    float fwdX, fwdY, fwdZ, rtX, rtY, rtZ, upX, upY, upZ;
+    quat_rotate_vec3(ori, 0, 0, -1, &fwdX, &fwdY, &fwdZ);
+    quat_rotate_vec3(ori, 1, 0, 0, &rtX, &rtY, &rtZ);
+    quat_rotate_vec3(ori, 0, 1, 0, &upX, &upY, &upZ);
+
+    float d = moveSpeed * deltaTime;
+    if (state.keyW) { state.cameraPosX += fwdX*d; state.cameraPosY += fwdY*d; state.cameraPosZ += fwdZ*d; }
+    if (state.keyS) { state.cameraPosX -= fwdX*d; state.cameraPosY -= fwdY*d; state.cameraPosZ -= fwdZ*d; }
+    if (state.keyD) { state.cameraPosX += rtX*d; state.cameraPosY += rtY*d; state.cameraPosZ += rtZ*d; }
+    if (state.keyA) { state.cameraPosX -= rtX*d; state.cameraPosY -= rtY*d; state.cameraPosZ -= rtZ*d; }
+    if (state.keyE) { state.cameraPosX += upX*d; state.cameraPosY += upY*d; state.cameraPosZ += upZ*d; }
+    if (state.keyQ) { state.cameraPosX -= upX*d; state.cameraPosY -= upY*d; state.cameraPosZ -= upZ*d; }
 }
 
 // ============================================================================
@@ -908,6 +1257,7 @@ struct AppXrSession {
     XrSession session = XR_NULL_HANDLE;
     XrSpace localSpace = XR_NULL_HANDLE;
     XrSpace viewSpace = XR_NULL_HANDLE;
+    XrSpace displaySpace = XR_NULL_HANDLE;
 
     SwapchainInfo swapchains[2];
 
@@ -918,6 +1268,23 @@ struct AppXrSession {
     bool sessionRunning = false;
     bool exitRequested = false;
     bool hasMacosWindowBinding = false;
+
+    // XR_EXT_display_info
+    bool hasDisplayInfoExt = false;
+    float recommendedViewScaleX = 1.0f;
+    float recommendedViewScaleY = 1.0f;
+    float displayWidthM = 0.0f;
+    float displayHeightM = 0.0f;
+    float nominalViewerX = 0.0f;
+    float nominalViewerY = 0.0f;
+    float nominalViewerZ = 0.5f;
+    bool supportsDisplayModeSwitch = false;
+    PFN_xrRequestDisplayModeEXT pfnRequestDisplayModeEXT = nullptr;
+
+    // Eye tracking data for HUD
+    float leftEyeX = 0, leftEyeY = 0, leftEyeZ = 0;
+    float rightEyeX = 0, rightEyeY = 0, rightEyeZ = 0;
+    bool eyeTrackingActive = false;
 };
 
 static bool InitializeOpenXR(AppXrSession& xr) {
@@ -935,6 +1302,9 @@ static bool InitializeOpenXR(AppXrSession& xr) {
         if (strcmp(ext.extensionName, XR_EXT_MACOS_WINDOW_BINDING_EXTENSION_NAME) == 0) {
             xr.hasMacosWindowBinding = true;
         }
+        if (strcmp(ext.extensionName, XR_EXT_DISPLAY_INFO_EXTENSION_NAME) == 0) {
+            xr.hasDisplayInfoExt = true;
+        }
     }
 
     if (!hasVulkan) {
@@ -943,12 +1313,16 @@ static bool InitializeOpenXR(AppXrSession& xr) {
     }
 
     LOG_INFO("XR_EXT_macos_window_binding: %s", xr.hasMacosWindowBinding ? "available" : "not available");
+    LOG_INFO("XR_EXT_display_info: %s", xr.hasDisplayInfoExt ? "available" : "not available");
 
     // Build extension list
     std::vector<const char*> enabledExtensions;
     enabledExtensions.push_back(XR_KHR_VULKAN_ENABLE_EXTENSION_NAME);
     if (xr.hasMacosWindowBinding) {
         enabledExtensions.push_back(XR_EXT_MACOS_WINDOW_BINDING_EXTENSION_NAME);
+    }
+    if (xr.hasDisplayInfoExt) {
+        enabledExtensions.push_back(XR_EXT_DISPLAY_INFO_EXTENSION_NAME);
     }
 
     XrInstanceCreateInfo createInfo = {XR_TYPE_INSTANCE_CREATE_INFO};
@@ -965,6 +1339,33 @@ static bool InitializeOpenXR(AppXrSession& xr) {
     sysInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     XR_CHECK(xrGetSystem(xr.instance, &sysInfo, &xr.systemId));
     LOG_INFO("Got system ID: %llu", (unsigned long long)xr.systemId);
+
+    // Query display info via XR_EXT_display_info
+    if (xr.hasDisplayInfoExt) {
+        XrSystemProperties sysProps = {XR_TYPE_SYSTEM_PROPERTIES};
+        XrDisplayInfoEXT displayInfo = {};
+        displayInfo.type = XR_TYPE_DISPLAY_INFO_EXT;
+        sysProps.next = &displayInfo;
+        if (XR_SUCCEEDED(xrGetSystemProperties(xr.instance, xr.systemId, &sysProps))) {
+            xr.recommendedViewScaleX = displayInfo.recommendedViewScaleX;
+            xr.recommendedViewScaleY = displayInfo.recommendedViewScaleY;
+            xr.displayWidthM = displayInfo.displaySizeMeters.width;
+            xr.displayHeightM = displayInfo.displaySizeMeters.height;
+            xr.nominalViewerX = displayInfo.nominalViewerPositionInDisplaySpace.x;
+            xr.nominalViewerY = displayInfo.nominalViewerPositionInDisplaySpace.y;
+            xr.nominalViewerZ = displayInfo.nominalViewerPositionInDisplaySpace.z;
+            xr.supportsDisplayModeSwitch = displayInfo.supportsDisplayModeSwitch;
+            LOG_INFO("Display info: %.3fx%.3f m, scale=%.2fx%.2f, nominal=(%.3f,%.3f,%.3f)",
+                xr.displayWidthM, xr.displayHeightM,
+                xr.recommendedViewScaleX, xr.recommendedViewScaleY,
+                xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ);
+            LOG_INFO("Display mode switch: %s", xr.supportsDisplayModeSwitch ? "supported" : "not supported");
+        }
+
+        // Load display mode request function pointer
+        xrGetInstanceProcAddr(xr.instance, "xrRequestDisplayModeEXT",
+            (PFN_xrVoidFunction*)&xr.pfnRequestDisplayModeEXT);
+    }
 
     uint32_t viewCount = 0;
     XR_CHECK(xrEnumerateViewConfigurationViews(xr.instance, xr.systemId, xr.viewConfigType, 0, &viewCount, nullptr));
@@ -1215,6 +1616,19 @@ static bool CreateSpaces(AppXrSession& xr) {
     viewSpaceInfo.poseInReferenceSpace.position = {0, 0, 0};
     XR_CHECK(xrCreateReferenceSpace(xr.session, &viewSpaceInfo, &xr.viewSpace));
 
+    // DISPLAY space: physically anchored, unaffected by recentering
+    XrReferenceSpaceCreateInfo displaySpaceInfo = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    displaySpaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT;
+    displaySpaceInfo.poseInReferenceSpace.orientation = {0, 0, 0, 1};
+    displaySpaceInfo.poseInReferenceSpace.position = {0, 0, 0};
+    XrResult dispResult = xrCreateReferenceSpace(xr.session, &displaySpaceInfo, &xr.displaySpace);
+    if (XR_SUCCEEDED(dispResult)) {
+        LOG_INFO("DISPLAY space created");
+    } else {
+        LOG_INFO("DISPLAY space not available, using LOCAL as fallback");
+        xr.displaySpace = XR_NULL_HANDLE;
+    }
+
     LOG_INFO("Reference spaces created");
     return true;
 }
@@ -1325,10 +1739,12 @@ static bool ReleaseSwapchainImage(AppXrSession& xr, int eye) {
     return XR_SUCCEEDED(xrReleaseSwapchainImage(xr.swapchains[eye].swapchain, &releaseInfo));
 }
 
-static bool EndFrame(AppXrSession& xr, XrTime displayTime, const XrCompositionLayerProjectionView* views) {
+static bool EndFrame(AppXrSession& xr, XrTime displayTime,
+    const XrCompositionLayerProjectionView* views, uint32_t viewCount = 2) {
     XrCompositionLayerProjection projectionLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-    projectionLayer.space = xr.localSpace;
-    projectionLayer.viewCount = 2;
+    // Use DISPLAY space when available (physically anchored)
+    projectionLayer.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
+    projectionLayer.viewCount = viewCount;
     projectionLayer.views = views;
 
     const XrCompositionLayerBaseHeader* layers[] = {
@@ -1349,6 +1765,7 @@ static void CleanupOpenXR(AppXrSession& xr) {
             xrDestroySwapchain(xr.swapchains[eye].swapchain);
         }
     }
+    if (xr.displaySpace != XR_NULL_HANDLE) xrDestroySpace(xr.displaySpace);
     if (xr.viewSpace != XR_NULL_HANDLE) xrDestroySpace(xr.viewSpace);
     if (xr.localSpace != XR_NULL_HANDLE) xrDestroySpace(xr.localSpace);
     if (xr.session != XR_NULL_HANDLE) xrDestroySession(xr.session);
@@ -1375,9 +1792,22 @@ int main() {
     LOG_INFO("=== Sim Cube OpenXR + External macOS Window ===");
 
     // Step 1: Create the macOS window FIRST (app owns it)
-    if (!CreateMacOSWindow(1280, 720)) {
+    g_windowW = 1280;
+    g_windowH = 720;
+    if (!CreateMacOSWindow(g_windowW, g_windowH)) {
         LOG_ERROR("Failed to create macOS window");
         return 1;
+    }
+
+    // Update g_windowW/H to actual drawable pixel dimensions (Retina-aware).
+    // The initial 1280x720 are in points; the Vulkan surface uses pixel dimensions.
+    {
+        NSSize contentSize = [[g_window contentView] bounds].size;
+        CGFloat backingScale = [g_window backingScaleFactor];
+        g_windowW = (uint32_t)(contentSize.width * backingScale);
+        g_windowH = (uint32_t)(contentSize.height * backingScale);
+        LOG_INFO("Window drawable size: %ux%u (points: %.0fx%.0f, scale: %.1f)",
+                 g_windowW, g_windowH, contentSize.width, contentSize.height, (float)backingScale);
     }
 
     // Step 2: Initialize OpenXR
@@ -1385,6 +1815,30 @@ int main() {
     if (!InitializeOpenXR(xr)) {
         LOG_ERROR("OpenXR initialization failed");
         return 1;
+    }
+
+    // Try to find sim_display_set_output_mode in the loaded runtime (1/2/3 keys).
+    // OpenXR loader dlopen's the runtime with RTLD_LOCAL, so RTLD_DEFAULT won't see it.
+    // Use _dyld APIs to find the loaded runtime library and get a proper handle.
+    {
+        void *rtHandle = NULL;
+        uint32_t imageCount = _dyld_image_count();
+        for (uint32_t i = 0; i < imageCount; i++) {
+            const char *name = _dyld_get_image_name(i);
+            if (name && strstr(name, "openxr_monado")) {
+                LOG_INFO("Found runtime image: %s", name);
+                rtHandle = dlopen(name, RTLD_NOLOAD);
+                break;
+            }
+        }
+        if (rtHandle) {
+            g_pfnSetOutputMode = (PFN_sim_display_set_output_mode)dlsym(rtHandle, "sim_display_set_output_mode");
+        }
+        if (g_pfnSetOutputMode) {
+            LOG_INFO("sim_display hot-reload: available");
+        } else {
+            LOG_INFO("sim_display hot-reload: not available (%s)", dlerror());
+        }
     }
 
     if (!GetVulkanGraphicsRequirements(xr)) {
@@ -1480,22 +1934,39 @@ int main() {
         LOG_INFO("  Eye %d framebuffers created OK", eye);
     }
 
-    LOG_INFO("=== Entering main loop (ESC to quit, 1/2/3 for display modes) ===");
+    LOG_INFO("=== Entering main loop ===");
+    LOG_INFO("Controls: WASD=move, Mouse=look, Scroll=zoom, Space=reset, V=2D/3D, 1/2/3=SBS/anaglyph/blend, TAB=HUD, Cmd+Ctrl+F=fullscreen, ESC=quit");
+    LOG_INFO("          V=2D/3D, Tab=HUD, 1/2/3=SBS/Ana/Blend, ESC=quit");
 
     auto lastTime = std::chrono::high_resolution_clock::now();
 
     while (g_running && !xr.exitRequested) {
-        // Pump macOS events (keyboard, window, etc.)
         PumpMacOSEvents();
 
-        // Delta time
         auto now = std::chrono::high_resolution_clock::now();
         float deltaTime = std::chrono::duration<float>(now - lastTime).count();
         lastTime = now;
 
+        // Performance stats
+        g_frameCount++;
+        g_avgFrameTime = g_avgFrameTime * 0.95 + deltaTime * 0.05;
+
+        UpdateCameraMovement(g_input, deltaTime);
+
         vkRenderer.cubeRotation += deltaTime * 0.5f;
-        if (vkRenderer.cubeRotation > 2.0f * 3.14159265f) {
+        if (vkRenderer.cubeRotation > 2.0f * 3.14159265f)
             vkRenderer.cubeRotation -= 2.0f * 3.14159265f;
+
+        // Handle display mode toggle (V key)
+        if (g_input.displayModeToggleRequested) {
+            g_input.displayModeToggleRequested = false;
+            if (xr.pfnRequestDisplayModeEXT && xr.session != XR_NULL_HANDLE) {
+                XrDisplayModeEXT mode = g_input.displayMode3D
+                    ? XR_DISPLAY_MODE_3D_EXT : XR_DISPLAY_MODE_2D_EXT;
+                XrResult modeResult = xr.pfnRequestDisplayModeEXT(xr.session, mode);
+                LOG_INFO("Display mode → %s (%s)", g_input.displayMode3D ? "3D" : "2D",
+                    XR_SUCCEEDED(modeResult) ? "OK" : "failed");
+            }
         }
 
         PollEvents(xr);
@@ -1507,44 +1978,132 @@ int main() {
                 bool rendered = false;
 
                 if (frameState.shouldRender) {
+                    // Locate views in DISPLAY space (physically anchored) or LOCAL fallback
                     XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
                     locateInfo.viewConfigurationType = xr.viewConfigType;
                     locateInfo.displayTime = frameState.predictedDisplayTime;
-                    locateInfo.space = xr.localSpace;
+                    locateInfo.space = (xr.displaySpace != XR_NULL_HANDLE)
+                        ? xr.displaySpace : xr.localSpace;
 
                     XrViewState viewState = {XR_TYPE_VIEW_STATE};
                     uint32_t viewCount = 2;
                     XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
 
-                    XrResult locResult = xrLocateViews(xr.session, &locateInfo, &viewState, 2, &viewCount, views);
+                    XrResult locResult = xrLocateViews(xr.session, &locateInfo,
+                        &viewState, 2, &viewCount, views);
                     if (XR_SUCCEEDED(locResult) &&
                         (viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) &&
                         (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT))
                     {
+                        // Save raw display-space positions for Kooima + HUD
+                        XrVector3f rawEyePos[2] = {views[0].pose.position, views[1].pose.position};
+
+                        // Store raw eye positions for HUD (pre-player-transform)
+                        xr.leftEyeX = rawEyePos[0].x; xr.leftEyeY = rawEyePos[0].y; xr.leftEyeZ = rawEyePos[0].z;
+                        xr.rightEyeX = rawEyePos[1].x; xr.rightEyeY = rawEyePos[1].y; xr.rightEyeZ = rawEyePos[1].z;
+                        xr.eyeTrackingActive = (viewState.viewStateFlags
+                            & XR_VIEW_STATE_POSITION_TRACKED_BIT) != 0;
+
+                        // Apply player transform (production-engine locomotion pattern)
+                        XrQuaternionf playerOri;
+                        quat_from_yaw_pitch(g_input.yaw, g_input.pitch, &playerOri);
+
+                        for (int i = 0; i < 2; i++) {
+                            // Scale by zoom, rotate by player, translate
+                            float lx = views[i].pose.position.x / g_input.zoomScale;
+                            float ly = views[i].pose.position.y / g_input.zoomScale;
+                            float lz = views[i].pose.position.z / g_input.zoomScale;
+                            float wx, wy, wz;
+                            quat_rotate_vec3(playerOri, lx, ly, lz, &wx, &wy, &wz);
+                            views[i].pose.position = {
+                                wx + g_input.cameraPosX,
+                                wy + g_input.cameraPosY,
+                                wz + g_input.cameraPosZ};
+                            // worldOri = playerOri * localOri (rotate local by player in world frame)
+                            XrQuaternionf localOri = views[i].pose.orientation;
+                            views[i].pose.orientation = quat_multiply(playerOri, localOri);
+                        }
+
+                        // Determine eye count (mono in 2D, stereo in 3D)
+                        int eyeCount = g_input.displayMode3D ? 2 : 1;
+
+                        // In mono mode, use center eye (average of L/R)
+                        if (!g_input.displayMode3D) {
+                            rawEyePos[0] = {
+                                (rawEyePos[0].x + rawEyePos[1].x) / 2.0f,
+                                (rawEyePos[0].y + rawEyePos[1].y) / 2.0f,
+                                (rawEyePos[0].z + rawEyePos[1].z) / 2.0f};
+                            views[0].pose.position = {
+                                (views[0].pose.position.x + views[1].pose.position.x) / 2.0f,
+                                (views[0].pose.position.y + views[1].pose.position.y) / 2.0f,
+                                (views[0].pose.position.z + views[1].pose.position.z) / 2.0f};
+                        }
+
+                        // Compute render dims based on display mode and output mode.
+                        // SBS: each eye = half width (scaleX=0.5). Anaglyph/blend: each eye = full width.
+                        //
+                        // TODO: SBS mode renders correctly but anaglyph and blend modes are
+                        // stretched 2x horizontally. The effectiveScaleX=1.0 override for
+                        // non-SBS modes should fix the Kooima FOV and render dimensions,
+                        // but the stretch persists. Suspect the issue is in the compositor's
+                        // display processor path (crop-blit aspect ratio vs framebuffer) or
+                        // in how the sim_display shaders sample the crop images. Needs
+                        // further investigation with actual dimension logging at each stage.
+                        float effectiveScaleX = (g_currentOutputMode == 0) ? xr.recommendedViewScaleX : 1.0f;
+                        float effectiveScaleY = xr.recommendedViewScaleY;
+                        uint32_t renderW, renderH;
+                        if (!g_input.displayMode3D) {
+                            renderW = g_windowW;
+                            renderH = g_windowH;
+                        } else {
+                            renderW = (uint32_t)(g_windowW * effectiveScaleX);
+                            renderH = (uint32_t)(g_windowH * effectiveScaleY);
+                        }
+                        if (renderW > xr.swapchains[0].width) renderW = xr.swapchains[0].width;
+                        if (renderH > xr.swapchains[0].height) renderH = xr.swapchains[0].height;
+                        g_renderW = renderW;
+                        g_renderH = renderH;
+
                         rendered = true;
-                        for (int eye = 0; eye < 2; eye++) {
+                        for (int eye = 0; eye < eyeCount; eye++) {
                             uint32_t imageIndex;
                             if (AcquireSwapchainImage(xr, eye, imageIndex)) {
                                 float viewMat[16], projMat[16];
                                 mat4_view_from_xr_pose(viewMat, views[eye].pose);
-                                mat4_from_xr_fov(projMat, views[eye].fov, 0.01f, 100.0f);
+
+                                // Kooima projection uses RAW display-space positions
+                                // screenW uses scale factor so frustum matches per-eye
+                                // viewport portion of the display
+                                XrFovf submitFov = views[eye].fov;
+                                if (xr.displayWidthM > 0 && xr.displayHeightM > 0) {
+                                    float zs = g_input.zoomScale;
+                                    XrVector3f kooimaEye = {rawEyePos[eye].x / zs, rawEyePos[eye].y / zs, rawEyePos[eye].z / zs};
+                                    float screenW = (g_input.displayMode3D
+                                        ? xr.displayWidthM * effectiveScaleX
+                                        : xr.displayWidthM) / zs;
+                                    float screenH = (xr.displayHeightM * effectiveScaleY) / zs;
+                                    mat4_kooima_projection(projMat, kooimaEye,
+                                        screenW, screenH, 0.01f, 100.0f);
+                                    submitFov = compute_kooima_fov(kooimaEye,
+                                        screenW, screenH);
+                                } else {
+                                    mat4_from_xr_fov(projMat, views[eye].fov, 0.01f, 100.0f);
+                                }
 
                                 RenderScene(vkRenderer, eye, imageIndex,
-                                    xr.swapchains[eye].width, xr.swapchains[eye].height,
+                                    renderW, renderH,
                                     viewMat, projMat);
-
                                 ReleaseSwapchainImage(xr, eye);
 
                                 projectionViews[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
                                 projectionViews[eye].subImage.swapchain = xr.swapchains[eye].swapchain;
                                 projectionViews[eye].subImage.imageRect.offset = {0, 0};
                                 projectionViews[eye].subImage.imageRect.extent = {
-                                    (int32_t)xr.swapchains[eye].width,
-                                    (int32_t)xr.swapchains[eye].height
-                                };
+                                    (int32_t)renderW,
+                                    (int32_t)renderH};
                                 projectionViews[eye].subImage.imageArrayIndex = 0;
                                 projectionViews[eye].pose = views[eye].pose;
-                                projectionViews[eye].fov = views[eye].fov;
+                                projectionViews[eye].fov = submitFov;
                             } else {
                                 rendered = false;
                             }
@@ -1553,7 +2112,8 @@ int main() {
                 }
 
                 if (rendered) {
-                    EndFrame(xr, frameState.predictedDisplayTime, projectionViews);
+                    uint32_t submitCount = g_input.displayMode3D ? 2u : 1u;
+                    EndFrame(xr, frameState.predictedDisplayTime, projectionViews, submitCount);
                 } else {
                     XrFrameEndInfo endInfo = {XR_TYPE_FRAME_END_INFO};
                     endInfo.displayTime = frameState.predictedDisplayTime;
@@ -1565,6 +2125,57 @@ int main() {
             }
         } else {
             usleep(100000);
+        }
+
+        // Update HUD overlay (throttled)
+        g_hudUpdateTimer += deltaTime;
+        if (g_hudUpdateTimer >= 0.5f) {
+            g_hudUpdateTimer = 0.0f;
+            @autoreleasepool {
+                if (g_input.hudVisible && g_hudView != nil) {
+                    double fps = (g_avgFrameTime > 0) ? 1.0 / g_avgFrameTime : 0;
+                    const char *outputModeNames[] = {"SBS", "Anaglyph", "Blend"};
+                    const char *outputModeName = (g_currentOutputMode >= 0 && g_currentOutputMode <= 2)
+                        ? outputModeNames[g_currentOutputMode] : "?";
+                    NSString *text = [NSString stringWithFormat:
+                        @"FPS: %.0f  (%.1f ms)\n"
+                        "Mode: %s%s  Output: %s\n"
+                        "Render: %ux%u\n"
+                        "Window: %ux%u\n"
+                        "Display: %.3f x %.3f m\n"
+                        "Scale: %.2f x %.2f\n"
+                        "Nominal: (%.3f, %.3f, %.3f)\n"
+                        "Eye L: (%.3f, %.3f, %.3f)\n"
+                        "Eye R: (%.3f, %.3f, %.3f)\n"
+                        "Camera: (%.2f, %.2f, %.2f)\n"
+                        "Yaw: %.1f\u00b0  Pitch: %.1f\u00b0  Zoom: %.2fx\n"
+                        "Track: %s\n"
+                        "\n"
+                        "WASD/QE=Move  Drag=Look  Scroll=Zoom\n"
+                        "Space=Reset  V=2D/3D  Tab=HUD  ESC=Quit",
+                        fps, g_avgFrameTime * 1000.0,
+                        g_input.displayMode3D ? "3D (Stereo)" : "2D (Mono)",
+                        xr.supportsDisplayModeSwitch ? "" : " [no switch]",
+                        outputModeName,
+                        g_renderW, g_renderH,
+                        g_windowW, g_windowH,
+                        xr.displayWidthM, xr.displayHeightM,
+                        xr.recommendedViewScaleX, xr.recommendedViewScaleY,
+                        xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ,
+                        xr.leftEyeX, xr.leftEyeY, xr.leftEyeZ,
+                        xr.rightEyeX, xr.rightEyeY, xr.rightEyeZ,
+                        g_input.cameraPosX, g_input.cameraPosY, g_input.cameraPosZ,
+                        g_input.yaw * 180.0f / 3.14159265f,
+                        g_input.pitch * 180.0f / 3.14159265f,
+                        g_input.zoomScale,
+                        xr.eyeTrackingActive ? "Active" : "None"];
+                    g_hudView.hudText = text;
+                    [g_hudView setNeedsDisplay:YES];
+                    [g_hudView setHidden:NO];
+                } else if (g_hudView != nil) {
+                    [g_hudView setHidden:YES];
+                }
+            }
         }
     }
 
