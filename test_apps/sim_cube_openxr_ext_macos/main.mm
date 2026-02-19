@@ -73,9 +73,6 @@
 
 struct InputState {
     // Mouse drag for camera look
-    bool dragging = false;
-    int dragStartX = 0;
-    int dragStartY = 0;
     float yaw = 0.0f;
     float pitch = 0.0f;
 
@@ -1115,30 +1112,16 @@ static void PumpMacOSEvents() {
             NSEventType type = [event type];
 
             if (type == NSEventTypeLeftMouseDown) {
-                // Only start drag if click is inside the content view (not title bar / resize edge).
-                // Window resize sends LeftMouseDown + LeftMouseDragged with large deltas that
-                // would otherwise spin the camera.
-                NSPoint loc = [event locationInWindow];
-                NSView *contentView = [g_window contentView];
-                NSPoint viewLoc = [contentView convertPoint:loc fromView:nil];
-                if (NSPointInRect(viewLoc, [contentView bounds])) {
-                    g_input.dragging = true;
-                    g_input.dragStartX = (int)loc.x;
-                    g_input.dragStartY = (int)loc.y;
-                    if ([event clickCount] >= 2) g_input.resetViewRequested = true;
-                }
-            } else if (type == NSEventTypeLeftMouseUp) {
-                g_input.dragging = false;
-            } else if (type == NSEventTypeMouseMoved || type == NSEventTypeLeftMouseDragged) {
-                if (g_input.dragging) {
-                    NSPoint loc = [event locationInWindow];
-                    int mx = (int)loc.x, my = (int)loc.y;
-                    g_input.yaw -= (mx - g_input.dragStartX) * 0.005f;
-                    g_input.pitch += (my - g_input.dragStartY) * 0.005f; // NSView Y is bottom-up
+                if ([event clickCount] >= 2) g_input.resetViewRequested = true;
+            } else if (type == NSEventTypeLeftMouseDragged) {
+                // Rotate camera only while left button is physically held.
+                // Uses event deltas — no persistent drag state that can get
+                // stuck when the window-resize modal loop swallows MouseUp.
+                if ([NSEvent pressedMouseButtons] & 1) {
+                    g_input.yaw   -= (float)[event deltaX] * 0.005f;
+                    g_input.pitch -= (float)[event deltaY] * 0.005f;
                     if (g_input.pitch > 1.4f) g_input.pitch = 1.4f;
                     if (g_input.pitch < -1.4f) g_input.pitch = -1.4f;
-                    g_input.dragStartX = mx;
-                    g_input.dragStartY = my;
                 }
             } else if (type == NSEventTypeScrollWheel) {
                 float dy = (float)[event scrollingDeltaY];
