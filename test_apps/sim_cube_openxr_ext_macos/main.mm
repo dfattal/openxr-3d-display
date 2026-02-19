@@ -1987,85 +1987,94 @@ int main() {
     LOG_INFO("Controls: WASD=move, Mouse=look, Scroll=zoom, Space=reset, V=2D/3D, 1/2/3=SBS/anaglyph/blend, TAB=HUD, Cmd+Ctrl+F=fullscreen, ESC=quit");
     LOG_INFO("          V=2D/3D, Tab=HUD, 1/2/3=SBS/Ana/Blend, ESC=quit");
 
-    // Store pointers for the timer callback (all rendering stays on the main thread).
-    static AppXrSession* s_xr = &xr;
-    static VkRenderer* s_vkRenderer = &vkRenderer;
-    static auto s_lastTime = std::chrono::high_resolution_clock::now();
+    // Known issue: during window resize, [NSApp sendEvent:] enters a modal
+    // tracking loop that blocks this while loop, freezing animation and frame
+    // submission until the mouse is released. Two approaches were tried:
+    //
+    //  1. CFRunLoopTimer on kCFRunLoopCommonModes — fires during resize
+    //     tracking but caused "Unknown failure" from the OpenXR loader
+    //     (C++ exception escaping from the Monado runtime).
+    //
+    //  2. Dedicated render pthread — same "Unknown failure". The Monado
+    //     runtime throws when OpenXR frame-loop calls (xrWaitFrame /
+    //     xrBeginFrame / xrEndFrame) run on a thread other than the one
+    //     that created the session. Even starting the session on the main
+    //     thread first did not help.
+    //
+    // The simple while-loop works reliably; resize just pauses animation.
 
-    // Drive rendering from a CFRunLoopTimer on kCFRunLoopCommonModes.
-    // This fires during window resize tracking (when a while-loop
-    // would be blocked inside [NSApp sendEvent:]).
-    CFRunLoopTimerRef renderTimer = CFRunLoopTimerCreateWithHandler(
-        NULL, CFAbsoluteTimeGetCurrent(), 1.0 / 120.0, 0, 0,
-        ^(CFRunLoopTimerRef timer) {
-        // Guard against re-entrancy: the timer can fire during [NSApp sendEvent:]
-        // which enters a nested run loop (e.g. window resize tracking).
-        static bool s_inFrame = false;
-        if (s_inFrame) return;
-        s_inFrame = true;
+    auto lastTime = std::chrono::high_resolution_clock::now();
 
+    while (g_running && !xr.exitRequested) {
         PumpMacOSEvents();
 
         auto now = std::chrono::high_resolution_clock::now();
-        float deltaTime = std::chrono::duration<float>(now - s_lastTime).count();
-        s_lastTime = now;
+        float deltaTime = std::chrono::duration<float>(now - lastTime).count();
+        lastTime = now;
 
+        // Performance stats
         g_frameCount++;
         g_avgFrameTime = g_avgFrameTime * 0.95 + deltaTime * 0.05;
 
         UpdateCameraMovement(g_input, deltaTime);
 
-        s_vkRenderer->cubeRotation += deltaTime * 0.5f;
-        if (s_vkRenderer->cubeRotation > 2.0f * 3.14159265f)
-            s_vkRenderer->cubeRotation -= 2.0f * 3.14159265f;
+        vkRenderer.cubeRotation += deltaTime * 0.5f;
+        if (vkRenderer.cubeRotation > 2.0f * 3.14159265f)
+            vkRenderer.cubeRotation -= 2.0f * 3.14159265f;
 
+        // Handle display mode toggle (V key)
         if (g_input.displayModeToggleRequested) {
             g_input.displayModeToggleRequested = false;
-            if (s_xr->pfnRequestDisplayModeEXT && s_xr->session != XR_NULL_HANDLE) {
+            if (xr.pfnRequestDisplayModeEXT && xr.session != XR_NULL_HANDLE) {
                 XrDisplayModeEXT mode = g_input.displayMode3D
                     ? XR_DISPLAY_MODE_3D_EXT : XR_DISPLAY_MODE_2D_EXT;
-                XrResult modeResult = s_xr->pfnRequestDisplayModeEXT(s_xr->session, mode);
+                XrResult modeResult = xr.pfnRequestDisplayModeEXT(xr.session, mode);
                 LOG_INFO("Display mode → %s (%s)", g_input.displayMode3D ? "3D" : "2D",
                     XR_SUCCEEDED(modeResult) ? "OK" : "failed");
             }
         }
 
-        PollEvents(*s_xr);
+        PollEvents(xr);
 
-        if (s_xr->sessionRunning) {
+        if (xr.sessionRunning) {
             XrFrameState frameState;
-            if (BeginFrame(*s_xr, frameState)) {
+            if (BeginFrame(xr, frameState)) {
                 XrCompositionLayerProjectionView projectionViews[2] = {};
                 bool rendered = false;
 
                 if (frameState.shouldRender) {
+                    // Locate views in DISPLAY space (physically anchored) or LOCAL fallback
                     XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
-                    locateInfo.viewConfigurationType = s_xr->viewConfigType;
+                    locateInfo.viewConfigurationType = xr.viewConfigType;
                     locateInfo.displayTime = frameState.predictedDisplayTime;
-                    locateInfo.space = (s_xr->displaySpace != XR_NULL_HANDLE)
-                        ? s_xr->displaySpace : s_xr->localSpace;
+                    locateInfo.space = (xr.displaySpace != XR_NULL_HANDLE)
+                        ? xr.displaySpace : xr.localSpace;
 
                     XrViewState viewState = {XR_TYPE_VIEW_STATE};
                     uint32_t viewCount = 2;
                     XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
 
-                    XrResult locResult = xrLocateViews(s_xr->session, &locateInfo,
+                    XrResult locResult = xrLocateViews(xr.session, &locateInfo,
                         &viewState, 2, &viewCount, views);
                     if (XR_SUCCEEDED(locResult) &&
                         (viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) &&
                         (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT))
                     {
+                        // Save raw display-space positions for Kooima + HUD
                         XrVector3f rawEyePos[2] = {views[0].pose.position, views[1].pose.position};
 
-                        s_xr->leftEyeX = rawEyePos[0].x; s_xr->leftEyeY = rawEyePos[0].y; s_xr->leftEyeZ = rawEyePos[0].z;
-                        s_xr->rightEyeX = rawEyePos[1].x; s_xr->rightEyeY = rawEyePos[1].y; s_xr->rightEyeZ = rawEyePos[1].z;
-                        s_xr->eyeTrackingActive = (viewState.viewStateFlags
+                        // Store raw eye positions for HUD (pre-player-transform)
+                        xr.leftEyeX = rawEyePos[0].x; xr.leftEyeY = rawEyePos[0].y; xr.leftEyeZ = rawEyePos[0].z;
+                        xr.rightEyeX = rawEyePos[1].x; xr.rightEyeY = rawEyePos[1].y; xr.rightEyeZ = rawEyePos[1].z;
+                        xr.eyeTrackingActive = (viewState.viewStateFlags
                             & XR_VIEW_STATE_POSITION_TRACKED_BIT) != 0;
 
+                        // Apply player transform (production-engine locomotion pattern)
                         XrQuaternionf playerOri;
                         quat_from_yaw_pitch(g_input.yaw, g_input.pitch, &playerOri);
 
                         for (int i = 0; i < 2; i++) {
+                            // Scale by zoom, rotate by player, translate
                             float lx = views[i].pose.position.x / g_input.zoomScale;
                             float ly = views[i].pose.position.y / g_input.zoomScale;
                             float lz = views[i].pose.position.z / g_input.zoomScale;
@@ -2075,12 +2084,15 @@ int main() {
                                 wx + g_input.cameraPosX,
                                 wy + g_input.cameraPosY,
                                 wz + g_input.cameraPosZ};
+                            // worldOri = playerOri * localOri (rotate local by player in world frame)
                             XrQuaternionf localOri = views[i].pose.orientation;
                             views[i].pose.orientation = quat_multiply(playerOri, localOri);
                         }
 
+                        // Determine eye count (mono in 2D, stereo in 3D)
                         int eyeCount = g_input.displayMode3D ? 2 : 1;
 
+                        // In mono mode, use center eye (average of L/R)
                         if (!g_input.displayMode3D) {
                             rawEyePos[0] = {
                                 (rawEyePos[0].x + rawEyePos[1].x) / 2.0f,
@@ -2092,17 +2104,18 @@ int main() {
                                 (views[0].pose.position.z + views[1].pose.position.z) / 2.0f};
                         }
 
-                        uint32_t eyeRenderW = s_xr->swapchain.width / 2;
-                        uint32_t eyeRenderH = s_xr->swapchain.height;
+                        // Compute render dims for SBS single-swapchain
+                        uint32_t eyeRenderW = xr.swapchain.width / 2;
+                        uint32_t eyeRenderH = xr.swapchain.height;
                         uint32_t renderW, renderH;
                         if (!g_input.displayMode3D) {
                             renderW = g_windowW;
                             renderH = g_windowH;
-                            if (renderW > s_xr->swapchain.width) renderW = s_xr->swapchain.width;
-                            if (renderH > s_xr->swapchain.height) renderH = s_xr->swapchain.height;
+                            if (renderW > xr.swapchain.width) renderW = xr.swapchain.width;
+                            if (renderH > xr.swapchain.height) renderH = xr.swapchain.height;
                         } else {
-                            renderW = (uint32_t)(g_windowW * s_xr->recommendedViewScaleX);
-                            renderH = (uint32_t)(g_windowH * s_xr->recommendedViewScaleY);
+                            renderW = (uint32_t)(g_windowW * xr.recommendedViewScaleX);
+                            renderH = (uint32_t)(g_windowH * xr.recommendedViewScaleY);
                             if (renderW > eyeRenderW) renderW = eyeRenderW;
                             if (renderH > eyeRenderH) renderH = eyeRenderH;
                         }
@@ -2111,26 +2124,32 @@ int main() {
 
                         rendered = true;
                         uint32_t imageIndex;
-                        if (AcquireSwapchainImage(*s_xr, imageIndex)) {
+                        if (AcquireSwapchainImage(xr, imageIndex)) {
                             EyeRenderParams eyeParams[2];
                             for (int eye = 0; eye < eyeCount; eye++) {
                                 mat4_view_from_xr_pose(eyeParams[eye].viewMat, views[eye].pose);
 
+                                // Kooima projection uses RAW display-space positions
+                                // Viewport-scaled: convert window pixels to meters,
+                                // apply isotropic scale so FOV stays consistent across
+                                // window sizes on the 3D display.
                                 XrFovf submitFov = views[eye].fov;
-                                if (s_xr->displayWidthM > 0 && s_xr->displayHeightM > 0) {
+                                if (xr.displayWidthM > 0 && xr.displayHeightM > 0) {
                                     float zs = g_input.zoomScale;
                                     XrVector3f kooimaEye = {rawEyePos[eye].x / zs, rawEyePos[eye].y / zs, rawEyePos[eye].z / zs};
-                                    float dispPxW = s_xr->displayPixelWidth > 0 ? (float)s_xr->displayPixelWidth : (float)s_xr->swapchain.width;
-                                    float dispPxH = s_xr->displayPixelHeight > 0 ? (float)s_xr->displayPixelHeight : (float)s_xr->swapchain.height;
-                                    float pxSizeX = s_xr->displayWidthM / dispPxW;
-                                    float pxSizeY = s_xr->displayHeightM / dispPxH;
+                                    float dispPxW = xr.displayPixelWidth > 0 ? (float)xr.displayPixelWidth : (float)xr.swapchain.width;
+                                    float dispPxH = xr.displayPixelHeight > 0 ? (float)xr.displayPixelHeight : (float)xr.swapchain.height;
+                                    float pxSizeX = xr.displayWidthM / dispPxW;
+                                    float pxSizeY = xr.displayHeightM / dispPxH;
                                     float winW_m = (float)g_windowW * pxSizeX;
                                     float winH_m = (float)g_windowH * pxSizeY;
-                                    float minDisp = fminf(s_xr->displayWidthM, s_xr->displayHeightM);
+                                    float minDisp = fminf(xr.displayWidthM, xr.displayHeightM);
                                     float minWin  = fminf(winW_m, winH_m);
                                     float vs = minDisp / minWin;
                                     float screenWidthM  = winW_m * vs;
                                     float screenHeightM = winH_m * vs;
+                                    // Halve screenW only for SBS mode (each eye sees
+                                    // half the display). Anaglyph/blend: full width.
                                     bool sbsMode = g_input.displayMode3D && g_currentOutputMode == 0;
                                     float screenW = (sbsMode
                                         ? screenWidthM / 2.0f
@@ -2151,7 +2170,7 @@ int main() {
                                 eyeParams[eye].height = renderH;
 
                                 projectionViews[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
-                                projectionViews[eye].subImage.swapchain = s_xr->swapchain.swapchain;
+                                projectionViews[eye].subImage.swapchain = xr.swapchain.swapchain;
                                 projectionViews[eye].subImage.imageRect.offset = {(int32_t)vpX, 0};
                                 projectionViews[eye].subImage.imageRect.extent = {
                                     (int32_t)renderW,
@@ -2160,8 +2179,8 @@ int main() {
                                 projectionViews[eye].pose = views[eye].pose;
                                 projectionViews[eye].fov = submitFov;
                             }
-                            RenderScene(*s_vkRenderer, imageIndex, eyeParams, eyeCount);
-                            ReleaseSwapchainImage(*s_xr);
+                            RenderScene(vkRenderer, imageIndex, eyeParams, eyeCount);
+                            ReleaseSwapchainImage(xr);
                         } else {
                             rendered = false;
                         }
@@ -2170,16 +2189,18 @@ int main() {
 
                 if (rendered) {
                     uint32_t submitCount = g_input.displayMode3D ? 2u : 1u;
-                    EndFrame(*s_xr, frameState.predictedDisplayTime, projectionViews, submitCount);
+                    EndFrame(xr, frameState.predictedDisplayTime, projectionViews, submitCount);
                 } else {
                     XrFrameEndInfo endInfo = {XR_TYPE_FRAME_END_INFO};
                     endInfo.displayTime = frameState.predictedDisplayTime;
                     endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
                     endInfo.layerCount = 0;
                     endInfo.layers = nullptr;
-                    xrEndFrame(s_xr->session, &endInfo);
+                    xrEndFrame(xr.session, &endInfo);
                 }
             }
+        } else {
+            usleep(100000);
         }
 
         // Update HUD overlay (throttled)
@@ -2210,20 +2231,20 @@ int main() {
                         "Space=Reset  V=2D/3D  Tab=HUD  ESC=Quit",
                         fps, g_avgFrameTime * 1000.0,
                         g_input.displayMode3D ? "3D (Stereo)" : "2D (Mono)",
-                        s_xr->supportsDisplayModeSwitch ? "" : " [no switch]",
+                        xr.supportsDisplayModeSwitch ? "" : " [no switch]",
                         outputModeName,
                         g_renderW, g_renderH,
                         g_windowW, g_windowH,
-                        s_xr->displayWidthM, s_xr->displayHeightM,
-                        s_xr->recommendedViewScaleX, s_xr->recommendedViewScaleY,
-                        s_xr->nominalViewerX, s_xr->nominalViewerY, s_xr->nominalViewerZ,
-                        s_xr->leftEyeX, s_xr->leftEyeY, s_xr->leftEyeZ,
-                        s_xr->rightEyeX, s_xr->rightEyeY, s_xr->rightEyeZ,
+                        xr.displayWidthM, xr.displayHeightM,
+                        xr.recommendedViewScaleX, xr.recommendedViewScaleY,
+                        xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ,
+                        xr.leftEyeX, xr.leftEyeY, xr.leftEyeZ,
+                        xr.rightEyeX, xr.rightEyeY, xr.rightEyeZ,
                         g_input.cameraPosX, g_input.cameraPosY, g_input.cameraPosZ,
                         g_input.yaw * 180.0f / 3.14159265f,
                         g_input.pitch * 180.0f / 3.14159265f,
                         g_input.zoomScale,
-                        s_xr->eyeTrackingActive ? "Active" : "None"];
+                        xr.eyeTrackingActive ? "Active" : "None"];
                     g_hudView.hudText = text;
                     [g_hudView setNeedsDisplay:YES];
                     [g_hudView setHidden:NO];
@@ -2232,16 +2253,7 @@ int main() {
                 }
             }
         }
-
-        if (!g_running || s_xr->exitRequested)
-            CFRunLoopStop(CFRunLoopGetMain());
-
-        s_inFrame = false;
-    });
-    CFRunLoopAddTimer(CFRunLoopGetMain(), renderTimer, kCFRunLoopCommonModes);
-    CFRunLoopRun();
-    CFRunLoopRemoveTimer(CFRunLoopGetMain(), renderTimer, kCFRunLoopCommonModes);
-    CFRelease(renderTimer);
+    }
 
     // Clean exit
     if (!xr.exitRequested && xr.session != XR_NULL_HANDLE && xr.sessionRunning) {
