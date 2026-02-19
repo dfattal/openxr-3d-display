@@ -175,6 +175,14 @@ comp_window_mswin_wait_for_paint(struct comp_target *ct);
 void
 comp_window_mswin_signal_paint_done(struct comp_target *ct);
 
+struct xrt_system_devices;
+
+/*!
+ * Pass system devices to the Windows Vulkan window for qwerty input forwarding.
+ */
+void
+comp_window_mswin_set_system_devices(struct comp_target *ct, struct xrt_system_devices *xsysd);
+
 #endif // XRT_OS_WINDOWS
 
 #ifdef XRT_OS_MACOS

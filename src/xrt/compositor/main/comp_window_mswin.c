@@ -17,6 +17,13 @@
 #include "util/u_misc.h"
 #include "os/os_threading.h"
 
+#include "sim_display/sim_display_interface.h"
+
+#ifdef XRT_BUILD_DRIVER_QWERTY
+#include "qwerty/qwerty_interface.h"
+#include "xrt/xrt_system.h"
+#endif
+
 
 #undef ALLOW_CLOSING_WINDOW
 
@@ -63,6 +70,11 @@ struct comp_window_mswin
 	HANDLE paint_requested_event;
 	//! Auto-reset event: compositor signals when rendering is done during drag
 	HANDLE paint_done_event;
+
+#ifdef XRT_BUILD_DRIVER_QWERTY
+	bool qwerty_enabled;
+	struct xrt_system_devices *xsysd;
+#endif
 };
 
 static WCHAR szWindowClass[] = L"Monado";
@@ -152,6 +164,45 @@ WndProc(HWND hWnd, unsigned int message, WPARAM wParam, LPARAM lParam)
 			set_fullscreen(hWnd, cwm->is_fullscreen);
 			COMP_INFO(c, "F11: Toggled to %s mode", cwm->is_fullscreen ? "fullscreen" : "windowed");
 		}
+		// 1/2/3: switch sim_display output mode (SBS / Anaglyph / Blend)
+		if (wParam == '1') {
+			sim_display_set_output_mode(SIM_DISPLAY_OUTPUT_SBS);
+			return 0;
+		} else if (wParam == '2') {
+			sim_display_set_output_mode(SIM_DISPLAY_OUTPUT_ANAGLYPH);
+			return 0;
+		} else if (wParam == '3') {
+			sim_display_set_output_mode(SIM_DISPLAY_OUTPUT_BLEND);
+			return 0;
+		}
+		// FALLTHROUGH to qwerty forwarding
+	case WM_KEYUP:
+	case WM_SYSKEYDOWN:
+	case WM_SYSKEYUP:
+#ifdef XRT_BUILD_DRIVER_QWERTY
+		if (cwm->qwerty_enabled && cwm->xsysd != NULL) {
+			bool handled = false;
+			qwerty_process_win32(cwm->xsysd->xdevs, cwm->xsysd->xdev_count,
+			                     message, wParam, lParam, &handled);
+			if (handled) {
+				return 0;
+			}
+		}
+#endif
+		break;
+	case WM_LBUTTONDOWN:
+	case WM_LBUTTONUP:
+	case WM_RBUTTONDOWN:
+	case WM_RBUTTONUP:
+	case WM_MOUSEMOVE:
+	case WM_MOUSEWHEEL:
+#ifdef XRT_BUILD_DRIVER_QWERTY
+		if (cwm->qwerty_enabled && cwm->xsysd != NULL) {
+			bool handled = false;
+			qwerty_process_win32(cwm->xsysd->xdevs, cwm->xsysd->xdev_count,
+			                     message, wParam, lParam, &handled);
+		}
+#endif
 		break;
 	case WM_SIZE:
 		if (wParam != SIZE_MINIMIZED) {
@@ -678,6 +729,20 @@ comp_window_mswin_signal_paint_done(struct comp_target *ct)
 	struct comp_window_mswin *cwm = (struct comp_window_mswin *)ct;
 	if (cwm->paint_done_event)
 		SetEvent(cwm->paint_done_event);
+}
+
+
+void
+comp_window_mswin_set_system_devices(struct comp_target *ct, struct xrt_system_devices *xsysd)
+{
+#ifdef XRT_BUILD_DRIVER_QWERTY
+	struct comp_window_mswin *cwm = (struct comp_window_mswin *)ct;
+	cwm->xsysd = xsysd;
+	cwm->qwerty_enabled = true;
+#else
+	(void)ct;
+	(void)xsysd;
+#endif
 }
 
 
