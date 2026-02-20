@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Monado WebXR Bridge",
+  "version": "1.0",
+  "description": "Bridges WebXR content to Monado OpenXR runtime on macOS",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["webxr-polyfill-bundle.js"],
+      "matches": ["*://*/*"]
+    }
+  ],
+  "permissions": [
+    "nativeMessaging"
+  ],
+  "host_permissions": ["*://*/*"]
+}
