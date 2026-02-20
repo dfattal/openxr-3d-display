@@ -332,10 +332,10 @@ struct multi_compositor
 #ifdef XRT_OS_WINDOWS
 		//! Self-created window when no external HWND provided (Windows only)
 		struct comp_d3d11_window *own_window;
+#endif
 
 		//! True if we created the window ourselves (must destroy on end_session)
 		bool owns_window;
-#endif
 
 		//! @name HUD overlay (runtime-owned windows only)
 		//! @{

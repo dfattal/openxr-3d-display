@@ -17,6 +17,7 @@
 
 #include "qwerty_device.h"
 #include "util/u_device.h"
+#include "util/u_hud.h"
 #include "util/u_logging.h"
 #include "xrt/xrt_device.h"
 
@@ -442,6 +443,11 @@ qwerty_process_macos(struct xrt_device **xdevs,
 					qwerty_reset_controller_pose(qright);
 				}
 			}
+			break;
+
+		case kVK_Tab:
+			if (is_down && ![event isARepeat])
+				u_hud_toggle();
 			break;
 
 		default:

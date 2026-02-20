@@ -1643,11 +1643,9 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 	mc->session_render.hud_gpu_initialized = false;
 	mc->session_render.hud_last_frame_time_ns = 0;
 	mc->session_render.hud_smoothed_frame_time_ms = 16.67f;
-#ifdef XRT_OS_WINDOWS
 	if (mc->session_render.owns_window) {
 		u_hud_create(&mc->session_render.hud, 480, 256);
 	}
-#endif
 
 	U_LOG_W("Setting session_render.initialized = true...");
 	mc->session_render.initialized = true;
