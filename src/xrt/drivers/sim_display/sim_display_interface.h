@@ -85,6 +85,7 @@ struct sim_display_info
 	float nominal_z_m;
 	uint32_t display_pixel_width;
 	uint32_t display_pixel_height;
+	float zoom_scale;
 };
 
 /*!
