@@ -2728,12 +2728,10 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 
 submit_and_present:
 	// HUD overlay (post-weave, always readable)
-#ifdef XRT_OS_WINDOWS
 	if (mc->session_render.owns_window) {
 		session_render_hud_overlay(mc, vk, cmd, ct->images[buffer_index].handle,
 		                           framebufferWidth, framebufferHeight, is_mono);
 	}
-#endif
 
 	// End command buffer
 	ret = vk->vkEndCommandBuffer(cmd);
