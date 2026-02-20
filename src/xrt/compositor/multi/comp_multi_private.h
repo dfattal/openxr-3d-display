@@ -27,6 +27,7 @@
 // Vulkan types needed for Y-flip SBS image and display processor support
 // (comp_multi always links aux_vk, so Vulkan is always available)
 #include "xrt/xrt_vulkan_includes.h"
+#include "vk/vk_hud_blend.h"
 
 #ifdef XRT_HAVE_LEIA_SR_VULKAN
 #include "render/render_interface.h"
@@ -345,6 +346,7 @@ struct multi_compositor
 		VkBuffer hud_staging_buffer;
 		VkDeviceMemory hud_staging_memory;
 		void *hud_staging_mapped;
+		struct vk_hud_blend hud_blend; //!< Alpha-blended HUD overlay pipeline
 		bool hud_gpu_initialized;
 		uint64_t hud_last_frame_time_ns;
 		float hud_smoothed_frame_time_ms;
