@@ -1,14 +1,19 @@
 #!/bin/bash
-# Create a macOS .app bundle for SimCube OpenXR test app
-# Usage: ./create_app_bundle.sh <artifact-dir> [output.app]
+# Create a macOS .app bundle for an OpenXR test app
+# Usage: ./create_app_bundle.sh <artifact-dir> [output.app] [binary-name]
 set -e
 
-ARTIFACT_DIR="${1:?Usage: $0 <artifact-dir> [output.app]}"
+ARTIFACT_DIR="${1:?Usage: $0 <artifact-dir> [output.app] [binary-name]}"
 APP_BUNDLE="${2:-SimCubeOpenXR.app}"
+BINARY_NAME="${3:-sim_cube_openxr}"
 VERSION="${SRMONADO_VERSION:-1.0.0}"
 
-if [ ! -f "$ARTIFACT_DIR/bin/sim_cube_openxr" ]; then
-    echo "Error: sim_cube_openxr binary not found in $ARTIFACT_DIR/bin/"
+# Derive display name from app bundle filename (e.g. "SimCubeOpenXR" from "SimCubeOpenXR.app")
+BUNDLE_DISPLAY_NAME="$(basename "$APP_BUNDLE" .app)"
+BUNDLE_ID="com.leiainc.$(echo "$BUNDLE_DISPLAY_NAME" | tr '[:upper:]' '[:lower:]')"
+
+if [ ! -f "$ARTIFACT_DIR/bin/$BINARY_NAME" ]; then
+    echo "Error: $BINARY_NAME binary not found in $ARTIFACT_DIR/bin/"
     exit 1
 fi
 
@@ -29,13 +34,13 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>SimCubeOpenXR</string>
+    <string>${BUNDLE_DISPLAY_NAME}</string>
     <key>CFBundleIdentifier</key>
-    <string>com.leiainc.simcubeopenxr</string>
+    <string>${BUNDLE_ID}</string>
     <key>CFBundleName</key>
-    <string>SimCube OpenXR</string>
+    <string>${BUNDLE_DISPLAY_NAME}</string>
     <key>CFBundleDisplayName</key>
-    <string>SimCube OpenXR</string>
+    <string>${BUNDLE_DISPLAY_NAME}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -51,21 +56,21 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 EOF
 
 # --- Shell launcher (CFBundleExecutable) ---
-cat > "$APP_BUNDLE/Contents/MacOS/SimCubeOpenXR" <<'LAUNCHER'
+cat > "$APP_BUNDLE/Contents/MacOS/$BUNDLE_DISPLAY_NAME" <<LAUNCHER
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")/../Resources" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
-export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
-export VK_ICD_FILENAMES="$DIR/MoltenVK_icd.json"
-export VK_DRIVER_FILES="$DIR/MoltenVK_icd.json"
+DIR="\$(cd "\$(dirname "\$0")/../Resources" && pwd)"
+export XR_RUNTIME_JSON="\$DIR/openxr_monado.json"
+export DYLD_LIBRARY_PATH="\$DIR/lib:\${DYLD_LIBRARY_PATH:-}"
+export VK_ICD_FILENAMES="\$DIR/MoltenVK_icd.json"
+export VK_DRIVER_FILES="\$DIR/MoltenVK_icd.json"
 export SIM_DISPLAY_ENABLE=1
-export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
-exec "$DIR/sim_cube_openxr"
+export SIM_DISPLAY_OUTPUT="\${SIM_DISPLAY_OUTPUT:-anaglyph}"
+exec "\$DIR/$BINARY_NAME"
 LAUNCHER
-chmod +x "$APP_BUNDLE/Contents/MacOS/SimCubeOpenXR"
+chmod +x "$APP_BUNDLE/Contents/MacOS/$BUNDLE_DISPLAY_NAME"
 
 # --- Resources: binary and libraries ---
-cp "$ARTIFACT_DIR/bin/sim_cube_openxr" "$APP_BUNDLE/Contents/Resources/"
+cp "$ARTIFACT_DIR/bin/$BINARY_NAME" "$APP_BUNDLE/Contents/Resources/"
 cp "$ARTIFACT_DIR"/lib/libopenxr_monado* "$APP_BUNDLE/Contents/Resources/lib/"
 cp "$ARTIFACT_DIR"/lib/libopenxr_loader* "$APP_BUNDLE/Contents/Resources/lib/"
 cp "$ARTIFACT_DIR/lib/libvulkan.1.dylib" "$APP_BUNDLE/Contents/Resources/lib/"
