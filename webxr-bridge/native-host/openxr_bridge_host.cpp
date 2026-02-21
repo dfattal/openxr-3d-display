@@ -122,6 +122,17 @@ struct AppState {
     // Command pool for transfer commands
     VkCommandPool cmdPool = VK_NULL_HANDLE;
     VkFence uploadFence = VK_NULL_HANDLE;
+
+    // Controller actions
+    XrActionSet actionSet = XR_NULL_HANDLE;
+    XrAction triggerAction = XR_NULL_HANDLE;   // float
+    XrAction squeezeAction = XR_NULL_HANDLE;   // boolean
+    XrAction menuAction = XR_NULL_HANDLE;      // boolean
+    XrAction thumbstickAction = XR_NULL_HANDLE; // vec2f
+    XrAction thumbstickClickAction = XR_NULL_HANDLE; // boolean
+    XrAction gripPoseAction = XR_NULL_HANDLE;  // pose
+    XrPath handPaths[2] = {};
+    XrSpace gripSpaces[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
 };
 
 // ============================================================================
@@ -376,6 +387,161 @@ static bool CreateVulkanDevice(AppState& app) {
     vkGetDeviceQueue(app.device, app.queueFamilyIndex, 0, &app.graphicsQueue);
     LOG_INFO("Vulkan device and queue created");
 
+    return true;
+}
+
+// ============================================================================
+// Pose math helpers
+// ============================================================================
+
+// Rotate vec3 by quaternion: v' = q * v * q^-1
+static void QuatRotateVec3(const XrQuaternionf& q, const XrVector3f& v, XrVector3f& out) {
+    // t = 2 * cross(q.xyz, v)
+    float tx = 2.0f * (q.y * v.z - q.z * v.y);
+    float ty = 2.0f * (q.z * v.x - q.x * v.z);
+    float tz = 2.0f * (q.x * v.y - q.y * v.x);
+    // result = v + w*t + cross(q.xyz, t)
+    out.x = v.x + q.w * tx + (q.y * tz - q.z * ty);
+    out.y = v.y + q.w * ty + (q.z * tx - q.x * tz);
+    out.z = v.z + q.w * tz + (q.x * ty - q.y * tx);
+}
+
+// Quaternion multiply: result = a * b
+static XrQuaternionf QuatMultiply(const XrQuaternionf& a, const XrQuaternionf& b) {
+    return {
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+    };
+}
+
+// Compose child pose into parent space: result = parent * child
+static void ComposePose(const XrPosef& parent, const XrVector3f& childPos,
+                        const XrQuaternionf& childOri, float out[7]) {
+    XrVector3f rotatedPos;
+    QuatRotateVec3(parent.orientation, childPos, rotatedPos);
+    out[0] = parent.position.x + rotatedPos.x;
+    out[1] = parent.position.y + rotatedPos.y;
+    out[2] = parent.position.z + rotatedPos.z;
+    XrQuaternionf q = QuatMultiply(parent.orientation, childOri);
+    out[3] = q.x;
+    out[4] = q.y;
+    out[5] = q.z;
+    out[6] = q.w;
+}
+
+// ============================================================================
+// Action system (controllers)
+// ============================================================================
+
+static bool SetupActions(AppState& app) {
+    LOG_INFO("Setting up controller actions...");
+
+    // Subaction paths for left/right hands
+    XR_CHECK(xrStringToPath(app.instance, "/user/hand/left", &app.handPaths[0]));
+    XR_CHECK(xrStringToPath(app.instance, "/user/hand/right", &app.handPaths[1]));
+
+    // Create action set
+    XrActionSetCreateInfo asci = {XR_TYPE_ACTION_SET_CREATE_INFO};
+    strncpy(asci.actionSetName, "gameplay", sizeof(asci.actionSetName) - 1);
+    strncpy(asci.localizedActionSetName, "Gameplay", sizeof(asci.localizedActionSetName) - 1);
+    asci.priority = 0;
+    XR_CHECK(xrCreateActionSet(app.instance, &asci, &app.actionSet));
+
+    // Helper: create an action with both hand subaction paths
+    auto createAction = [&](XrAction& action, const char* name,
+                            const char* localName, XrActionType type) -> bool {
+        XrActionCreateInfo aci = {XR_TYPE_ACTION_CREATE_INFO};
+        aci.actionType = type;
+        strncpy(aci.actionName, name, sizeof(aci.actionName) - 1);
+        strncpy(aci.localizedActionName, localName, sizeof(aci.localizedActionName) - 1);
+        aci.countSubactionPaths = 2;
+        aci.subactionPaths = app.handPaths;
+        XR_CHECK(xrCreateAction(app.actionSet, &aci, &action));
+        return true;
+    };
+
+    if (!createAction(app.triggerAction, "trigger", "Trigger", XR_ACTION_TYPE_FLOAT_INPUT)) return false;
+    if (!createAction(app.squeezeAction, "squeeze", "Squeeze", XR_ACTION_TYPE_BOOLEAN_INPUT)) return false;
+    if (!createAction(app.menuAction, "menu", "Menu", XR_ACTION_TYPE_BOOLEAN_INPUT)) return false;
+    if (!createAction(app.thumbstickAction, "thumbstick", "Thumbstick", XR_ACTION_TYPE_VECTOR2F_INPUT)) return false;
+    if (!createAction(app.thumbstickClickAction, "thumbstick_click", "Thumbstick Click", XR_ACTION_TYPE_BOOLEAN_INPUT)) return false;
+    if (!createAction(app.gripPoseAction, "grip_pose", "Grip Pose", XR_ACTION_TYPE_POSE_INPUT)) return false;
+
+    // Helper: convert string to XrPath
+    auto toPath = [&](const char* str) -> XrPath {
+        XrPath p = XR_NULL_PATH;
+        xrStringToPath(app.instance, str, &p);
+        return p;
+    };
+
+    // Suggest bindings for WMR motion controller (qwerty driver's profile)
+    XrPath wmrProfile;
+    XR_CHECK(xrStringToPath(app.instance, "/interaction_profiles/microsoft/motion_controller", &wmrProfile));
+
+    XrActionSuggestedBinding wmrBindings[] = {
+        {app.triggerAction, toPath("/user/hand/left/input/trigger/value")},
+        {app.triggerAction, toPath("/user/hand/right/input/trigger/value")},
+        {app.squeezeAction, toPath("/user/hand/left/input/squeeze/click")},
+        {app.squeezeAction, toPath("/user/hand/right/input/squeeze/click")},
+        {app.menuAction, toPath("/user/hand/left/input/menu/click")},
+        {app.menuAction, toPath("/user/hand/right/input/menu/click")},
+        {app.thumbstickAction, toPath("/user/hand/left/input/thumbstick")},
+        {app.thumbstickAction, toPath("/user/hand/right/input/thumbstick")},
+        {app.thumbstickClickAction, toPath("/user/hand/left/input/thumbstick/click")},
+        {app.thumbstickClickAction, toPath("/user/hand/right/input/thumbstick/click")},
+        {app.gripPoseAction, toPath("/user/hand/left/input/grip/pose")},
+        {app.gripPoseAction, toPath("/user/hand/right/input/grip/pose")},
+    };
+
+    XrInteractionProfileSuggestedBinding wmrSuggestion = {XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    wmrSuggestion.interactionProfile = wmrProfile;
+    wmrSuggestion.suggestedBindings = wmrBindings;
+    wmrSuggestion.countSuggestedBindings = sizeof(wmrBindings) / sizeof(wmrBindings[0]);
+    XR_CHECK(xrSuggestInteractionProfileBindings(app.instance, &wmrSuggestion));
+
+    // Suggest bindings for simple controller fallback
+    XrPath simpleProfile;
+    XR_CHECK(xrStringToPath(app.instance, "/interaction_profiles/khr/simple_controller", &simpleProfile));
+
+    XrActionSuggestedBinding simpleBindings[] = {
+        {app.triggerAction, toPath("/user/hand/left/input/select/click")},
+        {app.triggerAction, toPath("/user/hand/right/input/select/click")},
+        {app.menuAction, toPath("/user/hand/left/input/menu/click")},
+        {app.menuAction, toPath("/user/hand/right/input/menu/click")},
+        {app.gripPoseAction, toPath("/user/hand/left/input/grip/pose")},
+        {app.gripPoseAction, toPath("/user/hand/right/input/grip/pose")},
+    };
+
+    XrInteractionProfileSuggestedBinding simpleSuggestion = {XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    simpleSuggestion.interactionProfile = simpleProfile;
+    simpleSuggestion.suggestedBindings = simpleBindings;
+    simpleSuggestion.countSuggestedBindings = sizeof(simpleBindings) / sizeof(simpleBindings[0]);
+    XR_CHECK(xrSuggestInteractionProfileBindings(app.instance, &simpleSuggestion));
+
+    LOG_INFO("Actions and interaction profile bindings set up");
+    return true;
+}
+
+static bool AttachActionsAndCreateSpaces(AppState& app) {
+    // Attach action set to session
+    XrSessionActionSetsAttachInfo attachInfo = {XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+    attachInfo.countActionSets = 1;
+    attachInfo.actionSets = &app.actionSet;
+    XR_CHECK(xrAttachSessionActionSets(app.session, &attachInfo));
+
+    // Create grip action spaces for each hand
+    for (int i = 0; i < 2; i++) {
+        XrActionSpaceCreateInfo spaceInfo = {XR_TYPE_ACTION_SPACE_CREATE_INFO};
+        spaceInfo.action = app.gripPoseAction;
+        spaceInfo.subactionPath = app.handPaths[i];
+        spaceInfo.poseInActionSpace.orientation = {0, 0, 0, 1};
+        spaceInfo.poseInActionSpace.position = {0, 0, 0};
+        XR_CHECK(xrCreateActionSpace(app.session, &spaceInfo, &app.gripSpaces[i]));
+    }
+
+    LOG_INFO("Action sets attached, grip spaces created");
     return true;
 }
 
@@ -700,7 +866,7 @@ static AppState* g_appState = nullptr; // For WS callback to access swapchain di
 static struct lws* g_clientWsi = nullptr;
 static struct lws_context* g_lwsContext = nullptr;
 static std::mutex g_poseMutex;
-static char g_poseBuf[LWS_PRE + 512]; // LWS_PRE padding + JSON (pose + FOV)
+static char g_poseBuf[LWS_PRE + 2048]; // LWS_PRE padding + JSON (pose + FOV + controllers)
 static int g_poseLen = 0;
 static std::atomic<bool> g_poseReady{false};
 
@@ -840,6 +1006,17 @@ static void WebSocketThread() {
 // ============================================================================
 
 static void Cleanup(AppState& app) {
+    // Controller action spaces
+    for (int i = 0; i < 2; i++) {
+        if (app.gripSpaces[i] != XR_NULL_HANDLE) {
+            xrDestroySpace(app.gripSpaces[i]);
+        }
+    }
+    // Destroying action set auto-destroys child actions
+    if (app.actionSet != XR_NULL_HANDLE) {
+        xrDestroyActionSet(app.actionSet);
+    }
+
     if (app.uploadFence != VK_NULL_HANDLE) {
         vkDestroyFence(app.device, app.uploadFence, nullptr);
     }
@@ -921,6 +1098,11 @@ int main() {
         Cleanup(app);
         return 1;
     }
+    if (!SetupActions(app)) {
+        LOG_ERROR("Action setup failed");
+        Cleanup(app);
+        return 1;
+    }
     if (!CreateSession(app)) {
         LOG_ERROR("Session creation failed");
         Cleanup(app);
@@ -928,6 +1110,11 @@ int main() {
     }
     if (!CreateSpaces(app)) {
         LOG_ERROR("Space creation failed");
+        Cleanup(app);
+        return 1;
+    }
+    if (!AttachActionsAndCreateSpaces(app)) {
+        LOG_ERROR("Action attach failed");
         Cleanup(app);
         return 1;
     }
@@ -984,7 +1171,16 @@ int main() {
         XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
         xrLocateViews(app.session, &locateInfo, &viewState, 2, &viewCount, views);
 
-        // Send composed head pose + per-eye Kooima FOV to browser.
+        // Sync controller actions every frame
+        XrActiveActionSet activeAS = {};
+        activeAS.actionSet = app.actionSet;
+        activeAS.subactionPath = XR_NULL_PATH;
+        XrActionsSyncInfo syncInfo = {XR_TYPE_ACTIONS_SYNC_INFO};
+        syncInfo.countActiveActionSets = 1;
+        syncInfo.activeActionSets = &activeAS;
+        xrSyncActions(app.session, &syncInfo);
+
+        // Send composed head pose + per-eye Kooima FOV + controller state to browser.
         // sim_display's get_tracked_pose composes: qwerty_pos + rotate(eye_offset, qwerty_ori)
         // The FOV from xrLocateViews changes with display mode (SBS uses half display width,
         // anaglyph/blend/2D use full width), so we must send it every frame.
@@ -995,17 +1191,149 @@ int main() {
                 (viewLoc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
                 (viewLoc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT))
             {
+                // Query controller state for each hand
+                struct { bool hasData; bool hasPose; float pose[7]; float tr; int sq, mn, tc; float ts[2]; } ctrl[2] = {};
+                for (int hand = 0; hand < 2; hand++) {
+                    XrActionStateGetInfo getInfo = {XR_TYPE_ACTION_STATE_GET_INFO};
+                    getInfo.subactionPath = app.handPaths[hand];
+
+                    getInfo.action = app.triggerAction;
+                    XrActionStateFloat triggerState = {XR_TYPE_ACTION_STATE_FLOAT};
+                    xrGetActionStateFloat(app.session, &getInfo, &triggerState);
+
+                    getInfo.action = app.squeezeAction;
+                    XrActionStateBoolean squeezeState = {XR_TYPE_ACTION_STATE_BOOLEAN};
+                    xrGetActionStateBoolean(app.session, &getInfo, &squeezeState);
+
+                    getInfo.action = app.menuAction;
+                    XrActionStateBoolean menuState = {XR_TYPE_ACTION_STATE_BOOLEAN};
+                    xrGetActionStateBoolean(app.session, &getInfo, &menuState);
+
+                    getInfo.action = app.thumbstickAction;
+                    XrActionStateVector2f thumbstickState = {XR_TYPE_ACTION_STATE_VECTOR2F};
+                    xrGetActionStateVector2f(app.session, &getInfo, &thumbstickState);
+
+                    getInfo.action = app.thumbstickClickAction;
+                    XrActionStateBoolean thumbstickClickState = {XR_TYPE_ACTION_STATE_BOOLEAN};
+                    xrGetActionStateBoolean(app.session, &getInfo, &thumbstickClickState);
+
+                    getInfo.action = app.gripPoseAction;
+                    XrActionStatePose poseState = {XR_TYPE_ACTION_STATE_POSE};
+                    xrGetActionStatePose(app.session, &getInfo, &poseState);
+
+                    bool hasPose = false;
+                    if (poseState.isActive) {
+                        XrSpaceLocation loc = {XR_TYPE_SPACE_LOCATION};
+                        if (XR_SUCCEEDED(xrLocateSpace(app.gripSpaces[hand], app.localSpace,
+                                frameState.predictedDisplayTime, &loc)) &&
+                            (loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
+                            (loc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT))
+                        {
+                            ctrl[hand].pose[0] = loc.pose.position.x;
+                            ctrl[hand].pose[1] = loc.pose.position.y;
+                            ctrl[hand].pose[2] = loc.pose.position.z;
+                            ctrl[hand].pose[3] = loc.pose.orientation.x;
+                            ctrl[hand].pose[4] = loc.pose.orientation.y;
+                            ctrl[hand].pose[5] = loc.pose.orientation.z;
+                            ctrl[hand].pose[6] = loc.pose.orientation.w;
+                            hasPose = true;
+                        }
+                    }
+
+                    bool hasInput = triggerState.isActive || squeezeState.isActive ||
+                                    menuState.isActive || thumbstickState.isActive ||
+                                    thumbstickClickState.isActive;
+                    ctrl[hand].hasData = hasPose || hasInput;
+                    ctrl[hand].hasPose = hasPose;
+                    ctrl[hand].tr = triggerState.isActive ? triggerState.currentState : 0.0f;
+                    ctrl[hand].sq = squeezeState.isActive && squeezeState.currentState ? 1 : 0;
+                    ctrl[hand].mn = menuState.isActive && menuState.currentState ? 1 : 0;
+                    ctrl[hand].ts[0] = thumbstickState.isActive ? thumbstickState.currentState.x : 0.0f;
+                    ctrl[hand].ts[1] = thumbstickState.isActive ? thumbstickState.currentState.y : 0.0f;
+                    ctrl[hand].tc = thumbstickClickState.isActive && thumbstickClickState.currentState ? 1 : 0;
+
+                    // If !hasPose, we omit the "pose" key from JSON so iwer keeps its defaults
+
+                    // Debug: log left controller state
+                    if (hand == 0) {
+                        static bool loggedInitial = false;
+                        static float lastTr = -1.0f;
+                        static float lastPose[3] = {-999, -999, -999};
+                        if (!loggedInitial) {
+                            LOG_INFO("Left ctrl: poseActive=%d hasPose=%d hasInput=%d",
+                                     poseState.isActive, hasPose, hasInput);
+                            if (hasPose) {
+                                auto& hp = viewLoc.pose.position;
+                                LOG_INFO("Left ctrl raw=(%.3f,%.3f,%.3f) +HMD=(%.3f,%.3f,%.3f) result=(%.3f,%.3f,%.3f)",
+                                         ctrl[0].pose[0], ctrl[0].pose[1], ctrl[0].pose[2],
+                                         hp.x, hp.y, hp.z,
+                                         hp.x + ctrl[0].pose[0], hp.y + ctrl[0].pose[1], hp.z + ctrl[0].pose[2]);
+                            }
+                            loggedInitial = true;
+                        }
+                        // Log when trigger changes or pose moves
+                        bool trChanged = (ctrl[0].tr != lastTr && ctrl[0].tr > 0);
+                        bool poseMoved = hasPose && (fabsf(ctrl[0].pose[0] - lastPose[0]) > 0.01f ||
+                                                     fabsf(ctrl[0].pose[1] - lastPose[1]) > 0.01f ||
+                                                     fabsf(ctrl[0].pose[2] - lastPose[2]) > 0.01f);
+                        if (trChanged || poseMoved) {
+                            LOG_INFO("Left ctrl UPDATE: pose=(%.3f,%.3f,%.3f) tr=%.2f sq=%d mn=%d ts=(%.2f,%.2f)",
+                                     ctrl[0].pose[0], ctrl[0].pose[1], ctrl[0].pose[2],
+                                     ctrl[0].tr, ctrl[0].sq, ctrl[0].mn,
+                                     ctrl[0].ts[0], ctrl[0].ts[1]);
+                            lastTr = ctrl[0].tr;
+                            if (hasPose) { lastPose[0] = ctrl[0].pose[0]; lastPose[1] = ctrl[0].pose[1]; lastPose[2] = ctrl[0].pose[2]; }
+                        }
+                    }
+                }
+
                 auto& p = viewLoc.pose.position;
                 auto& q = viewLoc.pose.orientation;
                 std::lock_guard<std::mutex> lock(g_poseMutex);
-                g_poseLen = snprintf(g_poseBuf + LWS_PRE, sizeof(g_poseBuf) - LWS_PRE,
+
+                char* buf = g_poseBuf + LWS_PRE;
+                int bufSize = (int)(sizeof(g_poseBuf) - LWS_PRE);
+                int len = 0;
+
+                // Head pose + FOV
+                len += snprintf(buf + len, bufSize - len,
                     "{\"pose\":[%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f],"
-                    "\"fov\":[[%.6f,%.6f,%.6f,%.6f],[%.6f,%.6f,%.6f,%.6f]]}",
+                    "\"fov\":[[%.6f,%.6f,%.6f,%.6f],[%.6f,%.6f,%.6f,%.6f]]",
                     p.x, p.y, p.z, q.x, q.y, q.z, q.w,
                     views[0].fov.angleLeft, views[0].fov.angleRight,
                     views[0].fov.angleUp, views[0].fov.angleDown,
                     views[1].fov.angleLeft, views[1].fov.angleRight,
                     views[1].fov.angleUp, views[1].fov.angleDown);
+
+                // Controller data
+                len += snprintf(buf + len, bufSize - len, ",\"ctrl\":[");
+                for (int hand = 0; hand < 2; hand++) {
+                    if (hand > 0) len += snprintf(buf + len, bufSize - len, ",");
+                    if (ctrl[hand].hasData) {
+                        len += snprintf(buf + len, bufSize - len, "{");
+                        if (ctrl[hand].hasPose) {
+                            // Qwerty controller position is already rotated by HMD orientation
+                            // (via tracking origin), but missing HMD translation. Just add it.
+                            float cx = viewLoc.pose.position.x + ctrl[hand].pose[0];
+                            float cy = viewLoc.pose.position.y + ctrl[hand].pose[1];
+                            float cz = viewLoc.pose.position.z + ctrl[hand].pose[2];
+                            len += snprintf(buf + len, bufSize - len,
+                                "\"pose\":[%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f],",
+                                cx, cy, cz,
+                                ctrl[hand].pose[3], ctrl[hand].pose[4],
+                                ctrl[hand].pose[5], ctrl[hand].pose[6]);
+                        }
+                        len += snprintf(buf + len, bufSize - len,
+                            "\"tr\":%.2f,\"sq\":%d,\"mn\":%d,\"ts\":[%.4f,%.4f],\"tc\":%d}",
+                            ctrl[hand].tr, ctrl[hand].sq, ctrl[hand].mn,
+                            ctrl[hand].ts[0], ctrl[hand].ts[1], ctrl[hand].tc);
+                    } else {
+                        len += snprintf(buf + len, bufSize - len, "null");
+                    }
+                }
+                len += snprintf(buf + len, bufSize - len, "]}");
+
+                g_poseLen = len;
                 g_poseReady.store(true);
                 if (g_lwsContext) lws_cancel_service(g_lwsContext);
             }

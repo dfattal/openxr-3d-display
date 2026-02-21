@@ -4,12 +4,13 @@
 // support immersive-vr on macOS). WASD keyboard controls for camera movement.
 
 import { XRDevice } from 'iwer';
+import { metaQuestTouchPlus } from 'iwer/lib/device/configs/controller/meta.js';
 
 // --- Device Configuration ---
 
 const MONADO_CONFIG = {
   name: 'Monado 3D Display',
-  controllerConfig: undefined,
+  controllerConfig: metaQuestTouchPlus,
   supportedSessionModes: ['inline', 'immersive-vr'],
   supportedFeatures: ['viewer', 'local', 'local-floor'],
   supportedFrameRates: [60],
@@ -85,6 +86,7 @@ window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
 function updateCamera(time) {
   requestAnimationFrame(updateCamera);
+  if (wsConnected) return; // Monado provides all pose data via bridge
 
   const now = time / 1000;
   const dt = lastTime > 0 ? Math.min(now - lastTime, 0.1) : 1 / 60;
@@ -170,6 +172,29 @@ function connectWebSocket() {
         // Per-eye FOV from Kooima projection: [[angleL,angleR,angleU,angleD],[...]]
         if (msg.fov) {
           fovAngles = msg.fov;
+        }
+        // Controller state: [{pose, tr, sq, mn, ts, tc}, {same}] for [left, right]
+        if (msg.ctrl) {
+          const controllers = xrDevice.controllers;
+          const hands = ['left', 'right'];
+          for (let i = 0; i < 2; i++) {
+            const c = msg.ctrl[i];
+            const controller = controllers[hands[i]];
+            if (!c || !controller) continue;
+
+            // Grip pose
+            if (c.pose) {
+              controller.position.set(c.pose[0], c.pose[1], c.pose[2]);
+              controller.quaternion.set(c.pose[3], c.pose[4], c.pose[5], c.pose[6]);
+            }
+            // Buttons
+            controller.updateButtonValue('trigger', c.tr);
+            controller.updateButtonValue('squeeze', c.sq ? 1 : 0);
+            controller.updateButtonValue(i === 0 ? 'x-button' : 'a-button', c.mn ? 1 : 0);
+            controller.updateButtonValue('thumbstick', c.tc ? 1 : 0);
+            // Thumbstick axes
+            controller.updateAxes('thumbstick', c.ts[0], c.ts[1]);
+          }
         }
       } catch (e) { /* ignore non-JSON */ }
     }
