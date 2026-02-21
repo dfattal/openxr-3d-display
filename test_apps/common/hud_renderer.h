@@ -42,7 +42,9 @@ bool InitializeHudRenderer(HudRenderer& hud, uint32_t w, uint32_t h);
 const void* RenderHudAndMap(HudRenderer& hud, uint32_t* rowPitch,
     const std::wstring& sessionText, const std::wstring& modeText,
     const std::wstring& perfText, const std::wstring& displayInfoText,
-    const std::wstring& eyeText);
+    const std::wstring& eyeText,
+    const std::wstring& cameraText = L"",
+    const std::wstring& helpText = L"");
 
 // Unmap the staging texture after pixel upload
 void UnmapHud(HudRenderer& hud);

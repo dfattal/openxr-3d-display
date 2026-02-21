@@ -22,6 +22,7 @@
 #include "xr_session.h"
 
 #include <chrono>
+#include <cmath>
 #include <string>
 #include <sstream>
 
@@ -43,8 +44,12 @@ static UINT g_windowWidth = 1280;
 static UINT g_windowHeight = 720;
 static bool g_inSizeMove = false;  // True while user is dragging/resizing the window
 static const uint32_t HUD_PIXEL_WIDTH = 380;
-static const uint32_t HUD_PIXEL_HEIGHT = 280;
+static const uint32_t HUD_PIXEL_HEIGHT = 420;
 static const float HUD_WIDTH_FRACTION = 0.30f;
+
+// sim_display output mode switching (loaded at runtime via GetProcAddress)
+typedef void (*PFN_sim_display_set_output_mode)(int mode);
+static PFN_sim_display_set_output_mode g_pfnSetOutputMode = nullptr;
 
 // Fullscreen state
 static bool g_fullscreen = false;
@@ -267,6 +272,14 @@ static void RenderOneFrame(RenderState& rs) {
         }
     }
 
+    // Handle output mode change (1/2/3 keys)
+    if (g_inputState.outputModeChangeRequested) {
+        g_inputState.outputModeChangeRequested = false;
+        if (g_pfnSetOutputMode) {
+            g_pfnSetOutputMode(g_inputState.outputMode);
+        }
+    }
+
     // Update scene (cube rotation)
     UpdateScene(renderer, rs.perfStats->deltaTime);
 
@@ -396,14 +409,25 @@ static void RenderOneFrame(RenderState& rs) {
                                 g_windowWidth, g_windowHeight);
                             std::wstring dispText = FormatDisplayInfo(xr.displayWidthM, xr.displayHeightM,
                                 xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ);
+                            dispText += L"\n" + FormatScaleInfo(xr.recommendedViewScaleX, xr.recommendedViewScaleY);
+                            dispText += L"\n" + FormatOutputMode(g_inputState.outputMode);
                             std::wstring eyeText = FormatEyeTrackingInfo(
                                 xr.leftEyeX, xr.leftEyeY, xr.leftEyeZ,
                                 xr.rightEyeX, xr.rightEyeY, xr.rightEyeZ,
                                 xr.eyeTrackingActive);
 
+                            float fwdX = -sinf(g_inputState.yaw) * cosf(g_inputState.pitch);
+                            float fwdY =  sinf(g_inputState.pitch);
+                            float fwdZ = -cosf(g_inputState.yaw) * cosf(g_inputState.pitch);
+                            std::wstring cameraText = FormatCameraInfo(
+                                g_inputState.cameraPosX, g_inputState.cameraPosY, g_inputState.cameraPosZ,
+                                fwdX, fwdY, fwdZ, g_inputState.zoomScale);
+                            std::wstring helpText = FormatHelpText();
+
                             uint32_t srcRowPitch = 0;
                             const void* pixels = RenderHudAndMap(*rs.hudRenderer, &srcRowPitch,
-                                sessionText, modeText, perfText, dispText, eyeText);
+                                sessionText, modeText, perfText, dispText, eyeText,
+                                cameraText, helpText);
                             if (pixels) {
                                 ID3D11Texture2D* hudTexture = (*rs.hudSwapchainImages)[hudImageIndex].texture;
                                 D3D11_BOX box = {0, 0, 0, xr.hudSwapchain.width, xr.hudSwapchain.height, 1};
@@ -620,6 +644,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         g_xr = nullptr;
         ShutdownLogging();
         return 1;
+    }
+
+    // Try to load sim_display_set_output_mode from the runtime (for 1/2/3 key switching)
+    {
+        HMODULE rtModule = GetModuleHandleA("openxr_monado.dll");
+        if (!rtModule) rtModule = GetModuleHandleA("openxr_monado");
+        if (rtModule) {
+            g_pfnSetOutputMode = (PFN_sim_display_set_output_mode)GetProcAddress(rtModule, "sim_display_set_output_mode");
+        }
+        LOG_INFO("sim_display output mode: %s", g_pfnSetOutputMode ? "available" : "not available");
     }
 
     // Check for session target extension
