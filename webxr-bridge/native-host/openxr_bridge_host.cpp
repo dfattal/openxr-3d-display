@@ -23,7 +23,6 @@
 #include <libwebsockets.h>
 
 #include <atomic>
-#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -388,47 +387,6 @@ static bool CreateVulkanDevice(AppState& app) {
     LOG_INFO("Vulkan device and queue created");
 
     return true;
-}
-
-// ============================================================================
-// Pose math helpers
-// ============================================================================
-
-// Rotate vec3 by quaternion: v' = q * v * q^-1
-static void QuatRotateVec3(const XrQuaternionf& q, const XrVector3f& v, XrVector3f& out) {
-    // t = 2 * cross(q.xyz, v)
-    float tx = 2.0f * (q.y * v.z - q.z * v.y);
-    float ty = 2.0f * (q.z * v.x - q.x * v.z);
-    float tz = 2.0f * (q.x * v.y - q.y * v.x);
-    // result = v + w*t + cross(q.xyz, t)
-    out.x = v.x + q.w * tx + (q.y * tz - q.z * ty);
-    out.y = v.y + q.w * ty + (q.z * tx - q.x * tz);
-    out.z = v.z + q.w * tz + (q.x * ty - q.y * tx);
-}
-
-// Quaternion multiply: result = a * b
-static XrQuaternionf QuatMultiply(const XrQuaternionf& a, const XrQuaternionf& b) {
-    return {
-        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
-    };
-}
-
-// Compose child pose into parent space: result = parent * child
-static void ComposePose(const XrPosef& parent, const XrVector3f& childPos,
-                        const XrQuaternionf& childOri, float out[7]) {
-    XrVector3f rotatedPos;
-    QuatRotateVec3(parent.orientation, childPos, rotatedPos);
-    out[0] = parent.position.x + rotatedPos.x;
-    out[1] = parent.position.y + rotatedPos.y;
-    out[2] = parent.position.z + rotatedPos.z;
-    XrQuaternionf q = QuatMultiply(parent.orientation, childOri);
-    out[3] = q.x;
-    out[4] = q.y;
-    out[5] = q.z;
-    out[6] = q.w;
 }
 
 // ============================================================================
@@ -1252,39 +1210,6 @@ int main() {
                     ctrl[hand].ts[1] = thumbstickState.isActive ? thumbstickState.currentState.y : 0.0f;
                     ctrl[hand].tc = thumbstickClickState.isActive && thumbstickClickState.currentState ? 1 : 0;
 
-                    // If !hasPose, we omit the "pose" key from JSON so iwer keeps its defaults
-
-                    // Debug: log left controller state
-                    if (hand == 0) {
-                        static bool loggedInitial = false;
-                        static float lastTr = -1.0f;
-                        static float lastPose[3] = {-999, -999, -999};
-                        if (!loggedInitial) {
-                            LOG_INFO("Left ctrl: poseActive=%d hasPose=%d hasInput=%d",
-                                     poseState.isActive, hasPose, hasInput);
-                            if (hasPose) {
-                                auto& hp = viewLoc.pose.position;
-                                LOG_INFO("Left ctrl raw=(%.3f,%.3f,%.3f) +HMD=(%.3f,%.3f,%.3f) result=(%.3f,%.3f,%.3f)",
-                                         ctrl[0].pose[0], ctrl[0].pose[1], ctrl[0].pose[2],
-                                         hp.x, hp.y, hp.z,
-                                         hp.x + ctrl[0].pose[0], hp.y + ctrl[0].pose[1], hp.z + ctrl[0].pose[2]);
-                            }
-                            loggedInitial = true;
-                        }
-                        // Log when trigger changes or pose moves
-                        bool trChanged = (ctrl[0].tr != lastTr && ctrl[0].tr > 0);
-                        bool poseMoved = hasPose && (fabsf(ctrl[0].pose[0] - lastPose[0]) > 0.01f ||
-                                                     fabsf(ctrl[0].pose[1] - lastPose[1]) > 0.01f ||
-                                                     fabsf(ctrl[0].pose[2] - lastPose[2]) > 0.01f);
-                        if (trChanged || poseMoved) {
-                            LOG_INFO("Left ctrl UPDATE: pose=(%.3f,%.3f,%.3f) tr=%.2f sq=%d mn=%d ts=(%.2f,%.2f)",
-                                     ctrl[0].pose[0], ctrl[0].pose[1], ctrl[0].pose[2],
-                                     ctrl[0].tr, ctrl[0].sq, ctrl[0].mn,
-                                     ctrl[0].ts[0], ctrl[0].ts[1]);
-                            lastTr = ctrl[0].tr;
-                            if (hasPose) { lastPose[0] = ctrl[0].pose[0]; lastPose[1] = ctrl[0].pose[1]; lastPose[2] = ctrl[0].pose[2]; }
-                        }
-                    }
                 }
 
                 auto& p = viewLoc.pose.position;
