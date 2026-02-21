@@ -231,3 +231,34 @@ std::wstring FormatParallaxInfo(bool parallaxEnabled, float eyePosX, float eyePo
     }
     return oss.str();
 }
+
+std::wstring FormatOutputMode(int outputMode) {
+    const wchar_t* modeNames[] = {L"SBS", L"Anaglyph", L"Blend"};
+    const wchar_t* name = (outputMode >= 0 && outputMode <= 2) ? modeNames[outputMode] : L"?";
+    std::wostringstream oss;
+    oss << L"Output: " << name << L" [1/2/3]";
+    return oss.str();
+}
+
+std::wstring FormatCameraInfo(float cameraPosX, float cameraPosY, float cameraPosZ,
+    float forwardX, float forwardY, float forwardZ, float zoom) {
+    std::wostringstream oss;
+    oss << std::fixed << std::setprecision(2);
+    oss << L"Virtual Display: (" << cameraPosX << L", " << cameraPosY << L", " << cameraPosZ << L")\n";
+    oss << L"Forward: (" << forwardX << L", " << forwardY << L", " << forwardZ << L")\n";
+    oss << L"Zoom: " << zoom << L"x";
+    return oss.str();
+}
+
+std::wstring FormatScaleInfo(float scaleX, float scaleY) {
+    std::wostringstream oss;
+    oss << std::fixed << std::setprecision(2);
+    oss << L"Scale: " << scaleX << L" x " << scaleY;
+    return oss.str();
+}
+
+std::wstring FormatHelpText() {
+    return L"WASD/QE=Move  Drag=Look  Scroll=Zoom\n"
+           L"Space=Reset  V=2D/3D  1/2/3=Output\n"
+           L"Tab=HUD  F11=Fullscreen  ESC=Quit";
+}

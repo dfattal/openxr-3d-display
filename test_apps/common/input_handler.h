@@ -65,6 +65,10 @@ struct InputState {
     // Display mode toggle (V key)
     bool displayMode3D = true;
     bool displayModeToggleRequested = false;
+
+    // Output mode for sim_display (1/2/3 keys: 0=SBS, 1=Anaglyph, 2=Blend)
+    int outputMode = 0;
+    bool outputModeChangeRequested = false;
 };
 
 // Process a Win32 message and update input state

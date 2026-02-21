@@ -139,6 +139,18 @@ bool UpdateInputState(InputState& state, UINT msg, WPARAM wParam, LPARAM lParam)
             state.displayMode3D = !state.displayMode3D;
             state.displayModeToggleRequested = true;
             break;
+        case '1':
+            state.outputMode = 0;
+            state.outputModeChangeRequested = true;
+            break;
+        case '2':
+            state.outputMode = 1;
+            state.outputModeChangeRequested = true;
+            break;
+        case '3':
+            state.outputMode = 2;
+            state.outputModeChangeRequested = true;
+            break;
         }
         return true;
 

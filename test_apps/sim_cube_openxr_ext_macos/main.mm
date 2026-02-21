@@ -1116,7 +1116,7 @@ static bool CreateMacOSWindow(uint32_t width, uint32_t height) {
         [g_window setContentView:g_metalView];
 
         // HUD overlay (semi-transparent text overlay, positioned bottom-left)
-        NSRect hudFrame = NSMakeRect(10, 10, 420, 260);
+        NSRect hudFrame = NSMakeRect(10, 10, 420, 290);
         g_hudView = [[HudOverlayView alloc] initWithFrame:hudFrame];
         [g_metalView addSubview:g_hudView];
 
@@ -2252,9 +2252,19 @@ int main() {
                     const char *outputModeNames[] = {"SBS", "Anaglyph", "Blend"};
                     const char *outputModeName = (g_currentOutputMode >= 0 && g_currentOutputMode <= 2)
                         ? outputModeNames[g_currentOutputMode] : "?";
+                    // Session state name lookup
+                    const char *sessionStateNames[] = {
+                        "UNKNOWN", "IDLE", "READY", "SYNCHRONIZED",
+                        "VISIBLE", "FOCUSED", "STOPPING", "LOSS_PENDING", "EXITING"};
+                    int stateIdx = (int)xr.sessionState;
+                    const char *sessionStateName = (stateIdx >= 0 && stateIdx < 9)
+                        ? sessionStateNames[stateIdx] : "INVALID";
+
                     NSString *text = [NSString stringWithFormat:
-                        @"FPS: %.0f  (%.1f ms)\n"
+                        @"Session: %s\n"
+                        "XR_EXT_macos_window_binding: %s\n"
                         "Mode: %s%s  Output: %s\n"
+                        "FPS: %.0f  (%.1f ms)\n"
                         "Render: %ux%u\n"
                         "Window: %ux%u\n"
                         "Display: %.3f x %.3f m\n"
@@ -2264,14 +2274,16 @@ int main() {
                         "Eye R: (%.3f, %.3f, %.3f)\n"
                         "Virtual Display: (%.2f, %.2f, %.2f)\n"
                         "Forward: (%.2f, %.2f, %.2f)  Zoom: %.2fx\n"
-                        "Track: %s\n"
                         "\n"
                         "WASD/QE=Move  Drag=Look  Scroll=Zoom\n"
-                        "Space=Reset  V=2D/3D  Tab=HUD  ESC=Quit",
-                        fps, g_avgFrameTime * 1000.0,
+                        "Space=Reset  V=2D/3D  1/2/3=Output\n"
+                        "Tab=HUD  Cmd+Ctrl+F=Fullscreen  ESC=Quit",
+                        sessionStateName,
+                        xr.hasMacosWindowBinding ? "ACTIVE" : "NOT AVAILABLE",
                         g_input.displayMode3D ? "3D (Stereo)" : "2D (Mono)",
                         xr.supportsDisplayModeSwitch ? "" : " [no switch]",
                         outputModeName,
+                        fps, g_avgFrameTime * 1000.0,
                         g_renderW, g_renderH,
                         g_windowW, g_windowH,
                         xr.displayWidthM, xr.displayHeightM,
@@ -2283,8 +2295,7 @@ int main() {
                         -sinf(g_input.yaw) * cosf(g_input.pitch),
                          sinf(g_input.pitch),
                         -cosf(g_input.yaw) * cosf(g_input.pitch),
-                        g_input.zoomScale,
-                        xr.eyeTrackingActive ? "Active" : "None"];
+                        g_input.zoomScale];
                     g_hudView.hudText = text;
                     [g_hudView setNeedsDisplay:YES];
                     [g_hudView setHidden:NO];

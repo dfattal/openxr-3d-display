@@ -80,19 +80,25 @@ bool InitializeHudRenderer(HudRenderer& hud, uint32_t w, uint32_t h) {
 const void* RenderHudAndMap(HudRenderer& hud, uint32_t* rowPitch,
     const std::wstring& sessionText, const std::wstring& modeText,
     const std::wstring& perfText, const std::wstring& displayInfoText,
-    const std::wstring& eyeText)
+    const std::wstring& eyeText,
+    const std::wstring& cameraText,
+    const std::wstring& helpText)
 {
     // Clear render texture with semi-transparent black
     ID3D11RenderTargetView* rtv = nullptr;
     hud.device->CreateRenderTargetView(hud.renderTex.Get(), nullptr, &rtv);
     if (rtv) {
-        float clearColor[4] = {0.0f, 0.0f, 0.0f, 0.7f};
+        float clearColor[4] = {0.0f, 0.0f, 0.0f, 0.5f};
         hud.context->ClearRenderTargetView(rtv, clearColor);
         rtv->Release();
     }
 
-    // Scale layout proportionally from 380x280 base (matching D3D11 ext app)
-    float sy = hud.height / 280.0f;
+    // Has extra sections (camera, help)?
+    bool hasExtra = !cameraText.empty() || !helpText.empty();
+
+    // Scale layout proportionally from base dimensions
+    float baseH = hasExtra ? 420.0f : 280.0f;
+    float sy = hud.height / baseH;
     float px = 12.0f * (hud.width / 380.0f);   // left padding
     float tw = (float)hud.width - 2.0f * px;    // text width
 
@@ -110,6 +116,16 @@ const void* RenderHudAndMap(HudRenderer& hud, uint32_t* rowPitch,
 
     RenderText(hud.overlay, hud.device.Get(), hud.renderTex.Get(),
         eyeText, px, 222*sy, tw, 44*sy, true);
+
+    if (!cameraText.empty()) {
+        RenderText(hud.overlay, hud.device.Get(), hud.renderTex.Get(),
+            cameraText, px, 272*sy, tw, 66*sy, true);
+    }
+
+    if (!helpText.empty()) {
+        RenderText(hud.overlay, hud.device.Get(), hud.renderTex.Get(),
+            helpText, px, 348*sy, tw, 60*sy, true);
+    }
 
     // Copy render texture to staging texture, then map for CPU read
     hud.context->CopyResource(hud.stagingTex.Get(), hud.renderTex.Get());
