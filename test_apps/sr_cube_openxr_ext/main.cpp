@@ -506,14 +506,14 @@ static void RenderOneFrame(RenderState& rs) {
                                 rawViews[0].pose.orientation.x, rawViews[0].pose.orientation.y,
                                 rawViews[0].pose.orientation.z, rawViews[0].pose.orientation.w);
 
-                            float zoomS = g_inputState.stereo.scaleFactor;
+                            float eyeScale = g_inputState.stereo.perspectiveFactor / g_inputState.stereo.scaleFactor;
                             XMVECTOR playerOri = XMQuaternionRotationRollPitchYaw(
                                 g_inputState.pitch, g_inputState.yaw, 0);
                             XMVECTOR playerPos = XMVectorSet(
                                 g_inputState.cameraPosX, g_inputState.cameraPosY,
                                 g_inputState.cameraPosZ, 0.0f);
 
-                            XMVECTOR worldPos = XMVector3Rotate(centerLocalPos / zoomS, playerOri) + playerPos;
+                            XMVECTOR worldPos = XMVector3Rotate(centerLocalPos * eyeScale, playerOri) + playerPos;
                             XMVECTOR worldOri = XMQuaternionMultiply(localOri, playerOri);
 
                             // View matrix = inverse pose: transposed rotation * negated translation

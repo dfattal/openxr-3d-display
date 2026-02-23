@@ -1012,7 +1012,7 @@ When `XR_EXT_display_info` is **not** enabled (or when explicitly overridden), t
 returns views in **RENDER_READY mode**:
 
 - `XrView.pose` — view pose with convergence and comfort adjustments applied by the
-  runtime. Includes runtime-side debug/qwerty input controls for scene navigation.
+  runtime.
 - `XrView.fov` — field-of-view angles derived from the runtime's internal camera model.
   The application constructs a standard symmetric or asymmetric projection matrix from
   these angles (the runtime does **not** return a projection matrix directly — only FOV
