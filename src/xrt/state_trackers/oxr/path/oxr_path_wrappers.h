@@ -28,7 +28,7 @@ extern "C" {
 static inline bool
 oxr_path_is_valid(struct oxr_logger *log, struct oxr_instance *inst, XrPath path)
 {
-	return oxr_path_store_is_valid(log, &inst->path_store, path);
+	return oxr_path_store_is_valid(&inst->path_store, path);
 }
 
 /*!

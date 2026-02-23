@@ -220,7 +220,7 @@ oxr_path_store_fini(struct oxr_path_store *store)
 }
 
 bool
-oxr_path_store_is_valid(struct oxr_logger *log, const struct oxr_path_store *store, XrPath xr_path)
+oxr_path_store_is_valid(const struct oxr_path_store *store, XrPath xr_path)
 {
 	return get_or_null(store, xr_path) != NULL;
 }

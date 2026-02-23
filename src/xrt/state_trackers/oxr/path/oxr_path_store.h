@@ -58,7 +58,7 @@ oxr_path_store_fini(struct oxr_path_store *store);
  * @public @memberof oxr_path_store
  */
 bool
-oxr_path_store_is_valid(struct oxr_logger *log, const struct oxr_path_store *store, XrPath xr_path);
+oxr_path_store_is_valid(const struct oxr_path_store *store, XrPath xr_path);
 
 /*!
  * Get the path for the given string if it exists, or create it if it does not.
