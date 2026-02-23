@@ -108,7 +108,7 @@ kb4_project(const struct t_camera_model_params *dist, //
 	if (r > SQRT_EPSILON) {
 
 
-		const float theta = atan2(r, z);
+		const float theta = atan2f(r, z);
 		const float theta2 = theta * theta;
 
 		float r_theta = kb4_calc_r_theta(dist, theta, theta2);
@@ -177,15 +177,15 @@ kb4_unproject(const struct t_camera_model_params *dist, //
 	float theta = 0.0;
 	float sin_theta = 0.0;
 	float cos_theta = 1.0;
-	float thetad = sqrt(mx * mx + my * my);
+	float thetad = sqrtf(mx * mx + my * my);
 	float scaling = 1.0;
 	float d_func_d_theta = 0.0;
 
 	if (thetad > SQRT_EPSILON) {
 		theta = kb4_solve_theta(dist, &thetad, &d_func_d_theta);
 
-		sin_theta = sin(theta);
-		cos_theta = cos(theta);
+		sin_theta = sinf(theta);
+		cos_theta = cosf(theta);
 		scaling = sin_theta / thetad;
 	}
 
@@ -351,7 +351,7 @@ rt8_unproject(
 
 	rt8_undistort(hg_dist, u, v, &xp, &yp);
 
-	const float norm_inv = 1.0f / sqrt(xp * xp + yp * yp + 1.0f);
+	const float norm_inv = 1.0f / sqrtf(xp * xp + yp * yp + 1.0f);
 	*out_x = xp * norm_inv;
 	*out_y = yp * norm_inv;
 	*out_z = norm_inv;
