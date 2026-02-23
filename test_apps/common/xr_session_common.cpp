@@ -452,13 +452,13 @@ bool LocateViews(
     XMVECTOR playerPos = XMVectorSet(playerPosX, playerPosY, playerPosZ, 0.0f);
 
     for (int i = 0; i < 2; i++) {
-        // Transform position: worldPos = playerOrientation * (localPos/scaleFactor) + playerPosition
-        // Scale divides the eye position toward the display center (origin of display space),
-        // reducing stereo baseline and parallax for a magnification effect.
+        // Transform position: worldPos = playerOrientation * (localPos * p / s) + playerPosition
+        // perspectiveFactor and scaleFactor both scale the eye position in display space.
+        // This must match KooimaEyePos() so display-plane content stays fixed.
         XMVECTOR localPos = XMVectorSet(
             views[i].pose.position.x, views[i].pose.position.y,
             views[i].pose.position.z, 0.0f);
-        localPos = localPos / stereo.scaleFactor;
+        localPos = localPos * stereo.perspectiveFactor / stereo.scaleFactor;
         XMVECTOR worldPos = XMVector3Rotate(localPos, playerOri) + playerPos;
 
         // Transform orientation: worldOri = playerOrientation * localOrientation

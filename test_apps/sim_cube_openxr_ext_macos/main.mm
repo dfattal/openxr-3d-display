@@ -2659,10 +2659,11 @@ int main() {
                         quat_from_yaw_pitch(g_input.yaw, g_input.pitch, &playerOri);
 
                         for (int i = 0; i < 2; i++) {
-                            // Scale by scaleFactor, rotate by player, translate
-                            float lx = views[i].pose.position.x / g_input.stereo.scaleFactor;
-                            float ly = views[i].pose.position.y / g_input.stereo.scaleFactor;
-                            float lz = views[i].pose.position.z / g_input.stereo.scaleFactor;
+                            // Scale by perspectiveFactor/scaleFactor (must match KooimaEyePos)
+                            float es = g_input.stereo.perspectiveFactor / g_input.stereo.scaleFactor;
+                            float lx = views[i].pose.position.x * es;
+                            float ly = views[i].pose.position.y * es;
+                            float lz = views[i].pose.position.z * es;
                             float wx, wy, wz;
                             quat_rotate_vec3(playerOri, lx, ly, lz, &wx, &wy, &wz);
                             views[i].pose.position = {

@@ -12,9 +12,14 @@
  *   Step 1 - IPD factor: scale inter-eye vector, keep center fixed
  *   Step 2 - Parallax factor: lerp center toward nominal viewer position
  *
- *   View matrix:   viewEye = processedEye / scaleFactor
+ *   View matrix:   viewEye = processedEye * perspectiveFactor / scaleFactor
  *   Kooima eye:    kooimaEye = processedEye * perspectiveFactor / scaleFactor
  *   Kooima screen: screenW,H = screenW,H / scaleFactor
+ *
+ *   View and Kooima eye are identical — this preserves the Kooima property
+ *   that display-plane content maps to NDC = position / halfScreen regardless
+ *   of eye position. scaleFactor cancels in projection (it also scales screenW,H).
+ *   perspectiveFactor does NOT scale screenW,H, so it modulates FOV.
  */
 
 #pragma once

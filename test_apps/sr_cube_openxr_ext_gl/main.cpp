@@ -527,14 +527,14 @@ static void RenderThreadFunc(
                                     rawViews[0].pose.orientation.x, rawViews[0].pose.orientation.y,
                                     rawViews[0].pose.orientation.z, rawViews[0].pose.orientation.w);
 
-                                float zoomS = inputSnapshot.stereo.scaleFactor;
+                                float eyeScale = inputSnapshot.stereo.perspectiveFactor / inputSnapshot.stereo.scaleFactor;
                                 XMVECTOR playerOri = XMQuaternionRotationRollPitchYaw(
                                     inputSnapshot.pitch, inputSnapshot.yaw, 0);
                                 XMVECTOR playerPos = XMVectorSet(
                                     inputSnapshot.cameraPosX, inputSnapshot.cameraPosY,
                                     inputSnapshot.cameraPosZ, 0.0f);
 
-                                XMVECTOR worldPos = XMVector3Rotate(centerLocalPos / zoomS, playerOri) + playerPos;
+                                XMVECTOR worldPos = XMVector3Rotate(centerLocalPos * eyeScale, playerOri) + playerPos;
                                 XMVECTOR worldOri = XMQuaternionMultiply(localOri, playerOri);
 
                                 XMMATRIX rot = XMMatrixTranspose(XMMatrixRotationQuaternion(worldOri));
