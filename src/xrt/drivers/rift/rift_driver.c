@@ -35,6 +35,7 @@
 #include "util/u_visibility_mask.h"
 #include "util/u_trace_marker.h"
 #include "util/u_linux.h"
+#include "util/u_truncate_printf.h"
 
 #include <stdio.h>
 #include <assert.h>
@@ -677,8 +678,8 @@ rift_devices_create(struct os_hid_device *hmd_dev,
 	}
 
 	// Print name.
-	strncpy(hmd->base.str, device_name, XRT_DEVICE_NAME_LEN);
-	strncpy(hmd->base.serial, serial_number, XRT_DEVICE_NAME_LEN);
+	u_truncate_snprintf(hmd->base.str, XRT_DEVICE_NAME_LEN, "%s", device_name);
+	u_truncate_snprintf(hmd->base.serial, XRT_DEVICE_NAME_LEN, "%s", serial_number);
 
 	m_relation_history_create(&hmd->relation_hist);
 

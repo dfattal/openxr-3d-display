@@ -427,7 +427,7 @@ rift_touch_controller_create(struct rift_hmd *hmd, enum rift_radio_device_type d
 static int
 rift_radio_read_device_serial_async_locked(struct rift_hmd *hmd,
                                            enum rift_radio_device_type device_type,
-                                           char serial[SERIAL_NUMBER_LENGTH],
+                                           char serial[SERIAL_NUMBER_LENGTH + 1],
                                            bool *serial_valid)
 {
 	// Radio is already busy
@@ -1168,7 +1168,8 @@ rift_radio_handle_command(struct rift_hmd *hmd)
 		(*data->serial_valid) = true;
 
 		HMD_INFO(hmd, "Read radio serial: %s", serial_ptr);
-		strncpy(data->serial, (char *)serial_ptr, SERIAL_NUMBER_LENGTH);
+		memcpy(data->serial, (char *)serial_ptr, SERIAL_NUMBER_LENGTH);
+		data->serial[SERIAL_NUMBER_LENGTH] = 0;
 
 		break;
 	}
