@@ -694,8 +694,8 @@ comp_target_swapchain_create_images(struct comp_target *ct,
 		 * function, we can happily create the images. But when trying
 		 * to present the images it will fail.
 		 */
-		COMP_ERROR(ct->c, "Queue family (index: %u) does not support this swapchain!",
-		           present_queue->family_index);
+		COMP_ERROR(ct->c, "Queue family (index: %u) does not support presentation ops for %s surfaces.",
+		           present_queue->family_index, ct->name);
 		goto error_print_and_free;
 	}
 
