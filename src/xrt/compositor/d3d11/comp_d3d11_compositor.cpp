@@ -407,8 +407,15 @@ d3d11_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 								uint32_t resize_target_h = (c->display_processor != NULL) ? new_vh : new_height;
 							comp_d3d11_renderer_resize(c->renderer, new_vw, new_vh, resize_target_h);
 							}
-						}
+						} else
 #endif
+						// No SR weaver: resize renderer to match new window dimensions
+						if (!in_size_move) {
+							uint32_t new_vw = new_width / 2;
+							uint32_t new_vh = new_height;
+							uint32_t resize_target_h = (c->display_processor != NULL) ? new_vh : new_height;
+							comp_d3d11_renderer_resize(c->renderer, new_vw, new_vh, resize_target_h);
+						}
 					}
 				}
 			}
@@ -759,9 +766,11 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		comp_d3d11_target_get_dimensions(c->target, &tgt_width, &tgt_height);
 	}
 
-	// Render layers to side-by-side stereo texture (or full-width mono)
+	// Render layers to side-by-side stereo texture (or full-width mono).
+	// Pass is_mono so the renderer forces 1-view rendering even if the app submitted 2 views
+	// (e.g. runtime-side V toggle where the app doesn't know about the 2D switch).
 	xrt_result_t xret = comp_d3d11_renderer_draw(
-	    c->renderer, &c->layer_accum, &left_eye, &right_eye, tgt_width, tgt_height);
+	    c->renderer, &c->layer_accum, &left_eye, &right_eye, tgt_width, tgt_height, is_mono);
 	if (xret != XRT_SUCCESS) {
 		U_LOG_E("Failed to render layers");
 		return xret;
@@ -859,20 +868,10 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		ID3D11Texture2D *stereo_texture =
 		    static_cast<ID3D11Texture2D *>(comp_d3d11_renderer_get_stereo_texture(c->renderer));
 
-		// Get target back buffer
-		ID3D11Texture2D *back_buffer = nullptr;
-		ID3D11RenderTargetView *rtv = nullptr;
-		c->context->OMGetRenderTargets(1, &rtv, nullptr);
-		if (rtv != nullptr) {
-			ID3D11Resource *resource = nullptr;
-			rtv->GetResource(&resource);
-			if (resource != nullptr) {
-				resource->QueryInterface(__uuidof(ID3D11Texture2D),
-				                          reinterpret_cast<void **>(&back_buffer));
-				resource->Release();
-			}
-			rtv->Release();
-		}
+		// Get target back buffer directly (not from OMGetRenderTargets, which
+		// returns the renderer's stereo RTV after comp_d3d11_renderer_draw)
+		ID3D11Texture2D *back_buffer = static_cast<ID3D11Texture2D *>(
+		    comp_d3d11_target_get_back_buffer(c->target));
 
 		if (back_buffer != nullptr && stereo_texture != nullptr) {
 			D3D11_TEXTURE2D_DESC src_desc, dst_desc;
@@ -902,7 +901,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 				c->context->CopySubresourceRegion(back_buffer, 0, 0, 0, 0, stereo_texture, 0,
 				                                   &src_box);
 			}
-			back_buffer->Release();
+			// No Release needed: back_buffer is a borrowed pointer from the target
 		}
 	}
 
