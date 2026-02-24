@@ -911,16 +911,22 @@ math_compute_fovs(double w_total,
 /*!
  * Compute the FOV to use when parallelizing canted views.
  *
- * Some applications do not support rendering for view orientations that are not parallel to each other.
- * When using a headset with physically canted displays, such applications require parallelizing the views, i.e. forcing
- * the view orientations to be parallel.
- * When the application passes content rendered for parallel views, the compositor typically reprojects this content
- * such that it matches the physical canting of the displays, effectively rotating the view orientation.
+ * Some applications do not support rendering for view orientations that are
+ * not parallel to each other.
+ * When using a headset with physically canted displays, such applications
+ * require parallelizing the views, i.e. forcing the orientations of the views
+ * to be parallel.
+ * When the application passes content rendered for parallel views to the
+ * compositor, the compositor typically reprojects this content such that it
+ * matches the physical canting of the displays, effectively rotating the view
+ * orientation.
  *
- * When rotating the view orientation, parts of the FOV are cut off on the side the view roates away from and parts of
- * previously unseen content is pulled in from the side the view rotates towards. Therefore, when parallezing views, the
- * application should render with an adjusted FOV that covers the area that will be in the FOV of the view *after* the
- * compositor reprojects it back to the physical canted orientation.
+ * When rotating the view orientation, parts of the FOV are cut off on the side
+ * the view roates away from and parts of previously unseen content is pulled
+ * in from the side the view rotates towards. Therefore, when parallezing
+ * views, the application should render with an adjusted FOV that covers the
+ * area that will be in the FOV of the view *after* the compositor reprojects
+ * it back to the physical canted orientation.
  *
  * @ingroup aux_math
  */
