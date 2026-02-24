@@ -52,7 +52,20 @@ endif()
 
 add_executable(sim_cube_openxr main.cpp)
 
-target_include_directories(sim_cube_openxr PRIVATE ${OPENXR_INCLUDE_DIR})
+target_include_directories(sim_cube_openxr PRIVATE
+    ${OPENXR_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/../common
+)
+
+# Copy texture files next to the built executable
+file(GLOB TEXTURE_FILES "${CMAKE_SOURCE_DIR}/../common/textures/*.jpg")
+foreach(TEX ${TEXTURE_FILES})
+    get_filename_component(TEX_NAME ${TEX} NAME)
+    add_custom_command(TARGET sim_cube_openxr POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:sim_cube_openxr>/textures"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TEX} "$<TARGET_FILE_DIR:sim_cube_openxr>/textures/${TEX_NAME}"
+    )
+endforeach()
 
 target_link_libraries(sim_cube_openxr PRIVATE
     OpenXR::openxr_loader
