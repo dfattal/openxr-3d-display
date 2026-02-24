@@ -54,10 +54,10 @@ std::wstring FormatInputInfo(const std::string& lastKey, int mouseX, int mouseY,
 std::wstring FormatDisplayInfo(float widthM, float heightM, float nomX, float nomY, float nomZ);
 std::wstring FormatEyeTrackingInfo(float lx, float ly, float lz, float rx, float ry, float rz, bool active);
 std::wstring FormatParallaxInfo(bool parallaxEnabled, float eyePosX, float eyePosY);
-std::wstring FormatOutputMode(int outputMode);
+std::wstring FormatOutputMode(int outputMode, bool simDisplayAvailable);
 std::wstring FormatCameraInfo(float cameraPosX, float cameraPosY, float cameraPosZ,
     float forwardX, float forwardY, float forwardZ);
 std::wstring FormatStereoParams(float ipdFactor, float parallaxFactor,
     float perspectiveFactor, float scaleFactor);
 std::wstring FormatScaleInfo(float scaleX, float scaleY);
-std::wstring FormatHelpText();
+std::wstring FormatHelpText(bool simDisplayAvailable);
