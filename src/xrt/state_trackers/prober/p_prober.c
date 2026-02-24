@@ -38,6 +38,7 @@
 #include "realsense/rs_interface.h"
 #endif
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
@@ -1039,8 +1040,9 @@ p_create_system(struct xrt_prober *xp,
 	 * Estimate.
 	 */
 
-	//! @todo Improve estimation selection logic.
+	// Select the highest-priority builder that is certain it can create a head.
 	if (select == NULL) {
+		int32_t best_priority = INT32_MIN;
 		for (size_t i = 0; i < p->builder_count; i++) {
 			struct xrt_builder *xb = p->builders[i];
 
@@ -1051,20 +1053,22 @@ p_create_system(struct xrt_prober *xp,
 			struct xrt_builder_estimate estimate = {0};
 			xrt_builder_estimate_system(xb, p->json.root, xp, &estimate);
 
-			if (estimate.certain.head) {
+			if (estimate.certain.head && estimate.priority > best_priority) {
 				select = xb;
-				break;
+				best_priority = estimate.priority;
 			}
 		}
 
 		if (select != NULL) {
-			u_pp(dg, "\n\tSelected %s because it was certain it could create a head", select->identifier);
+			u_pp(dg, "\n\tSelected %s (priority %d) because it was certain it could create a head",
+			     select->identifier, best_priority);
 		} else {
 			u_pp(dg, "\n\tNo builder was certain that it could create a head device");
 		}
 	}
 
 	if (select == NULL) {
+		int32_t best_priority = INT32_MIN;
 		for (size_t i = 0; i < p->builder_count; i++) {
 			struct xrt_builder *xb = p->builders[i];
 
@@ -1075,14 +1079,15 @@ p_create_system(struct xrt_prober *xp,
 			struct xrt_builder_estimate estimate = {0};
 			xrt_builder_estimate_system(xb, p->json.root, xp, &estimate);
 
-			if (estimate.maybe.head) {
+			if (estimate.maybe.head && estimate.priority > best_priority) {
 				select = xb;
-				break;
+				best_priority = estimate.priority;
 			}
 		}
 
 		if (select != NULL) {
-			u_pp(dg, "\n\tSelected %s because it maybe could create a head", select->identifier);
+			u_pp(dg, "\n\tSelected %s (priority %d) because it maybe could create a head",
+			     select->identifier, best_priority);
 		} else {
 			u_pp(dg, "\n\tNo builder could maybe create a head device");
 		}

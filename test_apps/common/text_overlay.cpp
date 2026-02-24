@@ -232,7 +232,10 @@ std::wstring FormatParallaxInfo(bool parallaxEnabled, float eyePosX, float eyePo
     return oss.str();
 }
 
-std::wstring FormatOutputMode(int outputMode) {
+std::wstring FormatOutputMode(int outputMode, bool simDisplayAvailable) {
+    if (!simDisplayAvailable) {
+        return L"Output: Weaved";
+    }
     const wchar_t* modeNames[] = {L"SBS", L"Anaglyph", L"Blend"};
     const wchar_t* name = (outputMode >= 0 && outputMode <= 2) ? modeNames[outputMode] : L"?";
     std::wostringstream oss;
@@ -265,8 +268,13 @@ std::wstring FormatScaleInfo(float scaleX, float scaleY) {
     return oss.str();
 }
 
-std::wstring FormatHelpText() {
+std::wstring FormatHelpText(bool simDisplayAvailable) {
+    if (simDisplayAvailable) {
+        return L"WASD/QE=Move  Drag=Look  Space=Reset\n"
+               L"Scroll=Scale  Shift=IPD  Ctrl=Parallax  Alt=Persp\n"
+               L"V=2D/3D  1/2/3=Output  Tab=HUD  F11=Full  ESC=Quit";
+    }
     return L"WASD/QE=Move  Drag=Look  Space=Reset\n"
            L"Scroll=Scale  Shift=IPD  Ctrl=Parallax  Alt=Persp\n"
-           L"V=2D/3D  1/2/3=Output  Tab=HUD  F11=Full  ESC=Quit";
+           L"V=2D/3D  Tab=HUD  F11=Full  ESC=Quit";
 }

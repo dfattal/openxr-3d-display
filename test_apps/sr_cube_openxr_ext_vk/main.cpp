@@ -424,7 +424,7 @@ static void RenderThreadFunc(
                                 std::wstring dispText = FormatDisplayInfo(xr->displayWidthM, xr->displayHeightM,
                                     xr->nominalViewerX, xr->nominalViewerY, xr->nominalViewerZ);
                                 dispText += L"\n" + FormatScaleInfo(xr->recommendedViewScaleX, xr->recommendedViewScaleY);
-                                dispText += L"\n" + FormatOutputMode(inputSnapshot.outputMode);
+                                dispText += L"\n" + FormatOutputMode(inputSnapshot.outputMode, g_pfnSetOutputMode != nullptr);
                                 std::wstring eyeText = FormatEyeTrackingInfo(
                                     xr->leftEyeX, xr->leftEyeY, xr->leftEyeZ,
                                     xr->rightEyeX, xr->rightEyeY, xr->rightEyeZ,
@@ -439,7 +439,7 @@ static void RenderThreadFunc(
                                 std::wstring stereoText = FormatStereoParams(
                                     inputSnapshot.stereo.ipdFactor, inputSnapshot.stereo.parallaxFactor,
                                     inputSnapshot.stereo.perspectiveFactor, inputSnapshot.stereo.scaleFactor);
-                                std::wstring helpText = FormatHelpText();
+                                std::wstring helpText = FormatHelpText(g_pfnSetOutputMode != nullptr);
 
                                 uint32_t srcRowPitch = 0;
                                 const void* pixels = RenderHudAndMap(*hud, &srcRowPitch, sessionText, modeText, perfText, dispText, eyeText,
