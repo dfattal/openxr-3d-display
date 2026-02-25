@@ -422,14 +422,19 @@ bool LocateViews(
     XMVECTOR playerOri = XMQuaternionRotationRollPitchYaw(playerPitch, playerYaw, 0);
     XMVECTOR playerPos = XMVectorSet(playerPosX, playerPosY, playerPosZ, 0.0f);
 
+    // Compute meters-to-virtual conversion factor (must match Kooima projection scaling)
+    float m2v = 1.0f;
+    if (stereo.virtualDisplayHeight > 0.0f && xr.displayHeightM > 0.0f)
+        m2v = stereo.virtualDisplayHeight / xr.displayHeightM;
+
     for (int i = 0; i < 2; i++) {
-        // Transform position: worldPos = playerOrientation * (localPos * p / s) + playerPosition
-        // perspectiveFactor and scaleFactor both scale the eye position in display space.
+        // Transform position: worldPos = playerOrientation * (localPos * p * m2v / s) + playerPosition
+        // perspectiveFactor, m2v, and scaleFactor all scale the eye position in display space.
         // This must match the Kooima eye scaling so display-plane content stays fixed.
         XMVECTOR localPos = XMVectorSet(
             views[i].pose.position.x, views[i].pose.position.y,
             views[i].pose.position.z, 0.0f);
-        localPos = localPos * stereo.perspectiveFactor / stereo.scaleFactor;
+        localPos = localPos * stereo.perspectiveFactor * m2v / stereo.scaleFactor;
         XMVECTOR worldPos = XMVector3Rotate(localPos, playerOri) + playerPos;
 
         // Transform orientation: worldOri = playerOrientation * localOrientation

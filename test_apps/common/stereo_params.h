@@ -11,8 +11,9 @@
 #pragma once
 
 struct StereoParams {
-    float ipdFactor = 1.0f;         // [0, 1] — 0=mono, 1=normal IPD
-    float parallaxFactor = 1.0f;    // [0, 1] — 0=no head tracking, 1=full
-    float perspectiveFactor = 1.0f; // [0.1, 10] — scales eye in Kooima only
-    float scaleFactor = 1.0f;       // [0.1, 10] — zoom (was zoomScale)
+    float ipdFactor = 1.0f;             // [0, 1] — 0=mono, 1=normal IPD
+    float parallaxFactor = 1.0f;        // [0, 1] — 0=no head tracking, 1=full
+    float perspectiveFactor = 1.0f;     // [0.1, 10] — scales eye in Kooima only
+    float scaleFactor = 1.0f;           // [0.1, 10] — zoom (was zoomScale)
+    float virtualDisplayHeight = 0.0f;  // virtual display height in app units (0 = disabled, 1:1 meters)
 };

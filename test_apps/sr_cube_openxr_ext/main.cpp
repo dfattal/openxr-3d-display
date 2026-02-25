@@ -255,7 +255,7 @@ static void RenderOneFrame(RenderState& rs) {
     UpdatePerformanceStats(*rs.perfStats);
 
     // Update input-based camera movement (clears resetViewRequested internally)
-    UpdateCameraMovement(g_inputState, rs.perfStats->deltaTime);
+    UpdateCameraMovement(g_inputState, rs.perfStats->deltaTime, rs.xr->displayHeightM);
 
     // Handle fullscreen toggle (F11)
     if (g_inputState.fullscreenToggleRequested) {
@@ -362,11 +362,16 @@ static void RenderOneFrame(RenderState& rs) {
                             &nominalViewer, g_inputState.stereo.ipdFactor, g_inputState.stereo.parallaxFactor,
                             &processedEyes[0], &processedEyes[1]);
 
-                        // Kooima projection with perspective + scale factors
-                        float kScreenW = screenWidthM / g_inputState.stereo.scaleFactor;
-                        float kScreenH = screenHeightM / g_inputState.stereo.scaleFactor;
+                        // Meters-to-virtual conversion factor
+                        float m2v = 1.0f;
+                        if (g_inputState.stereo.virtualDisplayHeight > 0.0f && xr.displayHeightM > 0.0f)
+                            m2v = g_inputState.stereo.virtualDisplayHeight / xr.displayHeightM;
+
+                        // Kooima projection with perspective + scale + m2v factors
+                        float kScreenW = screenWidthM * m2v / g_inputState.stereo.scaleFactor;
+                        float kScreenH = screenHeightM * m2v / g_inputState.stereo.scaleFactor;
                         for (int e = 0; e < 2; e++) {
-                            float es = g_inputState.stereo.perspectiveFactor / g_inputState.stereo.scaleFactor;
+                            float es = g_inputState.stereo.perspectiveFactor * m2v / g_inputState.stereo.scaleFactor;
                             XrVector3f kooimaEye = {processedEyes[e].x * es, processedEyes[e].y * es, processedEyes[e].z * es};
                             if (e == 0)
                                 leftProjMatrix = ComputeKooimaProjection(
@@ -429,9 +434,18 @@ static void RenderOneFrame(RenderState& rs) {
                             std::wstring cameraText = FormatCameraInfo(
                                 g_inputState.cameraPosX, g_inputState.cameraPosY, g_inputState.cameraPosZ,
                                 fwdX, fwdY, fwdZ);
+                            float hudM2v = 1.0f;
+                            if (g_inputState.stereo.virtualDisplayHeight > 0.0f && xr.displayHeightM > 0.0f)
+                                hudM2v = g_inputState.stereo.virtualDisplayHeight / xr.displayHeightM;
                             std::wstring stereoText = FormatStereoParams(
                                 g_inputState.stereo.ipdFactor, g_inputState.stereo.parallaxFactor,
                                 g_inputState.stereo.perspectiveFactor, g_inputState.stereo.scaleFactor);
+                            {
+                                wchar_t vhBuf[64];
+                                swprintf(vhBuf, 64, L"\nvHeight: %.3f  m2v: %.3f",
+                                    g_inputState.stereo.virtualDisplayHeight, hudM2v);
+                                stereoText += vhBuf;
+                            }
                             std::wstring helpText = FormatHelpText(g_pfnSetOutputMode != nullptr);
 
                             uint32_t srcRowPitch = 0;
@@ -480,10 +494,13 @@ static void RenderOneFrame(RenderState& rs) {
                             centerEye.x = xr.nominalViewerX + g_inputState.stereo.parallaxFactor * (cx - xr.nominalViewerX);
                             centerEye.y = xr.nominalViewerY + g_inputState.stereo.parallaxFactor * (cy - xr.nominalViewerY);
                             centerEye.z = xr.nominalViewerZ + g_inputState.stereo.parallaxFactor * (cz - xr.nominalViewerZ);
-                            float es = g_inputState.stereo.perspectiveFactor / g_inputState.stereo.scaleFactor;
+                            float monoM2v = 1.0f;
+                            if (g_inputState.stereo.virtualDisplayHeight > 0.0f && xr.displayHeightM > 0.0f)
+                                monoM2v = g_inputState.stereo.virtualDisplayHeight / xr.displayHeightM;
+                            float es = g_inputState.stereo.perspectiveFactor * monoM2v / g_inputState.stereo.scaleFactor;
                             XrVector3f kooimaEye = {centerEye.x * es, centerEye.y * es, centerEye.z * es};
-                            float kScreenW = screenWidthM / g_inputState.stereo.scaleFactor;
-                            float kScreenH = screenHeightM / g_inputState.stereo.scaleFactor;
+                            float kScreenW = screenWidthM * monoM2v / g_inputState.stereo.scaleFactor;
+                            float kScreenH = screenHeightM * monoM2v / g_inputState.stereo.scaleFactor;
                             monoProjMatrix = ComputeKooimaProjection(
                                 kooimaEye, kScreenW, kScreenH, 0.01f, 100.0f);
                             monoFov = ComputeKooimaFov(
@@ -504,7 +521,10 @@ static void RenderOneFrame(RenderState& rs) {
                                 rawViews[0].pose.orientation.x, rawViews[0].pose.orientation.y,
                                 rawViews[0].pose.orientation.z, rawViews[0].pose.orientation.w);
 
-                            float eyeScale = g_inputState.stereo.perspectiveFactor / g_inputState.stereo.scaleFactor;
+                            float monoM2vView = 1.0f;
+                            if (g_inputState.stereo.virtualDisplayHeight > 0.0f && xr.displayHeightM > 0.0f)
+                                monoM2vView = g_inputState.stereo.virtualDisplayHeight / xr.displayHeightM;
+                            float eyeScale = g_inputState.stereo.perspectiveFactor * monoM2vView / g_inputState.stereo.scaleFactor;
                             XMVECTOR playerOri = XMQuaternionRotationRollPitchYaw(
                                 g_inputState.pitch, g_inputState.yaw, 0);
                             XMVECTOR playerPos = XMVectorSet(
@@ -795,6 +815,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     PerformanceStats perfStats = {};
     perfStats.lastTime = std::chrono::high_resolution_clock::now();
+
+    // Set virtual display height (app units). 0.24 = 4x the 0.06m cube height.
+    g_inputState.stereo.virtualDisplayHeight = 0.24f;
 
     RenderState rs = {};
     rs.hwnd = hwnd;

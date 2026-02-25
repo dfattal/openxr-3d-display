@@ -334,7 +334,7 @@ static void RenderThreadFunc(
         }
 
         UpdatePerformanceStats(perfStats);
-        UpdateCameraMovement(inputSnapshot, perfStats.deltaTime);
+        UpdateCameraMovement(inputSnapshot, perfStats.deltaTime, xr->displayHeightM);
 
         {
             std::lock_guard<std::mutex> lock(g_inputMutex);
@@ -457,11 +457,16 @@ static void RenderThreadFunc(
                                 &nominalViewer, inputSnapshot.stereo.ipdFactor, inputSnapshot.stereo.parallaxFactor,
                                 &processedEyes[0], &processedEyes[1]);
 
-                            // Kooima projection with perspective + scale factors
-                            float kScreenW = screenWidthM / inputSnapshot.stereo.scaleFactor;
-                            float kScreenH = screenHeightM / inputSnapshot.stereo.scaleFactor;
+                            // Meters-to-virtual conversion factor
+                            float m2v = 1.0f;
+                            if (inputSnapshot.stereo.virtualDisplayHeight > 0.0f && xr->displayHeightM > 0.0f)
+                                m2v = inputSnapshot.stereo.virtualDisplayHeight / xr->displayHeightM;
+
+                            // Kooima projection with perspective + scale + m2v factors
+                            float kScreenW = screenWidthM * m2v / inputSnapshot.stereo.scaleFactor;
+                            float kScreenH = screenHeightM * m2v / inputSnapshot.stereo.scaleFactor;
                             for (int e = 0; e < 2; e++) {
-                                float es = inputSnapshot.stereo.perspectiveFactor / inputSnapshot.stereo.scaleFactor;
+                                float es = inputSnapshot.stereo.perspectiveFactor * m2v / inputSnapshot.stereo.scaleFactor;
                                 XrVector3f kooimaEye = {processedEyes[e].x * es, processedEyes[e].y * es, processedEyes[e].z * es};
                                 if (e == 0)
                                     leftProjMatrix = ComputeKooimaProjection(
@@ -502,10 +507,13 @@ static void RenderThreadFunc(
                                 centerEye.x = xr->nominalViewerX + inputSnapshot.stereo.parallaxFactor * (cx - xr->nominalViewerX);
                                 centerEye.y = xr->nominalViewerY + inputSnapshot.stereo.parallaxFactor * (cy - xr->nominalViewerY);
                                 centerEye.z = xr->nominalViewerZ + inputSnapshot.stereo.parallaxFactor * (cz - xr->nominalViewerZ);
-                                float es = inputSnapshot.stereo.perspectiveFactor / inputSnapshot.stereo.scaleFactor;
+                                float monoM2v = 1.0f;
+                                if (inputSnapshot.stereo.virtualDisplayHeight > 0.0f && xr->displayHeightM > 0.0f)
+                                    monoM2v = inputSnapshot.stereo.virtualDisplayHeight / xr->displayHeightM;
+                                float es = inputSnapshot.stereo.perspectiveFactor * monoM2v / inputSnapshot.stereo.scaleFactor;
                                 XrVector3f kooimaEye = {centerEye.x * es, centerEye.y * es, centerEye.z * es};
-                                float kScreenW = screenWidthM / inputSnapshot.stereo.scaleFactor;
-                                float kScreenH = screenHeightM / inputSnapshot.stereo.scaleFactor;
+                                float kScreenW = screenWidthM * monoM2v / inputSnapshot.stereo.scaleFactor;
+                                float kScreenH = screenHeightM * monoM2v / inputSnapshot.stereo.scaleFactor;
                                 monoProjMatrix = ComputeKooimaProjection(
                                     kooimaEye, kScreenW, kScreenH, 0.01f, 100.0f);
                                 monoFov = ComputeKooimaFov(
@@ -525,7 +533,10 @@ static void RenderThreadFunc(
                                     rawViews[0].pose.orientation.x, rawViews[0].pose.orientation.y,
                                     rawViews[0].pose.orientation.z, rawViews[0].pose.orientation.w);
 
-                                float eyeScale = inputSnapshot.stereo.perspectiveFactor / inputSnapshot.stereo.scaleFactor;
+                                float monoM2vView = 1.0f;
+                                if (inputSnapshot.stereo.virtualDisplayHeight > 0.0f && xr->displayHeightM > 0.0f)
+                                    monoM2vView = inputSnapshot.stereo.virtualDisplayHeight / xr->displayHeightM;
+                                float eyeScale = inputSnapshot.stereo.perspectiveFactor * monoM2vView / inputSnapshot.stereo.scaleFactor;
                                 XMVECTOR playerOri = XMQuaternionRotationRollPitchYaw(
                                     inputSnapshot.pitch, inputSnapshot.yaw, 0);
                                 XMVECTOR playerPos = XMVectorSet(
@@ -628,9 +639,18 @@ static void RenderThreadFunc(
                                 std::wstring cameraText = FormatCameraInfo(
                                     inputSnapshot.cameraPosX, inputSnapshot.cameraPosY, inputSnapshot.cameraPosZ,
                                     fwdX, fwdY, fwdZ);
+                                float hudM2v = 1.0f;
+                                if (inputSnapshot.stereo.virtualDisplayHeight > 0.0f && xr->displayHeightM > 0.0f)
+                                    hudM2v = inputSnapshot.stereo.virtualDisplayHeight / xr->displayHeightM;
                                 std::wstring stereoText = FormatStereoParams(
                                     inputSnapshot.stereo.ipdFactor, inputSnapshot.stereo.parallaxFactor,
                                     inputSnapshot.stereo.perspectiveFactor, inputSnapshot.stereo.scaleFactor);
+                                {
+                                    wchar_t vhBuf[64];
+                                    swprintf(vhBuf, 64, L"\nvHeight: %.3f  m2v: %.3f",
+                                        inputSnapshot.stereo.virtualDisplayHeight, hudM2v);
+                                    stereoText += vhBuf;
+                                }
                                 std::wstring helpText = FormatHelpText(g_pfnSetOutputMode != nullptr);
 
                                 uint32_t srcRowPitch = 0;
@@ -898,6 +918,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Release GL context from main thread before handing to render thread
     wglMakeCurrent(nullptr, nullptr);
+
+    // Set virtual display height (app units). 0.24 = 4x the 0.06m cube height.
+    g_inputState.stereo.virtualDisplayHeight = 0.24f;
 
     std::thread renderThread(RenderThreadFunc, hwnd, hDC, hGLRC, &xr, &glRenderer,
         &swapchainImages,
