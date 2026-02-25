@@ -26,10 +26,11 @@ extern "C" {
 // --- Structs ---
 
 typedef struct Display3DTunables {
-	float ipd_factor;         //!< [0, 1] — scales inter-eye distance (0=mono, 1=full)
-	float parallax_factor;    //!< [0, 1] — lerps eye center toward nominal (0=no tracking, 1=full)
-	float perspective_factor; //!< [0.1, 10] — scales eye XYZ in view+projection (not screen)
-	float scale_factor;       //!< [0.1, 10] — scales eye XYZ AND screenW/H (cancels in projection = zoom)
+	float ipd_factor;              //!< [0, 1] — scales inter-eye distance (0=mono, 1=full)
+	float parallax_factor;         //!< [0, 1] — lerps eye center toward nominal (0=no tracking, 1=full)
+	float perspective_factor;      //!< [0.1, 10] — scales eye XYZ in view+projection (not screen)
+	float scale_factor;            //!< [0.1, 10] — scales eye XYZ AND screenW/H (cancels in projection = zoom)
+	float virtual_display_height;  //!< Virtual display height in app units (0 = disabled, use physical meters)
 } Display3DTunables;
 
 typedef struct Display3DScreen {

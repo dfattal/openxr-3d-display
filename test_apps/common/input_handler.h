@@ -78,8 +78,8 @@ struct InputState {
 bool UpdateInputState(InputState& state, UINT msg, WPARAM wParam, LPARAM lParam);
 
 // Update camera position based on current key states
-// deltaTime is in seconds
-void UpdateCameraMovement(InputState& state, float deltaTime);
+// deltaTime is in seconds, displayHeightM is physical display height for m2v scaling
+void UpdateCameraMovement(InputState& state, float deltaTime, float displayHeightM = 0.0f);
 
 // Get a string describing current mouse button state
 std::string GetMouseButtonString(const InputState& state);

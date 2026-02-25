@@ -188,7 +188,7 @@ bool UpdateInputState(InputState& state, UINT msg, WPARAM wParam, LPARAM lParam)
     return false;
 }
 
-void UpdateCameraMovement(InputState& state, float deltaTime) {
+void UpdateCameraMovement(InputState& state, float deltaTime, float displayHeightM) {
     // Handle view reset (spacebar or double-click)
     if (state.resetViewRequested) {
         state.cameraPosX = 0.0f;
@@ -196,12 +196,19 @@ void UpdateCameraMovement(InputState& state, float deltaTime) {
         state.cameraPosZ = 0.0f;
         state.yaw = 0.0f;
         state.pitch = 0.0f;
+        float savedVDH = state.stereo.virtualDisplayHeight;
         state.stereo = StereoParams{};
+        state.stereo.virtualDisplayHeight = savedVDH;
         state.resetViewRequested = false;
         return;
     }
 
-    const float moveSpeed = 0.1f / state.stereo.scaleFactor; // Meters per second, scaled with zoom
+    // Meters-to-virtual conversion (matches Kooima projection scaling)
+    float m2v = 1.0f;
+    if (state.stereo.virtualDisplayHeight > 0.0f && displayHeightM > 0.0f)
+        m2v = state.stereo.virtualDisplayHeight / displayHeightM;
+
+    const float moveSpeed = 0.1f * m2v / state.stereo.scaleFactor; // Virtual units per second, scaled with zoom
 
     // Build orientation quaternion using the same function as LocateViews,
     // guaranteeing movement vectors match the view rotation exactly.

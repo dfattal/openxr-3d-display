@@ -1768,16 +1768,23 @@ static void PumpMacOSEvents() {
 // Camera movement (ported from test_apps/common/input_handler.cpp)
 // ============================================================================
 
-static void UpdateCameraMovement(InputState& state, float deltaTime) {
+static void UpdateCameraMovement(InputState& state, float deltaTime, float displayHeightM = 0.0f) {
     if (state.resetViewRequested) {
         state.cameraPosX = state.cameraPosY = state.cameraPosZ = 0.0f;
         state.yaw = state.pitch = 0.0f;
+        float savedVDH = state.stereo.virtualDisplayHeight;
         state.stereo = StereoParams{};
+        state.stereo.virtualDisplayHeight = savedVDH;
         state.resetViewRequested = false;
         return;
     }
 
-    const float moveSpeed = 0.1f / state.stereo.scaleFactor;
+    // Meters-to-virtual conversion (matches Kooima projection scaling)
+    float m2v = 1.0f;
+    if (state.stereo.virtualDisplayHeight > 0.0f && displayHeightM > 0.0f)
+        m2v = state.stereo.virtualDisplayHeight / displayHeightM;
+
+    const float moveSpeed = 0.1f * m2v / state.stereo.scaleFactor;
     XrQuaternionf ori;
     quat_from_yaw_pitch(state.yaw, state.pitch, &ori);
 
@@ -2527,6 +2534,8 @@ int main() {
         LOG_INFO("Framebuffers created OK");
     }
 
+    g_input.stereo.virtualDisplayHeight = 0.24f;
+
     LOG_INFO("=== Entering main loop ===");
     LOG_INFO("Controls: WASD=move, Mouse=look, Scroll=zoom, Space=reset, V=2D/3D, 1/2/3=SBS/anaglyph/blend, TAB=HUD, Cmd+Ctrl+F=fullscreen, ESC=quit");
     LOG_INFO("          V=2D/3D, Tab=HUD, 1/2/3=SBS/Ana/Blend, ESC=quit");
@@ -2560,7 +2569,7 @@ int main() {
         g_frameCount++;
         g_avgFrameTime = g_avgFrameTime * 0.95 + deltaTime * 0.05;
 
-        UpdateCameraMovement(g_input, deltaTime);
+        UpdateCameraMovement(g_input, deltaTime, xr.displayHeightM);
 
         vkRenderer.cubeRotation += deltaTime * 0.5f;
         if (vkRenderer.cubeRotation > 2.0f * 3.14159265f)
@@ -2636,6 +2645,7 @@ int main() {
                         tunables.parallax_factor = g_input.stereo.parallaxFactor;
                         tunables.perspective_factor = g_input.stereo.perspectiveFactor;
                         tunables.scale_factor = g_input.stereo.scaleFactor;
+                        tunables.virtual_display_height = g_input.stereo.virtualDisplayHeight;
 
                         XrVector3f nominalViewer = {xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ};
 
@@ -2789,6 +2799,7 @@ int main() {
                         "Forward: (%.2f, %.2f, %.2f)\n"
                         "IPD: %.2f  Parallax: %.2f\n"
                         "Persp: %.2f  Scale: %.2f\n"
+                        "vHeight: %.3f  m2v: %.3f\n"
                         "\n"
                         "WASD/QE=Move  Drag=Look  Space=Reset\n"
                         "Scroll=Scale  Shift=IPD  Ctrl=Parallax  Opt=Persp\n"
@@ -2812,7 +2823,10 @@ int main() {
                          sinf(g_input.pitch),
                         -cosf(g_input.yaw) * cosf(g_input.pitch),
                         g_input.stereo.ipdFactor, g_input.stereo.parallaxFactor,
-                        g_input.stereo.perspectiveFactor, g_input.stereo.scaleFactor];
+                        g_input.stereo.perspectiveFactor, g_input.stereo.scaleFactor,
+                        g_input.stereo.virtualDisplayHeight,
+                        (g_input.stereo.virtualDisplayHeight > 0.0f && xr.displayHeightM > 0.0f)
+                            ? g_input.stereo.virtualDisplayHeight / xr.displayHeightM : 1.0f];
                     g_hudView.hudText = text;
                     [g_hudView setNeedsDisplay:YES];
                     [g_hudView setHidden:NO];
