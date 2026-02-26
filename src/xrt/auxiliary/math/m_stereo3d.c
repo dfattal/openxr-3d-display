@@ -51,11 +51,9 @@ m_stereo3d_apply_eye_factors(const struct xrt_vec3 *raw_left,
                              struct xrt_vec3 *out_left,
                              struct xrt_vec3 *out_right)
 {
-	// Default nominal viewer if NULL
-	float nom_x = 0.0f, nom_y = 0.0f, nom_z = 0.5f;
+	// Default nominal viewer if NULL (only z is used — x/y lerp toward origin)
+	float nom_z = 0.5f;
 	if (nominal_viewer) {
-		nom_x = nominal_viewer->x;
-		nom_y = nominal_viewer->y;
 		nom_z = nominal_viewer->z;
 	}
 
@@ -72,9 +70,11 @@ m_stereo3d_apply_eye_factors(const struct xrt_vec3 *raw_left,
 	float rvy = (raw_right->y - cy) * ipd_factor;
 	float rvz = (raw_right->z - cz) * ipd_factor;
 
-	// Step 2: Parallax factor -- lerp center toward nominal viewer
-	float cx2 = nom_x + parallax_factor * (cx - nom_x);
-	float cy2 = nom_y + parallax_factor * (cy - nom_y);
+	// Step 2: Parallax factor -- lerp center toward (0, 0, nom_z).
+	// We use origin for x/y so that reducing parallax drives the viewpoint
+	// to the display-center axis rather than to an arbitrary nominal offset.
+	float cx2 = parallax_factor * cx;
+	float cy2 = parallax_factor * cy;
 	float cz2 = nom_z + parallax_factor * (cz - nom_z);
 
 	out_left->x = cx2 + lvx;
