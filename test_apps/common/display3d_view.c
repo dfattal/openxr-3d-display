@@ -108,7 +108,6 @@ display3d_default_tunables(void)
 	t.ipd_factor = 1.0f;
 	t.parallax_factor = 1.0f;
 	t.perspective_factor = 1.0f;
-	t.scale_factor = 1.0f;
 	t.virtual_display_height = 0.0f;
 	return t;
 }
@@ -244,15 +243,13 @@ display3d_compute_stereo_views(const XrVector3f *raw_left,
 	                            &processed[0], &processed[1]);
 
 	// Compute meters-to-virtual conversion factor
-	float m2v = 1.0f;
-	if (t.virtual_display_height > 0.0f && screen->height_m > 0.0f)
-		m2v = t.virtual_display_height / screen->height_m;
+	float m2v = t.virtual_display_height / screen->height_m;
 
 	// Process each eye
 	Display3DStereoView *outputs[2] = {out_left, out_right};
 	for (int i = 0; i < 2; i++) {
-		// Step 3: Apply perspective + scale + m2v to eye XYZ
-		float es = t.perspective_factor * m2v / t.scale_factor;
+		// Step 3: Apply perspective * m2v to eye XYZ
+		float es = t.perspective_factor * m2v;
 		XrVector3f eye_scaled;
 		eye_scaled.x = processed[i].x * es;
 		eye_scaled.y = processed[i].y * es;
@@ -261,9 +258,9 @@ display3d_compute_stereo_views(const XrVector3f *raw_left,
 		// Store display-space eye (after all factors)
 		outputs[i]->eye_display = eye_scaled;
 
-		// Step 4: Apply scale + m2v to screen dimensions
-		float kScreenW = screen->width_m * m2v / t.scale_factor;
-		float kScreenH = screen->height_m * m2v / t.scale_factor;
+		// Step 4: Apply m2v to screen dimensions
+		float kScreenW = screen->width_m * m2v;
+		float kScreenH = screen->height_m * m2v;
 
 		// Step 5: Transform display-space eye -> world-space via display_pose
 		XrVector3f eye_world = quat_rotate(disp_ori, eye_scaled);
