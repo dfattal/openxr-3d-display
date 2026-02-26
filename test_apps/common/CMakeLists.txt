@@ -26,6 +26,8 @@ add_library(sr_common_base STATIC
     xr_session_common.h
     display3d_view.c
     display3d_view.h
+    camera3d_view.c
+    camera3d_view.h
 )
 
 target_include_directories(sr_common_base PUBLIC

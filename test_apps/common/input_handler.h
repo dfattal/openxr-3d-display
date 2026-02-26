@@ -68,6 +68,10 @@ struct InputState {
     bool displayMode3D = true;
     bool displayModeToggleRequested = false;
 
+    // Camera vs display mode toggle (C key)
+    bool cameraMode = false;
+    float nominalViewerZ = 0.5f;  // Cached from runtime for camera-mode init
+
     // Output mode for sim_display (1/2/3 keys: 0=SBS, 1=Anaglyph, 2=Blend)
     int outputMode = 0;
     bool outputModeChangeRequested = false;

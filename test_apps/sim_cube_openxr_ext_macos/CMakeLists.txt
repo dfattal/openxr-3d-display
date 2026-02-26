@@ -53,6 +53,7 @@ endif()
 add_executable(sim_cube_openxr_ext_macos
     main.mm
     "${CMAKE_SOURCE_DIR}/../common/display3d_view.c"
+    "${CMAKE_SOURCE_DIR}/../common/camera3d_view.c"
 )
 
 target_include_directories(sim_cube_openxr_ext_macos PRIVATE
