@@ -943,10 +943,22 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 	uint32_t leftProjArray = 0, rightProjArray = 0;
 
 	if (!get_session_layer_view(proj_layer, 0, &imgW, &imgH, &imgFmt, &leftProjView, &leftProjImage,
-	                            &leftProjArray) ||
-	    !get_session_layer_view(proj_layer, 1, &imgW, &imgH, &imgFmt, &rightProjView, &rightProjImage,
-	                            &rightProjArray)) {
-		U_LOG_W("[composite] Could not extract projection views");
+	                            &leftProjArray)) {
+		U_LOG_W("[composite] Could not extract left projection view");
+		return false;
+	}
+
+	// Mono mode (viewCount=1): duplicate left view for right eye so the
+	// compositing pipeline can run unchanged.  The right composite output
+	// is identical to the left and is simply discarded by the caller.
+	bool mono_composite = (proj_layer->data.view_count < 2);
+	if (mono_composite) {
+		rightProjView = leftProjView;
+		rightProjImage = leftProjImage;
+		rightProjArray = leftProjArray;
+	} else if (!get_session_layer_view(proj_layer, 1, &imgW, &imgH, &imgFmt, &rightProjView,
+	                                    &rightProjImage, &rightProjArray)) {
+		U_LOG_W("[composite] Could not extract right projection view");
 		return false;
 	}
 
@@ -1002,12 +1014,13 @@ composite_layers_to_intermediate(struct multi_compositor *mc,
 		bool same_source = (shared_imgs[0] == shared_imgs[1] &&
 		                    shared_layers[0] == shared_layers[1]);
 
-		// Per-eye source offsets for single-swapchain SBS apps
+		// Per-eye source offsets for single-swapchain SBS apps.
+		// Mono mode: right eye duplicates left eye offsets.
 		int src_off_x[2], src_off_y[2];
 		src_off_x[0] = proj_layer->data.proj.v[0].sub.rect.offset.w;
 		src_off_y[0] = proj_layer->data.proj.v[0].sub.rect.offset.h;
-		src_off_x[1] = proj_layer->data.proj.v[1].sub.rect.offset.w;
-		src_off_y[1] = proj_layer->data.proj.v[1].sub.rect.offset.h;
+		src_off_x[1] = mono_composite ? src_off_x[0] : proj_layer->data.proj.v[1].sub.rect.offset.w;
+		src_off_y[1] = mono_composite ? src_off_y[0] : proj_layer->data.proj.v[1].sub.rect.offset.h;
 
 		// Pre-barriers: shared images GENERAL->TRANSFER_SRC, preblit UNDEFINED->TRANSFER_DST
 		// Deduplicate source barrier when both eyes share the same image.
@@ -2349,11 +2362,12 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	// directly to the presentation target without side-by-side packing or
 	// light-field interlacing (weaving).
 	if (is_mono) {
-		// Mono + window-space overlays: when the V-key forces 2D mode but the
-		// app submitted 2 views, we can use composite_layers_to_intermediate()
-		// to composite projection + HUD overlays into an intermediate image,
-		// then blit that to the target. This ensures the HUD is visible in 2D mode.
-		if (has_window_space_layers(mc) && layer->data.view_count >= 2) {
+		// Mono + window-space overlays: composite projection + HUD overlays
+		// into an intermediate image, then blit left eye to target.
+		// Works for both app-submitted mono (viewCount=1) and runtime-forced
+		// 2D mode (viewCount=2): composite_layers_to_intermediate() duplicates
+		// the left view for the right eye when only 1 view is submitted.
+		if (has_window_space_layers(mc)) {
 			VkImageView comp_left = VK_NULL_HANDLE, comp_right = VK_NULL_HANDLE;
 			if (composite_layers_to_intermediate(mc, vk, cmd, &comp_left, &comp_right)) {
 				// composite_images[0] is in SHADER_READ_ONLY_OPTIMAL.
@@ -2414,8 +2428,10 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 
 				static bool mono_hud_logged = false;
 				if (!mono_hud_logged) {
-					U_LOG_W("[per-session] Mono (2D) + HUD: composited %ux%u -> %ux%u",
-					        cw, ch, framebufferWidth, framebufferHeight);
+					U_LOG_W("[per-session] Mono (2D) + window-space HUD: "
+					        "composited %ux%u -> %ux%u (viewCount=%u)",
+					        cw, ch, framebufferWidth, framebufferHeight,
+					        layer->data.view_count);
 					mono_hud_logged = true;
 				}
 				goto submit_and_present;
