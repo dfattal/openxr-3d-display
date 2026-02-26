@@ -21,6 +21,7 @@
 #include "hud_renderer.h"
 #include "xr_session.h"
 #include "display3d_view.h"
+#include "camera3d_view.h"
 
 #include <chrono>
 #include <cmath>
@@ -46,6 +47,7 @@ static UINT g_windowHeight = 720;
 static bool g_inSizeMove = false;  // True while user is dragging/resizing the window
 static const uint32_t HUD_PIXEL_WIDTH = 380;
 static const uint32_t HUD_PIXEL_HEIGHT = 470;
+static const float CAMERA_HALF_TAN_VFOV = 0.57735026919f; // tan(30°) → 60° vFOV
 static const float HUD_WIDTH_FRACTION = 0.30f;
 
 // sim_display output mode switching (loaded at runtime via GetProcAddress)
@@ -356,29 +358,52 @@ static void RenderOneFrame(RenderState& rs) {
                             rawLeft = rawRight = center;
                         }
 
-                        // Build tunables: fold scaleFactor into virtual_display_height
-                        Display3DTunables tunables;
-                        tunables.ipd_factor = g_inputState.stereo.ipdFactor;
-                        tunables.parallax_factor = g_inputState.stereo.parallaxFactor;
-                        tunables.perspective_factor = g_inputState.stereo.perspectiveFactor;
-                        tunables.virtual_display_height = g_inputState.stereo.virtualDisplayHeight / g_inputState.stereo.scaleFactor;
-
-                        // Build display pose from player yaw/pitch/position
-                        XrPosef displayPose;
+                        // Build camera/display pose from player yaw/pitch/position
+                        XrPosef cameraPose;
                         XMVECTOR pOri = XMQuaternionRotationRollPitchYaw(
                             g_inputState.pitch, g_inputState.yaw, 0);
                         XMFLOAT4 q;
                         XMStoreFloat4(&q, pOri);
-                        displayPose.orientation = {q.x, q.y, q.z, q.w};
-                        displayPose.position = {g_inputState.cameraPosX, g_inputState.cameraPosY, g_inputState.cameraPosZ};
+                        cameraPose.orientation = {q.x, q.y, q.z, q.w};
+                        cameraPose.position = {g_inputState.cameraPosX, g_inputState.cameraPosY, g_inputState.cameraPosZ};
 
                         XrVector3f nominalViewer = {xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ};
                         Display3DScreen screen = {winW_m * vs, winH_m * vs};
 
-                        display3d_compute_stereo_views(
-                            &rawLeft, &rawRight, &nominalViewer,
-                            &screen, &tunables, &displayPose,
-                            0.01f, 100.0f, &stereoViews[0], &stereoViews[1]);
+                        if (g_inputState.cameraMode) {
+                            // Camera-centric path
+                            Camera3DTunables camTunables;
+                            camTunables.ipd_factor = g_inputState.stereo.ipdFactor;
+                            camTunables.parallax_factor = g_inputState.stereo.parallaxFactor;
+                            camTunables.inv_convergence_distance = g_inputState.stereo.invConvergenceDistance;
+                            camTunables.half_tan_vfov = CAMERA_HALF_TAN_VFOV / g_inputState.stereo.zoomFactor;
+
+                            Camera3DStereoView camViews[2];
+                            camera3d_compute_stereo_views(
+                                &rawLeft, &rawRight, &nominalViewer,
+                                &screen, &camTunables, &cameraPose,
+                                0.01f, 100.0f, &camViews[0], &camViews[1]);
+
+                            // Copy into Display3DStereoView for uniform downstream rendering
+                            for (int i = 0; i < 2; i++) {
+                                memcpy(stereoViews[i].view_matrix, camViews[i].view_matrix, sizeof(float) * 16);
+                                memcpy(stereoViews[i].projection_matrix, camViews[i].projection_matrix, sizeof(float) * 16);
+                                stereoViews[i].fov = camViews[i].fov;
+                                stereoViews[i].eye_world = camViews[i].eye_world;
+                            }
+                        } else {
+                            // Display-centric path
+                            Display3DTunables tunables;
+                            tunables.ipd_factor = g_inputState.stereo.ipdFactor;
+                            tunables.parallax_factor = g_inputState.stereo.parallaxFactor;
+                            tunables.perspective_factor = g_inputState.stereo.perspectiveFactor;
+                            tunables.virtual_display_height = g_inputState.stereo.virtualDisplayHeight / g_inputState.stereo.scaleFactor;
+
+                            display3d_compute_stereo_views(
+                                &rawLeft, &rawRight, &nominalViewer,
+                                &screen, &tunables, &cameraPose,
+                                0.01f, 100.0f, &stereoViews[0], &stereoViews[1]);
+                        }
                     }
 
                     // [Commented out — will be reused for 3D-positioned HUD later]
@@ -399,6 +424,9 @@ static void RenderOneFrame(RenderState& rs) {
                                     L"\nDisplay Mode: 3D Stereo [V=Toggle]" :
                                     L"\nDisplay Mode: 2D Mono [V=Toggle]";
                             }
+                            modeText += g_inputState.cameraMode ?
+                                L"\nKooima: Camera-Centric [C=Toggle]" :
+                                L"\nKooima: Display-Centric [C=Toggle]";
 
                             // Dynamic render dims matching the actual viewport computation
                             uint32_t dispRenderW, dispRenderH;
@@ -430,20 +458,27 @@ static void RenderOneFrame(RenderState& rs) {
                             float fwdZ = -cosf(g_inputState.yaw) * cosf(g_inputState.pitch);
                             std::wstring cameraText = FormatCameraInfo(
                                 g_inputState.cameraPosX, g_inputState.cameraPosY, g_inputState.cameraPosZ,
-                                fwdX, fwdY, fwdZ);
-                            float hudM2v = 1.0f;
-                            if (g_inputState.stereo.virtualDisplayHeight > 0.0f && xr.displayHeightM > 0.0f)
-                                hudM2v = g_inputState.stereo.virtualDisplayHeight / xr.displayHeightM;
+                                fwdX, fwdY, fwdZ, g_inputState.cameraMode);
+                            float dispP1 = g_inputState.cameraMode ? g_inputState.stereo.invConvergenceDistance : g_inputState.stereo.perspectiveFactor;
+                            float dispP2 = g_inputState.cameraMode ? g_inputState.stereo.zoomFactor : g_inputState.stereo.scaleFactor;
                             std::wstring stereoText = FormatStereoParams(
                                 g_inputState.stereo.ipdFactor, g_inputState.stereo.parallaxFactor,
-                                g_inputState.stereo.perspectiveFactor, g_inputState.stereo.scaleFactor);
+                                dispP1, dispP2, g_inputState.cameraMode);
                             {
                                 wchar_t vhBuf[64];
-                                swprintf(vhBuf, 64, L"\nvHeight: %.3f  m2v: %.3f",
-                                    g_inputState.stereo.virtualDisplayHeight, hudM2v);
+                                if (g_inputState.cameraMode) {
+                                    float tanHFOV = CAMERA_HALF_TAN_VFOV / g_inputState.stereo.zoomFactor;
+                                    swprintf(vhBuf, 64, L"\ntanHFOV: %.3f", tanHFOV);
+                                } else {
+                                    float hudM2v = 1.0f;
+                                    if (g_inputState.stereo.virtualDisplayHeight > 0.0f && xr.displayHeightM > 0.0f)
+                                        hudM2v = g_inputState.stereo.virtualDisplayHeight / xr.displayHeightM;
+                                    swprintf(vhBuf, 64, L"\nvHeight: %.3f  m2v: %.3f",
+                                        g_inputState.stereo.virtualDisplayHeight, hudM2v);
+                                }
                                 stereoText += vhBuf;
                             }
-                            std::wstring helpText = FormatHelpText(g_pfnSetOutputMode != nullptr);
+                            std::wstring helpText = FormatHelpText(g_pfnSetOutputMode != nullptr, g_inputState.cameraMode);
 
                             uint32_t srcRowPitch = 0;
                             const void* pixels = RenderHudAndMap(*rs.hudRenderer, &srcRowPitch,
@@ -792,6 +827,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Set virtual display height (app units). 0.24 = 4x the 0.06m cube height.
     g_inputState.stereo.virtualDisplayHeight = 0.24f;
+    g_inputState.nominalViewerZ = xr.nominalViewerZ;
 
     RenderState rs = {};
     rs.hwnd = hwnd;

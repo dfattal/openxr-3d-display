@@ -118,13 +118,25 @@ bool UpdateInputState(InputState& state, UINT msg, WPARAM wParam, LPARAM lParam)
             if (state.stereo.parallaxFactor < 0.0f) state.stereo.parallaxFactor = 0.0f;
             if (state.stereo.parallaxFactor > 1.0f) state.stereo.parallaxFactor = 1.0f;
         } else if (alt) {
-            state.stereo.perspectiveFactor *= factor;
-            if (state.stereo.perspectiveFactor < 0.1f) state.stereo.perspectiveFactor = 0.1f;
-            if (state.stereo.perspectiveFactor > 10.0f) state.stereo.perspectiveFactor = 10.0f;
+            if (state.cameraMode) {
+                state.stereo.invConvergenceDistance *= factor;
+                if (state.stereo.invConvergenceDistance < 0.1f) state.stereo.invConvergenceDistance = 0.1f;
+                if (state.stereo.invConvergenceDistance > 10.0f) state.stereo.invConvergenceDistance = 10.0f;
+            } else {
+                state.stereo.perspectiveFactor *= factor;
+                if (state.stereo.perspectiveFactor < 0.1f) state.stereo.perspectiveFactor = 0.1f;
+                if (state.stereo.perspectiveFactor > 10.0f) state.stereo.perspectiveFactor = 10.0f;
+            }
         } else {
-            state.stereo.scaleFactor *= factor;
-            if (state.stereo.scaleFactor < 0.1f) state.stereo.scaleFactor = 0.1f;
-            if (state.stereo.scaleFactor > 10.0f) state.stereo.scaleFactor = 10.0f;
+            if (state.cameraMode) {
+                state.stereo.zoomFactor *= factor;
+                if (state.stereo.zoomFactor < 0.1f) state.stereo.zoomFactor = 0.1f;
+                if (state.stereo.zoomFactor > 10.0f) state.stereo.zoomFactor = 10.0f;
+            } else {
+                state.stereo.scaleFactor *= factor;
+                if (state.stereo.scaleFactor < 0.1f) state.stereo.scaleFactor = 0.1f;
+                if (state.stereo.scaleFactor > 10.0f) state.stereo.scaleFactor = 10.0f;
+            }
         }
         return true;
     }
@@ -168,6 +180,25 @@ bool UpdateInputState(InputState& state, UINT msg, WPARAM wParam, LPARAM lParam)
             state.outputMode = 2;
             state.outputModeChangeRequested = true;
             break;
+        case 'C':
+            state.cameraMode = !state.cameraMode;
+            if (state.cameraMode) {
+                state.cameraPosX = 0.0f;
+                state.cameraPosY = 0.0f;
+                state.cameraPosZ = state.nominalViewerZ;
+                state.yaw = 0.0f;
+                state.pitch = 0.0f;
+                if (state.nominalViewerZ > 0.0f)
+                    state.stereo.invConvergenceDistance = 1.0f / state.nominalViewerZ;
+                state.stereo.zoomFactor = 1.0f;
+            } else {
+                state.cameraPosX = 0.0f;
+                state.cameraPosY = 0.0f;
+                state.cameraPosZ = 0.0f;
+                state.yaw = 0.0f;
+                state.pitch = 0.0f;
+            }
+            break;
         }
         return true;
 
@@ -191,14 +222,24 @@ bool UpdateInputState(InputState& state, UINT msg, WPARAM wParam, LPARAM lParam)
 void UpdateCameraMovement(InputState& state, float deltaTime, float displayHeightM) {
     // Handle view reset (spacebar or double-click)
     if (state.resetViewRequested) {
-        state.cameraPosX = 0.0f;
-        state.cameraPosY = 0.0f;
-        state.cameraPosZ = 0.0f;
         state.yaw = 0.0f;
         state.pitch = 0.0f;
         float savedVDH = state.stereo.virtualDisplayHeight;
+        bool savedCameraMode = state.cameraMode;
         state.stereo = StereoParams{};
         state.stereo.virtualDisplayHeight = savedVDH;
+        state.cameraMode = savedCameraMode;
+        if (state.cameraMode) {
+            state.cameraPosX = 0.0f;
+            state.cameraPosY = 0.0f;
+            state.cameraPosZ = state.nominalViewerZ;
+            if (state.nominalViewerZ > 0.0f)
+                state.stereo.invConvergenceDistance = 1.0f / state.nominalViewerZ;
+        } else {
+            state.cameraPosX = 0.0f;
+            state.cameraPosY = 0.0f;
+            state.cameraPosZ = 0.0f;
+        }
         state.resetViewRequested = false;
         return;
     }

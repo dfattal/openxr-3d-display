@@ -43,6 +43,7 @@
 
 #include "stereo_params.h"
 #include "display3d_view.h"
+#include "camera3d_view.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -101,6 +102,10 @@ struct InputState {
     // Display mode toggle (V key)
     bool displayMode3D = true;
     bool displayModeToggleRequested = false;
+
+    // Camera vs display mode toggle (C key)
+    bool cameraMode = false;
+    float nominalViewerZ = 0.5f;  // Cached from runtime for camera-mode init
 };
 
 // ============================================================================
@@ -111,6 +116,7 @@ static volatile bool g_running = true;
 static NSWindow *g_window = nil;
 static NSView *g_metalView = nil;
 static InputState g_input;
+static const float CAMERA_HALF_TAN_VFOV = 0.57735026919f; // tan(30°) → 60° vFOV
 
 // dlsym handle for sim_display live mode switching (Bug 4 fix)
 typedef void (*PFN_sim_display_set_output_mode)(int mode);
@@ -1670,13 +1676,25 @@ static void PumpMacOSEvents() {
                     if (g_input.stereo.parallaxFactor < 0.0f) g_input.stereo.parallaxFactor = 0.0f;
                     if (g_input.stereo.parallaxFactor > 1.0f) g_input.stereo.parallaxFactor = 1.0f;
                 } else if (scrollMods & NSEventModifierFlagOption) {
-                    g_input.stereo.perspectiveFactor *= factor;
-                    if (g_input.stereo.perspectiveFactor < 0.1f) g_input.stereo.perspectiveFactor = 0.1f;
-                    if (g_input.stereo.perspectiveFactor > 10.0f) g_input.stereo.perspectiveFactor = 10.0f;
+                    if (g_input.cameraMode) {
+                        g_input.stereo.invConvergenceDistance *= factor;
+                        if (g_input.stereo.invConvergenceDistance < 0.1f) g_input.stereo.invConvergenceDistance = 0.1f;
+                        if (g_input.stereo.invConvergenceDistance > 10.0f) g_input.stereo.invConvergenceDistance = 10.0f;
+                    } else {
+                        g_input.stereo.perspectiveFactor *= factor;
+                        if (g_input.stereo.perspectiveFactor < 0.1f) g_input.stereo.perspectiveFactor = 0.1f;
+                        if (g_input.stereo.perspectiveFactor > 10.0f) g_input.stereo.perspectiveFactor = 10.0f;
+                    }
                 } else {
-                    g_input.stereo.scaleFactor *= factor;
-                    if (g_input.stereo.scaleFactor < 0.1f) g_input.stereo.scaleFactor = 0.1f;
-                    if (g_input.stereo.scaleFactor > 10.0f) g_input.stereo.scaleFactor = 10.0f;
+                    if (g_input.cameraMode) {
+                        g_input.stereo.zoomFactor *= factor;
+                        if (g_input.stereo.zoomFactor < 0.1f) g_input.stereo.zoomFactor = 0.1f;
+                        if (g_input.stereo.zoomFactor > 10.0f) g_input.stereo.zoomFactor = 10.0f;
+                    } else {
+                        g_input.stereo.scaleFactor *= factor;
+                        if (g_input.stereo.scaleFactor < 0.1f) g_input.stereo.scaleFactor = 0.1f;
+                        if (g_input.stereo.scaleFactor > 10.0f) g_input.stereo.scaleFactor = 10.0f;
+                    }
                 }
             } else if (type == NSEventTypeKeyDown) {
                 // Cmd+Ctrl+F fullscreen toggle (keyCode 3 = 'f', ignores character remapping)
@@ -1702,6 +1720,25 @@ static void PumpMacOSEvents() {
                     else if (ch == 'v' && !isRepeat) {
                         g_input.displayMode3D = !g_input.displayMode3D;
                         g_input.displayModeToggleRequested = true;
+                    }
+                    else if (ch == 'c' && !isRepeat) {
+                        g_input.cameraMode = !g_input.cameraMode;
+                        if (g_input.cameraMode) {
+                            g_input.cameraPosX = 0.0f;
+                            g_input.cameraPosY = 0.0f;
+                            g_input.cameraPosZ = g_input.nominalViewerZ;
+                            g_input.yaw = 0.0f;
+                            g_input.pitch = 0.0f;
+                            if (g_input.nominalViewerZ > 0.0f)
+                                g_input.stereo.invConvergenceDistance = 1.0f / g_input.nominalViewerZ;
+                            g_input.stereo.zoomFactor = 1.0f;
+                        } else {
+                            g_input.cameraPosX = 0.0f;
+                            g_input.cameraPosY = 0.0f;
+                            g_input.cameraPosZ = 0.0f;
+                            g_input.yaw = 0.0f;
+                            g_input.pitch = 0.0f;
+                        }
                     }
                     else if (ch == '1' && !isRepeat) {
                         g_currentOutputMode = 0;
@@ -1770,11 +1807,21 @@ static void PumpMacOSEvents() {
 
 static void UpdateCameraMovement(InputState& state, float deltaTime, float displayHeightM = 0.0f) {
     if (state.resetViewRequested) {
-        state.cameraPosX = state.cameraPosY = state.cameraPosZ = 0.0f;
         state.yaw = state.pitch = 0.0f;
         float savedVDH = state.stereo.virtualDisplayHeight;
+        bool savedCameraMode = state.cameraMode;
         state.stereo = StereoParams{};
         state.stereo.virtualDisplayHeight = savedVDH;
+        state.cameraMode = savedCameraMode;
+        if (state.cameraMode) {
+            state.cameraPosX = 0.0f;
+            state.cameraPosY = 0.0f;
+            state.cameraPosZ = state.nominalViewerZ;
+            if (state.nominalViewerZ > 0.0f)
+                state.stereo.invConvergenceDistance = 1.0f / state.nominalViewerZ;
+        } else {
+            state.cameraPosX = state.cameraPosY = state.cameraPosZ = 0.0f;
+        }
         state.resetViewRequested = false;
         return;
     }
@@ -2535,6 +2582,7 @@ int main() {
     }
 
     g_input.stereo.virtualDisplayHeight = 0.24f;
+    g_input.nominalViewerZ = xr.nominalViewerZ;
 
     LOG_INFO("=== Entering main loop ===");
     LOG_INFO("Controls: WASD=move, Mouse=look, Scroll=zoom, Space=reset, V=2D/3D, 1/2/3=SBS/anaglyph/blend, TAB=HUD, Cmd+Ctrl+F=fullscreen, ESC=quit");
@@ -2634,19 +2682,10 @@ int main() {
                             rawEyePos[1] = rawEyePos[0];
                         }
 
-                        // Build display pose from player transform
-                        XrPosef displayPose;
-                        quat_from_yaw_pitch(g_input.yaw, g_input.pitch, &displayPose.orientation);
-                        displayPose.position = {g_input.cameraPosX, g_input.cameraPosY, g_input.cameraPosZ};
-
-                        // Build tunables from stereo params
-                        // scaleFactor is folded into virtual_display_height:
-                        // dividing vHeight by scaleFactor zooms the view (same math as before)
-                        Display3DTunables tunables;
-                        tunables.ipd_factor = g_input.stereo.ipdFactor;
-                        tunables.parallax_factor = g_input.stereo.parallaxFactor;
-                        tunables.perspective_factor = g_input.stereo.perspectiveFactor;
-                        tunables.virtual_display_height = g_input.stereo.virtualDisplayHeight / g_input.stereo.scaleFactor;
+                        // Build camera/display pose from player transform
+                        XrPosef cameraPose;
+                        quat_from_yaw_pitch(g_input.yaw, g_input.pitch, &cameraPose.orientation);
+                        cameraPose.position = {g_input.cameraPosX, g_input.cameraPosY, g_input.cameraPosZ};
 
                         XrVector3f nominalViewer = {xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ};
 
@@ -2676,7 +2715,7 @@ int main() {
                         g_renderW = renderW;
                         g_renderH = renderH;
 
-                        // Compute stereo views using display3d library
+                        // Compute stereo views using display3d or camera3d library
                         Display3DStereoView stereoViews[2];
                         bool hasKooima = (xr.displayWidthM > 0 && xr.displayHeightM > 0);
                         if (hasKooima) {
@@ -2701,10 +2740,40 @@ int main() {
                             screen.width_m = baseScreenW;
                             screen.height_m = screenHeightM;
 
-                            display3d_compute_stereo_views(
-                                &rawEyePos[0], &rawEyePos[1], &nominalViewer,
-                                &screen, &tunables, &displayPose,
-                                0.01f, 100.0f, &stereoViews[0], &stereoViews[1]);
+                            if (g_input.cameraMode) {
+                                // Camera-centric path
+                                Camera3DTunables camTunables;
+                                camTunables.ipd_factor = g_input.stereo.ipdFactor;
+                                camTunables.parallax_factor = g_input.stereo.parallaxFactor;
+                                camTunables.inv_convergence_distance = g_input.stereo.invConvergenceDistance;
+                                camTunables.half_tan_vfov = CAMERA_HALF_TAN_VFOV / g_input.stereo.zoomFactor;
+
+                                Camera3DStereoView camViews[2];
+                                camera3d_compute_stereo_views(
+                                    &rawEyePos[0], &rawEyePos[1], &nominalViewer,
+                                    &screen, &camTunables, &cameraPose,
+                                    0.01f, 100.0f, &camViews[0], &camViews[1]);
+
+                                // Copy into Display3DStereoView for uniform downstream rendering
+                                for (int i = 0; i < 2; i++) {
+                                    memcpy(stereoViews[i].view_matrix, camViews[i].view_matrix, sizeof(float) * 16);
+                                    memcpy(stereoViews[i].projection_matrix, camViews[i].projection_matrix, sizeof(float) * 16);
+                                    stereoViews[i].fov = camViews[i].fov;
+                                    stereoViews[i].eye_world = camViews[i].eye_world;
+                                }
+                            } else {
+                                // Display-centric path
+                                Display3DTunables tunables;
+                                tunables.ipd_factor = g_input.stereo.ipdFactor;
+                                tunables.parallax_factor = g_input.stereo.parallaxFactor;
+                                tunables.perspective_factor = g_input.stereo.perspectiveFactor;
+                                tunables.virtual_display_height = g_input.stereo.virtualDisplayHeight / g_input.stereo.scaleFactor;
+
+                                display3d_compute_stereo_views(
+                                    &rawEyePos[0], &rawEyePos[1], &nominalViewer,
+                                    &screen, &tunables, &cameraPose,
+                                    0.01f, 100.0f, &stereoViews[0], &stereoViews[1]);
+                            }
                         }
 
                         rendered = true;
@@ -2719,7 +2788,7 @@ int main() {
                                     submitFov = stereoViews[eye].fov;
                                     // Update view pose for layer submission
                                     views[eye].pose.position = stereoViews[eye].eye_world;
-                                    views[eye].pose.orientation = displayPose.orientation;
+                                    views[eye].pose.orientation = cameraPose.orientation;
                                 } else {
                                     mat4_view_from_xr_pose(eyeParams[eye].viewMat, views[eye].pose);
                                     mat4_from_xr_fov(eyeParams[eye].projMat, views[eye].fov, 0.01f, 100.0f);
@@ -2783,11 +2852,32 @@ int main() {
                     const char *sessionStateName = (stateIdx >= 0 && stateIdx < 9)
                         ? sessionStateNames[stateIdx] : "INVALID";
 
+                    // Mode-dependent labels
+                    const char *poseLabel = g_input.cameraMode ? "Virtual Camera" : "Virtual Display";
+                    const char *param1Label = g_input.cameraMode ? "Conv" : "Persp";
+                    const char *param2Label = g_input.cameraMode ? "Zoom" : "Scale";
+                    const char *kooimaMode = g_input.cameraMode ? "Camera-Centric [C=Toggle]" : "Display-Centric [C=Toggle]";
+                    const char *scrollHint = g_input.cameraMode ? "Scroll=Zoom" : "Scroll=Scale";
+                    const char *perspHint = g_input.cameraMode ? "Opt=Conv" : "Opt=Persp";
+
+                    // Mode-dependent last value line
+                    char valueLine[64];
+                    if (g_input.cameraMode) {
+                        float tanHFOV = CAMERA_HALF_TAN_VFOV / g_input.stereo.zoomFactor;
+                        snprintf(valueLine, sizeof(valueLine), "tanHFOV: %.3f", tanHFOV);
+                    } else {
+                        float m2v = (g_input.stereo.virtualDisplayHeight > 0.0f && xr.displayHeightM > 0.0f)
+                            ? g_input.stereo.virtualDisplayHeight / xr.displayHeightM : 1.0f;
+                        snprintf(valueLine, sizeof(valueLine), "vHeight: %.3f  m2v: %.3f",
+                            g_input.stereo.virtualDisplayHeight, m2v);
+                    }
+
                     NSString *text = [NSString stringWithFormat:
                         @"%s\n"
                         "Session: %s\n"
                         "XR_EXT_macos_window_binding: %s\n"
                         "Mode: %s%s  Output: %s\n"
+                        "Kooima: %s\n"
                         "FPS: %.0f  (%.1f ms)\n"
                         "Render: %ux%u\n"
                         "Window: %ux%u\n"
@@ -2796,21 +2886,22 @@ int main() {
                         "Nominal: (%.3f, %.3f, %.3f)\n"
                         "Eye L: (%.3f, %.3f, %.3f)\n"
                         "Eye R: (%.3f, %.3f, %.3f)\n"
-                        "Virtual Display: (%.2f, %.2f, %.2f)\n"
+                        "%s: (%.2f, %.2f, %.2f)\n"
                         "Forward: (%.2f, %.2f, %.2f)\n"
                         "IPD: %.2f  Parallax: %.2f\n"
-                        "Persp: %.2f  Scale: %.2f\n"
-                        "vHeight: %.3f  m2v: %.3f\n"
+                        "%s: %.2f  %s: %.2f\n"
+                        "%s\n"
                         "\n"
                         "WASD/QE=Move  Drag=Look  Space=Reset\n"
-                        "Scroll=Scale  Shift=IPD  Ctrl=Parallax  Opt=Persp\n"
-                        "V=2D/3D  1/2/3=Output  Tab=HUD  ESC=Quit",
+                        "%s  Shift=IPD  Ctrl=Parallax  %s\n"
+                        "C=Mode  V=2D/3D  1/2/3=Output  Tab=HUD  ESC=Quit",
                         xr.systemName,
                         sessionStateName,
                         xr.hasMacosWindowBinding ? "ACTIVE" : "NOT AVAILABLE",
                         g_input.displayMode3D ? "3D (Stereo)" : "2D (Mono)",
                         xr.supportsDisplayModeSwitch ? "" : " [no switch]",
                         outputModeName,
+                        kooimaMode,
                         fps, g_avgFrameTime * 1000.0,
                         g_renderW, g_renderH,
                         g_windowW, g_windowH,
@@ -2819,15 +2910,16 @@ int main() {
                         xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ,
                         xr.leftEyeX, xr.leftEyeY, xr.leftEyeZ,
                         xr.rightEyeX, xr.rightEyeY, xr.rightEyeZ,
+                        poseLabel,
                         g_input.cameraPosX, g_input.cameraPosY, g_input.cameraPosZ,
                         -sinf(g_input.yaw) * cosf(g_input.pitch),
                          sinf(g_input.pitch),
                         -cosf(g_input.yaw) * cosf(g_input.pitch),
                         g_input.stereo.ipdFactor, g_input.stereo.parallaxFactor,
-                        g_input.stereo.perspectiveFactor, g_input.stereo.scaleFactor,
-                        g_input.stereo.virtualDisplayHeight,
-                        (g_input.stereo.virtualDisplayHeight > 0.0f && xr.displayHeightM > 0.0f)
-                            ? g_input.stereo.virtualDisplayHeight / xr.displayHeightM : 1.0f];
+                        param1Label, g_input.cameraMode ? g_input.stereo.invConvergenceDistance : g_input.stereo.perspectiveFactor,
+                        param2Label, g_input.cameraMode ? g_input.stereo.zoomFactor : g_input.stereo.scaleFactor,
+                        valueLine,
+                        scrollHint, perspHint];
                     g_hudView.hudText = text;
                     [g_hudView setNeedsDisplay:YES];
                     [g_hudView setHidden:NO];
