@@ -28,9 +28,9 @@ extern "C" {
 typedef struct Display3DTunables {
 	float ipd_factor;              //!< [0, 1] — scales inter-eye distance (0=mono, 1=full)
 	float parallax_factor;         //!< [0, 1] — lerps eye center toward nominal (0=no tracking, 1=full)
-	float perspective_factor;      //!< [0.1, 10] — scales eye XYZ in view+projection (not screen)
-	float scale_factor;            //!< [0.1, 10] — scales eye XYZ AND screenW/H (cancels in projection = zoom)
-	float virtual_display_height;  //!< Virtual display height in app units (0 = disabled, use physical meters)
+	float perspective_factor;      //!< [0.1, 10] — scales eye XYZ only (changes object perspective)
+	float virtual_display_height;  //!< Virtual display height in app units (always required;
+	                               //!< use physical display height for 1:1 meters)
 } Display3DTunables;
 
 typedef struct Display3DScreen {
@@ -54,8 +54,8 @@ typedef struct Display3DStereoView {
  * Pipeline:
  *   1. Apply IPD factor (scale inter-eye vector, keep center fixed)
  *   2. Apply parallax factor (lerp center toward nominal viewer)
- *   3. Apply perspective+scale to eye XYZ (view matrix + Kooima eye)
- *   4. Apply scale to screen W/H (Kooima screen dims)
+ *   3. Apply perspective * m2v to eye XYZ (view matrix + Kooima eye)
+ *   4. Apply m2v to screen W/H (Kooima screen dims)
  *   5. Transform display-space eye -> world-space via display_pose
  *   6. Build view matrix from world-space eye + display orientation
  *   7. Build Kooima projection matrix from display-space scaled eye + scaled screen

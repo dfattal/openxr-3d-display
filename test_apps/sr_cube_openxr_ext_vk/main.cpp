@@ -334,17 +334,12 @@ static void RenderThreadFunc(
                             if (renderH > eyeRenderH) renderH = eyeRenderH;
                         }
 
-                        // --- App-side Kooima projection (RAW mode, app-owned camera model) ---
-                        // Full display pixel dimensions for pixel-to-meter conversion.
-                        float dispPxW = xr->displayPixelWidth > 0 ? (float)xr->displayPixelWidth : (float)xr->swapchain.width;
-                        float dispPxH = xr->displayPixelHeight > 0 ? (float)xr->displayPixelHeight : (float)xr->swapchain.height;
-
-                        XrFovf appFov[2];
+                        // --- App-side Kooima via canonical library ---
+                        Display3DStereoView stereoViews[2];
                         bool useAppProjection = (xr->hasDisplayInfoExt && xr->displayWidthM > 0.0f);
                         if (useAppProjection) {
-                            // Viewport-scale FOV (SRHydra): convert window pixels to meters,
-                            // then apply isotropic scale so FOV stays consistent across window
-                            // sizes on the 3D display. Matches the non-extension runtime path.
+                            float dispPxW = xr->displayPixelWidth > 0 ? (float)xr->displayPixelWidth : (float)xr->swapchain.width;
+                            float dispPxH = xr->displayPixelHeight > 0 ? (float)xr->displayPixelHeight : (float)xr->swapchain.height;
                             float pxSizeX = xr->displayWidthM / dispPxW;
                             float pxSizeY = xr->displayHeightM / dispPxH;
                             float winW_m = (float)windowW * pxSizeX;
@@ -352,42 +347,39 @@ static void RenderThreadFunc(
                             float minDisp = fminf(xr->displayWidthM, xr->displayHeightM);
                             float minWin  = fminf(winW_m, winH_m);
                             float vs = minDisp / minWin;
-                            float screenWidthM  = winW_m * vs;
-                            float screenHeightM = winH_m * vs;
 
-                            // Alternative: content-preserving FOV — keeps rendered content at
-                            // constant physical size on display regardless of window size.
-                            // float screenWidthM = xr->displayWidthM * (float)eyeRenderW / (float)(xr->swapchain.width / 2);
-                            // float screenHeightM = xr->displayHeightM * (float)eyeRenderH / (float)xr->swapchain.height;
+                            // For mono: pass center eye as both L/R
+                            XrVector3f rawLeft = rawViews[0].pose.position;
+                            XrVector3f rawRight = rawViews[1].pose.position;
+                            if (!inputSnapshot.displayMode3D) {
+                                XrVector3f center = {
+                                    (rawLeft.x + rawRight.x) * 0.5f,
+                                    (rawLeft.y + rawRight.y) * 0.5f,
+                                    (rawLeft.z + rawRight.z) * 0.5f};
+                                rawLeft = rawRight = center;
+                            }
 
-                        // Apply stereo eye factors (IPD + parallax) to raw eye positions
-                        XrVector3f processedEyes[2];
-                        XrVector3f nominalViewer = {xr->nominalViewerX, xr->nominalViewerY, xr->nominalViewerZ};
-                        display3d_apply_eye_factors(
-                            &rawViews[0].pose.position, &rawViews[1].pose.position,
-                            &nominalViewer, inputSnapshot.stereo.ipdFactor, inputSnapshot.stereo.parallaxFactor,
-                            &processedEyes[0], &processedEyes[1]);
+                            Display3DTunables tunables;
+                            tunables.ipd_factor = inputSnapshot.stereo.ipdFactor;
+                            tunables.parallax_factor = inputSnapshot.stereo.parallaxFactor;
+                            tunables.perspective_factor = inputSnapshot.stereo.perspectiveFactor;
+                            tunables.virtual_display_height = inputSnapshot.stereo.virtualDisplayHeight / inputSnapshot.stereo.scaleFactor;
 
-                        // Meters-to-virtual conversion factor
-                        float m2v = 1.0f;
-                        if (inputSnapshot.stereo.virtualDisplayHeight > 0.0f && xr->displayHeightM > 0.0f)
-                            m2v = inputSnapshot.stereo.virtualDisplayHeight / xr->displayHeightM;
+                            XrPosef displayPose;
+                            XMVECTOR pOri = XMQuaternionRotationRollPitchYaw(
+                                inputSnapshot.pitch, inputSnapshot.yaw, 0);
+                            XMFLOAT4 q;
+                            XMStoreFloat4(&q, pOri);
+                            displayPose.orientation = {q.x, q.y, q.z, q.w};
+                            displayPose.position = {inputSnapshot.cameraPosX, inputSnapshot.cameraPosY, inputSnapshot.cameraPosZ};
 
-                        // Kooima projection with perspective + scale + m2v factors
-                        float kScreenW = screenWidthM * m2v / inputSnapshot.stereo.scaleFactor;
-                        float kScreenH = screenHeightM * m2v / inputSnapshot.stereo.scaleFactor;
-                        for (int e = 0; e < 2; e++) {
-                            float es = inputSnapshot.stereo.perspectiveFactor * m2v / inputSnapshot.stereo.scaleFactor;
-                            XrVector3f kooimaEye = {processedEyes[e].x * es, processedEyes[e].y * es, processedEyes[e].z * es};
-                            if (e == 0)
-                                leftProjMatrix = ComputeKooimaProjection(
-                                    kooimaEye, kScreenW, kScreenH, 0.01f, 100.0f);
-                            else
-                                rightProjMatrix = ComputeKooimaProjection(
-                                    kooimaEye, kScreenW, kScreenH, 0.01f, 100.0f);
-                            appFov[e] = ComputeKooimaFov(
-                                kooimaEye, kScreenW, kScreenH);
-                        }
+                            XrVector3f nominalViewer = {xr->nominalViewerX, xr->nominalViewerY, xr->nominalViewerZ};
+                            Display3DScreen screen = {winW_m * vs, winH_m * vs};
+
+                            display3d_compute_stereo_views(
+                                &rawLeft, &rawRight, &nominalViewer,
+                                &screen, &tunables, &displayPose,
+                                0.01f, 100.0f, &stereoViews[0], &stereoViews[1]);
                         }
 
                         rendered = true;
@@ -401,34 +393,10 @@ static void RenderThreadFunc(
                             monoPose.position.y = (rawViews[0].pose.position.y + rawViews[1].pose.position.y) * 0.5f;
                             monoPose.position.z = (rawViews[0].pose.position.z + rawViews[1].pose.position.z) * 0.5f;
 
-                            if (useAppProjection) {
-                                float pxSizeX = xr->displayWidthM / dispPxW;
-                                float pxSizeY = xr->displayHeightM / dispPxH;
-                                float winW_m = (float)windowW * pxSizeX;
-                                float winH_m = (float)windowH * pxSizeY;
-                                float minDisp = fminf(xr->displayWidthM, xr->displayHeightM);
-                                float minWin  = fminf(winW_m, winH_m);
-                                float vs = minDisp / minWin;
-                                float screenWidthM  = winW_m * vs;
-                                float screenHeightM = winH_m * vs;
-                                XrVector3f centerEye = monoPose.position;
-                                float cx = centerEye.x, cy = centerEye.y, cz = centerEye.z;
-                                centerEye.x = xr->nominalViewerX + inputSnapshot.stereo.parallaxFactor * (cx - xr->nominalViewerX);
-                                centerEye.y = xr->nominalViewerY + inputSnapshot.stereo.parallaxFactor * (cy - xr->nominalViewerY);
-                                centerEye.z = xr->nominalViewerZ + inputSnapshot.stereo.parallaxFactor * (cz - xr->nominalViewerZ);
-                                float monoM2v = 1.0f;
-                                if (inputSnapshot.stereo.virtualDisplayHeight > 0.0f && xr->displayHeightM > 0.0f)
-                                    monoM2v = inputSnapshot.stereo.virtualDisplayHeight / xr->displayHeightM;
-                                float es = inputSnapshot.stereo.perspectiveFactor * monoM2v / inputSnapshot.stereo.scaleFactor;
-                                XrVector3f kooimaEye = {centerEye.x * es, centerEye.y * es, centerEye.z * es};
-                                float kScreenW = screenWidthM * monoM2v / inputSnapshot.stereo.scaleFactor;
-                                float kScreenH = screenHeightM * monoM2v / inputSnapshot.stereo.scaleFactor;
-                                monoProjMatrix = ComputeKooimaProjection(
-                                    kooimaEye, kScreenW, kScreenH, 0.01f, 100.0f);
-                            } else {
+                            // When useAppProjection, mono view+proj come from stereoViews[0]
+                            if (!useAppProjection) {
                                 monoProjMatrix = leftProjMatrix;
-                            }
-                            {
+
                                 XMVECTOR centerLocalPos = XMVectorSet(
                                     monoPose.position.x, monoPose.position.y, monoPose.position.z, 0.0f);
                                 XMVECTOR localOri = XMVectorSet(
@@ -464,10 +432,17 @@ static void RenderThreadFunc(
                                 eyeParams[eye].viewportY = 0;
                                 eyeParams[eye].width = renderW;
                                 eyeParams[eye].height = renderH;
-                                eyeParams[eye].viewMatrix = monoMode ? monoViewMatrix :
-                                    ((eye == 0) ? leftViewMatrix : rightViewMatrix);
-                                eyeParams[eye].projMatrix = monoMode ? monoProjMatrix :
-                                    ((eye == 0) ? leftProjMatrix : rightProjMatrix);
+                                if (useAppProjection) {
+                                    int vi = monoMode ? 0 : eye;
+                                    eyeParams[eye].viewMatrix = ColumnMajorToXMMatrix(stereoViews[vi].view_matrix);
+                                    eyeParams[eye].projMatrix = ColumnMajorToXMMatrix(stereoViews[vi].projection_matrix);
+                                } else if (monoMode) {
+                                    eyeParams[eye].viewMatrix = monoViewMatrix;
+                                    eyeParams[eye].projMatrix = monoProjMatrix;
+                                } else {
+                                    eyeParams[eye].viewMatrix = (eye == 0) ? leftViewMatrix : rightViewMatrix;
+                                    eyeParams[eye].projMatrix = (eye == 0) ? leftProjMatrix : rightProjMatrix;
+                                }
                             }
 
                             RenderScene(*renderer, imageIndex,
@@ -486,7 +461,9 @@ static void RenderThreadFunc(
                                 };
                                 projectionViews[eye].subImage.imageArrayIndex = 0;
                                 projectionViews[eye].pose = monoMode ? monoPose : rawViews[eye].pose;
-                                projectionViews[eye].fov = monoMode ? rawViews[0].fov : rawViews[eye].fov;
+                                projectionViews[eye].fov = useAppProjection ?
+                                    stereoViews[monoMode ? 0 : eye].fov :
+                                    (monoMode ? rawViews[0].fov : rawViews[eye].fov);
                             }
                             LOG_INFO("[FRAME] ReleaseSwapchainImage...");
                             ReleaseSwapchainImage(*xr);

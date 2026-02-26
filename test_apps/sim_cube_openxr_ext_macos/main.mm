@@ -2640,12 +2640,13 @@ int main() {
                         displayPose.position = {g_input.cameraPosX, g_input.cameraPosY, g_input.cameraPosZ};
 
                         // Build tunables from stereo params
+                        // scaleFactor is folded into virtual_display_height:
+                        // dividing vHeight by scaleFactor zooms the view (same math as before)
                         Display3DTunables tunables;
                         tunables.ipd_factor = g_input.stereo.ipdFactor;
                         tunables.parallax_factor = g_input.stereo.parallaxFactor;
                         tunables.perspective_factor = g_input.stereo.perspectiveFactor;
-                        tunables.scale_factor = g_input.stereo.scaleFactor;
-                        tunables.virtual_display_height = g_input.stereo.virtualDisplayHeight;
+                        tunables.virtual_display_height = g_input.stereo.virtualDisplayHeight / g_input.stereo.scaleFactor;
 
                         XrVector3f nominalViewer = {xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ};
 

@@ -167,6 +167,17 @@ bool AcquireSwapchainImage(XrSessionManager& xr, uint32_t& imageIndex);
 // Release swapchain image after rendering
 bool ReleaseSwapchainImage(XrSessionManager& xr);
 
+// Load column-major float[16] (OpenGL/Vulkan convention) into XMMATRIX.
+// XMMATRIX stores rows; column-major m[0..3] = column 0 → becomes row 0.
+static inline DirectX::XMMATRIX ColumnMajorToXMMatrix(const float m[16]) {
+    DirectX::XMMATRIX out;
+    out.r[0] = DirectX::XMVectorSet(m[0],  m[1],  m[2],  m[3]);
+    out.r[1] = DirectX::XMVectorSet(m[4],  m[5],  m[6],  m[7]);
+    out.r[2] = DirectX::XMVectorSet(m[8],  m[9],  m[10], m[11]);
+    out.r[3] = DirectX::XMVectorSet(m[12], m[13], m[14], m[15]);
+    return out;
+}
+
 // App-side Kooima asymmetric frustum projection (delegates to display3d_view library).
 // Wraps display3d_compute_projection() into an XMMATRIX for DirectX apps.
 DirectX::XMMATRIX ComputeKooimaProjection(
