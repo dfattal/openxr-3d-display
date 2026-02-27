@@ -615,6 +615,8 @@ multi_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 
 	os_mutex_lock(&mc->msc->list_and_timing_lock);
 	u_pa_mark_discarded(mc->upa, frame_id, now_ns);
+	// Need to drop delivered frame as it shouldn't be reused.
+	multi_compositor_retire_delivered_locked(mc, now_ns);
 	os_mutex_unlock(&mc->msc->list_and_timing_lock);
 
 	return XRT_SUCCESS;
