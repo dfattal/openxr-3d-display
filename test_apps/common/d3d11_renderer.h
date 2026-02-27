@@ -84,6 +84,7 @@ void UpdateScene(D3D11Renderer& renderer, float deltaTime);
 // viewMatrix and projMatrix come from OpenXR views (already includes player locomotion
 // via reference space offset — see UpdateLocalSpace in xr_session)
 // cubeHeight: Y position of cube in world space (1.6 for Monado window, 0 for extension apps)
+// Cube is at (0, cubeHeight, 2) with size 0.3m
 void RenderScene(
     D3D11Renderer& renderer,
     ID3D11RenderTargetView* rtv,

@@ -1484,13 +1484,13 @@ static void RenderScene(
 
         // Draw textured cube
         {
-            const float cubeSize = 0.06f;
+            const float cubeSize = 0.3f;
             const float cubeHeight = 1.6f;
 
             float rot[16], scl[16], trans[16], model[16], tmp[16];
             mat4_rotation_y(rot, renderer.cubeRotation);
             mat4_scaling(scl, cubeSize, cubeSize, cubeSize);
-            mat4_translation(trans, 0.0f, cubeHeight, 0.0f);
+            mat4_translation(trans, 0.0f, cubeHeight, -2.0f);
             mat4_multiply(tmp, scl, rot);
             mat4_multiply(model, trans, tmp);
             float mvp[16];
