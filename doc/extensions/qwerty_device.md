@@ -274,8 +274,9 @@ camera control.
 
 - **sim_display** uses pose delegation: calls `sim_display_hmd_set_pose_source()`
   to make the sim_display HMD track the qwerty HMD's position/orientation.
-- **Leia** does not use pose delegation (passes `NULL`): SR SDK eye tracking
-  provides the head pose directly.
+- **Leia** uses pose delegation: calls `leia_hmd_set_pose_source()` to make the
+  Leia HMD track the qwerty HMD's position/orientation. The initial qwerty pose
+  is set to the Leia display's nominal viewing position (0, 0, -nominal_z).
 
 ---
 

@@ -20,6 +20,10 @@
 
 #include "leia/leia_interface.h"
 
+#ifdef XRT_BUILD_DRIVER_QWERTY
+#include "qwerty/qwerty_device.h"
+#endif
+
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
@@ -81,9 +85,31 @@ leia_open_system_impl(struct xrt_builder *xb,
 	// Assign to role(s).
 	ubrh->head = head;
 
-	// Add qwerty controllers for keyboard/mouse input.
-	// No pose delegation — Leia uses SR SDK eye tracking.
-	t_builder_add_qwerty_input(xsysd, ubrh, U_LOGGING_INFO, NULL);
+	// Add qwerty keyboard/mouse input devices (controllers + HMD for pose).
+	struct xrt_device *qwerty_hmd = NULL;
+	t_builder_add_qwerty_input(xsysd, ubrh, U_LOGGING_INFO, &qwerty_hmd);
+
+#ifdef XRT_BUILD_DRIVER_QWERTY
+	if (qwerty_hmd != NULL) {
+		struct qwerty_device *qd = qwerty_device(qwerty_hmd);
+
+		// Set initial pose to Leia's nominal viewing position.
+		float nominal_z = 0.65f;
+		struct leiasr_probe_result probe;
+		if (leiasr_get_probe_results(&probe) && probe.hw_found) {
+			if (probe.nominal_z_m > 0.0f) {
+				nominal_z = probe.nominal_z_m;
+			}
+			qd->sys->screen_height_m = probe.display_h_m;
+			qd->sys->nominal_viewer_z = probe.nominal_z_m;
+		}
+		qd->pose.position = (struct xrt_vec3){0, 0, -nominal_z};
+		qd->pose.orientation = (struct xrt_quat){0, 0, 0, 1};
+
+		// Delegate head pose to qwerty HMD for WASD/mouse camera control.
+		leia_hmd_set_pose_source(head, qwerty_hmd);
+	}
+#endif
 
 	return XRT_SUCCESS;
 }
