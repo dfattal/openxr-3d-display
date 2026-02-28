@@ -468,6 +468,13 @@ sim_display_hmd_create(void)
 	hmd->base.name = XRT_DEVICE_GENERIC_HMD;
 	hmd->base.device_type = XRT_DEVICE_TYPE_HMD;
 
+	// Pose is delegated to the qwerty HMD (via pose_source), which already
+	// includes the Y=1.6 standing height.  Mark our tracking origin as
+	// OTHER so u_builder_setup_tracking_origins does NOT add a redundant
+	// Y=1.6 offset — that would double-count the height and place
+	// controllers (which share the qwerty origin) in a different space.
+	hmd->base.tracking_origin->type = XRT_TRACKING_TYPE_OTHER;
+
 	// Static pose: center of eyes, slightly above scene, at viewing distance.
 	hmd->pose.orientation.w = 1.0f;
 	hmd->pose.position.x = 0.0f;
