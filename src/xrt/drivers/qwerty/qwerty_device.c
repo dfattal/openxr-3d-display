@@ -383,6 +383,19 @@ qwerty_get_tracked_pose(struct xrt_device *xd,
 		m_relation_chain_push_pose(&relation_chain, &qd->pose);     // controller pose
 		m_relation_chain_push_pose(&relation_chain, &qd_hmd->pose); // base space is hmd space
 		m_relation_chain_resolve(&relation_chain, out_relation);
+
+		// One-shot debug: log poses on first left controller query
+		bool is_left = (qc == qd->sys->lctrl);
+		static bool logged_left = false;
+		if (is_left && !logged_left) {
+			logged_left = true;
+			U_LOG_W("CTRL DEBUG: ctrl_pose=(%.3f,%.3f,%.3f) hmd_pose=(%.3f,%.3f,%.3f) "
+			        "composed=(%.3f,%.3f,%.3f) follow_hmd=%d",
+			        qd->pose.position.x, qd->pose.position.y, qd->pose.position.z,
+			        qd_hmd->pose.position.x, qd_hmd->pose.position.y, qd_hmd->pose.position.z,
+			        out_relation->pose.position.x, out_relation->pose.position.y,
+			        out_relation->pose.position.z, qc->follow_hmd);
+		}
 	} else {
 		out_relation->pose = qd->pose;
 	}
