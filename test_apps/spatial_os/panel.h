@@ -63,6 +63,9 @@ static const PanelLayout LAYOUT_AGENDA       = {0.0f,  0.54f, 0.25f, 0.26f};
 static const PanelLayout LAYOUT_ACTION_ITEMS = {0.0f,  0.80f, 1.0f,  0.20f};
 static const PanelLayout LAYOUT_SCENE_3D     = {0.25f, 0.0f,  0.75f, 0.80f};
 
-// Disparity levels: flat → slightly out → slightly in → flat
-static const float DISPARITY_LEVELS[] = {0.0f, -0.005f, 0.005f, 0.0f};
-static const int NUM_DISPARITY_LEVELS = 4;
+// Disparity levels: flat → slightly out → slightly in (3-cycle, wraps back to flat)
+static const float DISPARITY_LEVELS[] = {0.0f, -0.005f, 0.005f};
+static const int NUM_DISPARITY_LEVELS = 3;
+
+// Inset margin applied to panels with non-zero disparity to avoid edge clipping
+static const float DISPARITY_INSET = 0.015f;
