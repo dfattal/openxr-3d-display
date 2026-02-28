@@ -145,6 +145,17 @@ void HandleDisparityToggle(SpatialAppState& app) {
 
     p.disparityLevel = (p.disparityLevel + 1) % NUM_DISPARITY_LEVELS;
     p.targetDisparity = DISPARITY_LEVELS[p.disparityLevel];
+
+    // Slightly shrink panel when disparity is non-zero to avoid edge depth violations
+    if (p.disparityLevel == 0) {
+        p.target = p.defaultLayout;
+    } else {
+        p.target.x = p.defaultLayout.x + DISPARITY_INSET;
+        p.target.y = p.defaultLayout.y + DISPARITY_INSET;
+        p.target.width = p.defaultLayout.width - 2.0f * DISPARITY_INSET;
+        p.target.height = p.defaultLayout.height - 2.0f * DISPARITY_INSET;
+    }
+
     LOG_INFO("Panel '%ls' disparity level %d (%.3f)",
         p.title.c_str(), p.disparityLevel, p.targetDisparity);
 }
