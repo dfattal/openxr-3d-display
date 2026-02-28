@@ -1056,10 +1056,11 @@ void GsRenderer::renderEye(VkImage swapchainImage,
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
             layoutRender_, 0, 2, renderSets, 0, nullptr);
 
-        // Determine if sRGB encoding is needed
-        bool isSrgb = (swapchainFormat == VK_FORMAT_R8G8B8A8_SRGB ||
-                       swapchainFormat == VK_FORMAT_B8G8R8A8_SRGB);
-        uint32_t renderPC[3] = {viewportWidth, viewportHeight, isSrgb ? 1u : 0u};
+        // Never apply manual sRGB encoding — the swapchain is SRGB format,
+        // so the compositor's sampler decodes sRGB→linear on read, and the
+        // display surface re-encodes linear→sRGB on output (single gamma).
+        // Manual linearToSrgb() would cause double encoding (washed out colors).
+        uint32_t renderPC[3] = {viewportWidth, viewportHeight, 0u};
         vkCmdPushConstants(cmd, layoutRender_, VK_SHADER_STAGE_COMPUTE_BIT,
                            0, sizeof(renderPC), renderPC);
 
