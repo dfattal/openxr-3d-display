@@ -913,7 +913,8 @@ static void CleanupOpenXR(AppXrSession& xr) {
 // ============================================================================
 
 static void RenderPlaceholder(VkDevice dev, VkQueue queue, VkCommandPool pool,
-                               VkImage image, uint32_t w, uint32_t h) {
+                               VkImage image, uint32_t w, uint32_t h,
+                               float yaw, float pitch) {
     VkCommandBufferAllocateInfo ai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ai.commandPool = pool; ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; ai.commandBufferCount = 1;
     VkCommandBuffer cmd;
@@ -930,7 +931,10 @@ static void RenderPlaceholder(VkDevice dev, VkQueue queue, VkCommandPool pool,
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    VkClearColorValue cc = {{0.1f, 0.1f, 0.12f, 1.0f}};
+    // Tint color based on camera direction so drag-rotation gives visual feedback
+    float ny = (yaw / 3.14159f) * 0.5f + 0.5f;   // 0..1 over ±π
+    float np = (pitch / 1.5f) * 0.5f + 0.5f;       // 0..1 over ±1.5 rad
+    VkClearColorValue cc = {{0.05f + ny * 0.15f, 0.08f + np * 0.12f, 0.15f, 1.0f}};
     VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cc, 1, &range);
 
@@ -1221,15 +1225,11 @@ int main() {
 
                             // Render 3DGS or placeholder
                             VkImage targetImage = swapchainImages[imageIndex].image;
-                            if (g_gsRenderer.hasScene()) {
-                                // TODO: Full 3DGS rendering per eye once patch is applied
-                                // For now, render placeholder
-                                RenderPlaceholder(vkDevice, graphicsQueue, cmdPool,
-                                    targetImage, xr.swapchain.width, xr.swapchain.height);
-                            } else {
-                                RenderPlaceholder(vkDevice, graphicsQueue, cmdPool,
-                                    targetImage, xr.swapchain.width, xr.swapchain.height);
-                            }
+                            // TODO: Full 3DGS rendering per eye once compute pipeline is integrated
+                            // For now, render placeholder (tinted by camera orientation for visual feedback)
+                            RenderPlaceholder(vkDevice, graphicsQueue, cmdPool,
+                                targetImage, xr.swapchain.width, xr.swapchain.height,
+                                g_input.yaw, g_input.pitch);
 
                             ReleaseSwapchainImage(xr);
                         } else {
@@ -1274,6 +1274,7 @@ int main() {
                         "Eye L: (%.3f, %.3f, %.3f)\n"
                         "Eye R: (%.3f, %.3f, %.3f)\n"
                         "Camera: (%.2f, %.2f, %.2f)\n"
+                        "Fwd: (%.3f, %.3f, %.3f)\n"
                         "IPD: %.2f  Parallax: %.2f\n"
                         "Persp: %.2f  Scale: %.2f\n"
                         "\nL=Load  WASD=Move  V=2D/3D\n"
@@ -1287,6 +1288,9 @@ int main() {
                         xr.leftEyeX, xr.leftEyeY, xr.leftEyeZ,
                         xr.rightEyeX, xr.rightEyeY, xr.rightEyeZ,
                         g_input.cameraPosX, g_input.cameraPosY, g_input.cameraPosZ,
+                        cosf(g_input.pitch) * sinf(g_input.yaw),
+                        -sinf(g_input.pitch),
+                        -cosf(g_input.pitch) * cosf(g_input.yaw),
                         g_input.stereo.ipdFactor, g_input.stereo.parallaxFactor,
                         g_input.stereo.perspectiveFactor, g_input.stereo.scaleFactor];
                     g_hudView.hudText = text;
