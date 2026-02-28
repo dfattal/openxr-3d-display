@@ -1111,20 +1111,16 @@ reset_controller_for_mode(struct qwerty_system *qs, struct qwerty_controller *qc
 		// Camera mode: standard HMD-relative offsets
 		qd->pose = (struct xrt_pose){XRT_QUAT_IDENTITY, QWERTY_CONTROLLER_INITIAL_POS(is_left)};
 	} else {
-		// Display mode: match extension math —
-		//   displayPos = (nominalViewPos + offset) / zoomScale
-		// where zoomScale = screen_height_m / disp_vHeight
+		// Display mode: x,y are standard hand offsets (same as camera mode),
+		// z depth scales with zoomScale to place controllers between viewer and display
 		float zs = qs->screen_height_m / qs->disp_vHeight;
-		float nvX = 0.0f;
-		float nvY = 0.0f;
-		float nvZ = qs->nominal_viewer_z;
 		float offX = is_left ? -0.2f : 0.2f;
-		float offY = -0.15f;
-		float offZ = -0.3f;
+		float offY = -0.3f;
+		float offZ = (qs->nominal_viewer_z - 0.3f) / zs;
 
 		qd->pose = (struct xrt_pose){
 		    XRT_QUAT_IDENTITY,
-		    {(nvX + offX) / zs, (nvY + offY) / zs, (nvZ + offZ) / zs},
+		    {offX, offY, offZ},
 		};
 	}
 }
