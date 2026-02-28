@@ -98,6 +98,20 @@ t_builder_leia_create(void);
 struct xrt_device *
 leia_hmd_create(void);
 
+/*!
+ * Set an optional external pose source for the Leia HMD.
+ *
+ * When set, leia_hmd_get_tracked_pose() delegates to this device
+ * (e.g. qwerty HMD for WASD/mouse camera control).
+ *
+ * @param leia_dev  The Leia HMD device returned by leia_hmd_create().
+ * @param source    The pose source device, or NULL to disable delegation.
+ *
+ * @ingroup drv_leia
+ */
+void
+leia_hmd_set_pose_source(struct xrt_device *leia_dev, struct xrt_device *source);
+
 #ifdef __cplusplus
 }
 #endif

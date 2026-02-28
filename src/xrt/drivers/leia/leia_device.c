@@ -52,6 +52,10 @@ struct leia_hmd
 	//! Stationary pose (looking at the display from nominal distance).
 	struct xrt_pose pose;
 
+	//! Optional external device providing pose (e.g. qwerty HMD).
+	//! When set, get_tracked_pose delegates to this device.
+	struct xrt_device *pose_source;
+
 	//! Physical display dimensions in meters.
 	float display_width_m;
 	float display_height_m;
@@ -88,6 +92,20 @@ leia_hmd_get_tracked_pose(struct xrt_device *xdev,
 		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
+	// Delegate to external pose source (e.g. qwerty HMD for WASD/mouse).
+	if (hmd->pose_source != NULL) {
+		struct xrt_space_relation src_rel;
+		hmd->pose_source->get_tracked_pose(hmd->pose_source, name, at_timestamp_ns, &src_rel);
+
+		out_relation->pose = src_rel.pose;
+		out_relation->relation_flags = (enum xrt_space_relation_flags)(
+		    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+		    XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		    XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
+		return XRT_SUCCESS;
+	}
+
 	// Static pose: viewer at nominal position in front of the display.
 	out_relation->pose = hmd->pose;
 	out_relation->relation_flags = (enum xrt_space_relation_flags)(
@@ -106,6 +124,13 @@ leia_hmd_destroy(struct xrt_device *xdev)
 
 	u_var_remove_root(hmd);
 	u_device_free(&hmd->base);
+}
+
+void
+leia_hmd_set_pose_source(struct xrt_device *leia_dev, struct xrt_device *source)
+{
+	struct leia_hmd *hmd = leia_hmd(leia_dev);
+	hmd->pose_source = source;
 }
 
 

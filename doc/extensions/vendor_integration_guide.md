@@ -1134,10 +1134,26 @@ my_vendor_open_system_impl(struct xrt_builder *xb,
     xsysd->xdevs[xsysd->xdev_count++] = head;
     ubrh->head = head;
 
-    // Add qwerty keyboard/mouse input devices (controllers + optional HMD for pose).
-    // Pass &qwerty_hmd if you need pose delegation (e.g., WASD camera control),
-    // or NULL if your SDK provides its own head tracking.
-    t_builder_add_qwerty_input(xsysd, ubrh, U_LOGGING_INFO, NULL);
+    // Add qwerty keyboard/mouse input devices (controllers + HMD for pose).
+    struct xrt_device *qwerty_hmd = NULL;
+    t_builder_add_qwerty_input(xsysd, ubrh, U_LOGGING_INFO, &qwerty_hmd);
+
+#ifdef XRT_BUILD_DRIVER_QWERTY
+    if (qwerty_hmd != NULL) {
+        struct qwerty_device *qd = qwerty_device(qwerty_hmd);
+
+        // Set initial qwerty pose to your display's nominal viewing position.
+        qd->pose.position = (struct xrt_vec3){0, 0, -nominal_z};
+        qd->pose.orientation = (struct xrt_quat){0, 0, 0, 1};
+
+        // Configure stereo params from display info.
+        qd->sys->screen_height_m = display_h_m;
+        qd->sys->nominal_viewer_z = nominal_z;
+
+        // Delegate head pose to qwerty HMD for WASD/mouse camera control.
+        my_vendor_hmd_set_pose_source(head, qwerty_hmd);
+    }
+#endif
 
     return XRT_SUCCESS;
 }

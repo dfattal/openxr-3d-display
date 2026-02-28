@@ -37,6 +37,8 @@
 
 #include "util/u_hud.h"
 
+#include "math/m_api.h"
+
 #include "sim_display/sim_display_interface.h"
 
 #ifdef XRT_BUILD_DRIVER_QWERTY
@@ -636,6 +638,7 @@ d3d11_render_hud_overlay(struct comp_d3d11_compositor *c, bool is_mono, bool wea
 
 	// Fill HUD data
 	struct u_hud_data data = {};
+	data.device_name = c->xdev->str;
 	data.fps = fps;
 	data.frame_time_ms = c->smoothed_frame_time_ms;
 	data.mode_3d = !is_mono;
@@ -659,6 +662,20 @@ d3d11_render_hud_overlay(struct comp_d3d11_compositor *c, bool is_mono, bool wea
 
 #ifdef XRT_BUILD_DRIVER_QWERTY
 	if (c->xsysd != nullptr) {
+		// Virtual display position + forward vector from qwerty device pose.
+		struct xrt_pose qwerty_pose;
+		if (qwerty_get_hmd_pose(c->xsysd->xdevs, c->xsysd->xdev_count, &qwerty_pose)) {
+			data.vdisp_x = qwerty_pose.position.x;
+			data.vdisp_y = qwerty_pose.position.y;
+			data.vdisp_z = qwerty_pose.position.z;
+			struct xrt_vec3 fwd_in = {0, 0, -1};
+			struct xrt_vec3 fwd_out;
+			math_quat_rotate_vec3(&qwerty_pose.orientation, &fwd_in, &fwd_out);
+			data.forward_x = fwd_out.x;
+			data.forward_y = fwd_out.y;
+			data.forward_z = fwd_out.z;
+		}
+
 		struct qwerty_stereo_state ss;
 		if (qwerty_get_stereo_state(c->xsysd->xdevs, c->xsysd->xdev_count, &ss)) {
 			data.camera_mode = ss.camera_mode;
