@@ -62,16 +62,19 @@ if(MSVC)
     # Patch splat-types.cc: replace 0/0 NaN/Inf literals with std::numeric_limits (MSVC C2124 fix)
     set(_SPZ_SOURCE "${spz_SOURCE_DIR}/src/cc/splat-types.cc")
     file(READ "${_SPZ_SOURCE}" _spz_src)
-    string(FIND "${_spz_src}" "0.0f / 0.0f" _spz_has_div_zero)
-    if(NOT _spz_has_div_zero EQUAL -1)
-        # Add <limits> include after <cmath>
+    # Always attempt the replacement (string(REPLACE) is a no-op if pattern not found)
+    # Add <limits> include after <cmath> (guard against double-insert)
+    string(FIND "${_spz_src}" "#include <limits>" _spz_has_limits)
+    if(_spz_has_limits EQUAL -1)
         string(REPLACE "#include <cmath>" "#include <cmath>\n#include <limits>" _spz_src "${_spz_src}")
-        # Replace NaN/Inf construction
-        string(REPLACE "0.0f / 0.0f" "std::numeric_limits<float>::quiet_NaN()" _spz_src "${_spz_src}")
-        string(REPLACE "1.0f / 0.0f" "std::numeric_limits<float>::infinity()" _spz_src "${_spz_src}")
-        file(WRITE "${_SPZ_SOURCE}" "${_spz_src}")
-        message(STATUS "Patched spz splat-types.cc: div-by-zero -> numeric_limits for MSVC")
     endif()
+    # Replace NaN/Inf construction — try both spaced and unspaced variants
+    string(REPLACE "0.0f / 0.0f" "std::numeric_limits<float>::quiet_NaN()" _spz_src "${_spz_src}")
+    string(REPLACE "0.0f/0.0f" "std::numeric_limits<float>::quiet_NaN()" _spz_src "${_spz_src}")
+    string(REPLACE "1.0f / 0.0f" "std::numeric_limits<float>::infinity()" _spz_src "${_spz_src}")
+    string(REPLACE "1.0f/0.0f" "std::numeric_limits<float>::infinity()" _spz_src "${_spz_src}")
+    file(WRITE "${_SPZ_SOURCE}" "${_spz_src}")
+    message(STATUS "Patched spz splat-types.cc: div-by-zero -> numeric_limits for MSVC")
 endif()
 
 add_library(spz_lib STATIC
