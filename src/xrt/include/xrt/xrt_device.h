@@ -238,6 +238,10 @@ enum xrt_device_property_id
 	//! Whether current mode uses side-by-side layout (half-width per eye).
 	//! Returns 1 for SBS, 0 otherwise. Read-only.
 	XRT_DEVICE_PROPERTY_SBS_MODE = 1,
+
+	//! Enable/disable EXT app mode (value: 1=enable, 0=disable).
+	//! When enabled, device returns raw pose without qwerty composition.
+	XRT_DEVICE_PROPERTY_EXT_APP_MODE = 2,
 };
 
 /*!

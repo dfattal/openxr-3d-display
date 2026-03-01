@@ -259,7 +259,7 @@ out:
 		xsysc->info.dp_factory_d3d11 = (void *)leia_dp_factory_d3d11;
 #endif
 
-		// sim_display fallback: populate display info if not already set by SR SDK
+		// sim_display fallback: populate display info and factory if not already set by SR SDK
 		{
 			struct sim_display_info sd_info;
 			if (xsysc->info.display_width_m == 0.0f &&
@@ -293,6 +293,11 @@ out:
 				        sd_mode == SIM_DISPLAY_OUTPUT_SBS ? "SBS" :
 				        sd_mode == SIM_DISPLAY_OUTPUT_ANAGLYPH ? "Anaglyph" : "Blend",
 				        sd_info.display_pixel_width, sd_info.display_pixel_height);
+
+				// Set sim_display factory (only if Leia SR didn't already set one)
+				if (xsysc->info.dp_factory_vk == NULL) {
+					xsysc->info.dp_factory_vk = (void *)sim_display_dp_factory_vk;
+				}
 			}
 		}
 
