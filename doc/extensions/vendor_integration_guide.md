@@ -1603,6 +1603,81 @@ The sim_display driver is the minimal starting point:
 
 ---
 
+## 13. Deployment Model and Version Compatibility
+
+### 13.1 OEM Runtime + Public SDK Pattern
+
+3D display vendors follow the same deployment model as GPU compute platforms
+(CUDA, OpenCL, DirectX): the vendor's IP lives in a **system-level runtime**
+installed by the device OEM, and a freely available **public SDK** provides only
+headers and import stubs for building against it.
+
+| Layer | Contains | Installed by | IP? |
+|-------|----------|--------------|-----|
+| **Vendor Runtime** (e.g., LeiaSR Runtime) | DLLs / shared libraries with interlacing algorithms, eye tracking models, calibration data, lens/backlight control | OEM (Samsung, Acer, ZTE, etc.) or vendor installer | **Yes** |
+| **Public SDK** (e.g., SR SDK) | C/C++ headers, import libraries / stubs, documentation, samples | Publicly downloadable (NuGet, GitHub release, etc.) | **No** |
+| **OpenXR Driver** (`src/xrt/drivers/<vendor>/`) | Open-source glue code: device driver, display processor, eye tracking provider, SDK wrapper, builder | This repository (open source) | **No** |
+
+The OpenXR driver links against the public SDK at **build time** and calls the
+vendor's system runtime at **run time**.  If the vendor runtime is not installed
+on the device, SDK calls fail gracefully and the builder is skipped.
+
+### 13.2 Version Compatibility Contract
+
+Vendor runtimes and SDKs follow a **forward-compatible runtime, backward-
+compatible SDK** rule — the same contract as CUDA, DirectX, and OpenCL:
+
+| Scenario | Works? | Why |
+|----------|--------|-----|
+| **New runtime + old SDK** | Yes | Runtime exports a superset of all previous API versions. Old apps call old functions — they're still there. |
+| **Old runtime + new SDK** | No | New SDK may call functions the old runtime doesn't implement. |
+
+**Rule**: The runtime is the floor (max capability on device).  The SDK is the
+ceiling (max capability the app can request).  A new runtime never breaks old
+apps.  A new SDK may require a new runtime.
+
+**Implications for the OpenXR driver**:
+
+- **Build against the latest vendor SDK** — to access all features.
+- **Check API availability at runtime** — don't assume all SDK functions will
+  succeed.  Use the vendor SDK's version query or capability check.
+- **Degrade gracefully** — if a new feature (e.g., raw eye tracking mode) isn't
+  available in the installed runtime, report the capability as unsupported rather
+  than crashing.
+- **Never require a minimum runtime version to start** — the driver should
+  activate with whatever runtime is installed and expose the intersection of what
+  the SDK declares and what the runtime actually provides.
+
+The `estimate_system()` function in the target builder and the SDK wrapper's
+`create()` function should probe the installed runtime's capabilities and
+populate `xrt_system_compositor_info` fields accordingly.
+
+### 13.3 Multi-Vendor Builds
+
+This model solves the multi-vendor build problem cleanly:
+
+1. **CI downloads all public SDKs** — no license issues since SDKs contain no
+   IP.  Each vendor's SDK is fetched in the CI workflow (see
+   `.github/workflows/build-windows.yml` for the Leia pattern).
+
+2. **Single runtime binary supports all vendors** — the built runtime links
+   against all vendor import libs.  At runtime, the builder system probes which
+   vendor DLLs are installed and activates the appropriate driver.
+
+3. **Graceful degradation** — if a vendor's runtime is not installed, SDK calls
+   fail, `estimate_system()` returns "no hardware," that builder is skipped, and
+   the next builder (or sim_display) wins.
+
+4. **No vendor IP in this repo** — driver code under
+   `src/xrt/drivers/<vendor>/` is pure glue.  Proprietary algorithms,
+   calibration data, and shaders live in the vendor's system runtime.
+
+5. **Vendors iterate independently** — a vendor can update their system runtime
+   (new interlacing algorithm, improved tracking) without rebuilding the OpenXR
+   runtime.  The public SDK's API contract is the stable boundary.
+
+---
+
 ## Appendix A: Key Type References
 
 ### `xrt_eye_position` / `xrt_eye_pair` / `xrt_window_metrics`

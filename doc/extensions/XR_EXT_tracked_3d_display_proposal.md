@@ -1304,6 +1304,42 @@ The window/surface binding extensions and `XR_EXT_display_info` are **independen
   on tracked 3D displays. This layer type works with both Win32 and Android surface
   bindings.
 
+### Vendor SDK Deployment Model
+
+These extensions are designed for a multi-vendor ecosystem where each 3D display vendor
+ships their own system-level runtime and public SDK, following the same model as CUDA,
+OpenCL, and DirectX:
+
+- **Vendor Runtime** (OEM-installed): Contains the vendor's IP — interlacing algorithms,
+  eye tracking models, calibration data, and display-specific hardware control. Installed
+  on the device by the display OEM (Samsung, Acer, ZTE, etc.) or a vendor installer.
+
+- **Public SDK** (freely available): Contains only C/C++ headers and import stubs — no IP.
+  Developers and CI systems download the SDK to build against. If the vendor runtime is not
+  installed on the target device, SDK calls fail gracefully.
+
+- **OpenXR Driver** (this repository): Open-source glue code under
+  `src/xrt/drivers/<vendor>/` that translates vendor SDK types into the runtime's
+  vendor-neutral `xrt_*` interfaces. Contains no vendor IP.
+
+**Version Compatibility Contract**: Vendor runtimes and SDKs follow a forward-compatible
+runtime, backward-compatible SDK rule:
+
+- **New runtime + old SDK**: Works. The runtime exports a superset of all previous API
+  versions, so old applications continue to work.
+- **Old runtime + new SDK**: May not work. The new SDK may call functions the old runtime
+  doesn't implement.
+
+The OpenXR driver should build against the **latest** vendor SDK but **check API
+availability at runtime** and degrade gracefully when features are not supported by the
+installed runtime. The `XR_EXT_display_info` extension's capability reporting
+(`XrDisplayInfoEXT`, `XrEyeTrackingModeCapabilitiesEXT`) reflects only what the device
+actually supports, not the full SDK API surface.
+
+See the **Vendor Integration Guide** (`doc/extensions/vendor_integration_guide.md` §13)
+for the complete deployment model, multi-vendor build strategy, and driver implementation
+guidelines.
+
 ---
 
 ## 7. Issues (Design Decisions)
