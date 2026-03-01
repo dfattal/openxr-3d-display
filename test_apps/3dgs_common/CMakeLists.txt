@@ -45,18 +45,32 @@ FetchContent_Declare(spz
 )
 FetchContent_MakeAvailable(spz)
 
-# Patch spz for MSVC: std::sqrt is not constexpr on MSVC, so constexpr
-# functions calling it (normalized, times) cause C3615 errors.
-# Replace all 'constexpr' function qualifiers with 'inline' in spz headers.
-# This is safe because these are small math helpers in a header file.
+# Patch spz for MSVC compatibility:
+# 1. std::sqrt is not constexpr on MSVC → replace constexpr with inline
+# 2. 0.0f/0.0f and 1.0f/0.0f cause C2124 → use std::numeric_limits
 if(MSVC)
+    # Patch splat-types.h: constexpr → inline (MSVC C3615 fix)
     set(_SPZ_HEADER "${spz_SOURCE_DIR}/src/cc/splat-types.h")
     file(READ "${_SPZ_HEADER}" _spz_content)
     string(FIND "${_spz_content}" "constexpr" _spz_has_constexpr)
     if(NOT _spz_has_constexpr EQUAL -1)
         string(REPLACE "constexpr " "inline " _spz_content "${_spz_content}")
         file(WRITE "${_SPZ_HEADER}" "${_spz_content}")
-        message(STATUS "Patched spz splat-types.h: constexpr -> inline for MSVC compatibility")
+        message(STATUS "Patched spz splat-types.h: constexpr -> inline for MSVC")
+    endif()
+
+    # Patch splat-types.cc: replace 0/0 NaN/Inf literals with std::numeric_limits (MSVC C2124 fix)
+    set(_SPZ_SOURCE "${spz_SOURCE_DIR}/src/cc/splat-types.cc")
+    file(READ "${_SPZ_SOURCE}" _spz_src)
+    string(FIND "${_spz_src}" "0.0f / 0.0f" _spz_has_div_zero)
+    if(NOT _spz_has_div_zero EQUAL -1)
+        # Add <limits> include after <cmath>
+        string(REPLACE "#include <cmath>" "#include <cmath>\n#include <limits>" _spz_src "${_spz_src}")
+        # Replace NaN/Inf construction
+        string(REPLACE "0.0f / 0.0f" "std::numeric_limits<float>::quiet_NaN()" _spz_src "${_spz_src}")
+        string(REPLACE "1.0f / 0.0f" "std::numeric_limits<float>::infinity()" _spz_src "${_spz_src}")
+        file(WRITE "${_SPZ_SOURCE}" "${_spz_src}")
+        message(STATUS "Patched spz splat-types.cc: div-by-zero -> numeric_limits for MSVC")
     endif()
 endif()
 
