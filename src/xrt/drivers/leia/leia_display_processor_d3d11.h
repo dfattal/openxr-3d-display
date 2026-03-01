@@ -20,13 +20,28 @@ extern "C" {
 struct leiasr_d3d11;
 
 /*!
+ * Factory function for creating a Leia SR D3D11 display processor.
+ *
+ * Matches the @ref xrt_dp_factory_d3d11_fn_t signature.
+ * Creates an SR D3D11 weaver internally and owns it for the lifetime
+ * of the display processor.
+ *
+ * Set this as dp_factory_d3d11 in xrt_system_compositor_info from
+ * the Leia target builder.
+ */
+xrt_result_t
+leia_dp_factory_d3d11(void *d3d11_device,
+                      void *window_handle,
+                      struct xrt_display_processor_d3d11 **out_xdp);
+
+/*!
  * Create an @ref xrt_display_processor_d3d11 that wraps a Leia SR SDK
  * D3D11 weaver (leiasr_d3d11_set_input_texture + leiasr_d3d11_weave).
  *
- * The processor does NOT own the leiasr_d3d11 instance; the caller is
- * responsible for destroying it separately after the processor.
+ * Legacy API — the processor takes ownership of the leiasr_d3d11 instance
+ * and will destroy it when the processor is destroyed.
  *
- * @param leiasr  Existing SR D3D11 weaver (must outlive the processor).
+ * @param leiasr  Existing SR D3D11 weaver (ownership transferred to processor).
  * @param[out] out_xdp  Receives the created display processor.
  * @return XRT_SUCCESS on success.
  */
