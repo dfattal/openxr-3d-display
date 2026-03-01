@@ -6,7 +6,7 @@
  *
  * Renders 3D Gaussian Splatting scenes on tracked 3D displays via OpenXR.
  * Based on sr_cube_openxr_ext_vk with the cube/grid renderer replaced by
- * a 3DGS.cpp compute pipeline.  Features a "Load .ply" button as a
+ * a 3DGS.cpp compute pipeline.  Features a "Load Scene" button as a
  * window-space layer overlay.
  */
 
@@ -114,13 +114,13 @@ static bool IsClickOnLoadButton(int mouseX, int mouseY, int windowW, int windowH
             fy <= LOAD_BTN_Y_FRACTION + LOAD_BTN_HEIGHT_FRACTION);
 }
 
-// Open a file dialog and load a .ply scene (called from main thread)
+// Open a file dialog and load a .ply or .spz scene (called from main thread)
 static void OpenLoadDialog(HWND hwnd) {
     OPENFILENAMEA ofn = {};
     char filePath[MAX_PATH] = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = "PLY Files (*.ply)\0*.ply\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFilter = "3DGS Files (*.ply;*.spz)\0*.ply;*.spz\0PLY Files (*.ply)\0*.ply\0SPZ Files (*.spz)\0*.spz\0All Files (*.*)\0*.*\0";
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrTitle = "Load Gaussian Splatting Scene";
@@ -128,7 +128,7 @@ static void OpenLoadDialog(HWND hwnd) {
 
     if (GetOpenFileNameA(&ofn)) {
         std::string path(filePath);
-        if (ValidatePlyFile(path)) {
+        if (ValidateSceneFile(path)) {
             LOG_INFO("Loading 3DGS scene: %s", path.c_str());
             std::lock_guard<std::mutex> lock(g_sceneMutex);
             if (g_gsRenderer.loadScene(path.c_str())) {
@@ -137,11 +137,11 @@ static void OpenLoadDialog(HWND hwnd) {
                     GetPlyFileSize(path).c_str());
             } else {
                 LOG_ERROR("Failed to load scene: %s", path.c_str());
-                MessageBoxA(hwnd, "Failed to load .ply file.\nThe file may be corrupt or unsupported.",
+                MessageBoxA(hwnd, "Failed to load scene file.\nThe file may be corrupt or unsupported.",
                     "Load Error", MB_OK | MB_ICONERROR);
             }
         } else {
-            MessageBoxA(hwnd, "Invalid .ply file.", "Load Error", MB_OK | MB_ICONERROR);
+            MessageBoxA(hwnd, "Invalid scene file. Supported formats: .ply, .spz", "Load Error", MB_OK | MB_ICONERROR);
         }
     }
 }
@@ -688,7 +688,7 @@ static void RenderThreadFunc(
                                         inputSnapshot.stereo.virtualDisplayHeight, hudM2v);
                                     stereoText += vhBuf;
                                 }
-                                std::wstring helpText = L"[L] Load .ply | [WASD] Fly | [Tab] HUD\n"
+                                std::wstring helpText = L"[L] Load Scene | [WASD] Fly | [Tab] HUD\n"
                                     L"[V] 2D/3D | [F11] Fullscreen | [ESC] Quit";
 
                                 uint32_t srcRowPitch = 0;
@@ -1083,7 +1083,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     LOG_INFO("");
     LOG_INFO("=== Entering main loop ===");
-    LOG_INFO("Controls: L=Load .ply, WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset");
+    LOG_INFO("Controls: L=Load Scene, WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset");
     LOG_INFO("          V=2D/3D, TAB=HUD, F11=Fullscreen, ESC=Quit");
     LOG_INFO("");
 

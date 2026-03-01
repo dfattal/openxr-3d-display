@@ -3,7 +3,7 @@
 #
 # Shared 3DGS-OpenXR integration library
 #
-# Embeds 8 compute shaders for Gaussian splatting, a PLY binary parser,
+# Embeds 8 compute shaders for Gaussian splatting, PLY and SPZ parsers,
 # and Vulkan utility helpers.  Test apps link this library and call
 # GsRenderer::renderEye() with OpenXR swapchain images.
 
@@ -18,6 +18,46 @@ if(MSVC)
 endif()
 
 find_package(Vulkan REQUIRED)
+
+# ── Niantic SPZ format support (FetchContent) ────────────────────────────
+include(FetchContent)
+
+# zlib (required by spz)
+find_package(ZLIB QUIET)
+if(NOT ZLIB_FOUND)
+    message(STATUS "System zlib not found — fetching via FetchContent")
+    FetchContent_Declare(zlib
+        GIT_REPOSITORY https://github.com/madler/zlib.git
+        GIT_TAG        v1.3.1
+    )
+    set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(zlib)
+    set(SPZ_ZLIB_TARGET zlibstatic)
+else()
+    set(SPZ_ZLIB_TARGET ZLIB::ZLIB)
+endif()
+
+# Download spz source (build manually to avoid find_package(ZLIB) issues)
+FetchContent_Declare(spz
+    GIT_REPOSITORY https://github.com/nianticlabs/spz.git
+    GIT_TAG        v1.1.0
+    SOURCE_SUBDIR  _skip  # Skip spz's CMakeLists.txt — we build sources manually below
+)
+FetchContent_MakeAvailable(spz)
+
+add_library(spz_lib STATIC
+    ${spz_SOURCE_DIR}/src/cc/load-spz.cc
+    ${spz_SOURCE_DIR}/src/cc/splat-c-types.cc
+    ${spz_SOURCE_DIR}/src/cc/splat-types.cc
+)
+target_include_directories(spz_lib PUBLIC ${spz_SOURCE_DIR}/src/cc)
+target_link_libraries(spz_lib PRIVATE ${SPZ_ZLIB_TARGET})
+set_target_properties(spz_lib PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+if(MSVC)
+    set_target_properties(spz_lib PROPERTIES
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+endif()
 
 # ── SPIR-V shader compilation ────────────────────────────────────────────
 # Inline version of cmake/SPIR-V.cmake with --include-dir for common.glsl.
@@ -72,6 +112,8 @@ add_library(gs_renderer STATIC
     gs_renderer.cpp
     gs_scene_loader.h
     gs_scene_loader.cpp
+    gs_spz_loader.h
+    gs_spz_loader.cpp
     gs_vulkan_utils.h
     gs_vulkan_utils.cpp
     ${SHADER_HEADERS}
@@ -84,4 +126,5 @@ target_include_directories(gs_renderer PUBLIC
 
 target_link_libraries(gs_renderer PUBLIC
     Vulkan::Vulkan
+    spz_lib
 )
