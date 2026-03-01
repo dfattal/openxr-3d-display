@@ -352,6 +352,10 @@ sim_display_hmd_set_property(struct xrt_device *xdev,
 		snprintf(xdev->str, XRT_DEVICE_NAME_LEN, "Sim 3D Display (%s)", mode_names[idx]);
 		return XRT_SUCCESS;
 	}
+	if (property == XRT_DEVICE_PROPERTY_EXT_APP_MODE) {
+		sim_display_hmd_set_ext_app_mode(xdev, value != 0);
+		return XRT_SUCCESS;
+	}
 	return XRT_ERROR_NOT_IMPLEMENTED;
 }
 

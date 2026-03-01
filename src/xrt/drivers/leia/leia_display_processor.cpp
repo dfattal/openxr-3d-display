@@ -16,6 +16,7 @@
 #include "leia_sr.h"
 
 #include "xrt/xrt_display_metrics.h"
+#include "vk/vk_helpers.h"
 #include "util/u_logging.h"
 
 #include <vulkan/vulkan.h>
@@ -145,9 +146,7 @@ leia_dp_destroy(struct xrt_display_processor *xdp)
  */
 
 extern "C" xrt_result_t
-leia_dp_factory_vk(void *vk_device,
-                   void *vk_physical_device,
-                   void *vk_queue,
+leia_dp_factory_vk(void *vk_bundle_ptr,
                    void *vk_cmd_pool,
                    void *window_handle,
                    int32_t target_format,
@@ -155,9 +154,12 @@ leia_dp_factory_vk(void *vk_device,
 {
 	(void)target_format; // unused by SR weaver
 
+	// Extract Vulkan handles from vk_bundle.
+	struct vk_bundle *vk = (struct vk_bundle *)vk_bundle_ptr;
+
 	struct leiasr *leiasr = NULL;
-	xrt_result_t ret = leiasr_create(5.0, (VkDevice)vk_device, (VkPhysicalDevice)vk_physical_device,
-	                                 (VkQueue)vk_queue, (VkCommandPool)vk_cmd_pool, window_handle, &leiasr);
+	xrt_result_t ret = leiasr_create(5.0, vk->device, vk->physical_device, vk->main_queue->queue,
+	                                 (VkCommandPool)vk_cmd_pool, window_handle, &leiasr);
 	if (ret != XRT_SUCCESS || leiasr == NULL) {
 		U_LOG_W("Failed to create SR Vulkan weaver, continuing without interlacing");
 		return ret != XRT_SUCCESS ? ret : XRT_ERROR_DEVICE_CREATION_FAILED;

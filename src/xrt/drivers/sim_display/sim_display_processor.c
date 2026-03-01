@@ -527,3 +527,26 @@ sim_display_processor_create(enum sim_display_output_mode mode,
 	*out_xdp = &sdp->base;
 	return XRT_SUCCESS;
 }
+
+
+/*
+ *
+ * Factory function — matches xrt_dp_factory_vk_fn_t signature.
+ *
+ */
+
+xrt_result_t
+sim_display_dp_factory_vk(void *vk_bundle_ptr,
+                          void *vk_cmd_pool,
+                          void *window_handle,
+                          int32_t target_format,
+                          struct xrt_display_processor **out_xdp)
+{
+	(void)vk_cmd_pool;
+	(void)window_handle;
+
+	struct vk_bundle *vk = (struct vk_bundle *)vk_bundle_ptr;
+	enum sim_display_output_mode mode = sim_display_get_output_mode();
+
+	return sim_display_processor_create(mode, vk, target_format, out_xdp);
+}

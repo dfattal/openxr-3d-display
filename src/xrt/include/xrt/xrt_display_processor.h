@@ -286,18 +286,14 @@ xrt_display_processor_get_display_pixel_info(struct xrt_display_processor *xdp,
  * xrt_system_compositor_info. The implementation creates and owns all
  * vendor-specific resources internally.
  *
- * @param vk_device           Vulkan logical device (VkDevice).
- * @param vk_physical_device  Vulkan physical device (VkPhysicalDevice).
- * @param vk_queue            Vulkan graphics queue (VkQueue).
- * @param vk_cmd_pool         Vulkan command pool (VkCommandPool).
- * @param window_handle       Native window handle (HWND on Windows, etc.), may be NULL.
- * @param target_format       Target framebuffer format (VkFormat as int32_t).
- * @param[out] out_xdp        Created display processor on success.
+ * @param vk_bundle      Opaque pointer to the compositor's struct vk_bundle.
+ * @param vk_cmd_pool    Vulkan command pool (VkCommandPool as void*) for recording.
+ * @param window_handle  Native window handle (HWND on Windows, etc.), may be NULL.
+ * @param target_format  Target framebuffer format (VkFormat as int32_t).
+ * @param[out] out_xdp   Created display processor on success.
  * @return XRT_SUCCESS on success.
  */
-typedef xrt_result_t (*xrt_dp_factory_vk_fn_t)(void *vk_device,
-                                               void *vk_physical_device,
-                                               void *vk_queue,
+typedef xrt_result_t (*xrt_dp_factory_vk_fn_t)(void *vk_bundle,
                                                void *vk_cmd_pool,
                                                void *window_handle,
                                                int32_t target_format,

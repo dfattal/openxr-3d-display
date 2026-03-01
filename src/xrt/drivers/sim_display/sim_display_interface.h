@@ -180,6 +180,30 @@ void
 sim_display_hmd_set_ext_app_mode(struct xrt_device *xdev, bool enabled);
 
 /*!
+ * Factory function for creating a sim_display Vulkan display processor.
+ *
+ * Matches the @ref xrt_dp_factory_vk_fn_t signature.
+ * Reads SIM_DISPLAY_OUTPUT env var internally to determine the initial mode.
+ *
+ * Set this as dp_factory_vk in xrt_system_compositor_info from
+ * target_instance.c when sim_display is the active driver.
+ *
+ * @param vk_bundle      Opaque pointer to struct vk_bundle.
+ * @param vk_cmd_pool    Vulkan command pool (unused by sim_display, may be NULL).
+ * @param window_handle  Unused by sim_display (may be NULL).
+ * @param target_format  Swapchain target format (VkFormat as int32_t).
+ * @param[out] out_xdp   Receives the created display processor.
+ * @return XRT_SUCCESS on success.
+ * @ingroup drv_sim_display
+ */
+xrt_result_t
+sim_display_dp_factory_vk(void *vk_bundle,
+                          void *vk_cmd_pool,
+                          void *window_handle,
+                          int32_t target_format,
+                          struct xrt_display_processor **out_xdp);
+
+/*!
  * Create the simulation display system builder.
  *
  * Enabled via SIM_DISPLAY_ENABLE=1 environment variable.

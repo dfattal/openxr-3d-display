@@ -32,9 +32,7 @@ struct leiasr;
  * the Leia target builder.
  */
 xrt_result_t
-leia_dp_factory_vk(void *vk_device,
-                   void *vk_physical_device,
-                   void *vk_queue,
+leia_dp_factory_vk(void *vk_bundle,
                    void *vk_cmd_pool,
                    void *window_handle,
                    int32_t target_format,
