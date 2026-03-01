@@ -142,6 +142,18 @@ bool ValidatePlyFile(const std::string& path)
     return std::filesystem::exists(p);
 }
 
+bool ValidateSceneFile(const std::string& path)
+{
+    if (path.empty()) return false;
+
+    std::filesystem::path p(path);
+    auto ext = p.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    if (ext != ".ply" && ext != ".spz") return false;
+
+    return std::filesystem::exists(p);
+}
+
 std::string GetPlyFilename(const std::string& path)
 {
     return std::filesystem::path(path).filename().string();

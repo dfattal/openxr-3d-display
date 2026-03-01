@@ -31,6 +31,10 @@ bool ParsePlyFile(const std::string& path,
 // Returns true if the file exists and has a .ply extension.
 bool ValidatePlyFile(const std::string& path);
 
+// Validate that a file path points to a valid 3DGS scene file (.ply or .spz).
+// Returns true if the file exists and has a supported extension.
+bool ValidateSceneFile(const std::string& path);
+
 // Extract the filename (without directory) from a full path.
 std::string GetPlyFilename(const std::string& path);
 

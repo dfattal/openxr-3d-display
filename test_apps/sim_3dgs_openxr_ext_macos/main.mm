@@ -6,7 +6,7 @@
  *
  * Renders 3DGS scenes on tracked 3D displays via OpenXR.
  * Based on sim_cube_openxr_ext_macos with the cube/grid renderer replaced by
- * a 3DGS.cpp compute pipeline.  Features a "Load .ply" button overlay.
+ * a 3DGS.cpp compute pipeline.  Features a "Load Scene" button overlay.
  *
  * Features:
  * - App creates and owns the NSWindow (XR_EXT_macos_window_binding)
@@ -14,7 +14,7 @@
  * - XR_EXT_display_info: Kooima projection, display metrics
  * - 2D/3D toggle (V key) via xrRequestDisplayModeEXT
  * - 1/2/3 keys for sim_display modes (SBS/anaglyph/blend)
- * - L key or button click: NSOpenPanel to load .ply scenes
+ * - L key or button click: NSOpenPanel to load .ply/.spz scenes
  * - Tab: toggle HUD overlay, Space: reset camera, ESC: quit
  */
 
@@ -280,12 +280,16 @@ static void OpenLoadDialog() {
         [panel setCanChooseDirectories:NO];
         [panel setAllowsMultipleSelection:NO];
         [panel setTitle:@"Load Gaussian Splatting Scene"];
-        [panel setMessage:@"Select a .ply file containing 3D Gaussian splats"];
+        [panel setMessage:@"Select a .ply or .spz file containing 3D Gaussian splats"];
 
         if (@available(macOS 11.0, *)) {
             UTType *plyType = [UTType typeWithFilenameExtension:@"ply"];
-            if (plyType) {
-                [panel setAllowedContentTypes:@[plyType]];
+            UTType *spzType = [UTType typeWithFilenameExtension:@"spz"];
+            NSMutableArray<UTType *> *types = [NSMutableArray array];
+            if (plyType) [types addObject:plyType];
+            if (spzType) [types addObject:spzType];
+            if (types.count > 0) {
+                [panel setAllowedContentTypes:types];
             }
         }
 
@@ -294,7 +298,7 @@ static void OpenLoadDialog() {
             if (url) {
                 const char *path = [[url path] UTF8String];
                 std::string pathStr(path);
-                if (ValidatePlyFile(pathStr)) {
+                if (ValidateSceneFile(pathStr)) {
                     LOG_INFO("Loading 3DGS scene: %s", path);
                     if (g_gsRenderer.loadScene(path)) {
                         g_loadedFileName = GetPlyFilename(pathStr);
@@ -303,7 +307,7 @@ static void OpenLoadDialog() {
                     } else {
                         LOG_ERROR("Failed to load scene: %s", path);
                         NSAlert *alert = [[NSAlert alloc] init];
-                        [alert setMessageText:@"Failed to load .ply file"];
+                        [alert setMessageText:@"Failed to load scene file"];
                         [alert setInformativeText:@"The file may be corrupt or unsupported."];
                         [alert runModal];
                     }
@@ -478,7 +482,7 @@ static bool CreateMacOSWindow(uint32_t width, uint32_t height) {
 
     // Add Load button overlay (top-right)
     g_loadButton = [[NSButton alloc] initWithFrame:NSMakeRect(width - 120, height - 40, 110, 30)];
-    [g_loadButton setTitle:@"Load .ply"];
+    [g_loadButton setTitle:@"Load Scene"];
     [g_loadButton setBezelStyle:NSBezelStyleRounded];
     [g_loadButton setTarget:nil];
     [g_loadButton setAction:@selector(loadButtonClicked:)];
@@ -1061,7 +1065,7 @@ int main() {
     g_input.nominalViewerZ = xr.nominalViewerZ;
 
     LOG_INFO("=== Entering main loop ===");
-    LOG_INFO("Controls: L=Load .ply, WASD=Move, Drag=Look, Scroll=Scale");
+    LOG_INFO("Controls: L=Load Scene, WASD=Move, Drag=Look, Scroll=Scale");
     LOG_INFO("          V=2D/3D, Tab=HUD, 1/2/3=SBS/Ana/Blend, ESC=Quit");
 
     auto lastTime = std::chrono::high_resolution_clock::now();
