@@ -3016,22 +3016,87 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			c->render.back_buffer_rtv->GetResource(back_buffer.put());
 
 			if (is_mono) {
-				// MONO / forced 2D: copy left eye to back buffer.
-				// When force_2d with stereo submission, the stereo texture
-				// contains SBS content — copy only the left half (view_width).
-				uint32_t src_w = sys->view_width;
-				uint32_t src_h = sys->view_height;
+				// MONO / forced 2D: stretch-blit left eye to fill entire back buffer.
+				// The source is SBS (2*view_width x view_height); we sample only the
+				// left half and stretch it to the full back buffer via a GPU blit.
+				ID3D11ShaderResourceView *src_srv = nullptr;
+				uint32_t eye_w = 0, eye_h = 0;
+				uint32_t tex_w = 0, tex_h = 0;
 
-				if (use_direct_sbs && direct_sbs_tex) {
-					D3D11_BOX src_box = {0, 0, 0, src_w, src_h, 1};
-					sys->context->CopySubresourceRegion(
-					    back_buffer.get(), 0, 0, 0, 0,
-					    direct_sbs_tex, 0, &src_box);
-				} else if (c->render.stereo_texture) {
-					D3D11_BOX src_box = {0, 0, 0, src_w, src_h, 1};
-					sys->context->CopySubresourceRegion(
-					    back_buffer.get(), 0, 0, 0, 0,
-					    c->render.stereo_texture.get(), 0, &src_box);
+				if (use_direct_sbs && direct_sbs_srv) {
+					src_srv = direct_sbs_srv.get();
+					eye_w = direct_view_w;
+					eye_h = direct_view_h;
+					tex_w = direct_view_w * 2;
+					tex_h = direct_view_h;
+				} else if (c->render.stereo_srv) {
+					src_srv = c->render.stereo_srv.get();
+					eye_w = sys->view_width;
+					eye_h = sys->view_height;
+					tex_w = sys->view_width * 2;
+					tex_h = sys->view_height;
+				}
+
+				if (src_srv != nullptr) {
+					// Bind back buffer as render target
+					ID3D11RenderTargetView *rtvs[] = {c->render.back_buffer_rtv.get()};
+					sys->context->OMSetRenderTargets(1, rtvs, nullptr);
+
+					// Viewport fills the entire back buffer — stretches the quad
+					D3D11_VIEWPORT vp = {};
+					vp.Width = static_cast<float>(sys->output_width);
+					vp.Height = static_cast<float>(sys->output_height);
+					vp.MaxDepth = 1.0f;
+					sys->context->RSSetViewports(1, &vp);
+
+					// Pipeline state
+					sys->context->IASetPrimitiveTopology(
+					    D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+					sys->context->IASetInputLayout(nullptr);
+					sys->context->VSSetShader(sys->blit_vs.get(), nullptr, 0);
+					sys->context->PSSetShader(sys->blit_ps.get(), nullptr, 0);
+					sys->context->RSSetState(sys->rasterizer_state.get());
+					sys->context->OMSetDepthStencilState(sys->depth_disabled.get(), 0);
+					sys->context->OMSetBlendState(
+					    sys->blend_opaque.get(), nullptr, 0xFFFFFFFF);
+					sys->context->PSSetSamplers(
+					    0, 1, sys->sampler_linear.addressof());
+					sys->context->PSSetShaderResources(0, 1, &src_srv);
+
+					// Blit constants: dst_size = eye dims so NDC maps fullscreen;
+					// src_size = actual SBS dims so UVs sample only the left eye.
+					BlitConstants bc = {};
+					bc.src_rect[0] = 0.0f;
+					bc.src_rect[1] = 0.0f;
+					bc.src_rect[2] = static_cast<float>(eye_w);
+					bc.src_rect[3] = static_cast<float>(eye_h);
+					bc.dst_offset[0] = 0.0f;
+					bc.dst_offset[1] = 0.0f;
+					bc.src_size[0] = static_cast<float>(tex_w);
+					bc.src_size[1] = static_cast<float>(tex_h);
+					bc.dst_size[0] = static_cast<float>(eye_w);
+					bc.dst_size[1] = static_cast<float>(eye_h);
+					bc.convert_srgb = 0.0f;
+
+					D3D11_MAPPED_SUBRESOURCE mapped;
+					HRESULT hr = sys->context->Map(
+					    sys->blit_constant_buffer.get(), 0,
+					    D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+					if (SUCCEEDED(hr)) {
+						memcpy(mapped.pData, &bc, sizeof(bc));
+						sys->context->Unmap(
+						    sys->blit_constant_buffer.get(), 0);
+					}
+					sys->context->VSSetConstantBuffers(
+					    0, 1, sys->blit_constant_buffer.addressof());
+					sys->context->PSSetConstantBuffers(
+					    0, 1, sys->blit_constant_buffer.addressof());
+
+					sys->context->Draw(4, 0);
+
+					// Unbind SRV to prevent hazard
+					ID3D11ShaderResourceView *null_srv = nullptr;
+					sys->context->PSSetShaderResources(0, 1, &null_srv);
 				}
 			} else if (use_direct_sbs && direct_sbs_tex) {
 				// Same-swapchain SBS: copy app's SBS region to back buffer
