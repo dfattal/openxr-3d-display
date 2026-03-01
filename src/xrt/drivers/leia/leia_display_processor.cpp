@@ -177,6 +177,7 @@ leia_dp_factory_vk(void *vk_bundle_ptr,
 	ldp->base.get_display_dimensions = leia_dp_get_display_dimensions;
 	ldp->base.get_display_pixel_info = leia_dp_get_display_pixel_info;
 	ldp->base.destroy = leia_dp_destroy;
+	ldp->base.prefers_sbs_input = true; // SR weaver expects single SBS view
 	ldp->leiasr = leiasr;
 
 	*out_xdp = &ldp->base;
@@ -215,6 +216,7 @@ leia_display_processor_create(struct leiasr *leiasr, struct xrt_display_processo
 	// Legacy: does NOT own leiasr — use a destroy that skips leiasr_destroy.
 	// For now just assign the full destroy; callers will be migrated to factory.
 	ldp->base.destroy = leia_dp_destroy;
+	ldp->base.prefers_sbs_input = true; // SR weaver expects single SBS view
 	ldp->leiasr = leiasr;
 
 	*out_xdp = &ldp->base;

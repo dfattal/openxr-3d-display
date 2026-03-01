@@ -172,6 +172,18 @@ struct xrt_display_processor
 	void (*destroy)(struct xrt_display_processor *xdp);
 
 	/*! @} */
+
+	/*!
+	 * If true, the display processor expects side-by-side stereo input:
+	 * left_view contains both eyes (left half + right half), right_view
+	 * is VK_NULL_HANDLE, and view_width is the full SBS width (2 * per_eye).
+	 *
+	 * If false (default), the display processor receives separate per-eye
+	 * views with view_width equal to a single eye's width.
+	 *
+	 * The compositor checks this flag and prepares input accordingly.
+	 */
+	bool prefers_sbs_input;
 };
 
 /*!
