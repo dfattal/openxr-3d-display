@@ -1622,6 +1622,65 @@ ensure_session_dp_crop_images(struct multi_compositor *mc, struct vk_bundle *vk,
 }
 
 /*!
+ * Ensure the SBS (side-by-side) intermediate image exists for display processors
+ * that prefer SBS input. Creates a single image at (2*per_eye_width x height)
+ * so both eyes can be blitted side-by-side before passing to the display processor.
+ * Reuses the flip_sbs_* fields in session_render.
+ * Recreates if size or format changed.
+ */
+static bool
+ensure_session_sbs_image(struct multi_compositor *mc, struct vk_bundle *vk, int per_eye_width, int height, VkFormat format)
+{
+	if (mc->session_render.flip_initialized && mc->session_render.flip_width == per_eye_width &&
+	    mc->session_render.flip_height == height && mc->session_render.flip_format == format) {
+		return true;
+	}
+
+	// Destroy old if resizing
+	if (mc->session_render.flip_initialized) {
+		if (mc->session_render.flip_sbs_view != VK_NULL_HANDLE)
+			vk->vkDestroyImageView(vk->device, mc->session_render.flip_sbs_view, NULL);
+		if (mc->session_render.flip_sbs_image != VK_NULL_HANDLE)
+			vk->vkDestroyImage(vk->device, mc->session_render.flip_sbs_image, NULL);
+		if (mc->session_render.flip_sbs_memory != VK_NULL_HANDLE)
+			vk->vkFreeMemory(vk->device, mc->session_render.flip_sbs_memory, NULL);
+		mc->session_render.flip_initialized = false;
+	}
+
+	VkExtent2D extent = {(uint32_t)(per_eye_width * 2), (uint32_t)height};
+	VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	VkImageSubresourceRange range = {
+	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .levelCount = 1,
+	    .layerCount = 1,
+	};
+
+	VkResult ret = vk_create_image_simple(vk, extent, format, usage,
+	                                      &mc->session_render.flip_sbs_memory,
+	                                      &mc->session_render.flip_sbs_image);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("[per-session] Failed to create SBS image: %s", vk_result_string(ret));
+		return false;
+	}
+
+	ret = vk_create_view(vk, mc->session_render.flip_sbs_image, VK_IMAGE_VIEW_TYPE_2D, format, range,
+	                     &mc->session_render.flip_sbs_view);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("[per-session] Failed to create SBS view: %s", vk_result_string(ret));
+		return false;
+	}
+
+	mc->session_render.flip_width = per_eye_width;
+	mc->session_render.flip_height = height;
+	mc->session_render.flip_format = format;
+	mc->session_render.flip_initialized = true;
+
+	U_LOG_W("[per-session] Created SBS image: %dx%d (per-eye %dx%d) format=%d",
+	        per_eye_width * 2, height, per_eye_width, height, format);
+	return true;
+}
+
+/*!
  * Initialize Vulkan GPU resources for the HUD overlay (image + staging buffer).
  * Called lazily on first HUD render.
  */
@@ -2322,26 +2381,222 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		framebuffer = mc->session_render.framebuffers[buffer_index];
 	}
 
-	// Display processor path: crop-blit source sub-region into intermediates,
-	// then pass the cropped views to the display processor.
-	// This fixes the mismatch where the display processor samples UVs 0..1 on the
-	// full swapchain but the app only rendered to imageRect.extent (a sub-region).
-	// Also handles GL Y-flip during the blit.
+	// Display processor path: blit source sub-regions into intermediates,
+	// then pass to the display processor for final output.
 	//
-	// TODO: SBS mode works correctly but anaglyph/blend modes show 2x horizontal
-	// stretch. The crop-blit correctly extracts imageRect.extent, but something in
-	// the pipeline (crop aspect vs framebuffer aspect? shader UV mapping? Kooima
-	// FOV mismatch?) causes the stretch. Need to log actual dimensions at each
-	// stage: imageWidth/Height, crop size, framebuffer size, and compare.
+	// Two input modes:
+	// - SBS (prefers_sbs_input=true): blit both eyes into a single side-by-side
+	//   image, add pre/post-weave layout barriers. Used by SR SDK Vulkan weaver
+	//   which expects a single SBS view with rightView=NULL.
+	// - Separate views (prefers_sbs_input=false): blit each eye into its own
+	//   crop image, pass separate left/right views. Used by sim_display which
+	//   has its own render pass with proper layout transitions.
 	if (mc->session_render.display_processor != NULL) {
 		static bool dp_logged = false;
 		if (!dp_logged) {
-			U_LOG_W("[per-session] Vulkan rendering via display processor (crop-blit), "
-			        "input=%dx%d fmt=%d, fb=%ux%u fmt=%d",
+			U_LOG_W("[per-session] Vulkan display processor: input=%dx%d fmt=%d, fb=%ux%u fmt=%d, sbs=%d",
 			        imageWidth, imageHeight, imageFormat,
-			        framebufferWidth, framebufferHeight, framebufferFormat);
+			        framebufferWidth, framebufferHeight, framebufferFormat,
+			        mc->session_render.display_processor->prefers_sbs_input);
 			dp_logged = true;
 		}
+
+		bool sbs_mode = mc->session_render.display_processor->prefers_sbs_input;
+
+		// ================================================================
+		// SBS INPUT PATH: blit both eyes into single SBS image, then weave
+		// with explicit pre/post layout barriers on the target image.
+		// ================================================================
+		if (sbs_mode) {
+			// Determine blit sources — either composited overlay images or
+			// direct swapchain sub-regions.
+			VkImage sbs_src_left = leftImage;
+			VkImage sbs_src_right = rightImage;
+			uint32_t sbs_left_array = leftArrayIndex;
+			uint32_t sbs_right_array = rightArrayIndex;
+			int sbs_left_off_x = leftOffsetX, sbs_left_off_y = leftOffsetY;
+			int sbs_right_off_x = rightOffsetX, sbs_right_off_y = rightOffsetY;
+			int sbs_eye_w = imageWidth, sbs_eye_h = imageHeight;
+			bool sbs_flip_y = layer->data.flip_y;
+			bool sbs_same_src = same_swapchain;
+			VkImageLayout sbs_src_old_layout = VK_IMAGE_LAYOUT_GENERAL;
+
+			if (has_window_space_layers(mc)) {
+				VkImageView comp_left = VK_NULL_HANDLE, comp_right = VK_NULL_HANDLE;
+				if (composite_layers_to_intermediate(mc, vk, cmd, &comp_left, &comp_right)) {
+					sbs_src_left = mc->session_render.composite_images[0];
+					sbs_src_right = mc->session_render.composite_images[1];
+					sbs_left_array = sbs_right_array = 0;
+					sbs_left_off_x = sbs_left_off_y = 0;
+					sbs_right_off_x = sbs_right_off_y = 0;
+					sbs_eye_w = (int)mc->session_render.composite_width;
+					sbs_eye_h = (int)mc->session_render.composite_height;
+					sbs_flip_y = false;
+					sbs_same_src = false;
+					sbs_src_old_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				}
+			}
+
+			// Ensure SBS intermediate image exists (2*eye_w x eye_h)
+			if (!ensure_session_sbs_image(mc, vk, sbs_eye_w, sbs_eye_h, imageFormat)) {
+				U_LOG_E("[per-session] Failed to ensure SBS image");
+				goto submit_and_present;
+			}
+
+			// Y-flip handling for GL textures
+			int l_src_top = sbs_left_off_y + (sbs_flip_y ? sbs_eye_h : 0);
+			int l_src_bot = sbs_left_off_y + (sbs_flip_y ? 0 : sbs_eye_h);
+			int r_src_top = sbs_right_off_y + (sbs_flip_y ? sbs_eye_h : 0);
+			int r_src_bot = sbs_right_off_y + (sbs_flip_y ? 0 : sbs_eye_h);
+
+			// Pre-barriers: sources → TRANSFER_SRC, SBS image → TRANSFER_DST
+			uint32_t sbs_pre_count = sbs_same_src ? 2 : 3;
+			VkImageMemoryBarrier sbs_pre[3] = {
+			    {
+			        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			        .srcAccessMask = 0,
+			        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+			        .oldLayout = sbs_src_old_layout,
+			        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			        .image = sbs_src_left,
+			        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, sbs_left_array, 1},
+			    },
+			    {
+			        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			        .srcAccessMask = 0,
+			        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+			        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			        .image = mc->session_render.flip_sbs_image,
+			        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+			    },
+			};
+			if (!sbs_same_src) {
+				sbs_pre[2] = (VkImageMemoryBarrier){
+				    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+				    .srcAccessMask = 0,
+				    .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+				    .oldLayout = sbs_src_old_layout,
+				    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				    .image = sbs_src_right,
+				    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, sbs_right_array, 1},
+				};
+			}
+			vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL,
+			                         sbs_pre_count, sbs_pre);
+
+			// Blit left eye into left half of SBS image
+			VkImageBlit sbs_left_blit = {
+			    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, sbs_left_array, 1},
+			    .srcOffsets = {{sbs_left_off_x, l_src_top, 0},
+			                   {sbs_left_off_x + sbs_eye_w, l_src_bot, 1}},
+			    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+			    .dstOffsets = {{0, 0, 0}, {sbs_eye_w, sbs_eye_h, 1}},
+			};
+			vk->vkCmdBlitImage(cmd, sbs_src_left, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			                   mc->session_render.flip_sbs_image,
+			                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			                   1, &sbs_left_blit, VK_FILTER_NEAREST);
+
+			// Blit right eye into right half of SBS image
+			VkImageBlit sbs_right_blit = {
+			    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, sbs_right_array, 1},
+			    .srcOffsets = {{sbs_right_off_x, r_src_top, 0},
+			                   {sbs_right_off_x + sbs_eye_w, r_src_bot, 1}},
+			    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+			    .dstOffsets = {{sbs_eye_w, 0, 0}, {sbs_eye_w * 2, sbs_eye_h, 1}},
+			};
+			vk->vkCmdBlitImage(cmd, sbs_src_right, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			                   mc->session_render.flip_sbs_image,
+			                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			                   1, &sbs_right_blit, VK_FILTER_NEAREST);
+
+			// Post-barriers: sources → original layout, SBS → SHADER_READ_ONLY
+			uint32_t sbs_post_count = sbs_same_src ? 2 : 3;
+			VkImageMemoryBarrier sbs_post[3] = {
+			    {
+			        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+			        .dstAccessMask = 0,
+			        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			        .newLayout = sbs_src_old_layout,
+			        .image = sbs_src_left,
+			        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, sbs_left_array, 1},
+			    },
+			    {
+			        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+			        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+			        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			        .image = mc->session_render.flip_sbs_image,
+			        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+			    },
+			};
+			if (!sbs_same_src) {
+				sbs_post[2] = (VkImageMemoryBarrier){
+				    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+				    .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+				    .dstAccessMask = 0,
+				    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				    .newLayout = sbs_src_old_layout,
+				    .image = sbs_src_right,
+				    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, sbs_right_array, 1},
+				};
+			}
+			vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+			                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL,
+			                         sbs_post_count, sbs_post);
+
+			// Pre-weave barrier: target → COLOR_ATTACHMENT_OPTIMAL
+			VkImageMemoryBarrier pre_weave = {
+			    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			    .srcAccessMask = 0,
+			    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			    .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			    .image = ct->images[buffer_index].handle,
+			    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+			};
+			vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			                         0, 0, NULL, 0, NULL, 1, &pre_weave);
+
+			// Call display processor with SBS input
+			xrt_display_processor_process_views(
+			    mc->session_render.display_processor, cmd,
+			    mc->session_render.flip_sbs_view,  // SBS view (L+R side-by-side)
+			    VK_NULL_HANDLE,                     // right = NULL for SBS mode
+			    (uint32_t)(sbs_eye_w * 2),          // full SBS width
+			    (uint32_t)sbs_eye_h,
+			    (VkFormat_XDP)imageFormat,
+			    framebuffer, framebufferWidth, framebufferHeight,
+			    (VkFormat_XDP)framebufferFormat);
+
+			// Post-weave barrier: target → PRESENT_SRC_KHR (for HUD overlay + present)
+			VkImageMemoryBarrier post_weave = {
+			    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			    .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			    .dstAccessMask = 0,
+			    .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			    .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			    .image = ct->images[buffer_index].handle,
+			    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+			};
+			vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			                         0, 0, NULL, 0, NULL, 1, &post_weave);
+
+			goto submit_and_present;
+		}
+
+		// ================================================================
+		// SEPARATE VIEWS PATH: crop-blit each eye into its own image, then
+		// pass separate left/right views to the display processor.
+		// The display processor's render pass handles layout transitions
+		// (e.g., sim_display uses initialLayout=UNDEFINED, finalLayout=PRESENT_SRC_KHR).
+		// ================================================================
 
 		// Window-space overlay path: composite projection + HUD layers into
 		// intermediate per-eye images, then pass directly to display processor.
@@ -2523,7 +2778,8 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		    framebufferHeight,
 		    (VkFormat_XDP)framebufferFormat);
 
-		// Display processor render pass already transitions target to PRESENT_SRC_KHR
+		// Display processor render pass handles target layout transitions
+		// (e.g., sim_display: initialLayout=UNDEFINED → finalLayout=PRESENT_SRC_KHR)
 		goto submit_and_present;
 	}
 
