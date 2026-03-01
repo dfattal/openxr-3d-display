@@ -1117,7 +1117,7 @@ oxr_session_locate_views(struct oxr_logger *log,
 	// Save Kooima fovs before xrt_device_get_view_poses overwrites them
 	{
 		struct xrt_fov kooima_fovs[2];
-		if (have_kooima_fov) {
+		if (have_kooima_fov && have_stereo_state) {
 			kooima_fovs[0] = fovs[0];
 			kooima_fovs[1] = fovs[1];
 		}
@@ -1132,10 +1132,11 @@ oxr_session_locate_views(struct oxr_logger *log,
 		    poses);
 		OXR_CHECK_XRET(log, sess, xret, xrt_device_get_view_poses);
 
-		// Restore client-side Kooima FOVs. In IPC mode, have_kooima_fov
-		// is false (eye tracking returns false when xmcc is NULL), so
-		// server-computed FOVs from get_view_poses are preserved.
-		if (have_kooima_fov) {
+		// Restore client-side Kooima FOVs only when the client has local
+		// stereo state (non-IPC mode). In IPC mode, the server already
+		// computes stereo-adjusted Kooima FOVs and returns them via
+		// get_view_poses — don't override those.
+		if (have_kooima_fov && have_stereo_state) {
 			fovs[0] = kooima_fovs[0];
 			fovs[1] = kooima_fovs[1];
 		}
