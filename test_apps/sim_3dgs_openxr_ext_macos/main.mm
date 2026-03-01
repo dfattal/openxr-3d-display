@@ -34,6 +34,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <chrono>
 #include <vector>
@@ -216,25 +217,33 @@ static void quat_rotate_vec3(XrQuaternionf q, float vx, float vy, float vz,
 // ============================================================================
 
 static void UpdateCameraMovement(InputState& input, float dt, float displayHeightM) {
-    float speed = 0.15f;
-    if (displayHeightM > 0.0f) speed *= displayHeightM / 0.1f;
-    float dx = 0, dy = 0, dz = 0;
-    if (input.keyW) dz -= speed * dt;
-    if (input.keyS) dz += speed * dt;
-    if (input.keyA) dx -= speed * dt;
-    if (input.keyD) dx += speed * dt;
-    if (input.keyE) dy += speed * dt;
-    if (input.keyQ) dy -= speed * dt;
-    float cy = cosf(input.yaw), sy = sinf(input.yaw);
-    input.cameraPosX += dx * cy + dz * (-sy);
-    input.cameraPosY += dy;
-    input.cameraPosZ += dx * sy + dz * (-cy);
     if (input.resetViewRequested) {
         input.yaw = 0; input.pitch = 0;
         input.cameraPosX = input.cameraPosY = input.cameraPosZ = 0;
         input.stereo = StereoParams();
         input.resetViewRequested = false;
+        return;
     }
+
+    float speed = 0.15f;
+    if (displayHeightM > 0.0f) speed *= displayHeightM / 0.1f;
+
+    // Build orientation quaternion and derive basis vectors
+    XrQuaternionf ori;
+    quat_from_yaw_pitch(input.yaw, input.pitch, &ori);
+
+    float fwdX, fwdY, fwdZ, rtX, rtY, rtZ, upX, upY, upZ;
+    quat_rotate_vec3(ori, 0, 0, -1, &fwdX, &fwdY, &fwdZ);
+    quat_rotate_vec3(ori, 1, 0, 0, &rtX, &rtY, &rtZ);
+    quat_rotate_vec3(ori, 0, 1, 0, &upX, &upY, &upZ);
+
+    float d = speed * dt;
+    if (input.keyW) { input.cameraPosX += fwdX*d; input.cameraPosY += fwdY*d; input.cameraPosZ += fwdZ*d; }
+    if (input.keyS) { input.cameraPosX -= fwdX*d; input.cameraPosY -= fwdY*d; input.cameraPosZ -= fwdZ*d; }
+    if (input.keyD) { input.cameraPosX += rtX*d;  input.cameraPosY += rtY*d;  input.cameraPosZ += rtZ*d; }
+    if (input.keyA) { input.cameraPosX -= rtX*d;  input.cameraPosY -= rtY*d;  input.cameraPosZ -= rtZ*d; }
+    if (input.keyE) { input.cameraPosX += upX*d;  input.cameraPosY += upY*d;  input.cameraPosZ += upZ*d; }
+    if (input.keyQ) { input.cameraPosX -= upX*d;  input.cameraPosY -= upY*d;  input.cameraPosZ -= upZ*d; }
 }
 
 // ============================================================================
@@ -1331,8 +1340,14 @@ int main() {
     g_gsRenderer.cleanup();
     if (cmdPool != VK_NULL_HANDLE) vkDestroyCommandPool(vkDevice, cmdPool, nullptr);
     CleanupOpenXR(xr);
-    vkDestroyDevice(vkDevice, nullptr);
-    vkDestroyInstance(vkInstance, nullptr);
+    // MoltenVK may throw std::system_error ("mutex lock failed") during device/instance
+    // destruction due to internal threading cleanup.  Catch and ignore since we're exiting.
+    try {
+        vkDestroyDevice(vkDevice, nullptr);
+        vkDestroyInstance(vkInstance, nullptr);
+    } catch (const std::exception& e) {
+        LOG_WARN("Vulkan cleanup exception (ignored): %s", e.what());
+    }
     LOG_INFO("Application shutdown complete");
     return 0;
 }
