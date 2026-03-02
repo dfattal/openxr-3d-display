@@ -18,8 +18,13 @@
  */
 /*
  * Max number of views supported by a compositor, artificial limit.
+ *
+ * Raised from 2 to 8 to support multiview 3D displays (light field
+ * displays with 4-8 views).  Cannot go higher without refactoring
+ * shader UBOs (render_layer_ubo_data) and stack-allocated dispatch
+ * arrays in the compositor layer renderer.
  */
-#define XRT_MAX_VIEWS 2
+#define XRT_MAX_VIEWS 8
 
 /*!
  * Maximum number of handles sent in one call.
