@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - '*with-ci-build'
+      - '**with-ci-build'
       - 'XR_EXT_session_target'
     tags:
       - 'v*'

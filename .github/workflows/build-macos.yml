@@ -2,7 +2,7 @@ name: Build macOS
 
 on:
   push:
-    branches: [cnsdk, XR_EXT_session_target, refactor/remove-vendor-ifdefs]
+    branches: [cnsdk, XR_EXT_session_target, refactor/remove-vendor-ifdefs, '**with-ci-build']
   pull_request:
 
 env:
