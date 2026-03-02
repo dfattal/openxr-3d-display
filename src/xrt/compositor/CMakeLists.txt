@@ -310,16 +310,10 @@ if(XRT_MODULE_COMPOSITOR_MAIN)
 	endif()
 endif()
 
-# drv_leia exports XRT_HAVE_CNSDK as a PUBLIC compile definition.
-# comp_renderer.c still uses CNSDK directly (leia_cnsdk.h).
-# Note: XRT_HAVE_LEIA_SR_VULKAN no longer used — display processor factory
-# replaces direct leiasr calls.
-if(XRT_HAVE_LEIA_SR OR XRT_HAVE_CNSDK)
-	if(NOT TARGET drv_leia)
-		message(FATAL_ERROR "no drv_leia target")
-	endif()
-	target_link_libraries(comp_main PUBLIC drv_leia)
-endif()
+# comp_main no longer depends on drv_leia — the legacy CNSDK interlacing
+# path has been removed.  The compositor now uses the generic
+# xrt_display_processor interface exclusively (factory set by target_instance.c).
+# drv_leia is only linked by the target binary (via target_instance.c).
 
 # Qwerty include path for comp_renderer.c HUD stereo toggle
 if(XRT_BUILD_DRIVER_QWERTY)

@@ -50,10 +50,6 @@
 #include "vk/vk_hud_blend.h"
 #include "vk/vk_image_readback_to_xf_pool.h"
 
-#ifdef XRT_HAVE_CNSDK
-#include "leia/leia_cnsdk.h"
-#endif
-
 #include "xrt/xrt_config_drivers.h"
 #include "xrt/xrt_display_processor.h"
 #include "xrt/xrt_display_metrics.h"
@@ -172,8 +168,6 @@ struct comp_renderer
 
 	//! True after the first attempt to create the display processor (prevent retry loops).
 	bool dp_init_attempted;
-
-	struct leia_cnsdk *cnsdk;
 
 	//! Intermediate images for Y-flipping GL textures before display processing
 	struct
@@ -614,10 +608,6 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	// Try to early-allocate these, in case we can.
 	renderer_ensure_images_and_renderings(r, false);
 
-#ifdef XRT_HAVE_CNSDK
-	leia_cnsdk_create(&r->cnsdk);
-#endif
-
 	struct vk_bundle *vk = &r->c->base.vk;
 
 	// Display processor is created lazily in do_weaving() on first use.
@@ -927,10 +917,6 @@ renderer_fini(struct comp_renderer *r)
 
 	// Do this after the layer renderer.
 	chl_scratch_free_resources(&r->c->scratch, &r->c->nr);
-
-#ifdef XRT_HAVE_CNSDK
-	leia_cnsdk_destroy(&r->cnsdk);
-#endif // XRT_HAVE_CNSDK
 
 	// Destroy generic display processor before vendor-specific resources
 	xrt_display_processor_destroy(&r->display_processor);
@@ -1427,26 +1413,6 @@ do_weaving(struct comp_renderer *r,
 			}
 		}
 	}
-
-#ifdef XRT_HAVE_CNSDK
-	if (r->cnsdk != NULL) {
-		int iw = 0, ih = 0;
-		VkFormat ifmt = VK_FORMAT_UNDEFINED;
-		VkImageView leftView = VK_NULL_HANDLE, rightView = VK_NULL_HANDLE;
-		bool lok = getLayerInfo(r, 0, &iw, &ih, &ifmt, &leftView);
-		bool rok = getLayerInfo(r, 1, &iw, &ih, &ifmt, &rightView);
-		if (lok && rok) {
-			leia_cnsdk_weave(r->cnsdk,
-			                 r->c->base.vk.device,
-			                 r->c->base.vk.physical_device,
-			                 leftView, rightView,
-			                 r->c->target->format,
-			                 rtr->data.width, rtr->data.height,
-			                 rtr->framebuffer,
-			                 r->c->target->images[r->acquired_buffer].handle);
-		}
-	}
-#endif
 
 	// Generic display processor path — routes through xrt_display_processor
 	// interface instead of calling vendor-specific weaving functions directly.
