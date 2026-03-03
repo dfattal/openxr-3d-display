@@ -9,6 +9,7 @@
 
 #include "util/u_system.h"
 #include "util/u_session.h"
+#include "util/u_logging.h"
 
 
 /*
