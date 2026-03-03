@@ -91,6 +91,14 @@ static void ToggleFullscreen(HWND hwnd) {
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    // Log WM_CLOSE and WM_DESTROY for debugging session exit
+    if (msg == WM_CLOSE || msg == WM_DESTROY || msg == WM_QUIT) {
+        LOG_WARN("WindowProc: msg=0x%04X (%s) wParam=%llu lParam=%lld",
+            msg,
+            msg == WM_CLOSE ? "WM_CLOSE" : msg == WM_DESTROY ? "WM_DESTROY" : "WM_QUIT",
+            (unsigned long long)wParam, (long long)lParam);
+    }
+
     {
         std::lock_guard<std::mutex> lock(g_inputMutex);
         UpdateInputState(g_inputState, msg, wParam, lParam);
@@ -116,7 +124,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_CLOSE:
         // Graceful shutdown: ask OpenXR to end the session so the state machine
         // runs STOPPING -> xrEndSession -> EXITING -> exitRequested before cleanup.
+        LOG_WARN("WM_CLOSE received! sessionRunning=%d, g_xr=%p",
+            (g_xr ? (int)g_xr->sessionRunning : -1), (void*)g_xr);
         if (g_xr && g_xr->session != XR_NULL_HANDLE && g_xr->sessionRunning) {
+            LOG_WARN("WM_CLOSE -> calling xrRequestExitSession");
             xrRequestExitSession(g_xr->session);
             return 0;
         }

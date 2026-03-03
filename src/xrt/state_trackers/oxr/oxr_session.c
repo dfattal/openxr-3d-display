@@ -662,6 +662,9 @@ oxr_session_end(struct oxr_logger *log, struct oxr_session *sess)
 XrResult
 oxr_session_request_exit(struct oxr_logger *log, struct oxr_session *sess)
 {
+	U_LOG_W("oxr_session_request_exit: APP called xrRequestExitSession (synchronous path), current state=%d",
+	        (int)sess->state);
+
 	int64_t now = os_monotonic_get_ns();
 	XrTime now_xr = time_state_monotonic_to_ts_ns(sess->sys->inst->timekeeping, now);
 	if (now_xr <= 0) {
@@ -850,6 +853,8 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 			// and immediately restart VR, creating a new window in a loop.
 			// With EXITING, apps destroy the session and stay alive — the user
 			// can start a new VR session manually.
+			U_LOG_W("oxr_session_poll: REQUEST_EXIT event received (async path), current state=%d",
+			        (int)sess->state);
 			sess->exiting = true;
 			if (sess->state == XR_SESSION_STATE_FOCUSED) {
 				oxr_session_change_state(log, sess, XR_SESSION_STATE_VISIBLE, 0);

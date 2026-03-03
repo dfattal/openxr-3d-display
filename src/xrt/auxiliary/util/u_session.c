@@ -53,6 +53,8 @@ poll_events(struct xrt_session *xs, union xrt_session_event *out_xse)
 static xrt_result_t
 request_exit(struct xrt_session *xs)
 {
+	U_LOG_W("u_session::request_exit: REQUEST_EXIT event being pushed to session queue (IPC/vtable path)");
+
 	struct u_session *us = u_session(xs);
 
 	union xrt_session_event xse = XRT_STRUCT_INIT;
