@@ -227,12 +227,8 @@ ipc_try_get_sr_view_poses(struct ipc_server *s,
 	struct qwerty_stereo_state stereo_state = {0};
 	bool have_stereo_state = false;
 	{
-		// Build xrt_device* array from ipc_server idevs
-		struct xrt_device *xdevs[XRT_SYSTEM_MAX_DEVICES] = {0};
-		for (size_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
-			xdevs[i] = s->idevs[i].xdev;
-		}
-		have_stereo_state = qwerty_get_stereo_state(xdevs, XRT_SYSTEM_MAX_DEVICES, &stereo_state);
+		// Build xrt_device* array from ipc_server system devices
+		have_stereo_state = qwerty_get_stereo_state(s->xsysd->xdevs, XRT_SYSTEM_MAX_DEVICES, &stereo_state);
 	}
 #else
 	struct { bool camera_mode; float cam_ipd_factor, cam_parallax_factor, cam_convergence,
