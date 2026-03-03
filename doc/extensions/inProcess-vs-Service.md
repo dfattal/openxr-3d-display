@@ -165,7 +165,7 @@ comp_d3d11_compositor → SR weaver → leiasr_d3d11_get_predicted_eye_positions
 View poses returned directly to app
 ```
 
-**Native compositor** (`comp_d3d11_compositor.cpp:567-586`):
+**Native compositor** (`comp_d3d11_compositor.cpp`, eye position query in `comp_d3d11_get_eye_positions()`):
 ```cpp
 // Get predicted eye positions from SR weaver
 struct xrt_vec3 left_eye = {-0.032f, 0.0f, 0.6f};   // Default fallback

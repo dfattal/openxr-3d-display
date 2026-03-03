@@ -403,3 +403,29 @@ When CTRL or ALT state changes, `qwerty_release_all()` is called on all devices.
 ### 9.3 Dual Controller Targeting
 
 All keyboard and mouse actions use `targets[]` / `ctrl_targets[]` arrays with `target_count`. When CTRL+ALT are both held, both arrays contain both controllers and `target_count = 2`. Every action loops over the array, so both controllers move, rotate, trigger, etc. simultaneously.
+
+---
+
+## 10. Default Parameters
+
+### Virtual Camera Defaults
+
+| Parameter | Default Value |
+|-----------|---------------|
+| Position | (0, 1.6, 0) |
+| Orientation | (0, 0, 0, 1) — identity quaternion |
+| IPD factor | 1 |
+| Parallax factor | 1 |
+| Convergence | 0.5 diopters (2 m) |
+| Vertical FOV | 36° (tan_half_vFOV = 0.325) |
+
+### Virtual Display Defaults
+
+| Parameter | Default Value |
+|-----------|---------------|
+| Position | (0, 1.6, 2) |
+| Orientation | (0, 0, 0, 1) — identity quaternion |
+| IPD factor | 1 |
+| Parallax factor | 1 |
+| Perspective factor | 1 |
+| Virtual height | 1.3 m |

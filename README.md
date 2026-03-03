@@ -100,7 +100,7 @@ If you're a display vendor looking to integrate your hardware with this runtime,
 ## Key Documentation
 
 - [Extension Proposal](doc/extensions/XR_EXT_tracked_3d_display_proposal.md) — formal specification of the three proposed extensions
-- [Implementation Plan](doc/extensions/OpenXR_Tracked_3D_Display_Extensions.md) — design and implementation guidance
+- [Project Structure](doc/extensions/project_structure.md) — architecture and source tree reference
 - [Vendor Integration Guide](doc/extensions/vendor_integration_guide.md) — how to add support for a new display vendor
 - [Vendor Abstraction Refactor](doc/extensions/vendor_abstraction_refactor.md) — architecture for multi-vendor support
 
@@ -126,7 +126,7 @@ This is a fork of [Monado](https://monado.freedesktop.org/), the open-source Ope
 - **Simulation driver** (`src/xrt/drivers/sim_display/`) — virtual tracked 3D display for development
 - **Window binding extension** — `XR_EXT_win32_window_binding` implementation in the OpenXR state tracker
 
-See [CLAUDE.md](CLAUDE.md) for a detailed source tree walkthrough.
+See the [project structure guide](doc/extensions/project_structure.md) for a detailed source tree walkthrough.
 
 ## Unity Plugin
 
