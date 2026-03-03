@@ -5,7 +5,7 @@ on:
     branches:
       - main
       - dev
-      - '*with-ci-build'
+      - '**with-ci-build'
     tags:
       - 'v*'
   pull_request:
