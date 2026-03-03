@@ -1927,10 +1927,10 @@ oxr_session_create(struct oxr_logger *log,
 #endif
 
 #ifdef XRT_OS_MACOS
-	// Parse XR_EXT_macos_window_binding extension - allows app to provide its own NSView
+	// Parse XR_EXT_cocoa_window_binding extension - allows app to provide its own NSView
 	// or offscreen readback (viewHandle=NULL + readbackCallback)
-	const XrMacOSWindowBindingCreateInfoEXT *macos_target_info = OXR_GET_INPUT_FROM_CHAIN(
-	    createInfo, XR_TYPE_MACOS_WINDOW_BINDING_CREATE_INFO_EXT, XrMacOSWindowBindingCreateInfoEXT);
+	const XrCocoaWindowBindingCreateInfoEXT *macos_target_info = OXR_GET_INPUT_FROM_CHAIN(
+	    createInfo, XR_TYPE_COCOA_WINDOW_BINDING_CREATE_INFO_EXT, XrCocoaWindowBindingCreateInfoEXT);
 	if (macos_target_info) {
 		if (macos_target_info->viewHandle) {
 			xsi.external_window_handle = (void *)macos_target_info->viewHandle;

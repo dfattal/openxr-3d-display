@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Header for XR_EXT_macos_window_binding extension
+ * @brief  Header for XR_EXT_cocoa_window_binding extension
  * @author David Fattal
  * @ingroup external_openxr
  *
@@ -24,8 +24,8 @@
  * Alternatively, set viewHandle=NULL and provide a readbackCallback to
  * receive composited pixels via GPU readback (no window required).
  */
-#ifndef XR_EXT_MACOS_WINDOW_BINDING_H
-#define XR_EXT_MACOS_WINDOW_BINDING_H 1
+#ifndef XR_EXT_COCOA_WINDOW_BINDING_H
+#define XR_EXT_COCOA_WINDOW_BINDING_H 1
 
 #include <openxr/openxr.h>
 #include <stdint.h>
@@ -34,13 +34,13 @@
 extern "C" {
 #endif
 
-#define XR_EXT_macos_window_binding 1
-#define XR_EXT_macos_window_binding_SPEC_VERSION 2
-#define XR_EXT_MACOS_WINDOW_BINDING_EXTENSION_NAME "XR_EXT_macos_window_binding"
+#define XR_EXT_cocoa_window_binding 1
+#define XR_EXT_cocoa_window_binding_SPEC_VERSION 2
+#define XR_EXT_COCOA_WINDOW_BINDING_EXTENSION_NAME "XR_EXT_cocoa_window_binding"
 
 // Use a value in the vendor extension range (1000000000+)
 // This should be replaced with an official Khronos-assigned value if the extension is standardized
-#define XR_TYPE_MACOS_WINDOW_BINDING_CREATE_INFO_EXT ((XrStructureType)1000999003)
+#define XR_TYPE_COCOA_WINDOW_BINDING_CREATE_INFO_EXT ((XrStructureType)1000999003)
 
 // Window-space composition layer (shared with XR_EXT_win32_window_binding)
 #ifndef XR_TYPE_COMPOSITION_LAYER_WINDOW_SPACE_EXT
@@ -92,16 +92,16 @@ typedef struct XrCompositionLayerWindowSpaceEXT {
 typedef void (*PFN_xrReadbackCallback)(
     const uint8_t *pixels, uint32_t width, uint32_t height, void *userdata);
 
-typedef struct XrMacOSWindowBindingCreateInfoEXT {
-    XrStructureType          type;              //!< Must be XR_TYPE_MACOS_WINDOW_BINDING_CREATE_INFO_EXT
+typedef struct XrCocoaWindowBindingCreateInfoEXT {
+    XrStructureType          type;              //!< Must be XR_TYPE_COCOA_WINDOW_BINDING_CREATE_INFO_EXT
     const void* XR_MAY_ALIAS next;              //!< Pointer to next structure in chain
     void*                    viewHandle;        //!< NSView* with CAMetalLayer backing, or NULL for offscreen
     PFN_xrReadbackCallback   readbackCallback;  //!< Called with composited RGBA pixels (offscreen mode)
     void*                    readbackUserdata;   //!< Passed to readbackCallback
-} XrMacOSWindowBindingCreateInfoEXT;
+} XrCocoaWindowBindingCreateInfoEXT;
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // XR_EXT_MACOS_WINDOW_BINDING_H
+#endif // XR_EXT_COCOA_WINDOW_BINDING_H
