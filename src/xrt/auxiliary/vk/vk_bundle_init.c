@@ -1195,9 +1195,15 @@ vk_deinit_mutex(struct vk_bundle *vk)
 
 	for (uint32_t i = 0; i < ARRAY_SIZE(vk->queues); ++i) {
 		struct vk_bundle_queue *q = &vk->queues[i];
+#ifndef NDEBUG
 		if (q->mutex.initialized) {
 			os_mutex_destroy(&q->mutex);
 		}
+#else
+		// In release builds, initialized field is not available;
+		// destroy unconditionally since mutex was init'd during setup.
+		os_mutex_destroy(&q->mutex);
+#endif
 		q->mutex = (struct os_mutex){0};
 	}
 	return VK_SUCCESS;
