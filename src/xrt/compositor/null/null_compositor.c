@@ -689,7 +689,7 @@ null_target_service_create_from_window(struct comp_target_service *service,
 	    .formats = {VK_FORMAT_B8G8R8A8_SRGB},
 	};
 
-	comp_target_create_images(ct, &info);
+	comp_target_create_images(ct, &info, nc->base.vk.main_queue);
 
 	if (!comp_target_has_images(ct)) {
 		NULL_ERROR(nc, "Failed to create swapchain images for per-session target");
