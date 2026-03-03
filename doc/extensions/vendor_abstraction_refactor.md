@@ -1083,7 +1083,7 @@ be <20 commits, follow Monado commit style, and represent one reviewable PR.
 - **Leia-specific driver** (`src/xrt/drivers/leia/`) — vendor glue tightly
   coupled to SR SDK; the open-source glue code is fine to share but the driver
   is only useful on Leia hardware
-- **Test apps** (`test_apps/sr_cube_*`) — product-specific test applications
+- **Test apps** (`test_apps/cube_d3d11/`, `test_apps/cube_ext_d3d11/`, etc.) — product-specific test applications
 
 #### Extraction approach
 
