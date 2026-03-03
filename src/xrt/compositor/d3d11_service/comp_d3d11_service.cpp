@@ -3246,6 +3246,33 @@ compositor_destroy(struct xrt_compositor *xc)
 }
 
 
+static xrt_result_t
+compositor_set_thread_hint(struct xrt_compositor *xc, enum xrt_thread_hint hint, uint32_t thread_id)
+{
+	(void)xc;
+	(void)hint;
+	(void)thread_id;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+compositor_get_display_refresh_rate(struct xrt_compositor *xc, float *out_display_refresh_rate_hz)
+{
+	// Return the nominal 60Hz refresh rate
+	*out_display_refresh_rate_hz = 60.0f;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display_refresh_rate_hz)
+{
+	(void)xc;
+	(void)display_refresh_rate_hz;
+	// D3D11 service doesn't support changing refresh rate
+	return XRT_SUCCESS;
+}
+
+
 /*
  *
  * System compositor functions
@@ -3281,6 +3308,42 @@ system_set_z_order(struct xrt_system_compositor *xsc, struct xrt_compositor *xc,
 	(void)xsc;
 	(void)xc;
 	(void)z_order;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+system_set_main_app_visibility(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, bool visible)
+{
+	(void)xsc;
+	(void)xc;
+	(void)visible;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+system_notify_loss_pending(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, int64_t loss_time_ns)
+{
+	(void)xsc;
+	(void)xc;
+	(void)loss_time_ns;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+system_notify_lost(struct xrt_system_compositor *xsc, struct xrt_compositor *xc)
+{
+	(void)xsc;
+	(void)xc;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+system_notify_display_refresh_changed(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, float from_display_refresh_rate_hz, float to_display_refresh_rate_hz)
+{
+	(void)xsc;
+	(void)xc;
+	(void)from_display_refresh_rate_hz;
+	(void)to_display_refresh_rate_hz;
 	return XRT_SUCCESS;
 }
 
@@ -3349,6 +3412,9 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 	c->base.base.layer_passthrough = compositor_layer_passthrough;
 	c->base.base.layer_commit = compositor_layer_commit;
 	c->base.base.layer_commit_with_semaphore = compositor_layer_commit_with_semaphore;
+	c->base.base.set_thread_hint = compositor_set_thread_hint;
+	c->base.base.get_display_refresh_rate = compositor_get_display_refresh_rate;
+	c->base.base.request_display_refresh_rate = compositor_request_display_refresh_rate;
 	c->base.base.destroy = compositor_destroy;
 
 	// Set up supported formats
@@ -3594,10 +3660,10 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 	// Set up multi-compositor control for session state management
 	sys->xmcc.set_state = system_set_state;
 	sys->xmcc.set_z_order = system_set_z_order;
-	sys->xmcc.set_main_app_visibility = NULL;  // Not needed for single client
-	sys->xmcc.notify_loss_pending = NULL;
-	sys->xmcc.notify_lost = NULL;
-	sys->xmcc.notify_display_refresh_changed = NULL;
+	sys->xmcc.set_main_app_visibility = system_set_main_app_visibility;
+	sys->xmcc.notify_loss_pending = system_notify_loss_pending;
+	sys->xmcc.notify_lost = system_notify_lost;
+	sys->xmcc.notify_display_refresh_changed = system_notify_display_refresh_changed;
 	sys->base.xmcc = &sys->xmcc;
 
 	// Fill system compositor info
