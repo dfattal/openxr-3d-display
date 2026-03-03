@@ -102,7 +102,7 @@ ogl_import_from_native(struct xrt_image_native *natives,
 	// Function is disabled for AHardwareBuffer, glImportMemoryFdEXT requires an actual FD and requires more work
 	// to handle AHardwareBuffer.
 	return false;
-#endif
+#else
 
 	// Setup fields.
 	results->width = info->width;
@@ -167,4 +167,5 @@ ogl_import_from_native(struct xrt_image_native *natives,
 	}
 
 	return true;
+#endif
 }

@@ -40,8 +40,6 @@
 /* Set to 1 to print controller states continuously */
 #define DUMP_CONTROLLER_STATE 0
 
-#define DEG_TO_RAD(D) ((D)*M_PI / 180.)
-
 static struct xrt_binding_input_pair simple_inputs_rift_s[4] = {
     {XRT_INPUT_SIMPLE_SELECT_CLICK, XRT_INPUT_TOUCH_TRIGGER_VALUE},
     {XRT_INPUT_SIMPLE_MENU_CLICK, XRT_INPUT_TOUCH_MENU_CLICK},
@@ -606,11 +604,9 @@ rift_s_controller_create(struct rift_s_system *sys, enum xrt_device_type device_
 
 	os_mutex_init(&ctrl->mutex);
 
+	u_device_populate_function_pointers(&ctrl->base, rift_s_controller_get_tracked_pose, rift_s_controller_destroy);
 	ctrl->base.update_inputs = rift_s_controller_update_inputs;
-	ctrl->base.set_output = u_device_ni_set_output;
-	ctrl->base.get_tracked_pose = rift_s_controller_get_tracked_pose;
 	ctrl->base.get_view_poses = u_device_get_view_poses;
-	ctrl->base.destroy = rift_s_controller_destroy;
 	ctrl->base.name = XRT_DEVICE_TOUCH_CONTROLLER;
 	ctrl->base.device_type = device_type;
 

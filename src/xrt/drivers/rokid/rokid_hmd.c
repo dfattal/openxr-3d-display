@@ -37,6 +37,7 @@
 
 #include <libusb.h>
 
+#include <stdint.h>
 
 /*
  *
@@ -319,13 +320,13 @@ static int
 rokid_hmd_get_display_mode(struct rokid_hmd *rokid)
 {
 	uint8_t data[ROKID_USB_BUFFER_LEN] = {0};
-	int res = libusb_control_transfer(rokid->usb_dev,
-	                                  LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-	                                  0x81, // request type = get display mode,
-	                                  0,    // wValue
-	                                  0x1,  // wIndex
-	                                  data, // data is mandatory for some reason,
-	                                  sizeof(data), ROKID_USB_TRANSFER_TIMEOUT_MS);
+	int res = libusb_control_transfer(
+	    rokid->usb_dev, (uint8_t)LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+	    0x81, // request type = get display mode,
+	    0,    // wValue
+	    0x1,  // wIndex
+	    data, // data is mandatory for some reason,
+	    sizeof(data), ROKID_USB_TRANSFER_TIMEOUT_MS);
 	if (res < 0) {
 		ROKID_ERROR(rokid, "Failed to set glasses to SBS mode");
 		return -1;
@@ -337,13 +338,13 @@ static bool
 rokid_hmd_set_display_mode(struct rokid_hmd *rokid, uint16_t mode)
 {
 	uint8_t data[1] = {1};
-	int res = libusb_control_transfer(rokid->usb_dev,
-	                                  LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-	                                  0x1,  // request type = set display mode,
-	                                  mode, // display type
-	                                  0x1,  // wIndex is fixed
-	                                  data, // data is mandatory for some reason,
-	                                  sizeof(data), ROKID_USB_TRANSFER_TIMEOUT_MS);
+	int res = libusb_control_transfer(
+	    rokid->usb_dev, (uint8_t)LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+	    0x1,  // request type = set display mode,
+	    mode, // display type
+	    0x1,  // wIndex is fixed
+	    data, // data is mandatory for some reason,
+	    sizeof(data), ROKID_USB_TRANSFER_TIMEOUT_MS);
 	if (res < 0) {
 		ROKID_ERROR(rokid, "Failed to set glasses to SBS mode");
 		return false;

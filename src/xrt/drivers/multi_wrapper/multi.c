@@ -196,6 +196,7 @@ static xrt_result_t
 get_view_poses(struct xrt_device *xdev,
                const struct xrt_vec3 *default_eye_relation,
                int64_t at_timestamp_ns,
+               enum xrt_view_type view_type,
                uint32_t view_count,
                struct xrt_space_relation *out_head_relation,
                struct xrt_fov *out_fovs,
@@ -203,8 +204,16 @@ get_view_poses(struct xrt_device *xdev,
 {
 	struct multi_device *d = (struct multi_device *)xdev;
 	struct xrt_device *target = d->tracking_override.target;
-	xrt_result_t xret = xrt_device_get_view_poses(target, default_eye_relation, at_timestamp_ns, view_count,
-	                                              out_head_relation, out_fovs, out_poses);
+
+	xrt_result_t xret = xrt_device_get_view_poses( //
+	    target,                                    //
+	    default_eye_relation,                      //
+	    at_timestamp_ns,                           //
+	    view_type,                                 //
+	    view_count,                                //
+	    out_head_relation,                         //
+	    out_fovs,                                  //
+	    out_poses);                                //
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}

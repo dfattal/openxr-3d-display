@@ -1,4 +1,5 @@
 // Copyright 2019-2025, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -70,6 +71,38 @@ enum u_logging_level
 u_log_get_global_level(void)
 {
 	return debug_get_log_option_global_log();
+}
+
+
+/*
+ *
+ * Logging file code.
+ *
+ */
+
+static FILE *g_log_file = NULL;
+
+void
+u_log_set_output_file(const char *filename)
+{
+	// While not thread safe, this function is externally synchronized.
+	if (g_log_file != NULL) {
+		FILE *tmp = g_log_file;
+		g_log_file = NULL;
+
+		fflush(tmp);
+		fclose(tmp);
+		tmp = NULL;
+	}
+
+	if (filename == NULL) {
+		return; // Turning off file logging.
+	}
+
+	g_log_file = fopen(filename, "w");
+	if (g_log_file == NULL) {
+		U_LOG_E("Failed to open '%s'", filename);
+	}
 }
 
 
@@ -295,7 +328,7 @@ print_prefix(const char *func, enum u_logging_level level, char *buf, int remain
 	int ret = 0;
 
 #ifdef XRT_FEATURE_COLOR_LOG
-	if (isatty(STDERR_FILENO)) {
+	if (g_log_file == NULL && isatty(STDERR_FILENO)) {
 		ret = print_prefix_color(func, level, buf, remaining);
 	} else {
 		ret = print_prefix_mono(func, level, buf, remaining);
@@ -397,18 +430,27 @@ do_print(const char *file, int line, const char *func, enum u_logging_level leve
 	} else {
 		__android_log_write(prio, storage_tag, storage);
 	}
-#elif defined XRT_OS_WINDOWS || defined XRT_OS_LINUX || defined XRT_OS_MACOS
+#elif defined(XRT_OS_WINDOWS) || defined(XRT_OS_LINUX) || defined(XRT_OS_MACOS)
 
 	// We want a newline, so add it, then null-terminate again.
 	storage[printed++] = '\n';
 	storage[printed] = '\0'; // Don't count zero termination as printed.
 
-#if defined XRT_OS_WINDOWS
+#if defined(XRT_OS_WINDOWS)
 	// Visual Studio output needs the newline char
 	OutputDebugStringA(storage);
 #endif
 
-	fwrite(storage, printed, 1, stderr);
+	FILE *output = g_log_file != NULL ? g_log_file : stderr;
+	fwrite(storage, printed, 1, output);
+
+#if defined(XRT_OS_WINDOWS)
+	/*
+	 * Windows like to buffer messages, call flush here to make sure all
+	 * logs gets written out in case of sudden exits and crashes.
+	 */
+	fflush(output);
+#endif
 
 #else
 #error "Port needed for logging function"
@@ -455,6 +497,14 @@ u_log_print_result(enum u_logging_level cond_level,
 	u_log(file, line, calling_fn, level, "%s", sink.buffer);
 }
 
+static u_log_filter_func_t g_filter = NULL;
+
+void
+u_log_set_filter(u_log_filter_func_t filter)
+{
+	g_filter = filter;
+}
+
 void
 u_log(const char *file, int line, const char *func, enum u_logging_level level, const char *format, ...)
 {
@@ -462,6 +512,11 @@ u_log(const char *file, int line, const char *func, enum u_logging_level level, 
 	u_file_logging_init();
 
 	va_list args;
+	// Check filter first
+	if (g_filter != NULL && !g_filter(file, line, func, level)) {
+		return; // Skip this message
+	}
+
 	va_start(args, format);
 	DISPATCH_SINK(file, line, func, level, format, args);
 	do_print(file, line, func, level, format, args);
@@ -478,6 +533,10 @@ u_log_xdev(const char *file,
            ...)
 {
 	va_list args;
+	// Check filter first
+	if (g_filter != NULL && !g_filter(file, line, func, level)) {
+		return; // Skip this message
+	}
 	va_start(args, format);
 	DISPATCH_SINK(file, line, func, level, format, args);
 	do_print(file, line, func, level, format, args);

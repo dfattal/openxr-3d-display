@@ -1,4 +1,5 @@
 // Copyright 2018-2020, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -64,9 +65,21 @@ oxr_xrGetSystem(XrInstance instance, const XrSystemGetInfo *getInfo, XrSystemId 
 	struct oxr_system *systems[1] = {&inst->system};
 	uint32_t system_count = ARRAY_SIZE(systems);
 
-	XrResult ret = oxr_system_select(&log, systems, system_count, getInfo->formFactor, &selected);
+	/*
+	 * This lock is needed to make sure that xrGetSystem can be called from
+	 * multiple threads. This happens in the CTS.
+	 */
+	os_mutex_lock(&inst->system_init_lock);
+	XrResult ret = oxr_instance_init_system_locked(&log, inst);
+	os_mutex_unlock(&inst->system_init_lock);
+
 	if (ret != XR_SUCCESS) {
-		return ret;
+		return ret; // Already logged
+	}
+
+	ret = oxr_system_select(&log, systems, system_count, getInfo->formFactor, &selected);
+	if (ret != XR_SUCCESS) {
+		return ret; // Already logged
 	}
 
 	*systemId = selected->systemId;
@@ -140,14 +153,7 @@ oxr_xrEnumerateEnvironmentBlendModes(XrInstance instance,
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrEnumerateEnvironmentBlendModes");
 	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, systemId, sys);
 	OXR_VERIFY_VIEW_CONFIG_TYPE(&log, inst, viewConfigurationType);
-
-	if (viewConfigurationType != sys->view_config_type) {
-		U_LOG_D("[SRMonado] xrEnumerateEnvironmentBlendModes: UNSUPPORTED view config");
-		return oxr_error(&log, XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED,
-		                 "(viewConfigurationType == 0x%08x) "
-		                 "unsupported view configuration type",
-		                 viewConfigurationType);
-	}
+	OXR_VERIFY_VIEW_CONFIG_TYPE_SUPPORTED(&log, sys, viewConfigurationType);
 
 	XrResult ret = oxr_system_enumerate_blend_modes(&log, sys, viewConfigurationType,
 	                                                environmentBlendModeCapacityInput,
@@ -177,6 +183,8 @@ oxr_xrGetViewConfigurationProperties(XrInstance instance,
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrGetViewConfigurationProperties");
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, configurationProperties, XR_TYPE_VIEW_CONFIGURATION_PROPERTIES);
 	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, systemId, sys);
+	OXR_VERIFY_VIEW_CONFIG_TYPE(&log, inst, viewConfigurationType);
+	OXR_VERIFY_VIEW_CONFIG_TYPE_SUPPORTED(&log, sys, viewConfigurationType);
 
 	return oxr_system_get_view_conf_properties(&log, sys, viewConfigurationType, configurationProperties);
 }
@@ -198,6 +206,8 @@ oxr_xrEnumerateViewConfigurationViews(XrInstance instance,
 	struct oxr_logger log;
 	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrEnumerateViewConfigurationViews");
 	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, systemId, sys);
+	OXR_VERIFY_VIEW_CONFIG_TYPE(&log, inst, viewConfigurationType);
+	OXR_VERIFY_VIEW_CONFIG_TYPE_SUPPORTED(&log, sys, viewConfigurationType);
 
 	for (uint32_t i = 0; i < viewCapacityInput; i++) {
 		OXR_VERIFY_ARG_ARRAY_ELEMENT_TYPE(&log, views, i, XR_TYPE_VIEW_CONFIGURATION_VIEW);
@@ -375,9 +385,10 @@ oxr_xrGetVulkanGraphicsDevice2KHR(XrInstance instance,
 
 	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, getInfo->systemId, sys);
 	OXR_VERIFY_ARG_NOT_NULL(&log, vkPhysicalDevice);
+	OXR_VERIFY_ARG_NOT_NULL(&log, sys->vk_get_instance_proc_addr);
 	OXR_VERIFY_XSYSC(&log, sys);
 
-	return oxr_vk_get_physical_device(&log, inst, sys, getInfo->vulkanInstance, vkGetInstanceProcAddr,
+	return oxr_vk_get_physical_device(&log, inst, sys, getInfo->vulkanInstance, sys->vk_get_instance_proc_addr,
 	                                  vkPhysicalDevice);
 }
 
@@ -440,6 +451,8 @@ oxr_xrCreateVulkanInstanceKHR(XrInstance instance,
 
 	// createInfo->vulkanAllocator can be NULL
 
+	sys->vk_get_instance_proc_addr = createInfo->pfnGetInstanceProcAddr;
+
 	if (createInfo->vulkanCreateInfo->sType != VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO) {
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
 		                 "createInfo->vulkanCreateInfo->sType must be "
@@ -475,6 +488,8 @@ oxr_xrCreateVulkanDeviceKHR(XrInstance instance,
 	OXR_VERIFY_ARG_NOT_NULL(&log, sys->suggested_vulkan_physical_device);
 	OXR_VERIFY_ARG_NOT_NULL(&log, sys->vulkan_enable2_instance);
 	OXR_VERIFY_XSYSC(&log, sys);
+
+	sys->vk_get_instance_proc_addr = createInfo->pfnGetInstanceProcAddr;
 
 	if (sys->suggested_vulkan_physical_device != createInfo->vulkanPhysicalDevice) {
 		return oxr_error(&log, XR_ERROR_HANDLE_INVALID,

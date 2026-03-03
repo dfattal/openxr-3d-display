@@ -71,8 +71,11 @@ struct render_gfx_target_resources;
  */
 struct comp_render_view_data
 {
-	//! New world pose of this view.
-	struct xrt_pose world_pose;
+	//! New world pose of this view at the beginng of scanout.
+	struct xrt_pose world_pose_scanout_begin;
+
+	//! New world pose of this view at the end of scanout.
+	struct xrt_pose world_pose_scanout_end;
 
 	//! New eye pose of this view.
 	struct xrt_pose eye_pose;
@@ -250,7 +253,8 @@ comp_render_initial_init(struct comp_render_dispatch_data *data, bool fast_path,
  */
 static inline struct comp_render_view_data *
 comp_render_dispatch_add_squash_view(struct comp_render_dispatch_data *data,
-                                     const struct xrt_pose *world_pose,
+                                     const struct xrt_pose *world_pose_scanout_begin,
+                                     const struct xrt_pose *world_pose_scanout_end,
                                      const struct xrt_pose *eye_pose,
                                      const struct xrt_fov *fov,
                                      VkImage squash_image,
@@ -265,7 +269,8 @@ comp_render_dispatch_add_squash_view(struct comp_render_dispatch_data *data,
 	render_calc_uv_to_tangent_lengths_rect(fov, &view->pre_transform);
 
 	// Common
-	view->world_pose = *world_pose;
+	view->world_pose_scanout_begin = *world_pose_scanout_begin;
+	view->world_pose_scanout_end = *world_pose_scanout_end;
 	view->eye_pose = *eye_pose;
 	view->fov = *fov;
 
@@ -372,6 +377,7 @@ comp_render_gfx_add_squash_view(struct comp_render_dispatch_data *data,
 {
 	struct comp_render_view_data *view = comp_render_dispatch_add_squash_view( //
 	    data,                                                                  //
+	    world_pose,                                                            //
 	    world_pose,                                                            //
 	    eye_pose,                                                              //
 	    fov,                                                                   //
@@ -517,10 +523,12 @@ comp_render_cs_add_target(struct comp_render_dispatch_data *data, VkImage target
  * Add view to the common data, as required by the CS renderer.
  *
  * @param[in,out] data Common render dispatch data, will be updated
- * @param world_pose New world pose of this view.
+ * @param world_pose_scanout_begin New world pose of this view.
+ *        Populates @ref comp_render_view_data::world_pose
+ * @param world_pose_scanout_end New world pose of this view.
  *        Populates @ref comp_render_view_data::world_pose
  * @param eye_pose New eye pose of this view
- *        Populates @ref comp_render_view_data::eye_pose
+ *        Populates @ref comp_render_view_data::eye_pose_scanout_end
  * @param fov Assigned to fov in the view data, and used to compute @ref comp_render_view_data::pre_transform.
  *        Populates @ref comp_render_view_data::fov
  * @param squash_image Scratch image for this view
@@ -537,7 +545,8 @@ comp_render_cs_add_target(struct comp_render_dispatch_data *data, VkImage target
  */
 static inline void
 comp_render_cs_add_squash_view(struct comp_render_dispatch_data *data,
-                               const struct xrt_pose *world_pose,
+                               const struct xrt_pose *world_pose_scanout_begin,
+                               const struct xrt_pose *world_pose_scanout_end,
                                const struct xrt_pose *eye_pose,
                                const struct xrt_fov *fov,
                                VkImage squash_image,
@@ -546,7 +555,8 @@ comp_render_cs_add_squash_view(struct comp_render_dispatch_data *data,
 {
 	struct comp_render_view_data *view = comp_render_dispatch_add_squash_view( //
 	    data,                                                                  //
-	    world_pose,                                                            //
+	    world_pose_scanout_begin,                                              //
+	    world_pose_scanout_end,                                                //
 	    eye_pose,                                                              //
 	    fov,                                                                   //
 	    squash_image,                                                          //
@@ -604,7 +614,8 @@ comp_render_cs_layer(struct render_compute *render,
                      const struct comp_layer *layers,
                      const uint32_t layer_count,
                      const struct xrt_normalized_rect *pre_transform,
-                     const struct xrt_pose *world_pose,
+                     const struct xrt_pose *world_pose_scanout_begin,
+                     const struct xrt_pose *world_pose_scanout_end,
                      const struct xrt_pose *eye_pose,
                      const VkImage target_image,
                      const VkImageView target_image_view,

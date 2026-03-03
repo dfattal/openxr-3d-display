@@ -828,7 +828,7 @@ render_gfx_render_pass_init(struct render_gfx_render_pass *rgrp,
 	    r->pipeline_cache,                      //
 	    blend_factor_premultiplied_alpha,       // src_blend_factor
 	    r->shaders->layer_projection_vert,      // module_vert
-	    r->shaders->layer_shared_frag,          // module_frag
+	    r->shaders->layer_projection_frag,      // module_frag
 	    &rgrp->layer.proj_premultiplied_alpha); // out_pipeline
 	VK_CHK_WITH_RET(ret, "create_layer_pipeline", false);
 	VK_NAME_PIPELINE(vk, rgrp->layer.proj_premultiplied_alpha,
@@ -841,7 +841,7 @@ render_gfx_render_pass_init(struct render_gfx_render_pass *rgrp,
 	    r->pipeline_cache,                        //
 	    blend_factor_unpremultiplied_alpha,       // src_blend_factor
 	    r->shaders->layer_projection_vert,        // module_vert
-	    r->shaders->layer_shared_frag,            // module_frag
+	    r->shaders->layer_projection_frag,        // module_frag
 	    &rgrp->layer.proj_unpremultiplied_alpha); // out_pipeline
 	VK_CHK_WITH_RET(ret, "create_layer_pipeline", false);
 	VK_NAME_PIPELINE(vk, rgrp->layer.proj_unpremultiplied_alpha,
@@ -855,7 +855,7 @@ render_gfx_render_pass_init(struct render_gfx_render_pass *rgrp,
 	    r->pipeline_cache,                      //
 	    blend_factor_premultiplied_alpha,       // src_blend_factor
 	    r->shaders->layer_quad_vert,            // module_vert
-	    r->shaders->layer_shared_frag,          // module_frag
+	    r->shaders->layer_quad_frag,            // module_frag
 	    &rgrp->layer.quad_premultiplied_alpha); // out_pipeline
 	VK_CHK_WITH_RET(ret, "create_layer_pipeline", false);
 	VK_NAME_PIPELINE(vk, rgrp->layer.quad_premultiplied_alpha, "render_gfx_render_pass quad premultiplied alpha");
@@ -867,7 +867,7 @@ render_gfx_render_pass_init(struct render_gfx_render_pass *rgrp,
 	    r->pipeline_cache,                        //
 	    blend_factor_unpremultiplied_alpha,       // src_blend_factor
 	    r->shaders->layer_quad_vert,              // module_vert
-	    r->shaders->layer_shared_frag,            // module_frag
+	    r->shaders->layer_quad_frag,              // module_frag
 	    &rgrp->layer.quad_unpremultiplied_alpha); // out_pipeline
 	VK_CHK_WITH_RET(ret, "create_layer_pipeline", false);
 	VK_NAME_PIPELINE(vk, rgrp->layer.quad_unpremultiplied_alpha,

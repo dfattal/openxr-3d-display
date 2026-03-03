@@ -1,4 +1,5 @@
 # Copyright 2019, Collabora, Ltd.
+# Copyright 2025, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 
 ######
@@ -14,7 +15,12 @@ set(RUNTIME_TARGET
 # OpenXR 1.0
 set(XR_API_MAJOR "1")
 
-add_library(${RUNTIME_TARGET} MODULE target.c libopenxr.def)
+if(APPLE)
+	# Needed to make a dynlib.
+	add_library(${RUNTIME_TARGET} SHARED target.c)
+else()
+	add_library(${RUNTIME_TARGET} MODULE target.c libopenxr.def)
+endif()
 
 # On Windows, output the runtime as SRMonadoClient.dll for the installer
 if(WIN32)

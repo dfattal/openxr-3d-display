@@ -5,7 +5,7 @@
   inputs = {
     # Whenever an upstream change is merged, update this and
     # remove the packages from the ...ToUpstream lists below
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-parts.url = "github:hercules-ci/flake-parts";
   };
 
@@ -24,11 +24,22 @@
           devTools = with pkgs; [
             # Tools that are required in order to develop with Monado
             # but are not required to build Monado itself
+            ninja
+
+            # Needed for running things in ./scripts
             clang-tools
             cmake-format
-            git
+            codespell
+            # Reccomended for debugging
+            gdb
+            lldb
+            vulkan-tools
+
+            # Needed for Android
             gradle
             gradle-completion
+            # Needed for running `survive-websocketd`
+            websocketd
           ];
 
           nativeBuildInputsToUpstream = with pkgs; [

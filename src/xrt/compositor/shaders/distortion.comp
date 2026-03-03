@@ -24,8 +24,9 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 	ivec4 views[2];
 	vec4 pre_transform[2];
 	vec4 post_transform[2];
-	mat4 transform[2];
-} ubo;
+	mat4 transform_timewarp_scanout_begin[2];
+	mat4 transform_timewarp_scanout_end[2];
+}ubo;
 
 
 vec2 position_to_uv(ivec2 extent, uint ix, uint iy)
@@ -79,15 +80,13 @@ vec2 transform_uv_timewarp(vec2 uv, uint iz)
 	values.xy = values.xy * ubo.pre_transform[iz].zw + ubo.pre_transform[iz].xy;
 	values.y = -values.y; // Flip to OpenXR coordinate system.
 
-	// Timewarp.
-	values = ubo.transform[iz] * values;
+	// Timewarp including scanline timewarp for rolling refresh panels.
+	values = ubo.transform_timewarp_scanout_begin[iz] * values * (1 - uv.y) +
+	         ubo.transform_timewarp_scanout_end[iz] * values * uv.y;
 	values.xy = values.xy * (1.0 / max(values.w, 0.00001));
 
 	// From [-1, 1] to [0, 1]
 	values.xy = values.xy * 0.5 + 0.5;
-
-	// To deal with OpenGL flip and sub image view.
-	values.xy = values.xy * ubo.post_transform[iz].zw + ubo.post_transform[iz].xy;
 
 	// Done.
 	return values.xy;
@@ -96,10 +95,10 @@ vec2 transform_uv_timewarp(vec2 uv, uint iz)
 vec2 transform_uv(vec2 uv, uint iz)
 {
 	if (do_timewarp) {
-		return transform_uv_timewarp(uv, iz);
-	} else {
-		return transform_uv_subimage(uv, iz);
+		uv = transform_uv_timewarp(uv, iz);
 	}
+
+	return transform_uv_subimage(uv, iz);
 }
 
 void main()
@@ -127,11 +126,11 @@ void main()
 	b_uv = transform_uv(b_uv, iz);
 
 	// Sample the source with distorted and chromatic-aberration corrected samples.
-	vec4 colour = vec4(
-		texture(source[iz], r_uv).r,
-		texture(source[iz], g_uv).g,
-		texture(source[iz], b_uv).b,
-		1);
+	vec4 colour = vec4(              //
+	    texture(source[iz], r_uv).r, //
+	    texture(source[iz], g_uv).g, //
+	    texture(source[iz], b_uv).b, //
+	    1);                          //
 
 	// Do colour correction here since there are no automatic conversion in hardware available.
 	colour = vec4(from_linear_to_srgb(colour.rgb), 1);

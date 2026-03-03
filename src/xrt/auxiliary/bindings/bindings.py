@@ -588,20 +588,10 @@ def generate_bindings_helpers_c(template, file, b):
     inputs.add("XRT_INPUT_HT_CONFORMING_RIGHT")
     inputs.add("XRT_INPUT_GENERIC_TRACKER_POSE")
 
-    xrt_input_name_string_switch = '\n'.join(
-        [(f'\tcase {input}: return "{input}";') for input in sorted(inputs)]
-    )
-    xrt_input_name_string_switch += (f'\n\tdefault: return "UNKNOWN";')
-
     xrt_input_name_enum_content = '\n'.join(
         [f'\tif(strcmp("{input}", input) == 0) return {input};' for input in sorted(inputs)]
     )
     xrt_input_name_enum_content += f'\n\treturn XRT_INPUT_GENERIC_TRACKER_POSE;'
-
-    xrt_output_name_string_switch = '\n'.join(
-        [(f'\tcase {output}: return "{output}";') for output in sorted(outputs)]
-    )
-    xrt_output_name_string_switch+= f'\n\tdefault: return "UNKNOWN";'
 
     xrt_output_name_enum_content = '\n'.join(
         [f'\tif(strcmp("{output}", output) == 0) return {output};' for output in sorted(outputs)]
@@ -614,9 +604,7 @@ def generate_bindings_helpers_c(template, file, b):
 
     with open(file, "w") as f:
         filled = src.substitute(
-            xrt_input_name_string_switch=xrt_input_name_string_switch,
             xrt_input_name_enum_content=xrt_input_name_enum_content,
-            xrt_output_name_string_switch=xrt_output_name_string_switch,
             xrt_output_name_enum_content=xrt_output_name_enum_content
         )
         f.write(filled)

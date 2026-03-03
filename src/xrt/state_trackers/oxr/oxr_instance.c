@@ -1,5 +1,5 @@
 // Copyright 2018-2024, Collabora, Ltd.
-// Copyright 2024-2025, NVIDIA CORPORATION.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,7 +9,6 @@
  * @ingroup oxr_main
  */
 
-#include "oxr_bindings/b_oxr_generated_bindings.h"
 #include "xrt/xrt_config_os.h"
 #include "xrt/xrt_config_build.h"
 #include "xrt/xrt_instance.h"
@@ -34,8 +33,11 @@
 #include "oxr_logger.h"
 #include "oxr_handle.h"
 #include "oxr_extension_support.h"
-#include "oxr_subaction.h"
 #include "oxr_chain.h"
+#include "oxr_roles.h"
+#include "oxr_generated_bindings.h"
+#include "actions/oxr_binding.h"
+#include "actions/oxr_subaction.h"
 
 #include <sys/types.h>
 #ifdef XRT_OS_UNIX
@@ -51,6 +53,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(debug_spaces, "OXR_DEBUG_SPACES", false)
 DEBUG_GET_ONCE_BOOL_OPTION(debug_bindings, "OXR_DEBUG_BINDINGS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(lifecycle_verbose, "OXR_LIFECYCLE_VERBOSE", false)
 DEBUG_GET_ONCE_TRISTATE_OPTION(parallel_views, "OXR_PARALLEL_VIEWS")
+DEBUG_GET_ONCE_TRISTATE_OPTION(no_texture_source_alpha, "OXR_NO_TEXTURE_SOURCE_ALPHA")
 DEBUG_GET_ONCE_BOOL_OPTION(map_stage_to_local_floor, "OXR_RECENTER_STAGE", false)
 
 
@@ -78,12 +81,15 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 
 	u_var_remove_root((void *)inst);
 
-	oxr_binding_destroy_all(log, inst);
+	if (inst->action_context != NULL) {
+		oxr_refcounted_unref(&inst->action_context->base);
+		inst->action_context = NULL;
+	}
 
-	oxr_path_destroy(log, inst);
+	// Maybe a no-op, needs to happen before path_store if not.
+	oxr_instance_path_cache_fini(&inst->path_cache);
 
-	u_hashset_destroy(&inst->action_sets.name_store);
-	u_hashset_destroy(&inst->action_sets.loc_store);
+	oxr_path_store_fini(&inst->path_store);
 
 	// Free the mask here, no system destroy yet.
 	for (uint32_t i = 0; i < ARRAY_SIZE(inst->system.visibility_mask); i++) {
@@ -91,8 +97,9 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 		inst->system.visibility_mask[i] = NULL;
 	}
 
+	os_mutex_destroy(&inst->system_init_lock);
+
 	xrt_space_overseer_destroy(&inst->system.xso);
-	os_mutex_destroy(&inst->system.sync_actions_mutex);
 	xrt_system_devices_destroy(&inst->system.xsysd);
 	xrt_system_destroy(&inst->system.xsys);
 
@@ -111,12 +118,6 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 	free(inst);
 
 	return XR_SUCCESS;
-}
-
-static void
-cache_path(struct oxr_logger *log, struct oxr_instance *inst, const char *str, XrPath *out_path)
-{
-	oxr_path_get_or_create(log, inst, str, strlen(str), out_path);
 }
 
 static bool
@@ -140,24 +141,26 @@ starts_with(const char *with, const char *string)
 static void
 debug_print_devices(struct oxr_logger *log, struct oxr_system *sys)
 {
-#define D(INDEX) (roles.INDEX < 0 ? NULL : sys->xsysd->xdevs[roles.INDEX])
 #define P(XDEV) (XDEV != NULL ? XDEV->str : "<none>")
 
-	// Static roles.
-	struct xrt_device *h = GET_XDEV_BY_ROLE(sys, head);
-	struct xrt_device *e = GET_XDEV_BY_ROLE(sys, eyes);
-	struct xrt_device *uhl = GET_XDEV_BY_ROLE(sys, hand_tracking_unobstructed_left);
-	struct xrt_device *uhr = GET_XDEV_BY_ROLE(sys, hand_tracking_unobstructed_right);
-	struct xrt_device *chl = GET_XDEV_BY_ROLE(sys, hand_tracking_conforming_left);
-	struct xrt_device *chr = GET_XDEV_BY_ROLE(sys, hand_tracking_conforming_right);
+	// Get all roles using oxr_roles struct.
+	struct oxr_roles roles = XRT_STRUCT_INIT;
+	XrResult result = oxr_roles_init_on_stack(log, &roles, sys);
+	if (result != XR_SUCCESS) {
+		// Just log and continue, this is debug output
+		oxr_warn(log, "Failed to get device roles for debug printing");
+		return;
+	}
 
-	// Dynamic roles, the system cache might not have been updated yet.
-	struct xrt_system_roles roles = XRT_SYSTEM_ROLES_INIT;
-	xrt_system_devices_get_roles(sys->xsysd, &roles);
-
-	struct xrt_device *l = D(left);
-	struct xrt_device *r = D(right);
-	struct xrt_device *gp = D(gamepad);
+	struct xrt_device *h = GET_STATIC_XDEV_BY_ROLE(sys, head);
+	struct xrt_device *e = GET_STATIC_XDEV_BY_ROLE(sys, eyes);
+	struct xrt_device *l = GET_XDEV_BY_ROLE(&roles, left);
+	struct xrt_device *r = GET_XDEV_BY_ROLE(&roles, right);
+	struct xrt_device *gp = GET_XDEV_BY_ROLE(&roles, gamepad);
+	struct xrt_device *uhl = GET_STATIC_XDEV_BY_ROLE(sys, hand_tracking_unobstructed_left);
+	struct xrt_device *uhr = GET_STATIC_XDEV_BY_ROLE(sys, hand_tracking_unobstructed_right);
+	struct xrt_device *chl = GET_STATIC_XDEV_BY_ROLE(sys, hand_tracking_conforming_left);
+	struct xrt_device *chr = GET_STATIC_XDEV_BY_ROLE(sys, hand_tracking_conforming_right);
 
 	oxr_log(log,
 	        "Selected devices"
@@ -173,7 +176,6 @@ debug_print_devices(struct oxr_logger *log, struct oxr_system *sys)
 	        P(h), P(e), P(l), P(r), P(gp), P(uhl), P(uhr), P(chl), P(chr));
 
 #undef P
-#undef D
 }
 
 static void
@@ -195,12 +197,15 @@ detect_engine(struct oxr_logger *log, struct oxr_instance *inst, const XrInstanc
 }
 
 static void
-apply_quirks(struct oxr_logger *log, struct oxr_instance *inst)
+apply_quirks(struct oxr_logger *log, struct oxr_instance *inst, const XrInstanceCreateInfo *create_info)
 {
 	// Reset.
 	inst->quirks.skip_end_session = false;
+	inst->quirks.disable_vulkan_format_depth = false;
 	inst->quirks.disable_vulkan_format_depth_stencil = false;
 	inst->quirks.no_validation_error_in_create_ref_space = false;
+	inst->quirks.parallel_views = false;
+	inst->quirks.no_texture_source_alpha = false;
 
 	if (starts_with("UnrealEngine", inst->appinfo.detected.engine.name) && //
 	    inst->appinfo.detected.engine.major == 4 &&                        //
@@ -208,16 +213,29 @@ apply_quirks(struct oxr_logger *log, struct oxr_instance *inst)
 		inst->quirks.skip_end_session = true;
 	}
 
+	// This only works on Beat Saber <1.40.9, on newer versions
+	// the application name is "Unity Application" which is too generic.
+	if (strcmp("Beat Saber", create_info->applicationInfo.applicationName) == 0) {
+		inst->quirks.parallel_views = true;
+	}
+
 	// Currently always true.
 	inst->quirks.no_validation_error_in_create_ref_space = true;
 
 	enum debug_tristate_option parallel_view = debug_get_tristate_option_parallel_views();
+	enum debug_tristate_option no_texture_source_alpha = debug_get_tristate_option_no_texture_source_alpha();
 
 	// Only override hardcoded quirks when explicitly enabling or disabling, not on auto.
 	if (parallel_view == DEBUG_TRISTATE_OFF) {
 		inst->quirks.parallel_views = false;
 	} else if (parallel_view == DEBUG_TRISTATE_ON) {
 		inst->quirks.parallel_views = true;
+	}
+
+	if (no_texture_source_alpha == DEBUG_TRISTATE_OFF) {
+		inst->quirks.no_texture_source_alpha = false;
+	} else if (no_texture_source_alpha == DEBUG_TRISTATE_ON) {
+		inst->quirks.no_texture_source_alpha = true;
 	}
 
 	inst->quirks.map_stage_to_local_floor = debug_get_bool_option_map_stage_to_local_floor();
@@ -232,7 +250,6 @@ oxr_instance_create(struct oxr_logger *log,
 {
 	struct oxr_instance *inst = NULL;
 	int m_ret;
-	int h_ret;
 	xrt_result_t xret;
 	XrResult ret;
 
@@ -251,11 +268,12 @@ oxr_instance_create(struct oxr_logger *log,
 		return ret;
 	}
 
-	m_ret = os_mutex_init(&inst->system.sync_actions_mutex);
+	m_ret = os_mutex_init(&inst->system_init_lock);
 	if (m_ret < 0) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to init sync action mutex");
+		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to init system init mutex");
 		return ret;
 	}
+
 
 #ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
 	struct u_debug_gui_create_info udgci = {
@@ -266,35 +284,23 @@ oxr_instance_create(struct oxr_logger *log,
 	u_debug_gui_create(&udgci, &inst->debug_ui);
 #endif
 
-	ret = oxr_path_init(log, inst);
+	ret = oxr_path_store_init(&inst->path_store);
 	if (ret != XR_SUCCESS) {
-		return ret;
+		return oxr_error(log, ret, "Failed to init path store");
 	}
-
-	h_ret = u_hashset_create(&inst->action_sets.name_store);
-	if (h_ret != 0) {
-		oxr_instance_destroy(log, &inst->handle);
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create name_store hashset");
-	}
-
-	h_ret = u_hashset_create(&inst->action_sets.loc_store);
-	if (h_ret != 0) {
-		oxr_instance_destroy(log, &inst->handle);
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create loc_store hashset");
-	}
-
 
 	// Cache certain often looked up paths.
-
-
-#define CACHE_SUBACTION_PATHS(NAME, NAME_CAPS, PATH) cache_path(log, inst, PATH, &inst->path_cache.NAME);
-	OXR_FOR_EACH_SUBACTION_PATH_DETAILED(CACHE_SUBACTION_PATHS)
-
-#undef CACHE_SUBACTION_PATHS
-
-	for (uint32_t i = 0; i < OXR_BINDINGS_PROFILE_TEMPLATE_COUNT; i++) {
-		cache_path(log, inst, profile_templates[i].path, &profile_templates[i].path_cache);
+	ret = oxr_instance_path_cache_init(&inst->path_cache, &inst->path_store);
+	if (ret != XR_SUCCESS) {
+		return oxr_error(log, ret, "Failed to init action path cache");
 	}
+
+	// Might use the path_store and path_cache, do after them.
+	ret = oxr_instance_action_context_create(log, &inst->action_context);
+	if (ret != XR_SUCCESS) {
+		return oxr_error(log, ret, "Failed to create instance action context");
+	}
+
 
 	// fill in our application info - @todo - replicate all createInfo
 	// fields?
@@ -309,6 +315,9 @@ oxr_instance_create(struct oxr_logger *log,
 #endif
 #ifdef OXR_HAVE_EXT_eye_gaze_interaction
 	    .ext_eye_gaze_interaction_enabled = extensions->EXT_eye_gaze_interaction,
+#endif
+#ifdef OXR_HAVE_EXT_future
+	    .ext_future_enabled = extensions->EXT_future,
 #endif
 #ifdef OXR_HAVE_EXT_hand_interaction
 	    .ext_hand_interaction_enabled = extensions->EXT_hand_interaction,
@@ -327,6 +336,9 @@ oxr_instance_create(struct oxr_logger *log,
 #endif
 #ifdef OXR_HAVE_META_body_tracking_calibration
 	    .meta_body_tracking_calibration_enabled = extensions->META_body_tracking_calibration,
+#endif
+#ifdef OXR_HAVE_ANDROID_face_tracking
+	    .android_face_tracking_enabled = extensions->ANDROID_face_tracking,
 #endif
 #ifdef OXR_HAVE_EXT_win32_appcontainer_compatible
 	    .ext_win32_appcontainer_compatible_enabled = extensions->EXT_win32_appcontainer_compatible,
@@ -354,7 +366,7 @@ oxr_instance_create(struct oxr_logger *log,
 
 	xret = xrt_instance_create(&i_info, &inst->xinst);
 	if (xret != XRT_SUCCESS) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create instance '%i'", xret);
+		ret = oxr_error(log, XR_ERROR_RUNTIME_UNAVAILABLE, "Failed to create instance '%i'", xret);
 		oxr_instance_destroy(log, &inst->handle);
 		return ret;
 	}
@@ -370,53 +382,6 @@ oxr_instance_create(struct oxr_logger *log,
 	}
 #endif // XRT_OS_ANDROID
 
-	struct oxr_system *sys = &inst->system;
-
-	// Create the compositor if we are not headless, currently always create it.
-	bool should_create_compositor = true /* !inst->extensions.MND_headless */;
-
-	// Create the system.
-	if (should_create_compositor) {
-		xret = xrt_instance_create_system(inst->xinst, &sys->xsys, &sys->xsysd, &sys->xso, &sys->xsysc);
-	} else {
-		xret = xrt_instance_create_system(inst->xinst, &sys->xsys, &sys->xsysd, &sys->xso, NULL);
-	}
-
-	if (xret != XRT_SUCCESS) {
-		ret = oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Failed to create the system '%i'", xret);
-		oxr_instance_destroy(log, &inst->handle);
-		return ret;
-	}
-
-	ret = XR_SUCCESS;
-	if (sys->xsysd == NULL) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysd was NULL?");
-	} else if (should_create_compositor && sys->xsysc == NULL) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysc was NULL?");
-	} else if (!should_create_compositor && sys->xsysc != NULL) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysc was not NULL?");
-	}
-
-	if (ret != XR_SUCCESS) {
-		oxr_instance_destroy(log, &inst->handle);
-		return ret;
-	}
-
-	// Did we find any HMD
-	// @todo Headless with only controllers?
-	struct xrt_device *dev = GET_XDEV_BY_ROLE(sys, head);
-	if (dev == NULL) {
-		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to find any HMD device");
-		oxr_instance_destroy(log, &inst->handle);
-		return ret;
-	}
-	uint32_t view_count = dev->hmd->view_count;
-	ret = oxr_system_fill_in(log, inst, XRT_SYSTEM_ID, view_count, &inst->system);
-	if (ret != XR_SUCCESS) {
-		oxr_instance_destroy(log, &inst->handle);
-		return ret;
-	}
-
 	inst->timekeeping = time_state_create(inst->xinst->startup_timestamp);
 
 	//! @todo check if this (and other creates) failed?
@@ -425,13 +390,9 @@ oxr_instance_create(struct oxr_logger *log,
 	detect_engine(log, inst, createInfo);
 
 	// Apply any quirks
-	apply_quirks(log, inst);
+	apply_quirks(log, inst, createInfo);
 
 	u_var_add_root((void *)inst, "XrInstance", true);
-
-#ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
-	u_debug_gui_start(inst->debug_ui, inst->xinst, sys->xsysd);
-#endif
 
 	oxr_log(log,
 	        "Instance created\n"
@@ -442,10 +403,12 @@ oxr_instance_create(struct oxr_logger *log,
 	        "\tcreateInfo->applicationInfo.apiVersion: %d.%d.%d\n"
 	        "\tappinfo.detected.engine.name: %s\n"
 	        "\tappinfo.detected.engine.version: %i.%i.%i\n"
+	        "\tquirks.disable_vulkan_format_depth: %s\n"
 	        "\tquirks.disable_vulkan_format_depth_stencil: %s\n"
 	        "\tquirks.no_validation_error_in_create_ref_space: %s\n"
 	        "\tquirks.skip_end_session: %s\n"
-	        "\tquirks.parallel_views: %s\n",
+	        "\tquirks.parallel_views: %s\n"
+	        "\tquirks.no_texture_source_alpha: %s\n",
 	        createInfo->applicationInfo.applicationName,                             //
 	        createInfo->applicationInfo.applicationVersion,                          //
 	        createInfo->applicationInfo.engineName,                                  //
@@ -457,14 +420,13 @@ oxr_instance_create(struct oxr_logger *log,
 	        inst->appinfo.detected.engine.major,                                     //
 	        inst->appinfo.detected.engine.minor,                                     //
 	        inst->appinfo.detected.engine.patch,                                     //
+	        inst->quirks.disable_vulkan_format_depth ? "true" : "false",             //
 	        inst->quirks.disable_vulkan_format_depth_stencil ? "true" : "false",     //
 	        inst->quirks.no_validation_error_in_create_ref_space ? "true" : "false", //
 	        inst->quirks.skip_end_session ? "true" : "false",                        //
-	        inst->quirks.parallel_views ? "true" : "false"                           //
+	        inst->quirks.parallel_views ? "true" : "false",                          //
+	        inst->quirks.no_texture_source_alpha ? "true" : "false"                  //
 	);                                                                               //
-
-	debug_print_devices(log, sys);
-
 
 #ifdef XRT_FEATURE_RENDERDOC
 
@@ -506,6 +468,87 @@ oxr_instance_create(struct oxr_logger *log,
 #endif
 
 	*out_instance = inst;
+
+	return XR_SUCCESS;
+}
+
+XrResult
+oxr_instance_init_system_locked(struct oxr_logger *log, struct oxr_instance *inst)
+{
+	struct oxr_system *sys = &inst->system;
+	if (sys->xsys) {
+		return XR_SUCCESS;
+	}
+
+	xrt_result_t xret;
+	XrResult ret;
+
+	bool available = false;
+	xret = xrt_instance_is_system_available(inst->xinst, &available);
+	if (xret != XRT_SUCCESS) {
+		struct u_pp_sink_stack_only sink;
+		u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+		u_pp(dg, "Call to xrt_instance_is_system_available failed: ");
+		u_pp_xrt_result(dg, xret);
+		ret = oxr_error(log, xret == XRT_ERROR_IPC_FAILURE ? XR_ERROR_INSTANCE_LOST : XR_ERROR_RUNTIME_FAILURE,
+		                "%s", sink.buffer);
+		return ret;
+	}
+	if (!available) {
+		return XR_ERROR_FORM_FACTOR_UNAVAILABLE;
+	}
+
+	// Create the compositor if we are not headless, currently always create it.
+	bool should_create_compositor = true /* !inst->extensions.MND_headless */;
+
+	// Create the system.
+	if (should_create_compositor) {
+		xret = xrt_instance_create_system(inst->xinst, &sys->xsys, &sys->xsysd, &sys->xso, &sys->xsysc);
+	} else {
+		xret = xrt_instance_create_system(inst->xinst, &sys->xsys, &sys->xsysd, &sys->xso, NULL);
+	}
+
+	if (xret != XRT_SUCCESS) {
+		struct u_pp_sink_stack_only sink;
+		u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+		u_pp(dg, "Call to xrt_instance_create_system failed: ");
+		u_pp_xrt_result(dg, xret);
+		ret = oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "%s", sink.buffer);
+		return ret;
+	}
+
+#ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
+	// Do this after creating the system.
+	u_debug_gui_start(inst->debug_ui, inst->xinst, sys->xsysd);
+#endif
+
+	ret = XR_SUCCESS;
+	if (sys->xsysd == NULL) {
+		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysd was NULL?");
+	} else if (should_create_compositor && sys->xsysc == NULL) {
+		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysc was NULL?");
+	} else if (!should_create_compositor && sys->xsysc != NULL) {
+		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Huh?! Field sys->xsysc was not NULL?");
+	}
+
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	// Did we find any HMD
+	// @todo Headless with only controllers?
+	struct xrt_device *dev = GET_STATIC_XDEV_BY_ROLE(sys, head);
+	if (dev == NULL) {
+		ret = oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to find any HMD device");
+		return ret;
+	}
+	uint32_t view_count = (uint32_t)dev->hmd->view_count;
+	ret = oxr_system_fill_in(log, inst, XRT_SYSTEM_ID, view_count, &inst->system);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	debug_print_devices(log, sys);
 
 	return XR_SUCCESS;
 }

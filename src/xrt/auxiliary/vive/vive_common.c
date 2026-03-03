@@ -45,3 +45,29 @@ vive_determine_variant(const char *model_number)
 
 	return variant;
 }
+
+bool
+vive_variant_scanout_info(enum VIVE_VARIANT variant,
+                          time_duration_ns frame_period_ns,
+                          time_duration_ns *out_scanout_time_ns,
+                          enum xrt_scanout_direction *out_scanout_direction)
+{
+	switch (variant) {
+	case VIVE_VARIANT_PRO:
+		*out_scanout_direction = XRT_SCANOUT_DIRECTION_TOP_TO_BOTTOM;
+		*out_scanout_time_ns = frame_period_ns * 1600.0 / 1624.0;
+		return true;
+	case VIVE_VARIANT_BEYOND:
+		*out_scanout_direction = XRT_SCANOUT_DIRECTION_TOP_TO_BOTTOM;
+		*out_scanout_time_ns = frame_period_ns * 2544.0 / 2568.0;
+		return true;
+	case VIVE_VARIANT_PRO2:
+		*out_scanout_direction = XRT_SCANOUT_DIRECTION_TOP_TO_BOTTOM;
+		*out_scanout_time_ns = frame_period_ns * 2448.0 / 2574.0;
+		return true;
+	default:
+		*out_scanout_direction = XRT_SCANOUT_DIRECTION_NONE;
+		*out_scanout_time_ns = 0;
+		return false;
+	}
+}

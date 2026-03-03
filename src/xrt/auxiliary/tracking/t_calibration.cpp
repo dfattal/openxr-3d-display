@@ -1468,7 +1468,7 @@ cv::Vec3f
 NormalizedCoordsCache::getNormalizedVector(cv::Point2f origCoords) const
 {
 	// cameras traditionally look along -z, so we want negative sqrt
-	auto pt = getNormalizedImageCoords(std::move(origCoords));
+	auto pt = getNormalizedImageCoords(origCoords);
 	auto z = -std::sqrt(1.f - pt.dot(pt));
 	return {pt[0], pt[1], z};
 }

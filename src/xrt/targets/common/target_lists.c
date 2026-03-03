@@ -48,6 +48,10 @@
 #include "rift/rift_interface.h"
 #endif
 
+#ifdef XRT_BUILD_DRIVER_PSVR2
+#include "psvr2/psvr2_interface.h"
+#endif
+
 #ifdef XRT_BUILD_DRIVER_RIFT_S
 #include "rift_s/rift_s_interface.h"
 #endif
@@ -132,9 +136,17 @@ xrt_builder_create_func_t target_builder_list[] = {
     t_builder_sim_display_create,
 #endif // T_BUILDER_SIM_DISPLAY
 
+#ifdef XRT_BUILD_DRIVER_RIFT
+    rift_builder_create,
+#endif // XRT_BUILD_DRIVER_RIFT
+
 #ifdef XRT_BUILD_DRIVER_RIFT_S
     rift_s_builder_create,
 #endif // XRT_BUILD_DRIVER_RIFT_S
+
+#ifdef XRT_BUILD_DRIVER_PSVR2
+    t_builder_psvr2_create,
+#endif // XRT_BUILD_DRIVER_PSVR2
 
 #ifdef T_BUILDER_RGB_TRACKING
     t_builder_rgb_tracking_create,
@@ -201,7 +213,8 @@ struct xrt_prober_entry target_entry_list[] = {
 #endif // XRT_BUILD_DRIVER_PSSENSE
 
 #ifdef XRT_BUILD_DRIVER_RIFT
-    {OCULUS_VR_VID, OCULUS_DK2_PID, rift_found, "Rift (DK2)", "rift"},
+    {OCULUS_VR_VID, OCULUS_DK2_PID, rift_found, RIFT_DK2_PRODUCT_STRING, "rift"},
+    {OCULUS_VR_VID, OCULUS_CV1_PID, rift_found, RIFT_CV1_PRODUCT_STRING, "rift"},
 #endif // XRT_BUILD_DRIVER_RIFT
 
 #ifdef XRT_BUILD_DRIVER_BLUBUR_S1
@@ -211,6 +224,10 @@ struct xrt_prober_entry target_entry_list[] = {
 #ifdef XRT_BUILD_DRIVER_ROKID
     {ROKID_VID, ROKID_PID, rokid_found, "Rokid Air or Max", "rokid"},
 #endif // XRT_BUILD_DRIVER_ROKID
+
+#ifdef XRT_BUILD_DRIVER_PSVR2
+    {PSVR2_VID, PSVR2_PID, psvr2_found, "PlayStation VR2 HMD", "psvr2"},
+#endif // XRT_BUILD_DRIVER_PSVR2
 
 #ifdef XRT_BUILD_DRIVER_HYDRA
     {HYDRA_VID, HYDRA_PID, hydra_found, "Razer Hydra", "hydra"},

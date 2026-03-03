@@ -141,33 +141,31 @@ _get_lighthouse(struct vive_config *d, const cJSON *json)
 		return;
 	}
 
-	const cJSON *json_map = cJSON_GetObjectItemCaseSensitive(lh, "channelMap");
+	const cJSON *json_channels = cJSON_GetObjectItemCaseSensitive(lh, "channelMap");
 	const cJSON *json_normals = cJSON_GetObjectItemCaseSensitive(lh, "modelNormals");
 	const cJSON *json_points = cJSON_GetObjectItemCaseSensitive(lh, "modelPoints");
 
-	if (json_map == NULL || json_normals == NULL || json_points == NULL) {
+	if (json_channels == NULL || json_normals == NULL || json_points == NULL) {
 		return;
 	}
 
-	size_t map_size = cJSON_GetArraySize(json_map);
-	size_t normals_size = cJSON_GetArraySize(json_normals);
-	size_t points_size = cJSON_GetArraySize(json_points);
+	uint8_t channels_size = cJSON_GetArraySize(json_channels);
+	uint8_t normals_size = cJSON_GetArraySize(json_normals);
+	uint8_t points_size = cJSON_GetArraySize(json_points);
 
-	if (map_size != normals_size || normals_size != points_size || map_size <= 0) {
+	if (channels_size != normals_size || normals_size != points_size || channels_size <= 0) {
 		return;
 	}
 
-	uint32_t *map = U_TYPED_ARRAY_CALLOC(uint32_t, map_size);
-	struct lh_sensor *s = U_TYPED_ARRAY_CALLOC(struct lh_sensor, map_size);
+	struct lh_sensor *s = U_TYPED_ARRAY_CALLOC(struct lh_sensor, channels_size);
 
-	size_t i = 0;
+	uint8_t i = 0;
 	const cJSON *item = NULL;
-	cJSON_ArrayForEach(item, json_map)
+	cJSON_ArrayForEach(item, json_channels)
 	{
-		// Build the channel map
-		int map_item = 0;
-		u_json_get_int(item, &map_item);
-		map[i++] = (uint32_t)map_item;
+		// Build the channel
+		// NOTE: Value can only be between 0 and 31
+		u_json_get_int(item, (int *)&s[i++].channel);
 	}
 
 	i = 0;
@@ -175,7 +173,7 @@ _get_lighthouse(struct vive_config *d, const cJSON *json)
 	cJSON_ArrayForEach(item, json_normals)
 	{
 		// Store in channel map order.
-		u_json_get_vec3_array(item, &s[map[i++]].normal);
+		u_json_get_vec3_array(item, &s[i++].normal);
 	}
 
 	i = 0;
@@ -183,15 +181,11 @@ _get_lighthouse(struct vive_config *d, const cJSON *json)
 	cJSON_ArrayForEach(item, json_points)
 	{
 		// Store in channel map order.
-		u_json_get_vec3_array(item, &s[map[i++]].pos);
+		u_json_get_vec3_array(item, &s[i++].pos);
 	}
 
-	// Free the map.
-	free(map);
-	map = NULL;
-
 	d->lh.sensors = s;
-	d->lh.sensor_count = map_size;
+	d->lh.sensor_count = channels_size;
 
 
 	// Transform the sensors into IMU space.
@@ -614,6 +608,12 @@ vive_config_parse_controller(struct vive_controller_config *d, char *json_string
 	           strcmp(d->firmware.model_number, "Knuckles EV3.0 Left") == 0) {
 		d->variant = CONTROLLER_INDEX_LEFT;
 		VIVE_DEBUG(d, "Found Knuckles Left controller");
+	} else if (strcmp(d->firmware.model_number, "FlipVr Controller VC1B Left") == 0) {
+		d->variant = CONTROLLER_FLIPVR_LEFT;
+		VIVE_DEBUG(d, "Found Shiftall Inc. FlipVR VC1B Left controller");
+	} else if (strcmp(d->firmware.model_number, "FlipVr Controller VC1B Right") == 0) {
+		d->variant = CONTROLLER_FLIPVR_RIGHT;
+		VIVE_DEBUG(d, "Found Shiftall Inc. FlipVR VC1B Right controller");
 	} else if (strcmp(d->firmware.model_number, "Vive Tracker PVT") == 0 ||
 	           strcmp(d->firmware.model_number, "Vive. Tracker MV") == 0 ||
 	           strcmp(d->firmware.model_number, "Vive Tracker MV") == 0) {
@@ -644,6 +644,8 @@ vive_config_parse_controller(struct vive_controller_config *d, char *json_string
 	} break;
 	case CONTROLLER_INDEX_LEFT:
 	case CONTROLLER_INDEX_RIGHT:
+	case CONTROLLER_FLIPVR_LEFT:
+	case CONTROLLER_FLIPVR_RIGHT:
 	case CONTROLLER_TRACKER_GEN2:
 	case CONTROLLER_TRACKER_GEN3:
 	case CONTROLLER_TRACKER_TUNDRA: {

@@ -106,3 +106,65 @@ struct xrt_binding_profile vive_binding_profiles_wand[1] = {
 };
 
 uint32_t vive_binding_profiles_wand_count = ARRAY_SIZE(vive_binding_profiles_wand);
+
+/*
+ *
+ * FlipVR Controller
+ *
+ */
+
+static struct xrt_binding_input_pair simple_inputs_flipvr[4] = {
+    {XRT_INPUT_SIMPLE_SELECT_CLICK, XRT_INPUT_FLIPVR_TRIGGER_VALUE},
+    {XRT_INPUT_SIMPLE_MENU_CLICK, XRT_INPUT_FLIPVR_B_CLICK},
+    {XRT_INPUT_SIMPLE_GRIP_POSE, XRT_INPUT_FLIPVR_GRIP_POSE},
+    {XRT_INPUT_SIMPLE_AIM_POSE, XRT_INPUT_FLIPVR_AIM_POSE},
+};
+
+static struct xrt_binding_output_pair simple_outputs_flipvr[1] = {
+    {XRT_OUTPUT_NAME_SIMPLE_VIBRATION, XRT_OUTPUT_NAME_FLIPVR_HAPTIC},
+};
+
+static struct xrt_binding_input_pair touch_inputs_flipvr[18] = {
+    {XRT_INPUT_TOUCH_X_CLICK, XRT_INPUT_FLIPVR_X_CLICK},
+    {XRT_INPUT_TOUCH_X_TOUCH, XRT_INPUT_FLIPVR_X_TOUCH},
+    {XRT_INPUT_TOUCH_Y_CLICK, XRT_INPUT_FLIPVR_Y_CLICK},
+    {XRT_INPUT_TOUCH_Y_TOUCH, XRT_INPUT_FLIPVR_Y_TOUCH},
+    {XRT_INPUT_TOUCH_MENU_CLICK, XRT_INPUT_FLIPVR_SYSTEM_CLICK}, // Map to menu
+    {XRT_INPUT_TOUCH_A_CLICK, XRT_INPUT_FLIPVR_A_CLICK},
+    {XRT_INPUT_TOUCH_A_TOUCH, XRT_INPUT_FLIPVR_A_TOUCH},
+    {XRT_INPUT_TOUCH_B_CLICK, XRT_INPUT_FLIPVR_B_CLICK},
+    {XRT_INPUT_TOUCH_B_TOUCH, XRT_INPUT_FLIPVR_B_TOUCH},
+    {XRT_INPUT_TOUCH_SYSTEM_CLICK, XRT_INPUT_FLIPVR_SYSTEM_CLICK},
+    {XRT_INPUT_TOUCH_SQUEEZE_VALUE, XRT_INPUT_FLIPVR_SQUEEZE_VALUE},
+    {XRT_INPUT_TOUCH_TRIGGER_TOUCH, XRT_INPUT_FLIPVR_TRIGGER_TOUCH},
+    {XRT_INPUT_TOUCH_TRIGGER_VALUE, XRT_INPUT_FLIPVR_TRIGGER_VALUE},
+    {XRT_INPUT_TOUCH_THUMBSTICK_CLICK, XRT_INPUT_FLIPVR_THUMBSTICK_CLICK},
+    {XRT_INPUT_TOUCH_THUMBSTICK_TOUCH, XRT_INPUT_FLIPVR_THUMBSTICK_TOUCH},
+    {XRT_INPUT_TOUCH_THUMBSTICK, XRT_INPUT_FLIPVR_THUMBSTICK},
+    {XRT_INPUT_TOUCH_GRIP_POSE, XRT_INPUT_FLIPVR_GRIP_POSE},
+    {XRT_INPUT_TOUCH_AIM_POSE, XRT_INPUT_FLIPVR_AIM_POSE},
+};
+
+static struct xrt_binding_output_pair touch_outputs_flipvr[1] = {
+    {XRT_OUTPUT_NAME_TOUCH_HAPTIC, XRT_OUTPUT_NAME_FLIPVR_HAPTIC},
+};
+
+// Exported to drivers.
+struct xrt_binding_profile vive_binding_profiles_flipvr[2] = {
+    {
+        .name = XRT_DEVICE_TOUCH_CONTROLLER,
+        .inputs = touch_inputs_flipvr,
+        .input_count = ARRAY_SIZE(touch_inputs_flipvr),
+        .outputs = touch_outputs_flipvr,
+        .output_count = ARRAY_SIZE(touch_outputs_flipvr),
+    },
+    {
+        .name = XRT_DEVICE_SIMPLE_CONTROLLER,
+        .inputs = simple_inputs_flipvr,
+        .input_count = ARRAY_SIZE(simple_inputs_flipvr),
+        .outputs = simple_outputs_flipvr,
+        .output_count = ARRAY_SIZE(simple_outputs_flipvr),
+    },
+};
+
+uint32_t vive_binding_profiles_flipvr_count = ARRAY_SIZE(vive_binding_profiles_flipvr);

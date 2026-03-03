@@ -24,6 +24,18 @@ struct xrt_hmd_parts;
  * @ingroup aux_util
  */
 
+enum u_cardboard_vertical_alignment
+{
+	//! device rests against a fixed bottom tray
+	U_CARDBOARD_VERTICAL_ALIGNMENT_BOTTOM = 0,
+
+	//! device screen assumed to be centered w.r.t. lenses
+	U_CARDBOARD_VERTICAL_ALIGNMENT_CENTER = 1,
+
+	//! device rests against a fixed top tray
+	U_CARDBOARD_VERTICAL_ALIGNMENT_TOP = 2,
+};
+
 /*!
  * These are the values that you need to supply to the distortion code to setup
  * a @ref u_cardboard_distortion properly.
@@ -56,6 +68,9 @@ struct u_cardboard_distortion_arguments
 
 	//! Fov values that the cardboard configuration has given us.
 	struct xrt_fov fov;
+
+	//! The vertical screen alignment
+	enum u_cardboard_vertical_alignment vertical_alignment;
 };
 
 /*!

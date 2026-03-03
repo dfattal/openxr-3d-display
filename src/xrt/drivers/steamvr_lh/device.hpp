@@ -11,6 +11,7 @@
 
 #include "math/m_relation_history.h"
 
+#include "util/u_template_historybuf.hpp"
 #include "xrt/xrt_device.h"
 
 #include "vive/vive_common.h"
@@ -23,6 +24,9 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
+#include <span>
+#include <array>
+#include <optional>
 
 #include <condition_variable>
 #include <mutex>
@@ -176,6 +180,7 @@ public:
 	xrt_result_t
 	get_view_poses(const xrt_vec3 *default_eye_relation,
 	               uint64_t at_timestamp_ns,
+	               xrt_view_type view_type,
 	               uint32_t view_count,
 	               xrt_space_relation *out_head_relation,
 	               xrt_fov *out_fovs,
@@ -197,6 +202,9 @@ public:
 	get_brightness(float *out_brightness);
 	xrt_result_t
 	set_brightness(float brightness, bool relative);
+
+	xrt_result_t
+	get_compositor_info(const struct xrt_device_compositor_mode *mode, struct xrt_device_compositor_info *out_info);
 
 	bool
 	init_vive_pro_2(struct xrt_prober *xp);
@@ -230,9 +238,6 @@ public:
 	xrt_result_t
 	get_tracked_pose(xrt_input_name name, uint64_t at_timestamp_ns, xrt_space_relation *out_relation) override;
 
-	IndexFingerInput *
-	get_finger_from_name(std::string_view name);
-
 	xrt_result_t
 	get_hand_tracking(enum xrt_input_name name,
 	                  int64_t desired_timestamp_ns,
@@ -243,22 +248,35 @@ public:
 	get_xrt_hand();
 
 	void
-	update_hand_tracking(int64_t desired_timestamp_ns, struct xrt_hand_joint_set *out);
+	update_skeleton_transforms(std::span<const vr::VRBoneTransform_t> bones);
+
+	void
+	set_skeleton(std::span<const vr::VRBoneTransform_t> bones, xrt_hand hand, bool is_simulated, const char *path);
+
+	void
+	set_active_hand(xrt_hand hand);
 
 protected:
 	void
 	set_input_class(const InputClass *input_class);
 
+	void
+	generate_palm_pose_offset(std::span<const vr::VRBoneTransform_t> bones, xrt_hand hand);
+
 private:
 	vr::VRInputComponentHandle_t haptic_handle{0};
 	std::unique_ptr<xrt_output> output{nullptr};
-	bool has_index_hand_tracking{false};
-	std::vector<IndexFingerInput> finger_inputs_vec;
-	std::unordered_map<std::string_view, IndexFingerInput *> finger_inputs_map;
-	uint64_t hand_tracking_timestamp;
+	bool has_hand_tracking{false};
+	xrt_hand skeleton_hand = XRT_HAND_LEFT;
+	std::array<std::optional<xrt_pose>, 2> palm_offsets;
+	std::array<xrt_input, 2> hand_tracking_inputs{};
 
-	void
-	set_hand_tracking_hand(xrt_input_name name);
+	struct JointsWithTimestamp
+	{
+		xrt_hand_joint_set joint_set;
+		int64_t timestamp{0};
+	};
+	xrt::auxiliary::util::HistoryBuffer<JointsWithTimestamp, 5> joint_history;
 
 	vr::ETrackedPropertyError
 	handle_property_write(const vr::PropertyWrite_t &prop) override;

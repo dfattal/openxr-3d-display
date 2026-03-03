@@ -14,27 +14,10 @@
 
 // clang-format off
 
-const char *
-xrt_input_name_string(enum xrt_input_name input) {
-    switch(input)
-    {
-$xrt_input_name_string_switch
-    }
-}
-
 enum xrt_input_name
 xrt_input_name_enum(const char *input)
 {
 $xrt_input_name_enum_content
-}
-
-const char *
-xrt_output_name_string(enum xrt_output_name output)
-{
-    switch(output)
-    {
-$xrt_output_name_string_switch
-    }
 }
 
 enum xrt_output_name

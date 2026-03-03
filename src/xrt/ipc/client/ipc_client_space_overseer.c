@@ -1,4 +1,5 @@
 // Copyright 2023, Collabora, Ltd.
+// Copyright 2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -317,6 +318,20 @@ set_reference_space_offset(struct xrt_space_overseer *xso,
 	return ipc_call_space_set_reference_space_offset(icspo->ipc_c, type, offset);
 }
 
+static xrt_result_t
+add_device(struct xrt_space_overseer *xso, struct xrt_device *xdev)
+{
+	return XRT_ERROR_NOT_IMPLEMENTED;
+}
+
+static xrt_result_t
+attach_device(struct xrt_space_overseer *xso, struct xrt_device *xdev, struct xrt_space *space)
+{
+	// For IPC client, attachable devices are handled on the server side.
+	// This should not be called from the client in the typical use case.
+	return XRT_ERROR_NOT_IMPLEMENTED;
+}
+
 static void
 destroy(struct xrt_space_overseer *xso)
 {
@@ -373,6 +388,8 @@ ipc_client_space_overseer_create(struct ipc_connection *ipc_c)
 	icspo->base.set_tracking_origin_offset = set_tracking_origin_offset;
 	icspo->base.get_reference_space_offset = get_reference_space_offset;
 	icspo->base.set_reference_space_offset = set_reference_space_offset;
+	icspo->base.add_device = add_device;
+	icspo->base.attach_device = attach_device;
 	icspo->base.destroy = destroy;
 	icspo->ipc_c = ipc_c;
 
@@ -394,4 +411,12 @@ ipc_client_space_overseer_create(struct ipc_connection *ipc_c)
 #undef CREATE
 
 	return &icspo->base;
+}
+
+uint32_t
+ipc_client_space_get_id(struct xrt_space *space)
+{
+	assert(space != NULL);
+
+	return ipc_client_space(space)->id;
 }

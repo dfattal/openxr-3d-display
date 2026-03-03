@@ -743,7 +743,7 @@ multi_compositor_wait_frame(struct xrt_compositor *xc,
 		if (!mc->session_render.window_close_exit_sent) {
 			U_LOG_W("Self-owned window closed - requesting session exit");
 			union xrt_session_event xse = XRT_STRUCT_INIT;
-			xse.type = XRT_SESSION_EVENT_EXIT_REQUEST;
+			xse.type = XRT_SESSION_EVENT_REQUEST_EXIT;
 			(void)multi_compositor_push_event(mc, &xse);
 			mc->session_render.window_close_exit_sent = true;
 		}
@@ -765,7 +765,7 @@ multi_compositor_wait_frame(struct xrt_compositor *xc,
 			if (!mc->session_render.window_close_exit_sent) {
 				U_LOG_W("macOS window closed - requesting session exit");
 				union xrt_session_event xse = XRT_STRUCT_INIT;
-				xse.type = XRT_SESSION_EVENT_EXIT_REQUEST;
+				xse.type = XRT_SESSION_EVENT_REQUEST_EXIT;
 				(void)multi_compositor_push_event(mc, &xse);
 				mc->session_render.window_close_exit_sent = true;
 			}
@@ -830,6 +830,8 @@ multi_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 
 	os_mutex_lock(&mc->msc->list_and_timing_lock);
 	u_pa_mark_discarded(mc->upa, frame_id, now_ns);
+	// Need to drop delivered frame as it shouldn't be reused.
+	multi_compositor_retire_delivered_locked(mc, now_ns);
 	os_mutex_unlock(&mc->msc->list_and_timing_lock);
 
 	return XRT_SUCCESS;
@@ -1635,7 +1637,7 @@ multi_compositor_init_session_render(struct multi_compositor *mc)
 	{
 		uint32_t disp_w = mc->msc->base.info.display_pixel_width;
 		if (disp_w == 0) {
-			disp_w = mc->msc->base.info.views[0].recommended.width_pixels;
+			disp_w = mc->msc->base.info.view_configs[0].views[0].recommended.width_pixels;
 		}
 		u_hud_create(&mc->session_render.hud, disp_w);
 	}

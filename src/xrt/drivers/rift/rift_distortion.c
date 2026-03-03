@@ -10,15 +10,11 @@
 #include "rift_distortion.h"
 
 #include "math/m_vec2.h"
+#include "math/m_vec3.h"
 
-#define HMD_TRACE(hmd, ...) U_LOG_XDEV_IFL_T(&hmd->base, hmd->log_level, __VA_ARGS__)
-#define HMD_DEBUG(hmd, ...) U_LOG_XDEV_IFL_D(&hmd->base, hmd->log_level, __VA_ARGS__)
-#define HMD_INFO(hmd, ...) U_LOG_XDEV_IFL_I(&hmd->base, hmd->log_level, __VA_ARGS__)
-#define HMD_WARN(hmd, ...) U_LOG_XDEV_IFL_W(&hmd->base, hmd->log_level, __VA_ARGS__)
-#define HMD_ERROR(hmd, ...) U_LOG_XDEV_IFL_E(&hmd->base, hmd->log_level, __VA_ARGS__)
 
 static float
-rift_catmull_rom_spline(struct rift_catmull_rom_distortion_data *catmull, float scaled_value)
+rift_catmull_rom_spline(const struct rift_catmull_rom_distortion_data *catmull, float scaled_value)
 {
 	float scaled_value_floor = floorf(scaled_value);
 	scaled_value_floor = CLAMP(scaled_value_floor, 0, CATMULL_COEFFICIENTS - 1);
@@ -62,7 +58,7 @@ rift_catmull_rom_spline(struct rift_catmull_rom_distortion_data *catmull, float 
 }
 
 static float
-rift_distortion_distance_scale_squared(struct rift_lens_distortion *lens_distortion, float distance_squared)
+rift_distortion_distance_scale_squared(const struct rift_lens_distortion *lens_distortion, float distance_squared)
 {
 	float scale = 1.0f;
 
@@ -80,15 +76,12 @@ rift_distortion_distance_scale_squared(struct rift_lens_distortion *lens_distort
 }
 
 struct xrt_vec3
-rift_distortion_distance_scale_squared_split_chroma(struct rift_lens_distortion *lens_distortion,
+rift_distortion_distance_scale_squared_split_chroma(const struct rift_lens_distortion *lens_distortion,
                                                     float distance_squared)
 {
 	float scale = rift_distortion_distance_scale_squared(lens_distortion, distance_squared);
 
-	struct xrt_vec3 scale_split;
-	scale_split.x = scale;
-	scale_split.y = scale;
-	scale_split.z = scale;
+	struct xrt_vec3 scale_split = {scale, scale, scale};
 
 	switch (lens_distortion->distortion_version) {
 	case RIFT_LENS_DISTORTION_LCSV_CATMULL_ROM_10_VERSION_1: {
@@ -106,7 +99,7 @@ rift_distortion_distance_scale_squared_split_chroma(struct rift_lens_distortion 
 struct rift_distortion_render_info
 rift_get_distortion_render_info(struct rift_hmd *hmd, uint32_t view)
 {
-	struct rift_lens_distortion *distortion = &hmd->lens_distortions[hmd->distortion_in_use];
+	const struct rift_lens_distortion *distortion = &hmd->lens_distortions[hmd->distortion_in_use];
 
 	float display_width_meters = MICROMETERS_TO_METERS(hmd->display_info.display_width);
 	float display_height_meters = MICROMETERS_TO_METERS(hmd->display_info.display_height);
@@ -188,7 +181,8 @@ rift_calculate_fov_from_eye_position(
 }
 
 static struct xrt_vec2
-rift_transform_screen_ndc_to_tan_fov_space(struct rift_distortion_render_info *distortion, struct xrt_vec2 screen_ndc)
+rift_transform_screen_ndc_to_tan_fov_space(const struct rift_distortion_render_info *distortion,
+                                           struct xrt_vec2 screen_ndc)
 {
 	struct xrt_vec2 tan_eye_angle_distorted = {
 	    (screen_ndc.x - distortion->lens_center.x) * distortion->tan_eye_angle_scale.x,
@@ -206,7 +200,7 @@ static struct rift_viewport_fov_tan
 rift_fov_find_range(struct xrt_vec2 from,
                     struct xrt_vec2 to,
                     int num_steps,
-                    struct rift_distortion_render_info *distortion)
+                    const struct rift_distortion_render_info *distortion)
 {
 	struct rift_viewport_fov_tan fov_port = {0.0f, 0.0f, 0.0f, 0.0f};
 
@@ -226,7 +220,7 @@ rift_fov_find_range(struct xrt_vec2 from,
 }
 
 static struct rift_viewport_fov_tan
-rift_get_physical_screen_fov(struct rift_distortion_render_info *distortion)
+rift_get_physical_screen_fov(const struct rift_distortion_render_info *distortion)
 {
 	struct xrt_vec2 lens_center = distortion->lens_center;
 
@@ -249,7 +243,7 @@ rift_get_physical_screen_fov(struct rift_distortion_render_info *distortion)
 }
 
 static struct rift_viewport_fov_tan
-rift_clamp_fov_to_physical_screen_fov(struct rift_distortion_render_info *distortion,
+rift_clamp_fov_to_physical_screen_fov(const struct rift_distortion_render_info *distortion,
                                       struct rift_viewport_fov_tan fov_port)
 {
 	struct rift_viewport_fov_tan result_fov_port;
@@ -264,7 +258,7 @@ rift_clamp_fov_to_physical_screen_fov(struct rift_distortion_render_info *distor
 }
 
 struct rift_viewport_fov_tan
-rift_calculate_fov_from_hmd(struct rift_hmd *hmd, struct rift_distortion_render_info *distortion, uint32_t view)
+rift_calculate_fov_from_hmd(struct rift_hmd *hmd, const struct rift_distortion_render_info *distortion, uint32_t view)
 {
 	float eye_relief = distortion->distortion->eye_relief;
 
@@ -278,7 +272,7 @@ rift_calculate_fov_from_hmd(struct rift_hmd *hmd, struct rift_distortion_render_
 }
 
 struct rift_scale_and_offset
-rift_calculate_ndc_scale_and_offset_from_fov(struct rift_viewport_fov_tan *fov)
+rift_calculate_ndc_scale_and_offset_from_fov(const struct rift_viewport_fov_tan *fov)
 {
 	struct xrt_vec2 proj_scale = {.x = 2.0f / (fov->left_tan + fov->right_tan),
 	                              .y = 2.0f / (fov->up_tan + fov->down_tan)};
@@ -299,7 +293,7 @@ rift_calculate_uv_scale_and_offset_from_ndc_scale_and_offset(struct rift_scale_a
 }
 
 static struct xrt_uv_triplet
-rift_transform_screen_ndc_to_tan_fov_space_chroma(struct rift_distortion_render_info *distortion,
+rift_transform_screen_ndc_to_tan_fov_space_chroma(const struct rift_distortion_render_info *distortion,
                                                   struct xrt_vec2 screen_ndc)
 {
 	struct xrt_vec2 tan_eye_angle_distorted = {
@@ -399,14 +393,20 @@ rift_hmd_compute_distortion(struct xrt_device *dev, uint32_t view, float u, floa
 
 	struct xrt_vec2 source_ndc = {TO_NDC(u), TO_NDC(v)};
 
-	struct rift_distortion_render_info distortion_render_info = rift_get_distortion_render_info(hmd, 0);
+	// Flip the input x coordinate for the left eye
+	if (view == 0) {
+		source_ndc.x *= -1.0f;
+	}
 
-	struct rift_scale_and_offset *eye_to_source_uv = &hmd->extra_display_info.eye_to_source_uv;
+	struct rift_distortion_render_info distortion_render_info = rift_get_distortion_render_info(hmd, 0);
 
 	struct xrt_uv_triplet tan_fov_chroma =
 	    rift_transform_screen_ndc_to_tan_fov_space_chroma(&distortion_render_info, source_ndc);
 
-#if 0 // no distortion (green channel doesn't have any chromatic aberration correction)
+	struct rift_scale_and_offset *eye_to_source_uv = &hmd->extra_display_info.eye_to_source_uv;
+
+#if 0 
+	// no chromatic aberration correction, pulled from the green channel, which has no correction applied
 	struct xrt_uv_triplet sample_tex_coord = {
 	    .r = m_vec2_add(m_vec2_mul(tan_fov_chroma.g, eye_to_source_uv->scale), eye_to_source_uv->offset),
 	    .g = m_vec2_add(m_vec2_mul(tan_fov_chroma.g, eye_to_source_uv->scale), eye_to_source_uv->offset),
@@ -418,6 +418,14 @@ rift_hmd_compute_distortion(struct xrt_device *dev, uint32_t view, float u, floa
 	    .b = m_vec2_add(m_vec2_mul(tan_fov_chroma.b, eye_to_source_uv->scale), eye_to_source_uv->offset)};
 #endif
 
+	// Flip the output x coordinate for the left eye back to the right space, this in effect reverses the distortion
+	// in the left eye, which is correct.
+	if (view == 0) {
+		sample_tex_coord.r.x = 1 - sample_tex_coord.r.x;
+		sample_tex_coord.g.x = 1 - sample_tex_coord.g.x;
+		sample_tex_coord.b.x = 1 - sample_tex_coord.b.x;
+	}
+
 	*out_result = sample_tex_coord;
 
 	return XRT_SUCCESS;
@@ -425,74 +433,117 @@ rift_hmd_compute_distortion(struct xrt_device *dev, uint32_t view, float u, floa
 #undef TO_NDC
 }
 
+// @todo remove clang-format off when CI is updated
+// clang-format off
+static const struct rift_lens_distortion DK2_DISTORTIONS[] = {
+    {
+        .distortion_version = RIFT_LENS_DISTORTION_LCSV_CATMULL_ROM_10_VERSION_1,
+        .eye_relief = 0.008f,
+        .data =
+            {
+                .lcsv_catmull_rom_10 =
+                    {
+                        .meters_per_tan_angle_at_center = 0.036f,
+                        .max_r = 1.0f,
+                        .chromatic_abberation = {-0.0112f, -0.015f, 0.0187f, 0.015f},
+                        .k =
+                            {
+                                1.003f,
+                                1.02f,
+                                1.042f,
+                                1.066f,
+                                1.094f,
+                                1.126f,
+                                1.162f,
+                                1.203f,
+                                1.25f,
+                                1.31f,
+                                1.38f,
+                            },
+                    },
+            },
+    },
+    {
+        .distortion_version = RIFT_LENS_DISTORTION_LCSV_CATMULL_ROM_10_VERSION_1,
+        .eye_relief = 0.018f,
+        .data =
+            {
+                .lcsv_catmull_rom_10 =
+                    {
+                        .meters_per_tan_angle_at_center = 0.036f,
+                        .max_r = 1.0f,
+                        .chromatic_abberation = {-0.015f, -0.02f, 0.025f, 0.02f},
+                        .k =
+                            {
+                                1.003f,
+                                1.02f,
+                                1.042f,
+                                1.066f,
+                                1.094f,
+                                1.126f,
+                                1.162f,
+                                1.203f,
+                                1.25f,
+                                1.31f,
+                                1.38f,
+                            },
+                    },
+            },
+    }};
+
+static const struct rift_lens_distortion CV1_DISTORTIONS[] = {{
+    .distortion_version = RIFT_LENS_DISTORTION_LCSV_CATMULL_ROM_10_VERSION_1,
+    .eye_relief = 0.015f,
+    .data =
+        {
+            .lcsv_catmull_rom_10 =
+                {
+                    .meters_per_tan_angle_at_center = 0.0438f,
+                    .max_r = 1.0f,
+                    .chromatic_abberation = {-0.008f, -0.005f, 0.015f, 0.005f},
+                    .k =
+                        {
+                            1.000f,
+                            1.0312999f,
+                            1.0698f,
+                            1.1155f,
+                            1.173f,
+                            1.2460001f,
+                            1.336f,
+                            1.457f,
+                            1.630f,
+                            1.900f,
+                            2.3599999f,
+                        },
+                },
+        },
+}};
+// clang-format on
+
 void
 rift_fill_in_default_distortions(struct rift_hmd *hmd)
 {
-	hmd->num_lens_distortions = 2;
-	hmd->lens_distortions = calloc(hmd->num_lens_distortions, sizeof(struct rift_lens_distortion));
+	switch (hmd->variant) {
+	case RIFT_VARIANT_DK1: // TODO: fill these in for DK1, for now just use DK2
+	case RIFT_VARIANT_DK2: {
+		hmd->num_lens_distortions = ARRAY_SIZE(DK2_DISTORTIONS);
+		hmd->lens_distortions = DK2_DISTORTIONS;
 
-	uint16_t i = 0;
+		// TODO: let the user specify which distortion is in use with an env var,
+		//       and interpolate the distortions for the user's specific eye relief setting
+		hmd->distortion_in_use = 1;
 
-	struct rift_catmull_rom_distortion_data distortion_data;
+		break;
+	}
+	case RIFT_VARIANT_CV1: {
+		hmd->num_lens_distortions = ARRAY_SIZE(CV1_DISTORTIONS);
+		hmd->lens_distortions = CV1_DISTORTIONS;
 
-	// TODO: dump these from the latest oculus runtime
-	// TODO: select the right distorions based on rift variant, right now this is hard-coded to the DK2
+		// TODO: let the user specify which distortion is in use with an env var,
+		//       and interpolate the distortions for the user's specific eye relief setting
+		hmd->distortion_in_use = 0;
 
-	hmd->lens_distortions[i].distortion_version = RIFT_LENS_DISTORTION_LCSV_CATMULL_ROM_10_VERSION_1;
-	hmd->lens_distortions[i].eye_relief = 0.008f;
-
-	distortion_data.meters_per_tan_angle_at_center = 0.036f;
-	distortion_data.max_r = 1.0f;
-
-	distortion_data.k[0] = 1.003f;
-	distortion_data.k[1] = 1.02f;
-	distortion_data.k[2] = 1.042f;
-	distortion_data.k[3] = 1.066f;
-	distortion_data.k[4] = 1.094f;
-	distortion_data.k[5] = 1.126f;
-	distortion_data.k[6] = 1.162f;
-	distortion_data.k[7] = 1.203f;
-	distortion_data.k[8] = 1.25f;
-	distortion_data.k[9] = 1.31f;
-	distortion_data.k[10] = 1.38f;
-
-	distortion_data.chromatic_abberation[0] = -0.0112f;
-	distortion_data.chromatic_abberation[1] = -0.015f;
-	distortion_data.chromatic_abberation[2] = 0.0187f;
-	distortion_data.chromatic_abberation[3] = 0.015f;
-
-	hmd->lens_distortions[i].data.lcsv_catmull_rom_10 = distortion_data;
-
-	i += 1;
-
-	hmd->lens_distortions[i].distortion_version = RIFT_LENS_DISTORTION_LCSV_CATMULL_ROM_10_VERSION_1;
-	hmd->lens_distortions[i].eye_relief = 0.018f;
-
-	distortion_data.meters_per_tan_angle_at_center = 0.036f;
-	distortion_data.max_r = 1.0f;
-
-	distortion_data.k[0] = 1.003f;
-	distortion_data.k[1] = 1.02f;
-	distortion_data.k[2] = 1.042f;
-	distortion_data.k[3] = 1.066f;
-	distortion_data.k[4] = 1.094f;
-	distortion_data.k[5] = 1.126f;
-	distortion_data.k[6] = 1.162f;
-	distortion_data.k[7] = 1.203f;
-	distortion_data.k[8] = 1.25f;
-	distortion_data.k[9] = 1.31f;
-	distortion_data.k[10] = 1.38f;
-
-	distortion_data.chromatic_abberation[0] = -0.015f;
-	distortion_data.chromatic_abberation[1] = -0.02f;
-	distortion_data.chromatic_abberation[2] = 0.025f;
-	distortion_data.chromatic_abberation[3] = 0.02f;
-
-	hmd->lens_distortions[i].data.lcsv_catmull_rom_10 = distortion_data;
-
-	i += 1;
-
-	// TODO: let the user specify which distortion is in use with an env var,
-	//       and interpolate the distortions for the user's specific eye relief setting
-	hmd->distortion_in_use = 1;
+		break;
+	}
+	}
 }

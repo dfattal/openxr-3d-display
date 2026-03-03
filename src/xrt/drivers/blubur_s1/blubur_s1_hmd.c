@@ -157,13 +157,21 @@ static xrt_result_t
 blubur_s1_hmd_get_view_poses(struct xrt_device *xdev,
                              const struct xrt_vec3 *default_eye_relation,
                              int64_t at_timestamp_ns,
+                             enum xrt_view_type view_type,
                              uint32_t view_count,
                              struct xrt_space_relation *out_head_relation,
                              struct xrt_fov *out_fovs,
                              struct xrt_pose *out_poses)
 {
-	return u_device_get_view_poses(xdev, default_eye_relation, at_timestamp_ns, view_count, out_head_relation,
-	                               out_fovs, out_poses);
+	return u_device_get_view_poses( //
+	    xdev,                       //
+	    default_eye_relation,       //
+	    at_timestamp_ns,            //
+	    view_type,                  //
+	    view_count,                 //
+	    out_head_relation,          //
+	    out_fovs,                   //
+	    out_poses);                 //
 }
 
 static void
@@ -502,12 +510,12 @@ blubur_s1_hmd_thread(void *ptr)
 	return NULL;
 }
 
-static struct xrt_binding_input_pair vive_pro_inputs_blubur_s1_hmd[1] = {
+static struct xrt_binding_input_pair vive_pro_inputs_blubur_s1_hmd[] = {
     {XRT_INPUT_VIVEPRO_SYSTEM_CLICK, XRT_INPUT_BLUBUR_S1_MENU_CLICK},
 };
 
 // Exported to drivers.
-static struct xrt_binding_profile blubur_s1_hmd_binding_profiles[2] = {
+static struct xrt_binding_profile blubur_s1_hmd_binding_profiles[] = {
     {
         .name = XRT_DEVICE_VIVE_PRO,
         .inputs = vive_pro_inputs_blubur_s1_hmd,

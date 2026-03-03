@@ -19,11 +19,11 @@
 static void
 calc_projection(const struct xrt_fov *fov, struct xrt_matrix_4x4_f64 *result)
 {
-	const double tan_left = tan(fov->angle_left);
-	const double tan_right = tan(fov->angle_right);
+	const double tan_left = tan((double)fov->angle_left);
+	const double tan_right = tan((double)fov->angle_right);
 
-	const double tan_down = tan(fov->angle_down);
-	const double tan_up = tan(fov->angle_up);
+	const double tan_down = tan((double)fov->angle_down);
+	const double tan_up = tan((double)fov->angle_up);
 
 	const bool vulkan_projection_space_y = true;
 
@@ -87,6 +87,55 @@ calc_projection(const struct xrt_fov *fov, struct xrt_matrix_4x4_f64 *result)
  *
  */
 
+uint32_t
+render_max_layers_capable(const struct vk_bundle *vk, bool use_compute, uint32_t desired_max_layers)
+{
+	/*!
+	 * Graphics pipeline:
+	 *
+	 * This path has no relevant Vulkan device limits that would
+	 * constrain the maximum number of layers (each layer uses a single descriptor
+	 * set bound individually per draw).
+	 */
+	if (!use_compute) {
+		// The min required by OpenXR spec is 16.
+		return MAX(desired_max_layers, 16);
+	}
+
+	/*!
+	 * Compute pipeline:
+	 *
+	 * Clamp max layers based on compute pipeline descriptor limits.
+	 *
+	 * The compute path uses an array of combined image samplers, with
+	 * @ref samplers_per_layer samplers needed per layer. We check both the
+	 * per-stage sampler and sampled image limits, then calculate the
+	 * maximum number of complete layers that fit within those limits.
+	 */
+	uint32_t desired_image_sampler_count = desired_max_layers * RENDER_CS_MAX_SAMPLERS_PER_VIEW;
+
+	const uint32_t max_sizes[] = {
+	    vk->limits.max_per_stage_descriptor_samplers,
+	    vk->limits.max_per_stage_descriptor_sampled_images,
+	};
+	for (uint32_t i = 0; i < ARRAY_SIZE(max_sizes); ++i) {
+		desired_image_sampler_count = MIN(desired_image_sampler_count, max_sizes[i]);
+	}
+
+	const uint32_t calculated_max_layers = desired_image_sampler_count / RENDER_CS_MAX_SAMPLERS_PER_VIEW;
+
+	if (calculated_max_layers < 16) {
+		VK_WARN(vk,
+		        "Device supports only %u compositor layers due to Vulkan limits. "
+		        "which is below Vulkan minimum of 16. "
+		        "This may indicate a driver bug. Attempting 16 anyway.",
+		        calculated_max_layers);
+	}
+
+	// The min required by OpenXR spec is 16.
+	return MAX(calculated_max_layers, 16);
+}
+
 void
 render_calc_time_warp_matrix(const struct xrt_pose *src_pose,
                              const struct xrt_fov *src_fov,
@@ -124,15 +173,26 @@ render_calc_time_warp_matrix(const struct xrt_pose *src_pose,
 }
 
 void
+render_calc_time_warp_projection(const struct xrt_fov *fov, struct xrt_matrix_4x4 *result)
+{
+	struct xrt_matrix_4x4_f64 tmp;
+	calc_projection(fov, &tmp);
+
+	for (int i = 0; i < 16; i++) {
+		result->v[i] = (float)tmp.v[i];
+	}
+}
+
+void
 render_calc_uv_to_tangent_lengths_rect(const struct xrt_fov *fov, struct xrt_normalized_rect *out_rect)
 {
 	const struct xrt_fov copy = *fov;
 
-	const double tan_left = tan(copy.angle_left);
-	const double tan_right = tan(copy.angle_right);
+	const double tan_left = tan((double)copy.angle_left);
+	const double tan_right = tan((double)copy.angle_right);
 
-	const double tan_down = tan(copy.angle_down);
-	const double tan_up = tan(copy.angle_up);
+	const double tan_down = tan((double)copy.angle_down);
+	const double tan_up = tan((double)copy.angle_up);
 
 	const double tan_width = tan_right - tan_left;
 	const double tan_height = tan_up - tan_down;

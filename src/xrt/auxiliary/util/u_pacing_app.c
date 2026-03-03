@@ -26,6 +26,9 @@ DEBUG_GET_ONCE_FLOAT_OPTION(min_app_time_ms, "U_PACING_APP_MIN_TIME_MS", 1.0f)
 DEBUG_GET_ONCE_FLOAT_OPTION(min_margin_ms, "U_PACING_APP_MIN_MARGIN_MS", 2.0f)
 DEBUG_GET_ONCE_BOOL_OPTION(use_min_frame_period, "U_PACING_APP_USE_MIN_FRAME_PERIOD", false)
 DEBUG_GET_ONCE_BOOL_OPTION(immediate_wait_frame_return, "U_PACING_APP_IMMEDIATE_WAIT_FRAME_RETURN", false)
+DEBUG_GET_ONCE_BOOL_OPTION(align_predicted_display_time_to_app_period,
+                           "U_PACING_APP_ALIGN_PREDICTED_DISPLAY_TIME_TO_APP_PERIOD",
+                           false)
 
 #define UPA_LOG_T(...) U_LOG_IFL_T(debug_get_log_option_log_level(), __VA_ARGS__)
 #define UPA_LOG_D(...) U_LOG_IFL_D(debug_get_log_option_log_level(), __VA_ARGS__)
@@ -221,7 +224,7 @@ do_iir_filter(int64_t *target, double alpha_lt, double alpha_gt, int64_t sample)
 }
 
 static int64_t
-min_period(const struct pacing_app *pa)
+display_period(const struct pacing_app *pa)
 {
 	return pa->last_input.predicted_display_period_ns;
 }
@@ -276,34 +279,37 @@ total_app_and_compositor_time_ns(const struct pacing_app *pa)
 }
 
 static int64_t
-calc_period(const struct pacing_app *pa)
+calc_app_period(const struct pacing_app *pa, int64_t display_period_ns)
 {
-	// Error checking.
-	int64_t base_period_ns = min_period(pa);
-	if (base_period_ns == 0) {
-		assert(false && "Have not yet received and samples from timing driver.");
-		base_period_ns = U_TIME_1MS_IN_NS * 16; // Sure
-	}
-
 	// Calculate the using both values separately.
-	int64_t period_ns = base_period_ns;
-	while (pa->app.cpu_time_ns > period_ns) {
-		period_ns += base_period_ns;
+	int64_t app_period_ns = display_period_ns;
+
+	/*
+	 * We can either limit the application to a calculated frame rate that
+	 * depends on it's total frame time. Or we try to use the minimal frame
+	 * period, aka the compositor's frame period. This will use more power.
+	 */
+	if (debug_get_bool_option_use_min_frame_period()) {
+		return app_period_ns;
 	}
 
-	while (pa->app.draw_time_ns > period_ns) {
-		period_ns += base_period_ns;
+	while (pa->app.cpu_time_ns > app_period_ns) {
+		app_period_ns += display_period_ns;
 	}
 
-	while (pa->app.gpu_time_ns > period_ns) {
-		period_ns += base_period_ns;
+	while (pa->app.draw_time_ns > app_period_ns) {
+		app_period_ns += display_period_ns;
 	}
 
-	return period_ns;
+	while (pa->app.gpu_time_ns > app_period_ns) {
+		app_period_ns += display_period_ns;
+	}
+
+	return app_period_ns;
 }
 
 static int64_t
-predict_display_time(const struct pacing_app *pa, int64_t now_ns, int64_t period_ns)
+predict_display_time(const struct pacing_app *pa, int64_t now_ns, int64_t display_period_ns, int64_t app_period_ns)
 {
 
 	// Total app and compositor time to produce a frame
@@ -315,8 +321,15 @@ predict_display_time(const struct pacing_app *pa, int64_t now_ns, int64_t period
 	// Return a time after the last returned display time. Add half the
 	// display period to the comparison for robustness when the last display
 	// time shifts slightly with respect to the last sample.
-	while (val <= last_return_predicted_display(pa) + (period_ns / 2)) {
-		val += period_ns;
+	while (val <= last_return_predicted_display(pa) + (app_period_ns / 2)) {
+		val += app_period_ns;
+	}
+
+	int64_t period_ns;
+	if (debug_get_bool_option_align_predicted_display_time_to_app_period()) {
+		period_ns = app_period_ns;
+	} else {
+		period_ns = display_period_ns;
 	}
 
 	// Have to have enough time to perform app work.
@@ -446,20 +459,16 @@ pa_predict(struct u_pacing_app *upa,
 
 	DEBUG_PRINT_ID(frame_id);
 
-	int64_t period_ns;
-
-	/*
-	 * We can either limit the application to a calculated frame rate that
-	 * depends on it's total frame time. Or we try to use the minimal frame
-	 * period, aka the compositor's frame period. This will use more power.
-	 */
-	if (debug_get_bool_option_use_min_frame_period()) {
-		period_ns = min_period(pa);
-	} else {
-		period_ns = calc_period(pa);
+	// Error checking.
+	int64_t display_period_ns = display_period(pa);
+	if (display_period_ns == 0) {
+		assert(false && "Have not yet received and samples from timing driver.");
+		display_period_ns = U_TIME_1MS_IN_NS * 16; // Sure
 	}
 
-	int64_t predict_ns = predict_display_time(pa, now_ns, period_ns);
+	int64_t app_period_ns = calc_app_period(pa, display_period_ns);
+
+	int64_t predict_ns = predict_display_time(pa, now_ns, display_period_ns, app_period_ns);
 	// How long we think the frame should take.
 	int64_t frame_time_ns = total_app_time_ns(pa);
 	// When should the client wake up.
@@ -478,13 +487,13 @@ pa_predict(struct u_pacing_app *upa,
 	}
 
 	// When the client's GPU work should have completed.
-	int64_t gpu_done_time_ns = predict_ns - total_compositor_time_ns(pa);
+	int64_t gpu_done_time_ns = wake_up_time_ns + total_app_time_ns(pa);
 
 	pa->last_returned_ns = predict_ns;
 
 	*out_wake_up_time = wake_up_time_ns;
 	*out_predicted_display_time = predict_ns;
-	*out_predicted_display_period = period_ns;
+	*out_predicted_display_period = app_period_ns;
 
 	size_t index = GET_INDEX_FROM_ID(pa, frame_id);
 	struct u_pa_frame *f = &pa->frames[index];
@@ -497,7 +506,7 @@ pa_predict(struct u_pacing_app *upa,
 	f->predicted_wake_up_time_ns = wake_up_time_ns;
 	f->predicted_gpu_done_time_ns = gpu_done_time_ns;
 	f->predicted_display_time_ns = predict_ns;
-	f->predicted_display_period_ns = period_ns;
+	f->predicted_display_period_ns = app_period_ns;
 	f->when.predicted_ns = now_ns;
 
 #ifdef U_TRACE_TRACY // Uses Tracy specific things.

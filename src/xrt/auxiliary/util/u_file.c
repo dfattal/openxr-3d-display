@@ -1,4 +1,5 @@
 // Copyright 2019-2025, Collabora, Ltd.
+// Copyright 2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -17,6 +18,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef XRT_OS_OSX
+// For PATH_MAX
+#include <sys/syslimits.h>
+#endif
 
 #if defined(XRT_OS_WINDOWS) && !defined(XRT_ENV_MINGW)
 #define PATH_MAX 4096

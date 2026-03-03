@@ -27,6 +27,14 @@ extern "C" {
 #define PSSENSE_PID_RIGHT 0x0E46
 
 /*!
+ * Create a PlayStation Sense controller device.
+ *
+ * @ingroup drv_pssense
+ */
+struct xrt_device *
+pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev);
+
+/*!
  * Probing function for PlayStation Sense devices.
  *
  * @ingroup drv_pssense

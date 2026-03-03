@@ -16,6 +16,7 @@
 
 #include "os/os_threading.h"
 #include "math/m_imu_3dof.h"
+#include "util/u_device.h"
 #include "util/u_logging.h"
 #include "xrt/xrt_device.h"
 
@@ -129,7 +130,8 @@ bool
 wmr_controller_base_init(struct wmr_controller_base *wcb,
                          struct wmr_controller_connection *conn,
                          enum xrt_device_type controller_type,
-                         enum u_logging_level log_level);
+                         enum u_logging_level log_level,
+                         u_device_destroy_function_t destroy_fn);
 
 void
 wmr_controller_base_deinit(struct wmr_controller_base *wcb);

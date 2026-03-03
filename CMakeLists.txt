@@ -1,4 +1,5 @@
 # Copyright 2018-2024, Collabora, Ltd.
+# Copyright 2024-2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 
 cmake_minimum_required(VERSION 3.22)
@@ -9,6 +10,7 @@ project(
 	DESCRIPTION "Monado(XRT) by Collabora et al"
 	)
 
+# Enable Objective-C for Apple platforms
 if(APPLE)
 	enable_language(OBJC)
 endif()
@@ -69,6 +71,8 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sanitizers")
 include(OptionWithDeps)
 include(SPIR-V)
 include(GNUInstallDirs)
+include(MergeJSON)
+include(GenerateMacroLists)
 if(NOT GIT_DESC)
 	include(GetGitRevisionDescription)
 	git_describe(GIT_DESC "--always")
@@ -289,11 +293,17 @@ option_with_deps(XRT_HAVE_ONNXRUNTIME "Enable ONNX runtime support" DEPENDS ONNX
 
 option(XRT_MODULE_IPC "Enable the build of the IPC layer" ON)
 option(XRT_MODULE_COMPOSITOR "Enable the compositor at all" ON)
+option_with_deps(XRT_MODULE_COMPOSITOR_CLIENT "Build compositor client library" DEPENDS XRT_MODULE_COMPOSITOR)
 option_with_deps(XRT_MODULE_COMPOSITOR_MAIN "Build main compositor host functionality" DEPENDS
 	XRT_MODULE_COMPOSITOR
 	XRT_HAVE_VULKAN
 	)
+option_with_deps(XRT_MODULE_COMPOSITOR_MULTI "Build multi-client compositor library" DEPENDS XRT_MODULE_COMPOSITOR)
 option_with_deps(XRT_MODULE_COMPOSITOR_NULL "Build testing null compositor" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
+option_with_deps(XRT_MODULE_COMPOSITOR_RENDER "Build compositor render library" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
+option_with_deps(XRT_MODULE_COMPOSITOR_SHADERS "Build compositor shaders" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
+option_with_deps(XRT_MODULE_COMPOSITOR_UTIL "Build compositor utility library" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
+option_with_deps(XRT_MODULE_COMPOSITOR_MOCK "Build mock compositor library" DEPENDS XRT_MODULE_COMPOSITOR)
 option_with_deps(XRT_MODULE_MERCURY_HANDTRACKING "Enable Mercury hand tracking" DEPENDS XRT_HAVE_OPENCV XRT_HAVE_ONNXRUNTIME)
 
 option(XRT_MODULE_MONADO_CLI "Build monado-cli" ON)
@@ -352,6 +362,7 @@ option_with_deps(XRT_HAVE_LIBUSB "Enable libusb (used for most drivers)" DEPENDS
 option_with_deps(XRT_HAVE_LIBUVC "Enable libuvc video driver" DEPENDS LIBUVC_FOUND XRT_HAVE_LIBUSB)
 option_with_deps(XRT_HAVE_REALSENSE "Enable RealSense support" DEPENDS realsense2_FOUND)
 option_with_deps(XRT_HAVE_OPENVR "Enable OpenVR support" DEPENDS OPENVR_FOUND)
+option_with_deps(XRT_BUILD_DRIVER_UVC "Enable userspace UVC driver" DEPENDS XRT_HAVE_LIBUSB)
 
 # Drivers to build (sorted)
 option_with_deps(XRT_BUILD_DRIVER_ANDROID "Enable Android sensors driver" DEPENDS ANDROID)
@@ -371,10 +382,12 @@ option_with_deps(XRT_BUILD_DRIVER_OPENGLOVES "Enable OpenGloves driver" DEPENDS 
 option_with_deps(XRT_BUILD_DRIVER_PSMV "Enable Playstation Move driver" DEPENDS XRT_HAVE_INTERNAL_HID "NOT MSVC")
 option_with_deps(XRT_BUILD_DRIVER_PSSENSE "Enable PlayStation Sense driver" DEPENDS XRT_HAVE_INTERNAL_HID)
 option_with_deps(XRT_BUILD_DRIVER_PSVR "Enable PSVR HMD driver" DEPENDS XRT_HAVE_HIDAPI)
+option_with_deps(XRT_BUILD_DRIVER_PSVR2 "Enable PS VR2 HMD driver" DEPENDS XRT_HAVE_INTERNAL_HID XRT_HAVE_LIBUSB)
 option_with_deps(XRT_BUILD_DRIVER_QWERTY "Enable Qwerty driver" DEPENDS "XRT_HAVE_SDL2 OR WIN32 OR APPLE")
 option_with_deps(XRT_BUILD_DRIVER_REALSENSE "Enable RealSense device driver" DEPENDS XRT_HAVE_REALSENSE)
 option_with_deps(XRT_BUILD_DRIVER_REMOTE "Enable remote debugging driver" DEPENDS "XRT_HAVE_LINUX OR ANDROID OR WIN32 OR XRT_HAVE_MACOS")
-option_with_deps(XRT_BUILD_DRIVER_RIFT "Enable Oculus Rift (DK2) device driver")
+option_with_deps(XRT_BUILD_DRIVER_RIFT "Enable Oculus Rift (DK2/CV1) device driver" DEPENDS XRT_HAVE_INTERNAL_HID)
+option_with_deps(XRT_BUILD_DRIVER_RIFT_SENSOR "Enable Oculus Rift Sensor (DK2/CV1) device driver" DEPENDS XRT_BUILD_DRIVER_RIFT XRT_BUILD_DRIVER_UVC XRT_HAVE_LIBUSB)
 option_with_deps(XRT_BUILD_DRIVER_RIFT_S "Enable Oculus Rift S device driver" DEPENDS XRT_HAVE_V4L2)
 option_with_deps(XRT_BUILD_DRIVER_ROKID "Enable Rokid driver" DEPENDS "XRT_HAVE_LIBUSB")
 option_with_deps(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE "Enable SteamVR Lighthouse driver" DEPENDS XRT_HAVE_LINUX XRT_MODULE_AUX_VIVE)
@@ -386,6 +399,7 @@ option_with_deps(XRT_BUILD_DRIVER_VIVE "Enable driver for HTC Vive, Vive Pro, Va
 option_with_deps(XRT_BUILD_DRIVER_WMR "Enable Windows Mixed Reality driver" DEPENDS LINUX)
 option_with_deps(XRT_BUILD_DRIVER_XREAL_AIR "Enable Xreal Air HMD driver" DEPENDS XRT_HAVE_HIDAPI)
 option_with_deps(XRT_BUILD_DRIVER_SIMULAVR "Enable simula driver" DEPENDS XRT_HAVE_REALSENSE)
+option_with_deps(XRT_BUILD_DRIVER_SOLARXR "Enable SolarXR driver" DEPENDS XRT_HAVE_LINUX XRT_MODULE_IPC)
 option(XRT_BUILD_DRIVER_SIMULATED "Enable simulated driver" ON)
 
 option(XRT_BUILD_SAMPLES "Enable compiling sample code implementations that will not be linked into any final targets" ON)
@@ -404,11 +418,14 @@ mark_as_advanced(XRT_MODULE_COMPOSITOR_MAIN XRT_MODULE_COMPOSITOR_NULL XRT_FEATU
 
 # Misc extension support.
 option(XRT_FEATURE_OPENXR_ACTIVE_ACTION_SET_PRIORITY "Enable XR_EXT_active_action_set_priority" ON)
+option(XRT_FEATURE_OPENXR_BODY_TRACKING_BD "Enable XR_BD_body_tracking (PICO)" OFF)
 option(XRT_FEATURE_OPENXR_BODY_TRACKING_FB "Enable XR_FB_body_tracking" OFF)
 option(XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE "Enable XR_FB_display_refresh_rate" ON)
-option(XRT_FEATURE_OPENXR_FACE_TRACKING2_FB "Enable XR_FB_face_tracking2" OFF)
-option(XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC "Enable XR_HTC_facial_tracking" OFF)
+option(XRT_FEATURE_OPENXR_FACE_TRACKING_ANDROID "Enable XR_ANDROID_face_tracking" ON)
+option(XRT_FEATURE_OPENXR_FACE_TRACKING2_FB "Enable XR_FB_face_tracking2" ON)
+option(XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC "Enable XR_HTC_facial_tracking" ON)
 option(XRT_FEATURE_OPENXR_FORCE_FEEDBACK_CURL "Enable XR_MNDX_force_feedback_curl" ON)
+option(XRT_FEATURE_OPENXR_FUTURE_EXT "Enable XR_EXT_future" ON)
 option(XRT_FEATURE_OPENXR_HAND_TRACKING_EXT "Enable XR_EXT_hand_tracking" ON)
 option_with_deps(XRT_FEATURE_OPENXR_HAND_TRACKING_DATA_SOURCE_EXT DEPENDS XRT_FEATURE_OPENXR_HAND_TRACKING_EXT)
 option(XRT_FEATURE_OPENXR_HAPTIC_PCM "Enable XR_FB_haptic_pcm" OFF)
@@ -427,8 +444,12 @@ option_with_deps(XRT_FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META "Enable XR_ME
 option(XRT_FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE "Enable XR_EXT_eye_gaze_interaction" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_EXT_HAND "Enable XR_EXT_hand_interaction" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE "Enable XR_EXT_palm_pose" OFF)
+# This can't be enabled currently because the current code in Monado doesn't
+# follow the spec. Common code or driver code to correctly map to the generic
+# controller interaction profile will need to be added.
+option(XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC "Enable XR_KHR_generic_controller" OFF)
 option(XRT_FEATURE_OPENXR_INTERACTION_ML2 "Enable XR_ML_ml2_controller_interaction" ON)
-option(XRT_FEATURE_OPENXR_INTERACTION_MNDX "Enable XR_MNDX_ball_on_a_stick_controller, XR_MNDX_hydra and XR_MNDX_system_buttons" ON)
+option(XRT_FEATURE_OPENXR_INTERACTION_MNDX "Enable XR_MNDX_ball_on_a_stick_controller, XR_MNDX_hydra, XR_MNDX_flipvr, and XR_MNDX_system_buttons" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_MSFT_HAND "Enable XR_MSFT_hand_interaction" OFF)
 option(XRT_FEATURE_OPENXR_INTERACTION_OPPO "Enable XR_OPPO_controller_interaction" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_WINMR "Enable XR_EXT_hp_mixed_reality_controller and XR_EXT_samsung_odyssey_controller" ON)
@@ -438,10 +459,11 @@ option(XRT_FEATURE_OPENXR_INTERACTION_VIVE_FOCUS3 "Enable XR_HTC_vive_focus3_con
 option(XRT_FEATURE_OPENXR_INTERACTION_FB_PROXIMITY "Enable XR_FB_touch_controller_proximity" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_TOUCH_PRO "Enable XR_FB_touch_controller_pro" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_TOUCH_PLUS "Enable XR_META_touch_controller_plus" ON)
+option(XRT_FEATURE_OPENXR_INTERACTION_LOGITECH_MX_INK "Enable XR_LOGITECH_mx_ink_stylus_interaction" OFF)
 
 # Defaults for OpenXR layer support
 option(XRT_FEATURE_OPENXR_LAYER_DEPTH "Enable XR_KHR_composition_layer_depth" ON)
-option(XRT_FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS "Enable XR_KHR_composition_layer_color_scale_bias" OFF)
+option(XRT_FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS "Enable XR_KHR_composition_layer_color_scale_bias" ON)
 option(XRT_FEATURE_OPENXR_LAYER_CUBE "Enable XR_KHR_composition_layer_cube" OFF)
 option(XRT_FEATURE_OPENXR_LAYER_CYLINDER "Enable XR_KHR_composition_layer_cylinder" ON)
 option(XRT_FEATURE_OPENXR_LAYER_EQUIRECT2 "Enable XR_KHR_composition_layer_equirect2" ON)
@@ -478,13 +500,16 @@ list(
 	"PSMV"
 	"PSSENSE"
 	"PSVR"
+	"PSVR2"
 	"REALSENSE"
 	"REMOTE"
 	"RIFT"
+	"RIFT_SENSOR"
 	"RIFT_S"
 	"ROKID"
 	"SURVIVE"
 	"V4L2"
+	"UVC"
 	"ULV2"
 	"ULV5"
 	"VF"
@@ -497,6 +522,7 @@ list(
 	"TWRAP"
 	"XREAL_AIR"
 	"STEAMVR_LIGHTHOUSE"
+	"SOLARXR"
 	)
 
 # Package name needs to be known by the native code itself.
@@ -658,47 +684,6 @@ message(STATUS "#    FEATURE_CLIENT_DEBUG_GUI:                      ${XRT_FEATUR
 message(STATUS "#    FEATURE_COLOR_LOG:                             ${XRT_FEATURE_COLOR_LOG}")
 message(STATUS "#    FEATURE_DEBUG_GUI:                             ${XRT_FEATURE_DEBUG_GUI}")
 message(STATUS "#    FEATURE_OPENXR:                                ${XRT_FEATURE_OPENXR}")
-message(STATUS "#    FEATURE_OPENXR_ACTIVE_ACTION_SET_PRIORITY:     ${XRT_FEATURE_OPENXR_ACTIVE_ACTION_SET_PRIORITY}")
-message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_FB:               ${XRT_FEATURE_OPENXR_BODY_TRACKING_FB}")
-message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META: ${XRT_FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META}")
-message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META:   ${XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META}")
-message(STATUS "#    FEATURE_OPENXR_FACE_TRACKING2_FB:              ${XRT_FEATURE_OPENXR_FACE_TRACKING2_FB}")
-message(STATUS "#    FEATURE_OPENXR_DEBUG_UTILS:                    ${XRT_FEATURE_OPENXR_DEBUG_UTILS}")
-message(STATUS "#    FEATURE_OPENXR_DISPLAY_REFRESH_RATE:           ${XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE}")
-message(STATUS "#    FEATURE_OPENXR_FACIAL_TRACKING_HTC:            ${XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC}")
-message(STATUS "#    FEATURE_OPENXR_FORCE_FEEDBACK_CURL:            ${XRT_FEATURE_OPENXR_FORCE_FEEDBACK_CURL}")
-message(STATUS "#    FEATURE_OPENXR_HAND_TRACKING_EXT:              ${XRT_FEATURE_OPENXR_HAND_TRACKING_EXT}")
-message(STATUS "#    FEATURE_OPENXR_HAND_TRACKING_DATA_SOURCE_EXT:  ${XRT_FEATURE_OPENXR_HAND_TRACKING_DATA_SOURCE_EXT}")
-message(STATUS "#    FEATURE_OPENXR_HAPTIC_PCM:                     ${XRT_FEATURE_OPENXR_HAPTIC_PCM}")
-message(STATUS "#    FEATURE_OPENXR_HEADLESS:                       ${XRT_FEATURE_OPENXR_HEADLESS}")
-message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE:       ${XRT_FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE}")
-message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_HAND:           ${XRT_FEATURE_OPENXR_INTERACTION_EXT_HAND}")
-message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE:      ${XRT_FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE}")
-message(STATUS "#    FEATURE_OPENXR_INTERACTION_ML2:                ${XRT_FEATURE_OPENXR_INTERACTION_ML2}")
-message(STATUS "#    FEATURE_OPENXR_INTERACTION_MNDX:               ${XRT_FEATURE_OPENXR_INTERACTION_MNDX}")
-message(STATUS "#    FEATURE_OPENXR_INTERACTION_MSFT_HAND:          ${XRT_FEATURE_OPENXR_INTERACTION_MSFT_HAND}")
-message(STATUS "#    FEATURE_OPENXR_INTERACTION_OPPO:               ${XRT_FEATURE_OPENXR_INTERACTION_OPPO}")
-message(STATUS "#    FEATURE_OPENXR_INTERACTION_WINMR:              ${XRT_FEATURE_OPENXR_INTERACTION_WINMR}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS:         ${XRT_FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_CUBE:                     ${XRT_FEATURE_OPENXR_LAYER_CUBE}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_CYLINDER:                 ${XRT_FEATURE_OPENXR_LAYER_CYLINDER}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_DEPTH:                    ${XRT_FEATURE_OPENXR_LAYER_DEPTH}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_EQUIRECT1:                ${XRT_FEATURE_OPENXR_LAYER_EQUIRECT1}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_EQUIRECT2:                ${XRT_FEATURE_OPENXR_LAYER_EQUIRECT2}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND:           ${XRT_FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_FB_DEPTH_TEST:            ${XRT_FEATURE_OPENXR_LAYER_FB_DEPTH_TEST}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT           ${XRT_FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_FB_SETTINGS:              ${XRT_FEATURE_OPENXR_LAYER_FB_SETTINGS}")
-message(STATUS "#    FEATURE_OPENXR_LAYER_FB_PASSTHROUGH:           ${XRT_FEATURE_OPENXR_LAYER_FB_PASSTHROUGH}")
-message(STATUS "#    FEATURE_OPENXR_OVERLAY:                        ${XRT_FEATURE_OPENXR_OVERLAY}")
-message(STATUS "#    FEATURE_OPENXR_PERFORMANCE_SETTINGS:           ${XRT_FEATURE_OPENXR_PERFORMANCE_SETTINGS}")
-message(STATUS "#    FEATURE_OPENXR_PLANE_DETECTION:                ${XRT_FEATURE_OPENXR_PLANE_DETECTION}")
-message(STATUS "#    FEATURE_OPENXR_USER_PRESENCE:                  ${XRT_FEATURE_OPENXR_USER_PRESENCE}")
-message(STATUS "#    FEATURE_OPENXR_SPACE_LOCAL_FLOOR:              ${XRT_FEATURE_OPENXR_SPACE_LOCAL_FLOOR}")
-message(STATUS "#    FEATURE_OPENXR_SPACE_UNBOUNDED:                ${XRT_FEATURE_OPENXR_SPACE_UNBOUNDED}")
-message(STATUS "#    FEATURE_OPENXR_VISIBILITY_MASK:                ${XRT_FEATURE_OPENXR_VISIBILITY_MASK}")
-message(STATUS "#    FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST:   ${XRT_FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST}")
-message(STATUS "#    FEATURE_OPENXR_XDEV_SPACE:                     ${XRT_FEATURE_OPENXR_XDEV_SPACE}")
 message(STATUS "#    FEATURE_RENDERDOC:                             ${XRT_FEATURE_RENDERDOC}")
 message(STATUS "#    FEATURE_SERVICE:                               ${XRT_FEATURE_SERVICE}")
 message(STATUS "#    FEATURE_SERVICE_SYSTEMD:                       ${XRT_FEATURE_SERVICE_SYSTEMD}")
@@ -709,6 +694,55 @@ message(STATUS "#    FEATURE_STEAMVR_PLUGIN:                        ${XRT_FEATUR
 message(STATUS "#    FEATURE_TRACING:                               ${XRT_FEATURE_TRACING}")
 message(STATUS "#    FEATURE_WINDOW_PEEK:                           ${XRT_FEATURE_WINDOW_PEEK}")
 message(STATUS "#")
+if(XRT_MODULE_OPENXR_STATE_TRACKER)
+	message(STATUS "#    FEATURE_OPENXR_ACTIVE_ACTION_SET_PRIORITY:             ${XRT_FEATURE_OPENXR_ACTIVE_ACTION_SET_PRIORITY}")
+	message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_BD:                       ${XRT_FEATURE_OPENXR_BODY_TRACKING_BD}")
+	message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META:         ${XRT_FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META}")
+	message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_FB:                       ${XRT_FEATURE_OPENXR_BODY_TRACKING_FB}")
+	message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META:           ${XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META}")
+	message(STATUS "#    FEATURE_OPENXR_DEBUG_UTILS:                            ${XRT_FEATURE_OPENXR_DEBUG_UTILS}")
+	message(STATUS "#    FEATURE_OPENXR_DISPLAY_REFRESH_RATE:                   ${XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE}")
+	message(STATUS "#    FEATURE_OPENXR_FACE_TRACKING2_FB:                      ${XRT_FEATURE_OPENXR_FACE_TRACKING2_FB}")
+	message(STATUS "#    FEATURE_OPENXR_FACE_TRACKING_ANDROID:                  ${XRT_FEATURE_OPENXR_FACE_TRACKING_ANDROID}")
+	message(STATUS "#    FEATURE_OPENXR_FACIAL_TRACKING_HTC:                    ${XRT_FEATURE_OPENXR_FACIAL_TRACKING_HTC}")
+	message(STATUS "#    FEATURE_OPENXR_FORCE_FEEDBACK_CURL:                    ${XRT_FEATURE_OPENXR_FORCE_FEEDBACK_CURL}")
+	message(STATUS "#    FEATURE_OPENXR_FUTURE_EXT:                             ${XRT_FEATURE_OPENXR_FUTURE_EXT}")
+	message(STATUS "#    FEATURE_OPENXR_HAND_TRACKING_DATA_SOURCE_EXT:          ${XRT_FEATURE_OPENXR_HAND_TRACKING_DATA_SOURCE_EXT}")
+	message(STATUS "#    FEATURE_OPENXR_HAND_TRACKING_EXT:                      ${XRT_FEATURE_OPENXR_HAND_TRACKING_EXT}")
+	message(STATUS "#    FEATURE_OPENXR_HAPTIC_PCM:                             ${XRT_FEATURE_OPENXR_HAPTIC_PCM}")
+	message(STATUS "#    FEATURE_OPENXR_HEADLESS:                               ${XRT_FEATURE_OPENXR_HEADLESS}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE:               ${XRT_FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_HAND:                   ${XRT_FEATURE_OPENXR_INTERACTION_EXT_HAND}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE:              ${XRT_FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_KHR_GENERIC:                ${XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_LOGITECH_MX_INK:            ${XRT_FEATURE_OPENXR_INTERACTION_LOGITECH_MX_INK}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_ML2:                        ${XRT_FEATURE_OPENXR_INTERACTION_ML2}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_MNDX:                       ${XRT_FEATURE_OPENXR_INTERACTION_MNDX}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_MSFT_HAND:                  ${XRT_FEATURE_OPENXR_INTERACTION_MSFT_HAND}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_OPPO:                       ${XRT_FEATURE_OPENXR_INTERACTION_OPPO}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_WINMR:                      ${XRT_FEATURE_OPENXR_INTERACTION_WINMR}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS:                 ${XRT_FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_CUBE:                             ${XRT_FEATURE_OPENXR_LAYER_CUBE}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_CYLINDER:                         ${XRT_FEATURE_OPENXR_LAYER_CYLINDER}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_DEPTH:                            ${XRT_FEATURE_OPENXR_LAYER_DEPTH}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_EQUIRECT1:                        ${XRT_FEATURE_OPENXR_LAYER_EQUIRECT1}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_EQUIRECT2:                        ${XRT_FEATURE_OPENXR_LAYER_EQUIRECT2}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND:                   ${XRT_FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_FB_DEPTH_TEST:                    ${XRT_FEATURE_OPENXR_LAYER_FB_DEPTH_TEST}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT                   ${XRT_FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_FB_PASSTHROUGH:                   ${XRT_FEATURE_OPENXR_LAYER_FB_PASSTHROUGH}")
+	message(STATUS "#    FEATURE_OPENXR_LAYER_FB_SETTINGS:                      ${XRT_FEATURE_OPENXR_LAYER_FB_SETTINGS}")
+	message(STATUS "#    FEATURE_OPENXR_OVERLAY:                                ${XRT_FEATURE_OPENXR_OVERLAY}")
+	message(STATUS "#    FEATURE_OPENXR_PERFORMANCE_SETTINGS:                   ${XRT_FEATURE_OPENXR_PERFORMANCE_SETTINGS}")
+	message(STATUS "#    FEATURE_OPENXR_PLANE_DETECTION:                        ${XRT_FEATURE_OPENXR_PLANE_DETECTION}")
+	message(STATUS "#    FEATURE_OPENXR_SPACE_LOCAL_FLOOR:                      ${XRT_FEATURE_OPENXR_SPACE_LOCAL_FLOOR}")
+	message(STATUS "#    FEATURE_OPENXR_SPACE_UNBOUNDED:                        ${XRT_FEATURE_OPENXR_SPACE_UNBOUNDED}")
+	message(STATUS "#    FEATURE_OPENXR_USER_PRESENCE:                          ${XRT_FEATURE_OPENXR_USER_PRESENCE}")
+	message(STATUS "#    FEATURE_OPENXR_VISIBILITY_MASK:                        ${XRT_FEATURE_OPENXR_VISIBILITY_MASK}")
+	message(STATUS "#    FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST:           ${XRT_FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST}")
+	message(STATUS "#    FEATURE_OPENXR_XDEV_SPACE:                             ${XRT_FEATURE_OPENXR_XDEV_SPACE}")
+	message(STATUS "#")
+endif()
 message(STATUS "#    DRIVER_ANDROID:              ${XRT_BUILD_DRIVER_ANDROID}")
 message(STATUS "#    DRIVER_ARDUINO:              ${XRT_BUILD_DRIVER_ARDUINO}")
 message(STATUS "#    DRIVER_BLUBUR_S1:            ${XRT_BUILD_DRIVER_BLUBUR_S1}")
@@ -725,16 +759,19 @@ message(STATUS "#    DRIVER_OPENGLOVES:           ${XRT_BUILD_DRIVER_OPENGLOVES}
 message(STATUS "#    DRIVER_PSMV:                 ${XRT_BUILD_DRIVER_PSMV}")
 message(STATUS "#    DRIVER_PSSENSE:              ${XRT_BUILD_DRIVER_PSSENSE}")
 message(STATUS "#    DRIVER_PSVR:                 ${XRT_BUILD_DRIVER_PSVR}")
+message(STATUS "#    DRIVER_PSVR2:                ${XRT_BUILD_DRIVER_PSVR2}")
 message(STATUS "#    DRIVER_QWERTY:               ${XRT_BUILD_DRIVER_QWERTY}")
 message(STATUS "#    DRIVER_REALSENSE:            ${XRT_BUILD_DRIVER_REALSENSE}")
 message(STATUS "#    DRIVER_REMOTE:               ${XRT_BUILD_DRIVER_REMOTE}")
 message(STATUS "#    DRIVER_RIFT:                 ${XRT_BUILD_DRIVER_RIFT}")
+message(STATUS "#    DRIVER_RIFT_SENSOR:          ${XRT_BUILD_DRIVER_RIFT_SENSOR}")
 message(STATUS "#    DRIVER_RIFT_S:               ${XRT_BUILD_DRIVER_RIFT_S}")
 message(STATUS "#    DRIVER_ROKID:                ${XRT_BUILD_DRIVER_ROKID}")
 message(STATUS "#    DRIVER_SIMULATED:            ${XRT_BUILD_DRIVER_SIMULATED}")
 message(STATUS "#    DRIVER_SIMULAVR:             ${XRT_BUILD_DRIVER_SIMULAVR}")
 message(STATUS "#    DRIVER_SURVIVE:              ${XRT_BUILD_DRIVER_SURVIVE}")
 message(STATUS "#    DRIVER_TWRAP:                ${XRT_BUILD_DRIVER_TWRAP}")
+message(STATUS "#    DRIVER_UVC:                  ${XRT_BUILD_DRIVER_UVC}")
 message(STATUS "#    DRIVER_ULV2:                 ${XRT_BUILD_DRIVER_ULV2}")
 message(STATUS "#    DRIVER_ULV5:                 ${XRT_BUILD_DRIVER_ULV5}")
 message(STATUS "#    DRIVER_VF:                   ${XRT_BUILD_DRIVER_VF}")
@@ -742,6 +779,7 @@ message(STATUS "#    DRIVER_VIVE:                 ${XRT_BUILD_DRIVER_VIVE}")
 message(STATUS "#    DRIVER_WMR:                  ${XRT_BUILD_DRIVER_WMR}")
 message(STATUS "#    DRIVER_XREAL_AIR:            ${XRT_BUILD_DRIVER_XREAL_AIR}")
 message(STATUS "#    DRIVER_STEAMVR_LIGHTHOUSE:   ${XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE}")
+message(STATUS "#    DRIVER_SOLARXR:              ${XRT_BUILD_DRIVER_SOLARXR}")
 message(STATUS "#####----- Config -----#####")
 # cmake-format: on
 

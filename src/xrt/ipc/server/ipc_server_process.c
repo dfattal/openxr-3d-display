@@ -1,5 +1,5 @@
 // Copyright 2020-2024, Collabora, Ltd.
-// Copyright 2024-2025, NVIDIA CORPORATION.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -12,6 +12,7 @@
  */
 
 #include "xrt/xrt_device.h"
+#include "xrt/xrt_results.h"
 #include "xrt/xrt_system.h"
 #include "xrt/xrt_instance.h"
 #include "xrt/xrt_compositor.h"
@@ -33,6 +34,7 @@
 #include "shared/ipc_protocol.h"
 #include "shared/ipc_shmem.h"
 #include "server/ipc_server.h"
+#include "server/ipc_server_objects.h"
 #include "server/ipc_server_interface.h"
 
 #include <stdlib.h>
@@ -61,10 +63,18 @@
  *
  */
 
-DEBUG_GET_ONCE_BOOL_OPTION(exit_on_disconnect, "IPC_EXIT_ON_DISCONNECT", false)
 DEBUG_GET_ONCE_BOOL_OPTION(exit_when_idle, "IPC_EXIT_WHEN_IDLE", false)
 DEBUG_GET_ONCE_NUM_OPTION(exit_when_idle_delay_ms, "IPC_EXIT_WHEN_IDLE_DELAY_MS", 5000)
 DEBUG_GET_ONCE_LOG_OPTION(ipc_log, "IPC_LOG", U_LOGGING_INFO)
+
+/*
+ * "XRT_NO_STDIN" option disables stdin and prevents monado-service from terminating.
+ * This could be useful for situations where there is no proper or in a non-interactive shell.
+ * Two example scenarios are:
+ *    * IDE terminals,
+ *    * Some scripting environments where monado-service is spawned in the background
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(no_stdin, "XRT_NO_STDIN", false)
 
 
 /*
@@ -89,44 +99,6 @@ find_xdev_index(struct ipc_server *s, struct xrt_device *xdev)
 	IPC_WARN(s, "Could not find index for xdev: '%s'", xdev->str);
 
 	return -1;
-}
-
-static void
-init_idev(struct ipc_device *idev, struct xrt_device *xdev)
-{
-	if (xdev != NULL) {
-		idev->io_active = true;
-		idev->xdev = xdev;
-	} else {
-		idev->io_active = false;
-	}
-}
-
-static void
-teardown_idev(struct ipc_device *idev)
-{
-	idev->io_active = false;
-}
-
-static void
-init_idevs(struct ipc_server *s)
-{
-	// Copy the devices over into the idevs array.
-	for (size_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
-		if (s->xsysd->xdevs[i] == NULL) {
-			continue;
-		}
-
-		init_idev(&s->idevs[i], s->xsysd->xdevs[i]);
-	}
-}
-
-static void
-teardown_idevs(struct ipc_server *s)
-{
-	for (size_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
-		teardown_idev(&s->idevs[i]);
-	}
 }
 
 
@@ -202,8 +174,6 @@ teardown_all(struct ipc_server *s)
 
 	xrt_syscomp_destroy(&s->xsysc);
 
-	teardown_idevs(s);
-
 	xrt_space_overseer_destroy(&s->xso);
 	xrt_system_devices_destroy(&s->xsysd);
 	xrt_system_destroy(&s->xsys);
@@ -218,227 +188,102 @@ teardown_all(struct ipc_server *s)
 	os_mutex_destroy(&s->global_state.lock);
 }
 
-static void
-init_tracking_origins(struct ipc_server *s)
-{
-	for (size_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
-		struct xrt_device *xdev = s->idevs[i].xdev;
-		if (xdev == NULL) {
-			continue;
-		}
-
-		struct xrt_tracking_origin *xtrack = xdev->tracking_origin;
-		assert(xtrack != NULL);
-		size_t index = 0;
-
-		for (; index < XRT_SYSTEM_MAX_DEVICES; index++) {
-			if (s->xtracks[index] == NULL) {
-				s->xtracks[index] = xtrack;
-				break;
-			}
-			if (s->xtracks[index] == xtrack) {
-				break;
-			}
-		}
-	}
-}
-
-static void
-handle_binding(struct ipc_shared_memory *ism,
-               struct xrt_binding_profile *xbp,
-               struct ipc_shared_binding_profile *isbp,
-               uint32_t *input_pair_index_ptr,
-               uint32_t *output_pair_index_ptr)
-{
-	uint32_t input_pair_index = *input_pair_index_ptr;
-	uint32_t output_pair_index = *output_pair_index_ptr;
-
-	isbp->name = xbp->name;
-
-	// Copy the initial state and also count the number in input_pairs.
-	uint32_t input_pair_start = input_pair_index;
-	for (size_t k = 0; k < xbp->input_count; k++) {
-		ism->input_pairs[input_pair_index++] = xbp->inputs[k];
-	}
-
-	// Setup the 'offsets' and number of input_pairs.
-	if (input_pair_start != input_pair_index) {
-		isbp->input_count = input_pair_index - input_pair_start;
-		isbp->first_input_index = input_pair_start;
-	}
-
-	// Copy the initial state and also count the number in outputs.
-	uint32_t output_pair_start = output_pair_index;
-	for (size_t k = 0; k < xbp->output_count; k++) {
-		ism->output_pairs[output_pair_index++] = xbp->outputs[k];
-	}
-
-	// Setup the 'offsets' and number of output_pairs.
-	if (output_pair_start != output_pair_index) {
-		isbp->output_count = output_pair_index - output_pair_start;
-		isbp->first_output_index = output_pair_start;
-	}
-
-	*input_pair_index_ptr = input_pair_index;
-	*output_pair_index_ptr = output_pair_index;
-}
-
 XRT_CHECK_RESULT static xrt_result_t
-init_shm(struct ipc_server *s, volatile struct ipc_client_state *cs)
+init_shm_and_instance_state(struct ipc_server *s, volatile struct ipc_client_state *ics)
 {
 	const size_t size = sizeof(struct ipc_shared_memory);
 	xrt_shmem_handle_t handle;
 
-	xrt_result_t xret = ipc_shmem_create(size, &handle, (void **)&s->isms[cs->server_thread_index]);
+	xrt_result_t xret = ipc_shmem_create(size, &handle, (void **)&s->isms[ics->server_thread_index]);
 	IPC_CHK_AND_RET(s, xret, "ipc_shmem_create");
 
 	// we have a filehandle, we will pass this to our client
-	cs->ism_handle = handle;
+	ics->ism_handle = handle;
 
+	// Convenience
+	struct ipc_shared_memory *ism = s->isms[ics->server_thread_index];
+
+	// Clients expect git version info and timestamp available upon connect.
+	snprintf(ism->u_git_tag, IPC_VERSION_NAME_LEN, "%s", u_git_tag);
 
 	/*
-	 *
-	 * Setup the shared memory state.
-	 *
+	 * Used to synchronize all client's xrt_instance::startup_timestamp.
+	 * Add random variation of ±5 minutes around the global runtime startup timestamp
+	 * so clients are close to each other but not exactly the same.
 	 */
+	const int64_t variation_range_ns = (int64_t)(10 * 60) * U_TIME_1S_IN_NS; // 10 minutes total range
+	const int64_t half_range_ns = (int64_t)(5 * 60) * U_TIME_1S_IN_NS;       // 5 minutes
+	int64_t random_offset_ns = ((int64_t)rand() % variation_range_ns) - half_range_ns;
+	ism->startup_timestamp = s->start_of_time_timestamp_ns + random_offset_ns;
 
-	uint32_t count = 0;
-	struct ipc_shared_memory *ism = s->isms[cs->server_thread_index];
+	return XRT_SUCCESS;
+}
 
-	ism->startup_timestamp = os_monotonic_get_ns();
+static void
+init_system_shm_state(struct ipc_server *s, volatile struct ipc_client_state *ics)
+{
+	struct ipc_shared_memory *ism = get_ism(ics);
+	xrt_result_t xret = XRT_SUCCESS;
 
-	// Setup the tracking origins.
-	count = 0;
+	/*
+	 * Loop over all of the devices to pre-populate the device IDs,
+	 * this also populates the tracking origins.
+	 */
 	for (size_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
-		struct xrt_tracking_origin *xtrack = s->xtracks[i];
-		if (xtrack == NULL) {
-			continue;
-		}
-
-		// The position of the tracking origin matches that in the
-		// server's memory.
-		assert(i < XRT_SYSTEM_MAX_DEVICES);
-
-		struct ipc_shared_tracking_origin *itrack = &ism->itracks[count++];
-		memcpy(itrack->name, xtrack->name, sizeof(itrack->name));
-		itrack->type = xtrack->type;
-		itrack->offset = xtrack->initial_offset;
-	}
-
-	ism->itrack_count = count;
-
-	count = 0;
-	uint32_t input_index = 0;
-	uint32_t output_index = 0;
-	uint32_t binding_index = 0;
-	uint32_t input_pair_index = 0;
-	uint32_t output_pair_index = 0;
-
-	for (size_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
-		struct xrt_device *xdev = s->idevs[i].xdev;
+		struct xrt_device *xdev = s->xsysd->xdevs[i];
 		if (xdev == NULL) {
 			continue;
 		}
 
-		struct ipc_shared_device *isdev = &ism->isdevs[count++];
-
-		isdev->name = xdev->name;
-		memcpy(isdev->str, xdev->str, sizeof(isdev->str));
-		memcpy(isdev->serial, xdev->serial, sizeof(isdev->serial));
-
-		// Copy information.
-		isdev->device_type = xdev->device_type;
-		isdev->supported = xdev->supported;
-
-		// Setup the tracking origin.
-		isdev->tracking_origin_index = (uint32_t)-1;
-		for (uint32_t k = 0; k < XRT_SYSTEM_MAX_DEVICES; k++) {
-			if (xdev->tracking_origin != s->xtracks[k]) {
-				continue;
-			}
-
-			isdev->tracking_origin_index = k;
-			break;
+		// Populate the tracking origin.
+		uint32_t tracking_origin_id = 0;
+		xret = ipc_server_objects_get_xtrack_id_or_add(ics, xdev->tracking_origin, &tracking_origin_id);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(s, "Failed to get/add tracking origin ID for: '%s'", xdev->tracking_origin->name);
+			continue;
 		}
 
-		assert(isdev->tracking_origin_index != (uint32_t)-1);
-
-		// Initial update.
-		xrt_device_update_inputs(xdev);
-
-		// Bindings
-		uint32_t binding_start = binding_index;
-		for (size_t k = 0; k < xdev->binding_profile_count; k++) {
-			handle_binding(ism, &xdev->binding_profiles[k], &ism->binding_profiles[binding_index++],
-			               &input_pair_index, &output_pair_index);
-		}
-
-		// Setup the 'offsets' and number of bindings.
-		if (binding_start != binding_index) {
-			isdev->binding_profile_count = binding_index - binding_start;
-			isdev->first_binding_profile_index = binding_start;
-		}
-
-		// Copy the initial state and also count the number in inputs.
-		uint32_t input_start = input_index;
-		for (size_t k = 0; k < xdev->input_count; k++) {
-			ism->inputs[input_index++] = xdev->inputs[k];
-		}
-
-		// Setup the 'offsets' and number of inputs.
-		if (input_start != input_index) {
-			isdev->input_count = input_index - input_start;
-			isdev->first_input_index = input_start;
-		}
-
-		// Copy the initial state and also count the number in outputs.
-		uint32_t output_start = output_index;
-		for (size_t k = 0; k < xdev->output_count; k++) {
-			ism->outputs[output_index++] = xdev->outputs[k];
-		}
-
-		// Setup the 'offsets' and number of outputs.
-		if (output_start != output_index) {
-			isdev->output_count = output_index - output_start;
-			isdev->first_output_index = output_start;
+		// Populate the device.
+		uint32_t device_id = 0;
+		xret = ipc_server_objects_get_xdev_id_or_add(ics, xdev, &device_id);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(s, "Failed to get/add device ID for: '%s'", xdev->str);
+			continue;
 		}
 	}
 
 	// Setup the HMD
 	// set view count
-	assert(s->xsysd->static_roles.head->hmd);
-	ism->hmd.view_count = s->xsysd->static_roles.head->hmd->view_count;
-	for (uint32_t view = 0; view < s->xsysd->static_roles.head->hmd->view_count; ++view) {
-		ism->hmd.views[view].display.w_pixels = s->xsysd->static_roles.head->hmd->views[view].display.w_pixels;
-		ism->hmd.views[view].display.h_pixels = s->xsysd->static_roles.head->hmd->views[view].display.h_pixels;
-	}
+	const struct xrt_device *xhead = s->xsysd->static_roles.head;
+	const struct xrt_hmd_parts *xhmd = xhead != NULL ? xhead->hmd : NULL;
+	U_ZERO(&ism->hmd);
+	if (xhmd != NULL) {
+		ism->hmd.view_count = xhmd->view_count;
+		for (uint32_t view = 0; view < xhmd->view_count; ++view) {
+			ism->hmd.views[view].display.w_pixels = xhmd->views[view].display.w_pixels;
+			ism->hmd.views[view].display.h_pixels = xhmd->views[view].display.h_pixels;
+		}
 
-	for (size_t i = 0; i < s->xsysd->static_roles.head->hmd->blend_mode_count; i++) {
-		// Not super necessary, we also do this assert in oxr_system.c
-		assert(u_verify_blend_mode_valid(s->xsysd->static_roles.head->hmd->blend_modes[i]));
-		ism->hmd.blend_modes[i] = s->xsysd->static_roles.head->hmd->blend_modes[i];
+		for (uint32_t i = 0; i < xhmd->blend_mode_count; i++) {
+			// Not super necessary, we also do this assert in oxr_system.c
+			assert(u_verify_blend_mode_valid(xhmd->blend_modes[i]));
+			ism->hmd.blend_modes[i] = xhmd->blend_modes[i];
+		}
+		ism->hmd.blend_mode_count = xhmd->blend_mode_count;
 	}
-	ism->hmd.blend_mode_count = s->xsysd->static_roles.head->hmd->blend_mode_count;
-
-	// Finally tell the client how many devices we have.
-	ism->isdev_count = count;
 
 	// Assign all of the roles.
 	ism->roles.head = find_xdev_index(s, s->xsysd->static_roles.head);
 	ism->roles.eyes = find_xdev_index(s, s->xsysd->static_roles.eyes);
 	ism->roles.face = find_xdev_index(s, s->xsysd->static_roles.face);
 	ism->roles.body = find_xdev_index(s, s->xsysd->static_roles.body);
+
 #define SET_HT_ROLE(SRC)                                                                                               \
 	ism->roles.hand_tracking.SRC.left = find_xdev_index(s, s->xsysd->static_roles.hand_tracking.SRC.left);         \
 	ism->roles.hand_tracking.SRC.right = find_xdev_index(s, s->xsysd->static_roles.hand_tracking.SRC.right);
 	SET_HT_ROLE(unobstructed)
 	SET_HT_ROLE(conforming)
 #undef SET_HT_ROLE
-
-	// Fill out git version info.
-	snprintf(ism->u_git_tag, IPC_VERSION_NAME_LEN, "%s", u_git_tag);
-
-	return XRT_SUCCESS;
 }
 
 static void
@@ -459,13 +304,21 @@ init_server_state(struct ipc_server *s)
 }
 
 static xrt_result_t
-init_all(struct ipc_server *s, enum u_logging_level log_level)
+init_all(struct ipc_server *s,
+         enum u_logging_level log_level,
+         const struct ipc_server_callbacks *callbacks,
+         void *callback_data,
+         bool exit_on_disconnect)
 {
 	xrt_result_t xret = XRT_SUCCESS;
 	int ret;
 
 	// First order of business set the log level.
 	s->log_level = log_level;
+
+	// Store callbacks and data
+	s->callbacks = callbacks;
+	s->callback_data = callback_data;
 
 	// This should never fail.
 	ret = os_mutex_init(&s->global_state.lock);
@@ -484,23 +337,27 @@ init_all(struct ipc_server *s, enum u_logging_level log_level)
 
 	// Yes we should be running.
 	s->running = true;
-	s->exit_on_disconnect = debug_get_bool_option_exit_on_disconnect();
+	s->exit_on_disconnect = exit_on_disconnect;
 	s->exit_when_idle = debug_get_bool_option_exit_when_idle();
 	s->last_client_disconnect_ns = 0;
 	uint64_t delay_ms = debug_get_num_option_exit_when_idle_delay_ms();
 	s->exit_when_idle_delay_ns = delay_ms * U_TIME_1MS_IN_NS;
 
+	// See the comment in ipc_server.h for more details.
+	const int64_t offset = (int64_t)(42 * 60) * U_TIME_1S_IN_NS;
+	s->start_of_time_timestamp_ns = os_monotonic_get_ns() - offset;
+
+	/*
+	 * Initialize random number generator for startup timestamp variation.
+	 * This not used for any security critical purposes, just to ensure that
+	 * the startup timestamps are not exactly the same for all clients.
+	 */
+	srand((unsigned int)(os_monotonic_get_ns() / U_TIME_1MS_IN_NS));
+
 	xret = xrt_instance_create(NULL, &s->xinst);
 	IPC_CHK_WITH_GOTO(s, xret, "xrt_instance_create", error);
 
-	xret = xrt_instance_create_system(s->xinst, &s->xsys, &s->xsysd, &s->xso, &s->xsysc);
-	IPC_CHK_WITH_GOTO(s, xret, "xrt_instance_create_system", error);
-
-	// Always succeeds.
-	init_idevs(s);
-	init_tracking_origins(s);
-
-	ret = ipc_server_mainloop_init(&s->ml);
+	ret = ipc_server_mainloop_init(&s->ml, s->no_stdin);
 	if (ret < 0) {
 		xret = XRT_ERROR_IPC_MAINLOOP_FAILED_TO_INIT;
 	}
@@ -611,7 +468,7 @@ handle_focused_client_events(volatile struct ipc_client_state *ics, int active_i
 	ics->client_state.z_order = z_order;
 
 	if (ics->xc != NULL) {
-		xrt_syscomp_set_state(ics->server->xsysc, ics->xc, visible, focused);
+		xrt_syscomp_set_state(ics->server->xsysc, ics->xc, visible, focused, os_monotonic_get_ns());
 		xrt_syscomp_set_z_order(ics->server->xsysc, ics->xc, z_order);
 	}
 }
@@ -735,7 +592,6 @@ get_client_app_state_locked(struct ipc_server *s, uint32_t client_id, struct ipc
 	}
 
 	struct ipc_app_state ias = ics->client_state;
-	ias.io_active = ics->io_active;
 
 	// @todo: track this data in the ipc_client_state struct
 	ias.primary_application = false;
@@ -765,6 +621,7 @@ set_active_client_locked(struct ipc_server *s, uint32_t client_id)
 
 	if (index != s->global_state.active_client_index) {
 		s->global_state.active_client_index = index;
+		update_server_state_locked(s);
 	}
 
 	return XRT_SUCCESS;
@@ -778,9 +635,53 @@ toggle_io_client_locked(struct ipc_server *s, uint32_t client_id)
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	ics->io_active = !ics->io_active;
+	volatile struct ipc_client_io_blocks *iob = &ics->client_state.io_blocks;
+	bool io_active = iob->block_poses && iob->block_hand_tracking && iob->block_inputs && iob->block_outputs;
+	iob->block_poses = iob->block_hand_tracking = iob->block_inputs = iob->block_outputs = !io_active;
 
 	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+set_client_io_blocks_locked(struct ipc_server *s, uint32_t client_id, const struct ipc_client_io_blocks *blocks)
+{
+	volatile struct ipc_client_state *ics = find_client_locked(s, client_id);
+	if (ics == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	volatile struct ipc_client_io_blocks *iob = &ics->client_state.io_blocks;
+	*iob = *blocks;
+
+	return XRT_SUCCESS;
+}
+
+static uint32_t
+allocate_id_locked(struct ipc_server *s)
+{
+	uint32_t id = 0;
+	while (id == 0) {
+		// Allocate a new one.
+		id = ++s->id_generator;
+
+		for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
+			volatile struct ipc_client_state *ics = &s->threads[i].ics;
+
+			// If we find the ID, get a new one by setting to zero.
+			if (ics->client_state.id == id) {
+				id = 0;
+				break;
+			}
+		}
+	}
+
+	// Paranoia.
+	if (id == 0) {
+		U_LOG_E("Got app(client) id 0, not allowed!");
+		assert(id > 0);
+	}
+
+	return id;
 }
 
 
@@ -789,6 +690,42 @@ toggle_io_client_locked(struct ipc_server *s, uint32_t client_id)
  * Exported functions.
  *
  */
+
+xrt_result_t
+ipc_server_init_system_if_available_locked(struct ipc_server *s,
+                                           volatile struct ipc_client_state *ics,
+                                           bool *out_available)
+{
+	xrt_result_t xret = XRT_SUCCESS;
+
+	bool available = false;
+
+	if (s->xsys) {
+		available = true;
+	} else {
+		xret = xrt_instance_is_system_available(s->xinst, &available);
+		IPC_CHK_WITH_GOTO(s, xret, "xrt_instance_is_system_available", error);
+
+		if (available) {
+			xret = xrt_instance_create_system(s->xinst, &s->xsys, &s->xsysd, &s->xso, &s->xsysc);
+			IPC_CHK_WITH_GOTO(s, xret, "xrt_instance_create_system", error);
+		}
+	}
+
+	if (available && ics != NULL && !ics->has_init_shm_system) {
+		init_system_shm_state(s, ics);
+		ics->has_init_shm_system = true;
+	}
+
+	if (out_available) {
+		*out_available = available;
+	}
+
+	return XRT_SUCCESS;
+
+error:
+	return xret;
+}
 
 xrt_result_t
 ipc_server_get_client_app_state(struct ipc_server *s, uint32_t client_id, struct ipc_app_state *out_ias)
@@ -820,6 +757,16 @@ ipc_server_toggle_io_client(struct ipc_server *s, uint32_t client_id)
 	return xret;
 }
 
+xrt_result_t
+ipc_server_set_client_io_blocks(struct ipc_server *s, uint32_t client_id, const struct ipc_client_io_blocks *blocks)
+{
+	os_mutex_lock(&s->global_state.lock);
+	xrt_result_t xret = set_client_io_blocks_locked(s, client_id, blocks);
+	os_mutex_unlock(&s->global_state.lock);
+
+	return xret;
+}
+
 void
 ipc_server_activate_session(volatile struct ipc_client_state *ics)
 {
@@ -846,9 +793,6 @@ ipc_server_activate_session(volatile struct ipc_client_state *ics)
 	} else {
 		// Update active client
 		set_active_client_locked(s, ics->client_state.id);
-
-		// For new active regular sessions update all clients.
-		update_server_state_locked(s);
 	}
 
 	os_mutex_unlock(&s->global_state.lock);
@@ -949,25 +893,24 @@ ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_h
 	it->state = IPC_THREAD_STARTING;
 
 	// Allocate a new ID, avoid zero.
-	//! @todo validate ID.
-	uint32_t id = ++vs->id_generator;
+	uint32_t id = allocate_id_locked(vs);
 
 	// Reset everything.
 	U_ZERO((struct ipc_client_state *)ics);
 
 	// Set state.
+	ics->local_space_overseer_index = UINT32_MAX;
 	ics->client_state.id = id;
 	ics->imc.ipc_handle = ipc_handle;
 	ics->server = vs;
 	ics->server_thread_index = cs_index;
-	ics->io_active = true;
 
 	ics->plane_detection_size = 0;
 	ics->plane_detection_count = 0;
 	ics->plane_detection_ids = NULL;
 	ics->plane_detection_xdev = NULL;
 
-	xrt_result_t xret = init_shm(vs, ics);
+	xrt_result_t xret = init_shm_and_instance_state(vs, ics);
 	if (xret != XRT_SUCCESS) {
 
 		// Unlock when we are done.
@@ -990,9 +933,10 @@ ipc_server_get_system_properties(struct ipc_server *vs, struct xrt_system_proper
 	return XRT_SUCCESS;
 }
 
-#ifndef XRT_OS_ANDROID
 int
-ipc_server_main(int argc, char **argv, const struct ipc_server_main_info *ismi)
+ipc_server_main_common(const struct ipc_server_main_info *ismi,
+                       const struct ipc_server_callbacks *callbacks,
+                       void *data)
 {
 	xrt_result_t xret = XRT_SUCCESS;
 	int ret = -1;
@@ -1006,6 +950,9 @@ ipc_server_main(int argc, char **argv, const struct ipc_server_main_info *ismi)
 	// Allocate the server itself.
 	struct ipc_server *s = U_TYPED_CALLOC(struct ipc_server);
 
+	// Can be set by either.
+	s->no_stdin = ismi->no_stdin || debug_get_bool_option_no_stdin();
+
 #ifdef XRT_OS_WINDOWS
 	timeBeginPeriod(1);
 #endif
@@ -1017,28 +964,36 @@ ipc_server_main(int argc, char **argv, const struct ipc_server_main_info *ismi)
 	 */
 	u_debug_gui_create(&ismi->udgci, &s->debug_gui);
 
-	xret = init_all(s, log_level);
+	xret = init_all(s, log_level, callbacks, data, ismi->exit_on_disconnect);
 	U_LOG_CHK_ONLY_PRINT(log_level, xret, "init_all");
 	if (xret != XRT_SUCCESS) {
-#ifdef XRT_OS_LINUX
-		// Print information how to debug issues.
-		print_linux_end_user_failed_information(log_level);
-#endif
-
+		// Propagate the failure.
+		callbacks->init_failed(xret, data);
 		u_debug_gui_stop(&s->debug_gui);
 		free(s);
 		return -1;
 	}
 
+	// Tell the callbacks we are entering the main-loop.
+	callbacks->mainloop_entering(s, s->xinst, data);
+
+	// Early init the system. If not available now, will try again per client request.
+	xret = ipc_server_init_system_if_available_locked( //
+	    s,                                             //
+	    NULL,                                          // optional - ics
+	    NULL);                                         // optional - out_available
+	if (xret != XRT_SUCCESS) {
+		U_LOG_CHK_ONLY_PRINT(log_level, xret, "ipc_server_init_system_if_available_locked");
+	}
+
 	// Start the debug UI now (if enabled).
 	u_debug_gui_start(s->debug_gui, s->xinst, s->xsysd);
 
-#ifdef XRT_OS_LINUX
-	// Print a very clear service started message.
-	print_linux_end_user_started_information(log_level);
-#endif
 	// Main loop.
 	ret = main_loop(s);
+
+	// Tell the callbacks we are leaving the main-loop.
+	callbacks->mainloop_leaving(s, s->xinst, data);
 
 	// Stop the UI before tearing everything down.
 	u_debug_gui_stop(&s->debug_gui);
@@ -1056,39 +1011,63 @@ ipc_server_main(int argc, char **argv, const struct ipc_server_main_info *ismi)
 	return ret;
 }
 
-#endif // !XRT_OS_ANDROID
-
-#ifdef XRT_OS_ANDROID
 int
-ipc_server_main_android(struct ipc_server **ps, void (*startup_complete_callback)(void *data), void *data)
+ipc_server_stop(struct ipc_server *s)
 {
-	xrt_result_t xret = XRT_SUCCESS;
-	int ret = -1;
-
-	// Get log level first.
-	enum u_logging_level log_level = debug_get_log_option_ipc_log();
-
-	struct ipc_server *s = U_TYPED_CALLOC(struct ipc_server);
-	U_LOG_D("Created IPC server!");
-
-	xret = init_all(s, log_level);
-	U_LOG_CHK_ONLY_PRINT(log_level, xret, "init_all");
-	if (xret != XRT_SUCCESS) {
-		free(s);
-		startup_complete_callback(data);
-		return -1;
-	}
-
-	*ps = s;
-	startup_complete_callback(data);
-
-	ret = main_loop(s);
-
-	teardown_all(s);
-	free(s);
-
-	U_LOG_I("Server exiting '%i'!", ret);
-
-	return ret;
+	s->running = false;
+	return 0;
 }
-#endif // XRT_OS_ANDROID
+
+#ifndef XRT_OS_ANDROID
+
+static void
+init_failed(xrt_result_t xret, void *data)
+{
+#ifdef XRT_OS_LINUX
+	// Print information how to debug issues.
+	print_linux_end_user_failed_information(debug_get_log_option_ipc_log());
+#endif
+}
+
+static void
+mainloop_entering(struct ipc_server *s, struct xrt_instance *xinst, void *data)
+{
+#ifdef XRT_OS_LINUX
+	// Print a very clear service started message.
+	print_linux_end_user_started_information(s->log_level);
+#endif
+}
+
+static void
+mainloop_leaving(struct ipc_server *s, struct xrt_instance *xinst, void *data)
+{
+	// No-op
+}
+
+void
+client_connected(struct ipc_server *s, uint32_t client_id, void *data)
+{
+	IPC_INFO(s, "Client %u connected", client_id);
+}
+
+void
+client_disconnected(struct ipc_server *s, uint32_t client_id, void *data)
+{
+	IPC_INFO(s, "Client %u disconnected", client_id);
+}
+
+int
+ipc_server_main(int argc, char **argv, const struct ipc_server_main_info *ismi)
+{
+	const struct ipc_server_callbacks callbacks = {
+	    .init_failed = init_failed,
+	    .mainloop_entering = mainloop_entering,
+	    .mainloop_leaving = mainloop_leaving,
+	    .client_connected = client_connected,
+	    .client_disconnected = client_disconnected,
+	};
+
+	return ipc_server_main_common(ismi, &callbacks, NULL);
+}
+
+#endif // !XRT_OS_ANDROID

@@ -1,4 +1,5 @@
 // Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -17,24 +18,37 @@
 
 #include "os/os_time.h"
 
-#if defined(XRT_OS_LINUX) || defined(XRT_ENV_MINGW)
+#if defined(XRT_OS_OSX)
+#include <unistd.h>
+#include <pthread.h>
+#include <assert.h>
+
+#elif defined(XRT_OS_LINUX) || defined(XRT_ENV_MINGW)
+#include <unistd.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <assert.h>
 #define OS_THREAD_HAVE_SETNAME
+#define OS_THREAD_HAVE_SEMAPHORE
+
 #elif defined(XRT_OS_MACOS)
 #include <pthread.h>
 #include <dispatch/dispatch.h>
 #include <assert.h>
 // macOS pthread_setname_np takes 1 arg (sets current thread name only), not 2
 #elif defined(XRT_OS_WINDOWS)
+#include "xrt/xrt_windows.h"
 #include <pthread.h>
 #include <sched.h>
 #include <semaphore.h>
 #include <assert.h>
 #define OS_THREAD_HAVE_SETNAME
+#define OS_THREAD_HAVE_SEMAPHORE
+
 #else
+
 #error "OS not supported"
+
 #endif
 
 #ifdef __cplusplus
@@ -343,6 +357,24 @@ os_thread_destroy(struct os_thread *ost)
 {}
 
 /*!
+ * Gets the number of hardware threads available.
+ */
+static inline int64_t
+os_hardware_thread_count(void)
+{
+#if defined(XRT_OS_LINUX) || defined(XRT_OS_OSX)
+	return (int64_t)sysconf(_SC_NPROCESSORS_ONLN);
+#elif defined(XRT_OS_WINDOWS)
+	SYSTEM_INFO sysinfo = {0};
+	GetSystemInfo(&sysinfo);
+	return (int64_t)sysinfo.dwNumberOfProcessors;
+#else
+#error "OS not supported"
+	return -1;
+#endif
+}
+
+/*!
  * Make a best effort to name our thread.
  *
  * @public @memberof os_thread
@@ -358,6 +390,7 @@ os_thread_name(struct os_thread *ost, const char *name)
 #endif
 }
 
+#ifdef OS_THREAD_HAVE_SEMAPHORE
 /*
  *
  * Semaphore.
@@ -523,6 +556,7 @@ os_semaphore_destroy(struct os_semaphore *os)
 {
 	sem_destroy(&os->sem);
 }
+#endif // OS_THREAD_HAVE_SEMAPHORE
 
 #endif // !XRT_OS_MACOS
 

@@ -6,6 +6,8 @@ xrt_optimized_math_flags()
 add_library(
 	aux_tracking STATIC
 	t_data_utils.c
+	t_dead_reckoning.h
+	t_dead_reckoning.c
 	t_imu_fusion.hpp
 	t_imu.cpp
 	t_imu.h

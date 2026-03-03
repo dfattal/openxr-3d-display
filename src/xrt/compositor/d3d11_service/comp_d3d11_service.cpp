@@ -211,7 +211,7 @@ struct d3d11_service_compositor
 	//! Whether the window has been closed (triggers session exit)
 	bool window_closed;
 
-	//! Whether the EXIT_REQUEST event has already been sent (prevent duplicates)
+	//! Whether the REQUEST_EXIT event has already been sent (prevent duplicates)
 	bool exit_request_sent;
 
 	//! Number of frames since window close was detected
@@ -2044,7 +2044,7 @@ compositor_predict_frame(struct xrt_compositor *xc,
 			U_LOG_W("Window closed failsafe: %u frames since close, requesting session exit",
 			        c->window_closed_frame_count);
 			union xrt_session_event xse = XRT_STRUCT_INIT;
-			xse.type = XRT_SESSION_EVENT_EXIT_REQUEST;
+			xse.type = XRT_SESSION_EVENT_REQUEST_EXIT;
 			xrt_session_event_sink_push(c->xses, &xse);
 			c->exit_request_sent = true;
 		}
@@ -2078,7 +2078,7 @@ compositor_wait_frame(struct xrt_compositor *xc,
 	if (c->window_closed) {
 		if (!c->exit_request_sent && c->xses != nullptr) {
 			union xrt_session_event xse = XRT_STRUCT_INIT;
-			xse.type = XRT_SESSION_EVENT_EXIT_REQUEST;
+			xse.type = XRT_SESSION_EVENT_REQUEST_EXIT;
 			xrt_session_event_sink_push(c->xses, &xse);
 			c->exit_request_sent = true;
 		}
@@ -2440,15 +2440,15 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 	if (c->window_closed) {
 		c->window_closed_frame_count++;
-		// Push EXIT_REQUEST once to trigger graceful session shutdown
+		// Push REQUEST_EXIT once to trigger graceful session shutdown
 		if (!c->exit_request_sent && c->xses != nullptr) {
 			union xrt_session_event xse = XRT_STRUCT_INIT;
-			xse.type = XRT_SESSION_EVENT_EXIT_REQUEST;
+			xse.type = XRT_SESSION_EVENT_REQUEST_EXIT;
 			xrt_session_event_sink_push(c->xses, &xse);
 			c->exit_request_sent = true;
 		}
 		// Return success so the error doesn't propagate as XR_ERROR_INSTANCE_LOST.
-		// The EXIT_REQUEST event drives the session to STOPPING so the app
+		// The REQUEST_EXIT event drives the session to STOPPING so the app
 		// calls xrEndSession and continues running.
 		return XRT_SUCCESS;
 	}

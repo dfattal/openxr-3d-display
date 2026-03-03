@@ -347,12 +347,8 @@ simulated_create_controller(enum xrt_device_name name,
 
 	// Allocate.
 	struct simulated_device *sd = U_DEVICE_ALLOCATE(struct simulated_device, flags, input_count, output_count);
+	u_device_populate_function_pointers(&sd->base, simulated_device_get_tracked_pose, simulated_device_destroy);
 	sd->base.update_inputs = simulated_device_update_inputs;
-	sd->base.get_tracked_pose = simulated_device_get_tracked_pose;
-	sd->base.get_hand_tracking = u_device_ni_get_hand_tracking;
-	sd->base.get_view_poses = u_device_ni_get_view_poses;
-	sd->base.set_output = u_device_ni_set_output;
-	sd->base.destroy = simulated_device_destroy;
 	sd->base.tracking_origin = origin;
 	sd->base.supported.orientation_tracking = true;
 	sd->base.supported.position_tracking = true;

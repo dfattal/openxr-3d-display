@@ -401,7 +401,7 @@ stereographic_project_image(const t_camera_model_params &dist,
                             const projection_instructions &instructions,
                             cv::Mat &input_image,
                             cv::Mat *debug_image,
-                            const cv::Scalar boundary_color,
+                            const cv::Scalar &boundary_color,
                             cv::Mat &out);
 
 

@@ -360,13 +360,15 @@ wmr_controller_hp_create(struct wmr_controller_connection *conn,
 	    U_DEVICE_ALLOCATE(struct wmr_controller_hp, flags, WMR_CONTROLLER_INDEX_COUNT, 1);
 	struct wmr_controller_base *wcb = (struct wmr_controller_base *)(ctrl);
 
-	if (!wmr_controller_base_init(wcb, conn, controller_type, log_level)) {
+	if (!wmr_controller_base_init(wcb, conn, controller_type, log_level, wmr_controller_hp_destroy)) {
 		wmr_controller_hp_destroy(&wcb->base);
 		return NULL;
 	}
 
 	wcb->handle_input_packet = handle_input_packet;
 
+	// Only set those we want to overwrite.
+	wcb->base.update_inputs = wmr_controller_hp_update_inputs;
 	wcb->base.name = XRT_DEVICE_HP_REVERB_G2_CONTROLLER;
 
 	if (controller_type == XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER) {
@@ -374,10 +376,6 @@ wmr_controller_hp_create(struct wmr_controller_connection *conn,
 	} else {
 		snprintf(wcb->base.str, ARRAY_SIZE(wcb->base.str), "HP Reverb G2 Right Controller");
 	}
-
-	wcb->base.destroy = wmr_controller_hp_destroy;
-	wcb->base.update_inputs = wmr_controller_hp_update_inputs;
-	wcb->base.set_output = u_device_ni_set_output;
 
 	SET_INPUT(wcb, MENU_CLICK, MENU_CLICK);
 	SET_INPUT(wcb, HOME_CLICK, HOME_CLICK);

@@ -97,12 +97,11 @@ svr_hmd_get_tracked_pose(struct xrt_device *xdev,
 	return XRT_SUCCESS;
 }
 
-#define DEG_TO_RAD(DEG) (DEG * M_PI / 180.)
-
 static xrt_result_t
 svr_hmd_get_view_poses(struct xrt_device *xdev,
                        const struct xrt_vec3 *default_eye_relation,
                        int64_t at_timestamp_ns,
+                       enum xrt_view_type view_type,
                        uint32_t view_count,
                        struct xrt_space_relation *out_head_relation,
                        struct xrt_fov *out_fovs,
@@ -115,6 +114,7 @@ svr_hmd_get_view_poses(struct xrt_device *xdev,
 	    xdev,                                    //
 	    default_eye_relation,                    //
 	    at_timestamp_ns,                         //
+	    view_type,                               //
 	    view_count,                              //
 	    out_head_relation,                       //
 	    out_fovs,                                //
@@ -245,7 +245,6 @@ svr_hmd_create(struct svr_two_displays_distortion *distortion)
 	svr->base.device_type = XRT_DEVICE_TYPE_HMD;
 
 	svr->base.hmd->screens[0].nominal_frame_interval_ns = (uint64_t)time_s_to_ns(1.0f / 90.0f);
-
 
 	// Print name.
 	snprintf(svr->base.str, XRT_DEVICE_NAME_LEN, "SimulaVR HMD");

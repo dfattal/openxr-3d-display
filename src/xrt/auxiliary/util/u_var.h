@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -82,6 +83,13 @@ struct u_var_button
 
 	//! Pointer that will be passed to the function as its only argument
 	void *ptr;
+
+	/*!
+	 * Is the pointer pressing down on the button curruently, this is not
+	 * edge triggered like the callback. For a mouse this means that the
+	 * pointer is hovering the button and the left is held down.
+	 */
+	xrt_atomic_s32_t downed;
 
 	//! Button text, use var `name` if zeroed
 	char label[64];
@@ -229,7 +237,7 @@ enum u_var_kind
 	U_VAR_KIND_NATIVE_IMAGES_DEBUG,
 	U_VAR_KIND_LOG_LEVEL,
 	U_VAR_KIND_RO_TEXT,
-	U_VAR_KIND_RO_FTEXT,
+	U_VAR_KIND_RO_RAW_TEXT,
 	U_VAR_KIND_RO_I16,
 	U_VAR_KIND_RO_I32,
 	U_VAR_KIND_RO_U16,
@@ -239,14 +247,17 @@ enum u_var_kind
 	U_VAR_KIND_RO_U64,
 	U_VAR_KIND_RO_F64,
 	U_VAR_KIND_RO_I64_NS,
+	U_VAR_KIND_RO_VEC2_F32,
 	U_VAR_KIND_RO_VEC3_I32,
 	U_VAR_KIND_RO_VEC3_F32,
+	U_VAR_KIND_RO_VEC3_F64,
 	U_VAR_KIND_RO_QUAT_F32,
 	U_VAR_KIND_RO_FF_F64,
 	U_VAR_KIND_RO_FF_VEC3_F32,
 	U_VAR_KIND_GUI_HEADER,
 	U_VAR_KIND_GUI_HEADER_BEGIN,
 	U_VAR_KIND_GUI_HEADER_END,
+	U_VAR_KIND_GUI_SAMELINE,
 	U_VAR_KIND_BUTTON,
 	U_VAR_KIND_COMBO,
 	U_VAR_KIND_HISTOGRAM_F32,
@@ -389,7 +400,7 @@ u_var_force_on(void);
 	ADD_FUNC(native_images_debug, struct u_native_images_debug, NATIVE_IMAGES_DEBUG)                               \
 	ADD_FUNC(log_level, enum u_logging_level, LOG_LEVEL)                                                           \
 	ADD_FUNC(ro_text, const char, RO_TEXT)                                                                         \
-	ADD_FUNC(ro_ftext, const char, RO_FTEXT)                                                                       \
+	ADD_FUNC(ro_raw_text, const char, RO_RAW_TEXT)                                                                 \
 	ADD_FUNC(ro_i16, int16_t, RO_I16)                                                                              \
 	ADD_FUNC(ro_i32, int32_t, RO_I32)                                                                              \
 	ADD_FUNC(ro_u16, uint16_t, RO_U16)                                                                             \
@@ -399,14 +410,17 @@ u_var_force_on(void);
 	ADD_FUNC(ro_u64, uint64_t, RO_U64)                                                                             \
 	ADD_FUNC(ro_f64, double, RO_F64)                                                                               \
 	ADD_FUNC(ro_i64_ns, int64_t, RO_I64_NS)                                                                        \
+	ADD_FUNC(ro_vec2_f32, struct xrt_vec2, RO_VEC2_F32)                                                            \
 	ADD_FUNC(ro_vec3_i32, struct xrt_vec3_i32, RO_VEC3_I32)                                                        \
 	ADD_FUNC(ro_vec3_f32, struct xrt_vec3, RO_VEC3_F32)                                                            \
+	ADD_FUNC(ro_vec3_f64, struct xrt_vec3_f64, RO_VEC3_F64)                                                        \
 	ADD_FUNC(ro_quat_f32, struct xrt_quat, RO_QUAT_F32)                                                            \
 	ADD_FUNC(ro_ff_f64, struct m_ff_f64, RO_FF_F64)                                                                \
 	ADD_FUNC(ro_ff_vec3_f32, struct m_ff_vec3_f32, RO_FF_VEC3_F32)                                                 \
 	ADD_FUNC(gui_header, bool, GUI_HEADER)                                                                         \
 	ADD_FUNC(gui_header_begin, bool, GUI_HEADER_BEGIN)                                                             \
 	ADD_FUNC(gui_header_end, bool, GUI_HEADER_END)                                                                 \
+	ADD_FUNC(gui_sameline, void, GUI_SAMELINE)                                                                     \
 	ADD_FUNC(button, struct u_var_button, BUTTON)                                                                  \
 	ADD_FUNC(combo, struct u_var_combo, COMBO)                                                                     \
 	ADD_FUNC(draggable_f32, struct u_var_draggable_f32, DRAGGABLE_F32)                                             \

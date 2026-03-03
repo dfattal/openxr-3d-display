@@ -137,21 +137,22 @@ struct xrt_plane_polygon_info_ext
 };
 
 /*!
- * Each plane has n polygons; ultimately plane metadata from @ref locations and @ref vetices is
- * reconstructed. Therefore lay out the data in flattened arrays:
+ * Each plane has n polygons; ultimately plane metadata from @ref xrt_plane_detections_ext::locations and @ref
+ * xrt_plane_detections_ext::vertices is reconstructed. Therefore lay out the data in flattened arrays:
  *
- * @ref locations stores continuous metadata for each plane:
+ * @ref xrt_plane_detections_ext::locations stores continuous metadata for each plane:
  * location 1 | location 2 | location 3 | location 4 | ...
  *
- * @ref polygon_info_start_index is a helper array to go from a location entry to a polygon_info entry.
+ * @ref xrt_plane_detections_ext::polygon_info_start_index is a helper array to go from a location entry to a
+ * polygon_info entry.
  *
- * @ref polygon_info stores info (metadata) for each polygon, flattened:
+ * @ref xrt_plane_detections_ext::polygon_infos stores info (metadata) for each polygon, flattened:
  * plane 1 polygon 1 info | plane 1 polygon 2 info | ... | plane 2 polygon 1 info | ...
  *
- * @ref polygon_info.vertices_start_index is a helper array to go from a polygon_info entry to vertices
- * entry.
+ * @ref xrt_plane_polygon_info_ext::vertices_start_index is a helper array to go from a @p polygon_info entry to
+ * @p vertices entry.
  *
- * @ref vertices stores vertex data for each polygon, for each plane, flattened:
+ * @ref xrt_plane_detections_ext::vertices stores vertex data for each polygon, for each plane, flattened:
  * plane 1 polygon 1 vertex 1 | plane 1 polygon 1 vertex 2 | ... | plane 1 polygon 2 vertex 1 | ...
  *
  * To reconstruct the vertices of a certain plane polygon:
@@ -179,7 +180,7 @@ struct xrt_plane_detections_ext
 	struct xrt_plane_detector_location_ext *locations;
 
 	//! Parallel array to @ref locations.
-	//! Index into @ref polygon_info of polygon_infos for all planes of a query.
+	//! Index into polygon_info of @ref polygon_infos for all planes of a query.
 	uint32_t *polygon_info_start_index;
 
 	//! size of @ref polygon_infos array.

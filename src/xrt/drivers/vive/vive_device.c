@@ -212,6 +212,7 @@ static xrt_result_t
 vive_device_get_view_poses(struct xrt_device *xdev,
                            const struct xrt_vec3 *default_eye_relation,
                            int64_t at_timestamp_ns,
+                           enum xrt_view_type view_type,
                            uint32_t view_count,
                            struct xrt_space_relation *out_head_relation,
                            struct xrt_fov *out_fovs,
@@ -226,6 +227,7 @@ vive_device_get_view_poses(struct xrt_device *xdev,
 	    xdev,                                    //
 	    default_eye_relation,                    //
 	    at_timestamp_ns,                         //
+	    view_type,                               //
 	    view_count,                              //
 	    out_head_relation,                       //
 	    out_fovs,                                //
@@ -1067,6 +1069,26 @@ precompute_sensor_transforms(struct vive_device *d)
 	d->P_imu_me = P_imuxr_me;
 }
 
+static xrt_result_t
+vive_device_get_compositor_info(struct xrt_device *xdev,
+                                const struct xrt_device_compositor_mode *mode,
+                                struct xrt_device_compositor_info *out_info)
+{
+	struct vive_device *d = vive_device(xdev);
+
+	time_duration_ns scanout_time_ns;
+	enum xrt_scanout_direction scanout_direction;
+
+	vive_variant_scanout_info(d->config.variant, mode->frame_interval_ns, &scanout_time_ns, &scanout_direction);
+
+	(*out_info) = (struct xrt_device_compositor_info){
+	    .scanout_time_ns = scanout_time_ns,
+	    .scanout_direction = scanout_direction,
+	};
+
+	return XRT_SUCCESS;
+}
+
 struct vive_device *
 vive_device_create(struct os_hid_device *mainboard_dev,
                    struct os_hid_device *sensors_dev,
@@ -1090,6 +1112,7 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	d->base.update_inputs = vive_device_update_inputs;
 	d->base.get_tracked_pose = vive_device_get_tracked_pose;
 	d->base.get_view_poses = vive_device_get_view_poses;
+	d->base.get_compositor_info = vive_device_get_compositor_info;
 	d->base.destroy = vive_device_destroy;
 	d->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	d->base.name = XRT_DEVICE_GENERIC_HMD;
@@ -1103,6 +1126,8 @@ vive_device_create(struct os_hid_device *mainboard_dev,
 	    .step = 0.1,
 	    .max = +120.0,
 	};
+
+	d->base.supported.compositor_info = true;
 
 	d->base.hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	d->base.hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;

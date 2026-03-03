@@ -233,8 +233,9 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 }
 
 int
-ipc_server_mainloop_init(struct ipc_server_mainloop *ml)
+ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
 {
+	(void)no_stdin;
 	IPC_TRACE_MARKER();
 
 	int ret = init_listen_socket(ml);

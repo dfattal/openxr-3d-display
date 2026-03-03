@@ -92,7 +92,7 @@ struct comp_target_swapchain
 	struct
 	{
 		//! Must only be accessed from main compositor thread.
-		bool has_started;
+		bool thread_running;
 
 		//! Protected by event_thread lock.
 		bool should_wait;
@@ -102,6 +102,9 @@ struct comp_target_swapchain
 
 		//! Thread waiting on vblank_event_fence (first pixel out).
 		struct os_thread_helper event_thread;
+
+		//! Skipping the event on the first vblank avoids a spurious VK_ERROR_OUT_OF_HOST_MEMORY error.
+		bool event_active;
 	} vblank;
 
 	/*!

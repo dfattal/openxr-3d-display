@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -164,13 +165,15 @@ static const char *optional_device_extensions[] = {
 };
 
 static VkResult
-select_instances_extensions(struct null_compositor *c, struct u_string_list *required, struct u_string_list *optional)
+select_instances_extensions(struct null_compositor *c,
+                            struct u_extension_list_builder *required_builder,
+                            struct u_extension_list_builder *optional_builder)
 {
 #ifdef VK_KHR_portability_enumeration
-	u_string_list_append(optional, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+	u_extension_list_builder_append(optional_builder, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
 #ifdef VK_EXT_display_surface_counter
-	u_string_list_append(optional, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME);
+	u_extension_list_builder_append(optional_builder, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME);
 #endif
 
 	return VK_SUCCESS;
@@ -195,25 +198,32 @@ compositor_init_vulkan(struct null_compositor *c)
 	VkResult ret;
 
 	// every backend needs at least the common extensions
-	struct u_string_list *required_instance_ext_list =
-	    u_string_list_create_from_array(instance_extensions_common, ARRAY_SIZE(instance_extensions_common));
+	struct u_extension_list_builder *required_instance_ext_builder = u_extension_list_builder_create_from_array( //
+	    instance_extensions_common,                                                                              //
+	    ARRAY_SIZE(instance_extensions_common));                                                                 //
 
-	struct u_string_list *optional_instance_ext_list = u_string_list_create();
+	struct u_extension_list_builder *optional_instance_ext_builder = u_extension_list_builder_create();
 
-	ret = select_instances_extensions(c, required_instance_ext_list, optional_instance_ext_list);
+	ret = select_instances_extensions(c, required_instance_ext_builder, optional_instance_ext_builder);
 	if (ret != VK_SUCCESS) {
 		VK_ERROR(vk, "select_instances_extensions: %s\n\tFailed to select instance extensions.",
 		         vk_result_string(ret));
-		u_string_list_destroy(&required_instance_ext_list);
-		u_string_list_destroy(&optional_instance_ext_list);
+		u_extension_list_builder_destroy(&required_instance_ext_builder);
+		u_extension_list_builder_destroy(&optional_instance_ext_builder);
 		return ret;
 	}
 
-	struct u_string_list *required_device_extension_list =
-	    u_string_list_create_from_array(required_device_extensions, ARRAY_SIZE(required_device_extensions));
+	// Consumes the builder and returns a new list.
+	struct u_extension_list *required_instance_ext_list =
+	    u_extension_list_builder_build(&required_instance_ext_builder);
+	struct u_extension_list *optional_instance_ext_list =
+	    u_extension_list_builder_build(&optional_instance_ext_builder);
 
-	struct u_string_list *optional_device_extension_list =
-	    u_string_list_create_from_array(optional_device_extensions, ARRAY_SIZE(optional_device_extensions));
+	struct u_extension_list *required_device_extension_list =
+	    u_extension_list_create_from_array(required_device_extensions, ARRAY_SIZE(required_device_extensions));
+
+	struct u_extension_list *optional_device_extension_list =
+	    u_extension_list_create_from_array(optional_device_extensions, ARRAY_SIZE(optional_device_extensions));
 
 	struct comp_vulkan_arguments vk_args = {
 	    .get_instance_proc_address = vkGetInstanceProcAddr,
@@ -232,10 +242,10 @@ compositor_init_vulkan(struct null_compositor *c)
 	struct comp_vulkan_results vk_res = {0};
 	bool bundle_ret = comp_vulkan_init_bundle(vk, &vk_args, &vk_res);
 
-	u_string_list_destroy(&required_instance_ext_list);
-	u_string_list_destroy(&optional_instance_ext_list);
-	u_string_list_destroy(&required_device_extension_list);
-	u_string_list_destroy(&optional_device_extension_list);
+	u_extension_list_destroy(&required_instance_ext_list);
+	u_extension_list_destroy(&optional_instance_ext_list);
+	u_extension_list_destroy(&required_device_extension_list);
+	u_extension_list_destroy(&optional_device_extension_list);
 
 	if (!bundle_ret) {
 		return false;
@@ -306,8 +316,26 @@ compositor_init_sys_info(struct null_compositor *c, struct xrt_device *xdev)
 {
 	struct xrt_system_compositor_info *sys_info = &c->sys_info;
 
-	// Required by OpenXR spec.
+	/*
+	 * Required by OpenXR spec (minimum 16).
+	 *
+	 * NOTE: When using Vulkan compositor components (c/render, c/util),
+	 * call render_max_layers_capable() to clamp this value based on
+	 * actual device limits.
+	 */
 	sys_info->max_layers = XRT_MAX_LAYERS;
+
+	uint32_t view_count = xdev->hmd->view_count;
+	enum xrt_view_type view_type = 0; // Invalid
+
+	switch (view_count) {
+	case 0: U_LOG_E("Bug detected: HMD \"%s\" xdev->hmd.view_count must be > 0!", xdev->str); return false;
+	case 1: view_type = XRT_VIEW_TYPE_MONO; break;
+	case 2: view_type = XRT_VIEW_TYPE_STEREO; break;
+	default:
+		U_LOG_E("Bug detected: HMD \"%s\" xdev->hmd.view_count must be 1 or 2, not %u!", xdev->str, view_count);
+		return false;
+	}
 
 	// UUIDs and LUID already set in vk init.
 	(void)sys_info->compositor_vk_deviceUUID;
@@ -316,7 +344,6 @@ compositor_init_sys_info(struct null_compositor *c, struct xrt_device *xdev)
 	(void)sys_info->client_d3d_deviceLUID_valid;
 
 	// Use device native display resolution per eye for recommended/max
-	uint32_t view_count = xdev->hmd->view_count;
 	uint64_t native_w = xdev->hmd->screens[0].w_pixels;
 	uint64_t native_h = xdev->hmd->screens[0].h_pixels;
 
@@ -325,14 +352,17 @@ compositor_init_sys_info(struct null_compositor *c, struct xrt_device *xdev)
 
 	// clang-format off
 	for (uint32_t i = 0; i < view_count; ++i) {
-		sys_info->views[i].recommended.width_pixels  = per_eye_w;
-		sys_info->views[i].recommended.height_pixels = per_eye_h;
-		sys_info->views[i].recommended.sample_count  = 1;
-		sys_info->views[i].max.width_pixels  = per_eye_w;
-		sys_info->views[i].max.height_pixels = per_eye_h;
-		sys_info->views[i].max.sample_count  = 1;
+		sys_info->view_configs[0].views[i].recommended.width_pixels  = per_eye_w;
+		sys_info->view_configs[0].views[i].recommended.height_pixels = per_eye_h;
+		sys_info->view_configs[0].views[i].recommended.sample_count  = 1;
+		sys_info->view_configs[0].views[i].max.width_pixels  = per_eye_w;
+		sys_info->view_configs[0].views[i].max.height_pixels = per_eye_h;
+		sys_info->view_configs[0].views[i].max.sample_count  = 1;
 	}
 	// clang-format on
+	sys_info->view_configs[0].view_type = view_type;
+	sys_info->view_configs[0].view_count = view_count;
+	sys_info->view_config_count = 1; // Only one view config type supported.
 
 	NULL_INFO(c, "Null compositor view: %lux%lu per eye (native: %lux%lu)",
 	          (unsigned long)per_eye_w, (unsigned long)per_eye_h,
@@ -486,8 +516,16 @@ null_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle
 
 	struct xrt_fov fovs[2] = {0};
 	struct xrt_pose poses[2] = {0};
-	xrt_result_t xret =
-	    xrt_device_get_view_poses(c->xdev, &default_eye_relation, display_time_ns, 2, &head_relation, fovs, poses);
+
+	xrt_result_t xret = xrt_device_get_view_poses( //
+	    c->xdev,                                   //
+	    &default_eye_relation,                     //
+	    display_time_ns,                           //
+	    XRT_VIEW_TYPE_STEREO,                      //
+	    2,                                         //
+	    &head_relation,                            //
+	    fovs,                                      //
+	    poses);                                    //
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}

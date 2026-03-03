@@ -9,6 +9,7 @@
  */
 
 #include "math/m_api.h"
+#include "math/m_predict.h"
 #include "math/m_relation_history.h"
 #include "math/m_space.h"
 
@@ -16,16 +17,18 @@
 
 #include "util/u_debug.h"
 #include "util/u_device.h"
-#include "util/u_hand_simulation.h"
 #include "util/u_hand_tracking.h"
 #include "util/u_logging.h"
 #include "util/u_json.hpp"
 
+#include "util/u_time.h"
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_prober.h"
 
 #include "vive/vive_poses.h"
+
+#include "vp2/vp2_config.h"
 
 #include "openvr_driver.h"
 
@@ -34,10 +37,11 @@
 #include <cmath>
 #include <functional>
 #include <cstring>
+#include <numbers>
+#include <openvr_driver.h>
 #include <thread>
 #include <algorithm>
 #include <map>
-
 
 #define DEV_ERR(...) U_LOG_IFL_E(ctx->log_level, __VA_ARGS__)
 #define DEV_WARN(...) U_LOG_IFL_W(ctx->log_level, __VA_ARGS__)
@@ -45,6 +49,7 @@
 #define DEV_DEBUG(...) U_LOG_IFL_D(ctx->log_level, __VA_ARGS__)
 
 DEBUG_GET_ONCE_BOOL_OPTION(lh_emulate_hand, "LH_EMULATE_HAND", true)
+DEBUG_GET_ONCE_FLOAT_OPTION(lh_override_ipd, "LH_OVERRIDE_IPD_MM", -1.0f)
 
 // Each device will have its own input class.
 struct InputClass
@@ -52,10 +57,47 @@ struct InputClass
 	xrt_device_name name;
 	const std::vector<xrt_input_name> poses;
 	const std::unordered_map<std::string_view, xrt_input_name> non_poses;
-	const std::unordered_map<std::string_view, IndexFinger> finger_curls;
 };
 
 namespace {
+using namespace std::string_view_literals;
+// From https://github.com/ValveSoftware/openvr/blob/master/docs/Driver_API_Documentation.md#bone-structure
+enum HandSkeletonBone : std::uint8_t
+{
+	eBone_Root = 0,
+	eBone_Wrist,
+	eBone_Thumb0,
+	eBone_Thumb1,
+	eBone_Thumb2,
+	eBone_Thumb3,
+	eBone_IndexFinger0,
+	eBone_IndexFinger1,
+	eBone_IndexFinger2,
+	eBone_IndexFinger3,
+	eBone_IndexFinger4,
+	eBone_MiddleFinger0,
+	eBone_MiddleFinger1,
+	eBone_MiddleFinger2,
+	eBone_MiddleFinger3,
+	eBone_MiddleFinger4,
+	eBone_RingFinger0,
+	eBone_RingFinger1,
+	eBone_RingFinger2,
+	eBone_RingFinger3,
+	eBone_RingFinger4,
+	eBone_PinkyFinger0,
+	eBone_PinkyFinger1,
+	eBone_PinkyFinger2,
+	eBone_PinkyFinger3,
+	eBone_PinkyFinger4,
+	eBone_Aux_Thumb,
+	eBone_Aux_IndexFinger,
+	eBone_Aux_MiddleFinger,
+	eBone_Aux_RingFinger,
+	eBone_Aux_PinkyFinger,
+	eBone_Count
+};
+
 // Adding support for a new controller is a simple as adding it here.
 // The key for the map needs to be the name of input profile as indicated by the lighthouse driver.
 const std::unordered_map<std::string_view, InputClass> controller_classes{
@@ -66,6 +108,7 @@ const std::unordered_map<std::string_view, InputClass> controller_classes{
             {
                 XRT_INPUT_VIVE_GRIP_POSE,
                 XRT_INPUT_VIVE_AIM_POSE,
+                XRT_INPUT_GENERIC_PALM_POSE,
             },
             {
                 {"/input/application_menu/click", XRT_INPUT_VIVE_MENU_CLICK},
@@ -77,9 +120,6 @@ const std::unordered_map<std::string_view, InputClass> controller_classes{
                 {"/input/grip/click", XRT_INPUT_VIVE_SQUEEZE_CLICK},
                 {"/input/trackpad", XRT_INPUT_VIVE_TRACKPAD},
             },
-            {
-                // No fingers on this controller type
-            },
         },
     },
     {
@@ -89,6 +129,7 @@ const std::unordered_map<std::string_view, InputClass> controller_classes{
             {
                 XRT_INPUT_INDEX_GRIP_POSE,
                 XRT_INPUT_INDEX_AIM_POSE,
+                XRT_INPUT_GENERIC_PALM_POSE,
             },
             {
                 {"/input/system/click", XRT_INPUT_INDEX_SYSTEM_CLICK},
@@ -109,11 +150,34 @@ const std::unordered_map<std::string_view, InputClass> controller_classes{
                 {"/input/trackpad/touch", XRT_INPUT_INDEX_TRACKPAD_TOUCH},
                 {"/input/trackpad", XRT_INPUT_INDEX_TRACKPAD},
             },
+        },
+    },
+    {
+        "flipvr_controller_vc1b",
+        InputClass{
+            XRT_DEVICE_FLIPVR,
             {
-                {"/input/finger/index", IndexFinger::Index},
-                {"/input/finger/middle", IndexFinger::Middle},
-                {"/input/finger/ring", IndexFinger::Ring},
-                {"/input/finger/pinky", IndexFinger::Pinky},
+                XRT_INPUT_FLIPVR_GRIP_POSE,
+                XRT_INPUT_FLIPVR_AIM_POSE,
+            },
+            {
+                {"/input/system/click", XRT_INPUT_FLIPVR_SYSTEM_CLICK},
+                {"/input/a/click", XRT_INPUT_FLIPVR_A_CLICK},
+                {"/input/a/touch", XRT_INPUT_FLIPVR_A_TOUCH},
+                {"/input/b/click", XRT_INPUT_FLIPVR_B_CLICK},
+                {"/input/b/touch", XRT_INPUT_FLIPVR_B_TOUCH},
+                {"/input/x/click", XRT_INPUT_FLIPVR_X_CLICK},
+                {"/input/x/touch", XRT_INPUT_FLIPVR_X_TOUCH},
+                {"/input/y/click", XRT_INPUT_FLIPVR_Y_CLICK},
+                {"/input/y/touch", XRT_INPUT_FLIPVR_Y_TOUCH},
+                {"/input/trigger/click", XRT_INPUT_FLIPVR_TRIGGER_CLICK},
+                {"/input/trigger/touch", XRT_INPUT_FLIPVR_TRIGGER_TOUCH},
+                {"/input/trigger/value", XRT_INPUT_FLIPVR_TRIGGER_VALUE},
+                {"/input/grip/value", XRT_INPUT_FLIPVR_SQUEEZE_VALUE},
+                {"/input/grip/click", XRT_INPUT_FLIPVR_SQUEEZE_CLICK},
+                {"/input/joystick/click", XRT_INPUT_FLIPVR_THUMBSTICK_CLICK},
+                {"/input/joystick/touch", XRT_INPUT_FLIPVR_THUMBSTICK_TOUCH},
+                {"/input/joystick", XRT_INPUT_FLIPVR_THUMBSTICK},
             },
         },
     },
@@ -131,9 +195,6 @@ const std::unordered_map<std::string_view, InputClass> controller_classes{
                 {"/input/trigger/click", XRT_INPUT_VIVE_TRACKER_TRIGGER_CLICK},
                 {"/input/thumb/click", XRT_INPUT_VIVE_TRACKER_TRACKPAD_CLICK},
             },
-            {
-                // No fingers on this controller type
-            },
         },
     },
     {
@@ -150,13 +211,9 @@ const std::unordered_map<std::string_view, InputClass> controller_classes{
                 {"/input/trigger/click", XRT_INPUT_VIVE_TRACKER_TRIGGER_CLICK},
                 {"/input/thumb/click", XRT_INPUT_VIVE_TRACKER_TRACKPAD_CLICK},
             },
-            {
-                // No fingers on this controller type
-            },
         },
     },
 };
-
 int64_t
 chrono_timestamp_ns()
 {
@@ -214,6 +271,12 @@ brightness_to_analog_gain(float brightness)
 
 	return brightness;
 }
+xrt_pose
+bone_to_pose(const vr::VRBoneTransform_t &bone)
+{
+	return xrt_pose{xrt_quat{bone.orientation.x, bone.orientation.y, bone.orientation.z, bone.orientation.w},
+	                xrt_vec3{bone.position.v[0], bone.position.v[1], bone.position.v[2]}};
+}
 } // namespace
 
 Property::Property(vr::PropertyTypeTag_t tag, void *buffer, uint32_t bufferSize)
@@ -229,6 +292,8 @@ HmdDevice::HmdDevice(const DeviceBuilder &builder) : Device(builder)
 	this->device_type = XRT_DEVICE_TYPE_HMD;
 	this->container_handle = 0;
 
+	this->supported.compositor_info = true;
+
 	inputs_vec = {xrt_input{true, 0, XRT_INPUT_GENERIC_HEAD_POSE, {}}};
 	this->inputs = inputs_vec.data();
 	this->input_count = inputs_vec.size();
@@ -238,6 +303,7 @@ HmdDevice::HmdDevice(const DeviceBuilder &builder) : Device(builder)
 	SETUP_MEMBER_FUNC(compute_distortion);
 	SETUP_MEMBER_FUNC(set_brightness);
 	SETUP_MEMBER_FUNC(get_brightness);
+	SETUP_MEMBER_FUNC(get_compositor_info);
 #undef SETUP_MEMBER_FUNC
 }
 
@@ -249,6 +315,9 @@ ControllerDevice::ControllerDevice(vr::PropertyContainerHandle_t handle, const D
 	this->xrt_device::get_hand_tracking =
 	    &device_bouncer<ControllerDevice, &ControllerDevice::get_hand_tracking, xrt_result_t>;
 	this->xrt_device::set_output = &device_bouncer<ControllerDevice, &ControllerDevice::set_output, xrt_result_t>;
+
+	this->inputs_map["/skeleton/hand/left"] = &hand_tracking_inputs[XRT_HAND_LEFT];
+	this->inputs_map["/skeleton/hand/right"] = &hand_tracking_inputs[XRT_HAND_RIGHT];
 }
 
 Device::~Device()
@@ -285,14 +354,6 @@ Device::Device(const DeviceBuilder &builder) : xrt_device({}), ctx(builder.ctx),
 	init_chaperone(builder.steam_install);
 }
 
-void
-ControllerDevice::set_hand_tracking_hand(xrt_input_name name)
-{
-	if (has_index_hand_tracking) {
-		inputs_map["HAND"]->name = name;
-	}
-}
-
 // NOTE: No operations that would force inputs_vec or finger_inputs_vec to reallocate (such as insertion)
 // should be done after this function is called, otherwise the pointers in inputs_map/finger_inputs_map
 // would be invalidated.
@@ -314,19 +375,6 @@ ControllerDevice::set_input_class(const InputClass *input_class)
 		inputs_map.insert({path, &inputs_vec.back()});
 	}
 
-	has_index_hand_tracking = debug_get_bool_option_lh_emulate_hand() && !input_class->finger_curls.empty();
-	if (has_index_hand_tracking) {
-		finger_inputs_vec.reserve(input_class->finger_curls.size());
-		for (const auto &[path, finger] : input_class->finger_curls) {
-			assert(finger_inputs_vec.capacity() >= finger_inputs_vec.size() + 1);
-			finger_inputs_vec.push_back({0, finger, 0.f});
-			finger_inputs_map.insert({path, &finger_inputs_vec.back()});
-		}
-		assert(inputs_vec.capacity() >= inputs_vec.size() + 1);
-		inputs_vec.push_back({true, 0, XRT_INPUT_HT_CONFORMING_LEFT, {}});
-		inputs_map.insert({std::string_view("HAND"), &inputs_vec.back()});
-	}
-
 	this->inputs = inputs_vec.data();
 	this->input_count = inputs_vec.size();
 }
@@ -345,59 +393,242 @@ ControllerDevice::get_xrt_hand()
 	}
 }
 
-const std::vector<std::string> FACE_BUTTONS = {
-    "/input/system/touch", "/input/a/touch", "/input/b/touch", "/input/thumbstick/touch", "/input/trackpad/touch",
-};
+void
+ControllerDevice::set_active_hand(xrt_hand hand)
+{
+	this->skeleton_hand = hand;
+}
+
+namespace {
+xrt_quat
+from_euler_angles(float x, float y, float z)
+{
+	const xrt_vec3 v{x, y, z};
+	xrt_quat out;
+	math_quat_from_euler_angles(&v, &out);
+	return out;
+}
+
+constexpr float pi = std::numbers::pi_v<float>;
+constexpr float frac_pi_2 = pi / 2.0f;
+
+// OpenVR skeletal poses are defined with the palms facing each other, but OpenXR
+// hand tracking is defined with the palms facing down. These per hand rotations
+// are necessary to translate to what OpenXR expects.
+const xrt_quat right_hand_rotate = from_euler_angles(0.0f, frac_pi_2, 0.0f);
+const xrt_quat left_hand_rotate = from_euler_angles(0.0f, frac_pi_2, pi);
+
+xrt_quat
+right_wrist_rotate_init()
+{
+	const xrt_quat rot1 = from_euler_angles(0.0f, 0.0f, frac_pi_2);
+	const xrt_quat rot2 = from_euler_angles(0.0f, pi, 0.0f);
+	xrt_quat ret;
+	math_quat_rotate(&rot1, &rot2, &ret);
+	return ret;
+}
+xrt_quat
+left_wrist_rotate_init()
+{
+	const xrt_quat rot1 = from_euler_angles(pi, 0.0f, 0.0f);
+	const xrt_quat rot2 = from_euler_angles(0.0f, 0.0f, -frac_pi_2);
+	xrt_quat ret;
+	math_quat_rotate(&rot1, &rot2, &ret);
+	return ret;
+}
+
+const xrt_quat right_wrist_rotate = right_wrist_rotate_init();
+const xrt_quat left_wrist_rotate = left_wrist_rotate_init();
+
+xrt_pose
+generate_palm_pose(const xrt_pose &metacarpal_pose, const xrt_pose &proximal_pose)
+{
+	// OpenVR doesn't provide a palm joint, but the OpenXR palm is in the middle of
+	// the metacarpal and proximal bones of the middle finger,
+	// so we'll interpolate between them to generate it.
+	xrt_pose pose;
+	math_pose_interpolate(&metacarpal_pose, &proximal_pose, 0.5, &pose);
+	// Use metacarpal orientation, because the palm shouldn't really rotate
+	pose.orientation = metacarpal_pose.orientation;
+	return pose;
+}
+
+xrt_pose
+palm_offset_index(xrt_hand hand)
+{
+	// Taken from:
+	// https://github.com/ValveSoftware/OpenXR-Canonical-Pose-Tool/blob/5e6f3f6db584d58483058ff3262e7eef02c3acfd/dist/steamvr/cpt_SteamVR-valve_index_controller.xml#L1
+	switch (hand) {
+	case XRT_HAND_LEFT:
+		return xrt_pose{.orientation = xrt_quat{.x = -0.46, .y = -0.02, .z = -0.01, .w = 0.89},
+		                .position = xrt_vec3{.x = -0.015, .y = 0.0, .z = 0.001}};
+	case XRT_HAND_RIGHT:
+		return xrt_pose{.orientation = xrt_quat{.x = -0.46, .y = 0.02, .z = 0.01, .w = 0.89},
+		                .position = xrt_vec3{.x = 0.015, .y = 0.0, .z = 0.001}};
+	}
+
+	return {};
+}
+
+} // namespace
 
 void
-ControllerDevice::update_hand_tracking(int64_t desired_timestamp_ns, struct xrt_hand_joint_set *out)
+ControllerDevice::set_skeleton(std::span<const vr::VRBoneTransform_t> bones,
+                               xrt_hand hand,
+                               bool is_simulated,
+                               const char *path)
 {
-	if (!has_index_hand_tracking)
+	assert(bones.size() == eBone_Count);
+	generate_palm_pose_offset(bones, hand);
+	if (!is_simulated && debug_get_bool_option_lh_emulate_hand()) {
+		assert(inputs_vec.capacity() >= inputs_vec.size() + 1);
+		const xrt_input_name tracker_name =
+		    (hand == XRT_HAND_RIGHT) ? XRT_INPUT_HT_CONFORMING_RIGHT : XRT_INPUT_HT_CONFORMING_LEFT;
+		inputs_vec.push_back({true, 0, tracker_name, {}});
+		inputs_map.insert({path, &inputs_vec.back()});
+		this->input_count = inputs_vec.size();
+		has_hand_tracking = true;
+	}
+}
+
+void
+ControllerDevice::generate_palm_pose_offset(std::span<const vr::VRBoneTransform_t> bones, xrt_hand hand)
+{
+	if (this->input_class->name == XRT_DEVICE_INDEX_CONTROLLER) {
+		xrt_pose grip_offset;
+		vive_poses_get_pose_offset(this->input_class->name, this->device_type, XRT_INPUT_INDEX_GRIP_POSE,
+		                           &grip_offset);
+		auto offset = palm_offset_index(hand);
+		math_pose_transform(&grip_offset, &offset, &offset);
+		palm_offsets[hand] = offset;
 		return;
-	float index = 0.f;
-	float middle = 0.f;
-	float ring = 0.f;
-	float pinky = 0.f;
-	float thumb = 0.f;
-	for (auto fi : finger_inputs_vec) {
-		switch (fi.finger) {
-		case IndexFinger::Index: index = fi.value; break;
-		case IndexFinger::Middle: middle = fi.value; break;
-		case IndexFinger::Ring: ring = fi.value; break;
-		case IndexFinger::Pinky: pinky = fi.value; break;
-		default: break;
-		}
 	}
-	for (const auto &name : FACE_BUTTONS) {
-		auto *input = get_input_from_name(name);
-		if (input && input->value.boolean) {
-			thumb = 1.f;
-			break;
-		}
+	// The palm pose offset is generated from the OpenVR provided skeleton.
+	// https://github.com/ValveSoftware/openvr/blob/master/docs/Driver_API_Documentation.md#notes-on-the-skeleton
+
+	xrt_pose root = bone_to_pose(bones[eBone_Root]);
+	xrt_pose wrist = bone_to_pose(bones[eBone_Wrist]);
+	xrt_pose metacarpal = bone_to_pose(bones[eBone_MiddleFinger0]);
+	xrt_pose proximal = bone_to_pose(bones[eBone_MiddleFinger1]);
+
+	// The skeleton pose is given with the Root bone as origin.
+	// To convert from this, according to OpenVR docs we transform the wrist
+	// and then counter-transform the metacarpals
+	xrt_pose root_inv;
+	math_pose_invert(&root, &root_inv);
+	math_pose_transform(&root_inv, &wrist, &wrist);
+	math_pose_transform(&root, &metacarpal, &metacarpal);
+	math_pose_transform(&wrist, &metacarpal, &metacarpal);
+	math_pose_transform(&metacarpal, &proximal, &proximal);
+
+	xrt_pose palm_offset = generate_palm_pose(metacarpal, proximal);
+	xrt_quat palm_rotate = from_euler_angles(0.0f, 0.0f, frac_pi_2);
+
+	switch (hand) {
+	case XRT_HAND_LEFT: {
+		math_quat_rotate(&palm_offset.orientation, &left_hand_rotate, &palm_offset.orientation);
+		math_quat_invert(&palm_rotate, &palm_rotate);
+		break;
 	}
-	auto curl_values = u_hand_tracking_curl_values{pinky, ring, middle, index, thumb};
+	case XRT_HAND_RIGHT: {
+		math_quat_rotate(&palm_offset.orientation, &right_hand_rotate, &palm_offset.orientation);
+		break;
+	}
+	}
+	math_quat_rotate(&palm_offset.orientation, &palm_rotate, &palm_offset.orientation);
 
-	struct xrt_space_relation hand_relation = {};
-	m_relation_history_get(relation_hist, desired_timestamp_ns, &hand_relation);
+	// For controllers like the Vive Wands which can be in any hand, it will store both the left hand
+	// and the right hand skeletons, so we need to store both.
+	palm_offsets[hand] = palm_offset;
+}
 
-	u_hand_sim_simulate_for_valve_index_knuckles(&curl_values, get_xrt_hand(), &hand_relation, out);
+void
+ControllerDevice::update_skeleton_transforms(std::span<const vr::VRBoneTransform_t> bones)
+{
+	if (!has_hand_tracking) {
+		return;
+	}
 
-	struct xrt_relation_chain chain = {};
+	assert(bones.size() == eBone_Count);
 
-	struct xrt_pose pose_offset = XRT_POSE_IDENTITY;
-	vive_poses_get_pose_offset(name, device_type, inputs_map["HAND"]->name, &pose_offset);
+	xrt_hand_joint_set joint_set;
+	int64_t timestamp;
+	if (!m_relation_history_get_latest(relation_hist, &timestamp, &joint_set.hand_pose)) {
+		return;
+	}
+	joint_set.is_active = true;
+	auto &joints = joint_set.values.hand_joint_set_default;
 
-	m_relation_chain_push_pose(&chain, &pose_offset);
-	m_relation_chain_push_relation(&chain, &hand_relation);
-	m_relation_chain_resolve(&chain, &out->hand_pose);
+	xrt_pose root = bone_to_pose(bones[eBone_Root]);
+	xrt_pose wrist = bone_to_pose(bones[eBone_Wrist]);
+
+	// Here we're doing the same transformation as seen in generate_palm_pose_offset.
+	xrt_pose root_inv;
+	math_pose_invert(&root, &root_inv);
+	math_pose_transform(&root_inv, &wrist, &wrist);
+
+	constexpr auto valid_flags = (enum xrt_space_relation_flags)(
+	    XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+	    XRT_SPACE_RELATION_POSITION_TRACKED_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+
+	xrt_pose wrist_xr = wrist;
+
+	switch (skeleton_hand) {
+	case XRT_HAND_LEFT: {
+		math_quat_rotate(&wrist_xr.orientation, &left_wrist_rotate, &wrist_xr.orientation);
+		break;
+	}
+	case XRT_HAND_RIGHT: {
+		math_quat_rotate(&wrist_xr.orientation, &right_wrist_rotate, &wrist_xr.orientation);
+		break;
+	}
+	}
+
+	joints[XRT_HAND_JOINT_WRIST].relation.pose = wrist_xr;
+	joints[XRT_HAND_JOINT_WRIST].relation.relation_flags = valid_flags;
+
+	xrt_pose parent_pose;
+	for (int joint = XRT_HAND_JOINT_THUMB_METACARPAL; joint <= XRT_HAND_JOINT_LITTLE_TIP; ++joint) {
+		// Luckily openvr and openxr joint values match
+		xrt_pose pose = bone_to_pose(bones[joint]);
+		joints[joint].relation.relation_flags = valid_flags;
+
+		if (u_hand_joint_is_metacarpal((xrt_hand_joint)joint)) {
+			// Counter transform metacarpals
+			math_pose_transform(&root, &pose, &pose);
+			math_pose_transform(&wrist, &pose, &pose);
+		} else {
+			math_pose_transform(&parent_pose, &pose, &pose);
+		}
+
+		parent_pose = pose;
+
+		// Rotate joint to OpenXR orientation
+		switch (skeleton_hand) {
+		case XRT_HAND_LEFT: math_quat_rotate(&pose.orientation, &left_hand_rotate, &pose.orientation); break;
+		case XRT_HAND_RIGHT: math_quat_rotate(&pose.orientation, &right_hand_rotate, &pose.orientation); break;
+		}
+		joints[joint].relation.pose = pose;
+	}
+
+	joints[XRT_HAND_JOINT_PALM].relation.relation_flags = valid_flags;
+	joints[XRT_HAND_JOINT_PALM].relation.pose =
+	    generate_palm_pose(joints[XRT_HAND_JOINT_MIDDLE_METACARPAL].relation.pose,
+	                       joints[XRT_HAND_JOINT_MIDDLE_PROXIMAL].relation.pose);
+
+	u_hand_joints_apply_joint_width(&joint_set);
+	this->joint_history.push_back(JointsWithTimestamp{joint_set, timestamp});
 }
 
 xrt_input *
 Device::get_input_from_name(const std::string_view name)
 {
+	static const std::array ignore_inputs = {"/input/finger/index"sv, "/input/finger/middle"sv,
+	                                         "/input/finger/ring"sv, "/input/finger/pinky"sv,
+	                                         "/input/grip/touch"sv};
+
 	// Return nullptr without any other output to suppress a pile of useless warnings found below.
-	if (name == "/input/finger/index" || name == "/input/finger/middle" || name == "/input/finger/ring" ||
-	    name == "/input/finger/pinky") {
+	if (std::ranges::find(ignore_inputs, name) != std::ranges::end(ignore_inputs)) {
 		return nullptr;
 	}
 	auto input = inputs_map.find(name);
@@ -425,6 +656,10 @@ ControllerDevice::set_haptic_handle(vr::VRInputComponentHandle_t handle)
 		name = XRT_OUTPUT_NAME_INDEX_HAPTIC;
 		break;
 	}
+	case XRT_DEVICE_FLIPVR: {
+		name = XRT_OUTPUT_NAME_FLIPVR_HAPTIC;
+		break;
+	}
 	case XRT_DEVICE_VIVE_TRACKER: {
 		name = XRT_OUTPUT_NAME_VIVE_TRACKER_HAPTIC;
 		break;
@@ -447,29 +682,78 @@ Device::update_inputs()
 	return XRT_SUCCESS;
 }
 
-IndexFingerInput *
-ControllerDevice::get_finger_from_name(const std::string_view name)
-{
-	auto finger = finger_inputs_map.find(name);
-	if (finger == finger_inputs_map.end()) {
-		DEV_WARN("requested unknown finger name %s for device %s", std::string(name).c_str(), serial);
-		return nullptr;
-	}
-	return finger->second;
-}
-
 xrt_result_t
 ControllerDevice::get_hand_tracking(enum xrt_input_name name,
                                     int64_t desired_timestamp_ns,
                                     struct xrt_hand_joint_set *out_value,
                                     int64_t *out_timestamp_ns)
 {
-	if (!has_index_hand_tracking)
+	if (!has_hand_tracking) {
 		return XRT_ERROR_NOT_IMPLEMENTED;
-	update_hand_tracking(desired_timestamp_ns, out_value);
-	out_value->is_active = true;
-	hand_tracking_timestamp = desired_timestamp_ns;
-	*out_timestamp_ns = hand_tracking_timestamp;
+	}
+
+	// No handtracking data?
+	if (joint_history.empty()) {
+		out_value->is_active = false;
+		return XRT_SUCCESS;
+	}
+
+	const auto it = std::ranges::lower_bound(joint_history, desired_timestamp_ns, {},
+	                                         [](const JointsWithTimestamp &joint) { return joint.timestamp; });
+
+	auto predict_joint_set = [out_value, out_timestamp_ns,
+	                          desired_timestamp_ns](const JointsWithTimestamp &joints) {
+		out_value->is_active = joints.joint_set.is_active;
+		int64_t delta_ns = desired_timestamp_ns - joints.timestamp;
+		double delta_s = time_ns_to_s(delta_ns);
+
+		*out_timestamp_ns = desired_timestamp_ns;
+		m_predict_relation(&joints.joint_set.hand_pose, delta_s, &out_value->hand_pose);
+		for (int i = 0; i < XRT_HAND_JOINT_COUNT; i++) {
+			auto &new_joint = joints.joint_set.values.hand_joint_set_default[i];
+			auto &interp_joint = out_value->values.hand_joint_set_default[i];
+
+			m_predict_relation(&new_joint.relation, delta_s, &interp_joint.relation);
+			interp_joint.radius = new_joint.radius;
+		}
+	};
+
+	if (it == joint_history.end()) {
+		// Timestamp is newer than anything in history
+		predict_joint_set(joint_history.back());
+	} else if (desired_timestamp_ns == it->timestamp) {
+		*out_value = it->joint_set;
+		*out_timestamp_ns = it->timestamp;
+	} else if (it == joint_history.begin()) {
+		// Timestamp is older than anything in history
+		predict_joint_set(joint_history.front());
+	} else {
+		// Interpolate
+		auto it_previous = it - 1;
+
+		auto delta_before = desired_timestamp_ns - it_previous->timestamp;
+		auto delta_after = it->timestamp - desired_timestamp_ns;
+		float lerp_amt = (float)delta_before / (float)(delta_after - delta_before);
+
+		auto interpolate = [lerp_amt](xrt_space_relation &previous, xrt_space_relation &next,
+		                              xrt_space_relation &out) {
+			auto flags = (xrt_space_relation_flags)(previous.relation_flags & next.relation_flags);
+			m_space_relation_interpolate(&previous, &next, lerp_amt, flags, &out);
+		};
+
+		interpolate(it_previous->joint_set.hand_pose, it->joint_set.hand_pose, out_value->hand_pose);
+
+		for (int i = 0; i < XRT_HAND_JOINT_COUNT; i++) {
+			auto &prev = it_previous->joint_set.values.hand_joint_set_default[i];
+			auto &next = it->joint_set.values.hand_joint_set_default[i];
+			auto &out = out_value->values.hand_joint_set_default[i];
+			interpolate(prev.relation, next.relation, out.relation);
+			out.radius = next.radius;
+		}
+
+		*out_timestamp_ns = desired_timestamp_ns;
+	}
+
 	return XRT_SUCCESS;
 }
 
@@ -491,6 +775,10 @@ Device::get_battery_status(bool *out_present, bool *out_charging, float *out_cha
 xrt_result_t
 HmdDevice::get_brightness(float *out_brightness)
 {
+	if (variant == VIVE_VARIANT_PRO2 && vp2.hid != nullptr) {
+		this->brightness = vp2_get_brightness(vp2.hid);
+	}
+
 	*out_brightness = this->brightness;
 	return XRT_SUCCESS;
 }
@@ -498,6 +786,21 @@ HmdDevice::get_brightness(float *out_brightness)
 xrt_result_t
 HmdDevice::set_brightness(float brightness, bool relative)
 {
+	// Vive Pro 2 has a special command for setting brightness directly on the headset
+	if (variant == VIVE_VARIANT_PRO2 && vp2.hid != nullptr) {
+		brightness = relative ? vp2_get_brightness(vp2.hid) + brightness : brightness;
+
+		int ret = vp2_set_brightness(vp2.hid, brightness);
+		if (ret < 0) {
+			DEV_ERR("Failed to set VP2 brightness, got error %d", ret);
+			return XRT_ERROR_OUTPUT_REQUEST_FAILURE;
+		}
+
+		this->brightness = std::clamp(brightness, 0.0f, 1.3f);
+
+		return XRT_SUCCESS;
+	}
+
 	constexpr auto min_brightness = 0.2f;
 	constexpr auto max_brightness = 1.5f;
 
@@ -506,6 +809,23 @@ HmdDevice::set_brightness(float brightness, bool relative)
 	const auto analog_gain =
 	    std::clamp(brightness_to_analog_gain(this->brightness), analog_gain_range.min, analog_gain_range.max);
 	ctx->settings.SetFloat(vr::k_pch_SteamVR_Section, analog_gain_settings_key, analog_gain);
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+HmdDevice::get_compositor_info(const struct xrt_device_compositor_mode *mode,
+                               struct xrt_device_compositor_info *out_info)
+{
+	time_duration_ns scanout_time_ns;
+	enum xrt_scanout_direction scanout_direction;
+
+	vive_variant_scanout_info(this->variant, mode->frame_interval_ns, &scanout_time_ns, &scanout_direction);
+
+	(*out_info) = {
+	    .scanout_direction = scanout_direction,
+	    .scanout_time_ns = scanout_time_ns,
+	};
+
 	return XRT_SUCCESS;
 }
 
@@ -527,8 +847,18 @@ ControllerDevice::get_tracked_pose(xrt_input_name name, uint64_t at_timestamp_ns
 	Device::get_pose(at_timestamp_ns, &rel);
 
 	xrt_pose pose_offset = XRT_POSE_IDENTITY;
-	vive_poses_get_pose_offset(input_class->name, device_type, name, &pose_offset);
 
+	if (name == XRT_INPUT_GENERIC_PALM_POSE) {
+		if (!palm_offsets[skeleton_hand].has_value()) {
+			DEV_ERR("%s hand skeleton has not been initialized",
+			        skeleton_hand == XRT_HAND_LEFT ? "left" : "right");
+			*out_relation = XRT_SPACE_RELATION_ZERO;
+			return XRT_SUCCESS;
+		}
+		pose_offset = *palm_offsets[skeleton_hand];
+	} else {
+		vive_poses_get_pose_offset(input_class->name, device_type, name, &pose_offset);
+	}
 	xrt_relation_chain relchain = {};
 
 	m_relation_chain_push_pose(&relchain, &pose_offset);
@@ -605,18 +935,30 @@ HmdDevice::SetDisplayEyeToHead(uint32_t unWhichDevice,
 xrt_result_t
 HmdDevice::get_view_poses(const xrt_vec3 *default_eye_relation,
                           uint64_t at_timestamp_ns,
+                          xrt_view_type view_type,
                           uint32_t view_count,
                           xrt_space_relation *out_head_relation,
                           xrt_fov *out_fovs,
                           xrt_pose *out_poses)
 {
 	struct xrt_vec3 eye_relation = *default_eye_relation;
+
 	eye_relation.x = ipd;
+
+	float override_ipd_mm = debug_get_float_option_lh_override_ipd();
+	if (override_ipd_mm != -1.0f) {
+		// Convert from mm -> m
+		eye_relation.x = override_ipd_mm / 1000.0f;
+	} else if (this->variant == VIVE_VARIANT_PRO2) {
+		// Default to 63mm on Vive Pro 2, the IPD reading is completely borked and always sends 15mm
+		eye_relation.x = 0.063f;
+	}
 
 	xrt_result_t xret = u_device_get_view_poses( //
 	    this,                                    //
 	    &eye_relation,                           //
 	    at_timestamp_ns,                         //
+	    view_type,                               //
 	    view_count,                              //
 	    out_head_relation,                       //
 	    out_fovs,                                //
@@ -638,6 +980,18 @@ HmdDevice::get_view_poses(const xrt_vec3 *default_eye_relation,
 xrt_result_t
 HmdDevice::compute_distortion(uint32_t view, float u, float v, xrt_uv_triplet *out_result)
 {
+	// Vive Pro 2 has it's own special distortion model
+	if (this->variant == VIVE_VARIANT_PRO2 && this->vp2.hid != nullptr) {
+		vp2_config *config = vp2_get_config(this->vp2.hid);
+
+		struct xrt_vec2 uv = {u, v};
+
+		// If computing through VP2 method fails, fall back to the standard method.
+		if (vp2_distort(config, view, &uv, out_result)) {
+			return XRT_SUCCESS;
+		}
+	}
+
 	// Vive Pro 2 has a vertically flipped distortion map.
 	if (this->variant == VIVE_VARIANT_PRO2) {
 		v = 1.0f - v;
@@ -804,10 +1158,17 @@ Device::update_pose(const vr::DriverPose_t &newPose) const
 	relation.linear_velocity = copy_vec3(newPose.vecVelocity);
 	relation.angular_velocity = copy_vec3(newPose.vecAngularVelocity);
 
-	math_quat_rotate_vec3(&relation.pose.orientation, &relation.angular_velocity, &relation.angular_velocity);
-
-	// apply over local transform
+	// local transform (head to driver offset)
 	const xrt_pose local = copy_pose(newPose.qDriverFromHeadRotation, newPose.vecDriverFromHeadTranslation);
+
+	// IMU linear velocity contribution due to rotation around driver origin (tangential velocity)
+	xrt_vec3 tangential_velocity;
+	math_vec3_cross(&relation.angular_velocity, &local.position, &tangential_velocity);
+	math_quat_rotate_vec3(&relation.pose.orientation, &tangential_velocity, &tangential_velocity);
+	math_vec3_accum(&tangential_velocity, &relation.linear_velocity);
+
+	// apply local transform
+	math_quat_rotate_vec3(&relation.pose.orientation, &relation.angular_velocity, &relation.angular_velocity);
 	math_pose_transform(&relation.pose, &local, &relation.pose);
 
 	// apply world transform
@@ -1010,6 +1371,13 @@ HmdDevice::init_vive_pro_2(struct xrt_prober *xp)
 	this->hmd_parts->base.screens[0].w_pixels = width;
 	this->hmd_parts->base.screens[0].h_pixels = height;
 
+	vp2_config *config = vp2_get_config(this->vp2.hid);
+
+	vp2_get_fov(config, 0, &this->hmd_parts->base.distortion.fov[0]);
+	vp2_get_fov(config, 1, &this->hmd_parts->base.distortion.fov[1]);
+
+	this->supported.brightness_control = true;
+
 	return ret == 0;
 }
 
@@ -1027,7 +1395,8 @@ HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 	case vr::Prop_DisplayFrequency_Float: {
 		assert(prop.unBufferSize == sizeof(float));
 		float freq = *static_cast<float *>(prop.pvBuffer);
-		set_nominal_frame_interval((1.f / freq) * 1e9f);
+		int64_t interval_ns = (1.f / freq) * 1e9f;
+		set_nominal_frame_interval(interval_ns);
 		break;
 	}
 	case vr::Prop_UserIpdMeters_Float: {
@@ -1099,7 +1468,7 @@ ControllerDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 		const std::string_view name = {static_cast<char *>(prop.pvBuffer), prop.unBufferSize};
 		if (name == "SlimeVR Virtual Tracker\0"sv) {
 			static const InputClass input_class = {
-			    XRT_DEVICE_VIVE_TRACKER, {XRT_INPUT_GENERIC_TRACKER_POSE}, {}, {}};
+			    XRT_DEVICE_VIVE_TRACKER, {XRT_INPUT_GENERIC_TRACKER_POSE}, {}};
 			this->name = input_class.name;
 			set_input_class(&input_class);
 			this->manufacturer = name.substr(0, name.find_first_of(' '));
@@ -1118,12 +1487,12 @@ ControllerDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 		}
 		case vr::TrackedControllerRole_RightHand: {
 			this->device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
-			set_hand_tracking_hand(XRT_INPUT_HT_CONFORMING_RIGHT);
+			set_active_hand(XRT_HAND_RIGHT);
 			break;
 		}
 		case vr::TrackedControllerRole_LeftHand: {
 			this->device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
-			set_hand_tracking_hand(XRT_INPUT_HT_CONFORMING_LEFT);
+			set_active_hand(XRT_HAND_LEFT);
 			break;
 		}
 		case vr::TrackedControllerRole_OptOut: {

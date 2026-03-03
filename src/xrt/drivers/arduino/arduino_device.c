@@ -405,9 +405,9 @@ arduino_device_create(struct os_ble_device *ble)
 
 	m_imu_3dof_init(&ad->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_300MS);
 
-#define DEG_TO_RAD ((double)M_PI / 180.0)
+#define DEG_TO_RAD_MULTIPLIER ((double)M_PI / 180.0)
 	float accel_ticks_to_float = (4.0 * MATH_GRAVITY_M_S2) / INT16_MAX;
-	float gyro_ticks_to_float = (2000.0 * DEG_TO_RAD) / INT16_MAX;
+	float gyro_ticks_to_float = (2000.0 * DEG_TO_RAD_MULTIPLIER) / INT16_MAX;
 
 	m_imu_pre_filter_init(&ad->pre_filter, accel_ticks_to_float, gyro_ticks_to_float);
 	m_imu_pre_filter_set_switch_x_and_y(&ad->pre_filter);

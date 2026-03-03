@@ -1,4 +1,5 @@
 // Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -177,7 +178,7 @@ fill_in_results(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_arg
 static VkResult
 create_instance(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
 {
-	struct u_string_list *instance_ext_list = NULL;
+	struct u_extension_list *instance_ext_list = NULL;
 	VkResult ret;
 
 	assert(vk_args->required_instance_version != 0);
@@ -187,24 +188,18 @@ create_instance(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_arg
 	 * Extension handling.
 	 */
 
-	// Check required extensions, results in clearer error message.
-	ret = vk_check_required_instance_extensions(vk, vk_args->required_instance_extensions);
+	// Build extension list.
+	ret = vk_build_instance_extensions(        //
+	    vk,                                    //
+	    vk_args->required_instance_extensions, //
+	    vk_args->optional_instance_extensions, //
+	    &instance_ext_list);                   //
 	if (ret == VK_ERROR_EXTENSION_NOT_PRESENT) {
 		return ret; // Already printed.
 	}
 	if (ret != VK_SUCCESS) {
-		VK_ERROR_RET(vk, "vk_check_required_instance_extensions", "Failed to check required extension(s)", ret);
+		VK_ERROR_RET(vk, "vk_build_instance_extensions", "Failed to build extension list", ret);
 		return ret;
-	}
-
-	// Build extension list.
-	instance_ext_list = vk_build_instance_extensions( //
-	    vk,                                           //
-	    vk_args->required_instance_extensions,        //
-	    vk_args->optional_instance_extensions);       //
-	if (!instance_ext_list) {
-		VK_ERROR(vk, "vk_build_instance_extensions: Failed to be list");
-		return VK_ERROR_EXTENSION_NOT_PRESENT;
 	}
 
 
@@ -222,7 +217,7 @@ create_instance(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_arg
 	VkInstanceCreateFlags instance_flags = 0;
 
 	// MoltenVK is a Vulkan portability driver — must opt in to enumerate it.
-	if (u_string_list_contains(instance_ext_list, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+	if (u_extension_list_contains(instance_ext_list, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
 		instance_flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 	}
 
@@ -230,8 +225,8 @@ create_instance(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_arg
 	    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 	    .flags = instance_flags,
 	    .pApplicationInfo = &app_info,
-	    .enabledExtensionCount = u_string_list_get_size(instance_ext_list),
-	    .ppEnabledExtensionNames = u_string_list_get_data(instance_ext_list),
+	    .enabledExtensionCount = u_extension_list_get_size(instance_ext_list),
+	    .ppEnabledExtensionNames = u_extension_list_get_data(instance_ext_list),
 	};
 
 	ret = vk->vkCreateInstance(&instance_info, NULL, &vk->instance);
@@ -252,7 +247,7 @@ create_instance(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_arg
 	// Needs to be filled in before getting functions.
 	vk_fill_in_has_instance_extensions(vk, instance_ext_list);
 
-	u_string_list_destroy(&instance_ext_list);
+	u_extension_list_destroy(&instance_ext_list);
 
 	ret = vk_get_instance_functions(vk);
 	if (ret != VK_SUCCESS) {
@@ -409,9 +404,10 @@ void
 comp_vulkan_formats_check(struct vk_bundle *vk, struct comp_vulkan_formats *formats)
 {
 #define CHECK_COLOR(FORMAT)                                                                                            \
-	formats->has_##FORMAT = vk_csci_is_format_supported(vk, VK_FORMAT_##FORMAT, XRT_SWAPCHAIN_USAGE_COLOR);
+	formats->has_##FORMAT = vk_csci_is_format_supported(vk, VK_FORMAT_##FORMAT, 0, XRT_SWAPCHAIN_USAGE_COLOR);
 #define CHECK_DS(FORMAT)                                                                                               \
-	formats->has_##FORMAT = vk_csci_is_format_supported(vk, VK_FORMAT_##FORMAT, XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL);
+	formats->has_##FORMAT =                                                                                        \
+	    vk_csci_is_format_supported(vk, VK_FORMAT_##FORMAT, 0, XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL);
 
 	VK_CSCI_FORMATS(CHECK_COLOR, CHECK_DS, CHECK_DS, CHECK_DS)
 

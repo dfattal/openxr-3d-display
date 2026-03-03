@@ -278,6 +278,129 @@ update_compute_descriptor_set_target(struct vk_bundle *vk,
 	    NULL);                             // pDescriptorCopies
 }
 
+static void
+dispatch_project_pipeline(struct render_compute *render,
+                          VkSampler src_samplers[XRT_MAX_VIEWS],
+                          VkImageView src_image_views[XRT_MAX_VIEWS],
+                          const struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS],
+                          VkImage target_image,
+                          VkImageView target_image_view,
+                          const struct render_viewport_data views[XRT_MAX_VIEWS],
+                          VkPipeline pipeline)
+{
+	struct vk_bundle *vk = vk_from_render(render);
+	struct render_resources *r = render->r;
+
+
+	/*
+	 * UBO
+	 */
+
+	struct render_compute_distortion_ubo_data *data =
+	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
+	for (uint32_t i = 0; i < render->r->view_count; ++i) {
+		data->views[i] = views[i];
+		data->post_transforms[i] = src_norm_rects[i];
+	}
+
+
+	/*
+	 * Source, target and distortion images.
+	 */
+
+	VkImageSubresourceRange subresource_range = {
+	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .baseMipLevel = 0,
+	    .levelCount = VK_REMAINING_MIP_LEVELS,
+	    .baseArrayLayer = 0,
+	    .layerCount = VK_REMAINING_ARRAY_LAYERS,
+	};
+
+	vk_cmd_image_barrier_gpu_locked( //
+	    vk,                          //
+	    r->cmd,                      //
+	    target_image,                //
+	    0,                           //
+	    VK_ACCESS_SHADER_WRITE_BIT,  //
+	    VK_IMAGE_LAYOUT_UNDEFINED,   //
+	    VK_IMAGE_LAYOUT_GENERAL,     //
+	    subresource_range);          //
+
+	VkSampler sampler = r->samplers.clamp_to_edge;
+	VkSampler distortion_samplers[3 * XRT_MAX_VIEWS];
+	for (uint32_t i = 0; i < render->r->view_count; ++i) {
+		distortion_samplers[3 * i + 0] = sampler;
+		distortion_samplers[3 * i + 1] = sampler;
+		distortion_samplers[3 * i + 2] = sampler;
+	}
+
+	update_compute_shared_descriptor_set( //
+	    vk,                               //
+	    r->compute.src_binding,           //
+	    src_samplers,                     //
+	    src_image_views,                  //
+	    r->compute.distortion_binding,    //
+	    distortion_samplers,              //
+	    r->distortion.image_views,        //
+	    r->compute.target_binding,        //
+	    target_image_view,                //
+	    r->compute.ubo_binding,           //
+	    r->compute.distortion.ubo.buffer, //
+	    VK_WHOLE_SIZE,                    //
+	    render->shared_descriptor_set,    //
+	    render->r->view_count);           //
+
+	vk->vkCmdBindPipeline(              //
+	    r->cmd,                         //
+	    VK_PIPELINE_BIND_POINT_COMPUTE, // pipelineBindPoint
+	    pipeline);                      // pipeline
+
+	vk->vkCmdBindDescriptorSets(               //
+	    r->cmd,                                //
+	    VK_PIPELINE_BIND_POINT_COMPUTE,        // pipelineBindPoint
+	    r->compute.distortion.pipeline_layout, // layout
+	    0,                                     // firstSet
+	    1,                                     // descriptorSetCount
+	    &render->shared_descriptor_set,        // pDescriptorSets
+	    0,                                     // dynamicOffsetCount
+	    NULL);                                 // pDynamicOffsets
+
+
+	uint32_t w = 0, h = 0;
+	calc_dispatch_dims_views(views, render->r->view_count, &w, &h);
+	assert(w != 0 && h != 0);
+
+	vk->vkCmdDispatch( //
+	    r->cmd,        //
+	    w,             // groupCountX
+	    h,             // groupCountY
+	    2);            // groupCountZ
+
+	VkImageMemoryBarrier memoryBarrier = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+	    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+	    .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+	    .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .image = target_image,
+	    .subresourceRange = subresource_range,
+	};
+
+	vk->vkCmdPipelineBarrier(                 //
+	    r->cmd,                               //
+	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, //
+	    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,    //
+	    0,                                    //
+	    0,                                    //
+	    NULL,                                 //
+	    0,                                    //
+	    NULL,                                 //
+	    1,                                    //
+	    &memoryBarrier);                      //
+}
+
 
 /*
  *
@@ -457,14 +580,13 @@ render_compute_projection_timewarp(struct render_compute *render,
                                    const struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS],
                                    const struct xrt_pose src_poses[XRT_MAX_VIEWS],
                                    const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
-                                   const struct xrt_pose new_poses[XRT_MAX_VIEWS],
+                                   const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
+                                   const struct xrt_pose new_poses_scanout_end[XRT_MAX_VIEWS],
                                    VkImage target_image,
                                    VkImageView target_image_view,
                                    const struct render_viewport_data views[XRT_MAX_VIEWS])
 {
 	assert(render->r != NULL);
-
-	struct vk_bundle *vk = vk_from_render(render);
 	struct render_resources *r = render->r;
 
 
@@ -472,13 +594,20 @@ render_compute_projection_timewarp(struct render_compute *render,
 	 * UBO
 	 */
 
-	struct xrt_matrix_4x4 time_warp_matrix[XRT_MAX_VIEWS];
+	struct xrt_matrix_4x4 time_warp_matrix_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_matrix_4x4 time_warp_matrix_scanout_end[XRT_MAX_VIEWS];
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
-		render_calc_time_warp_matrix( //
-		    &src_poses[i],            //
-		    &src_fovs[i],             //
-		    &new_poses[i],            //
-		    &time_warp_matrix[i]);    //
+		render_calc_time_warp_matrix(            //
+		    &src_poses[i],                       //
+		    &src_fovs[i],                        //
+		    &new_poses_scanout_begin[i],         //
+		    &time_warp_matrix_scanout_begin[i]); //
+
+		render_calc_time_warp_matrix(          //
+		    &src_poses[i],                     //
+		    &src_fovs[i],                      //
+		    &new_poses_scanout_end[i],         //
+		    &time_warp_matrix_scanout_end[i]); //
 	}
 
 	struct render_compute_distortion_ubo_data *data =
@@ -486,119 +615,34 @@ render_compute_projection_timewarp(struct render_compute *render,
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
 		data->views[i] = views[i];
 		data->pre_transforms[i] = r->distortion.uv_to_tanangle[i];
-		data->transforms[i] = time_warp_matrix[i];
+		data->transform_timewarp_scanout_begin[i] = time_warp_matrix_scanout_begin[i];
+		data->transform_timewarp_scanout_end[i] = time_warp_matrix_scanout_end[i];
 		data->post_transforms[i] = src_norm_rects[i];
 	}
 
-	/*
-	 * Source, target and distortion images.
-	 */
-
-	VkImageSubresourceRange subresource_range = {
-	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-	    .baseMipLevel = 0,
-	    .levelCount = VK_REMAINING_MIP_LEVELS,
-	    .baseArrayLayer = 0,
-	    .layerCount = VK_REMAINING_ARRAY_LAYERS,
-	};
-
-	vk_cmd_image_barrier_gpu_locked( //
-	    vk,                          //
-	    r->cmd,                      //
-	    target_image,                //
-	    0,                           //
-	    VK_ACCESS_SHADER_WRITE_BIT,  //
-	    VK_IMAGE_LAYOUT_UNDEFINED,   //
-	    VK_IMAGE_LAYOUT_GENERAL,     //
-	    subresource_range);          //
-
-	VkSampler sampler = r->samplers.clamp_to_edge;
-	VkSampler distortion_samplers[3 * XRT_MAX_VIEWS];
-	for (uint32_t i = 0; i < render->r->view_count; ++i) {
-		distortion_samplers[3 * i + 0] = sampler;
-		distortion_samplers[3 * i + 1] = sampler;
-		distortion_samplers[3 * i + 2] = sampler;
-	}
-
-	update_compute_shared_descriptor_set( //
-	    vk,                               //
-	    r->compute.src_binding,           //
-	    src_samplers,                     //
-	    src_image_views,                  //
-	    r->compute.distortion_binding,    //
-	    distortion_samplers,              //
-	    r->distortion.image_views,        //
-	    r->compute.target_binding,        //
-	    target_image_view,                //
-	    r->compute.ubo_binding,           //
-	    r->compute.distortion.ubo.buffer, //
-	    VK_WHOLE_SIZE,                    //
-	    render->shared_descriptor_set,    //
-	    render->r->view_count);           //
-
-	vk->vkCmdBindPipeline(                        //
-	    r->cmd,                                   //
-	    VK_PIPELINE_BIND_POINT_COMPUTE,           // pipelineBindPoint
-	    r->compute.distortion.timewarp_pipeline); // pipeline
-
-	vk->vkCmdBindDescriptorSets(               //
-	    r->cmd,                                //
-	    VK_PIPELINE_BIND_POINT_COMPUTE,        // pipelineBindPoint
-	    r->compute.distortion.pipeline_layout, // layout
-	    0,                                     // firstSet
-	    1,                                     // descriptorSetCount
-	    &render->shared_descriptor_set,        // pDescriptorSets
-	    0,                                     // dynamicOffsetCount
-	    NULL);                                 // pDynamicOffsets
-
-
-	uint32_t w = 0, h = 0;
-	calc_dispatch_dims_views(views, render->r->view_count, &w, &h);
-	assert(w != 0 && h != 0);
-
-	vk->vkCmdDispatch( //
-	    r->cmd,        //
-	    w,             // groupCountX
-	    h,             // groupCountY
-	    2);            // groupCountZ
-
-	VkImageMemoryBarrier memoryBarrier = {
-	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-	    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-	    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
-	    .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-	    .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-	    .image = target_image,
-	    .subresourceRange = subresource_range,
-	};
-
-	vk->vkCmdPipelineBarrier(                 //
-	    r->cmd,                               //
-	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, //
-	    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,    //
-	    0,                                    //
-	    0,                                    //
-	    NULL,                                 //
-	    0,                                    //
-	    NULL,                                 //
-	    1,                                    //
-	    &memoryBarrier);                      //
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, target_image,
+	                          target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
 
+
+/*
+ * This function is intended to be used on content already timewarped to new_poses_scanout_begin.
+ * It performs only the timewarp nesscary to compensate for the time delta between the start and end of
+ * scanout.
+ */
 void
-render_compute_projection(struct render_compute *render,
-                          VkSampler src_samplers[XRT_MAX_VIEWS],
-                          VkImageView src_image_views[XRT_MAX_VIEWS],
-                          const struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS],
-                          VkImage target_image,
-                          VkImageView target_image_view,
-                          const struct render_viewport_data views[XRT_MAX_VIEWS])
+render_compute_projection_scanout_compensation(struct render_compute *render,
+                                               VkSampler src_samplers[XRT_MAX_VIEWS],
+                                               VkImageView src_image_views[XRT_MAX_VIEWS],
+                                               const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                               const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
+                                               const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
+                                               const struct xrt_pose new_poses_scanout_end[XRT_MAX_VIEWS],
+                                               VkImage target_image,
+                                               VkImageView target_image_view,
+                                               const struct render_viewport_data views[XRT_MAX_VIEWS])
 {
 	assert(render->r != NULL);
-
-	struct vk_bundle *vk = vk_from_render(render);
 	struct render_resources *r = render->r;
 
 
@@ -606,109 +650,46 @@ render_compute_projection(struct render_compute *render,
 	 * UBO
 	 */
 
+	struct xrt_matrix_4x4 time_warp_matrix_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_matrix_4x4 time_warp_matrix_scanout_end[XRT_MAX_VIEWS];
+	for (uint32_t i = 0; i < render->r->view_count; ++i) {
+		render_calc_time_warp_projection(&src_fovs[i], &time_warp_matrix_scanout_begin[i]);
+
+		render_calc_time_warp_matrix(          //
+		    &new_poses_scanout_begin[i],       //
+		    &src_fovs[i],                      //
+		    &new_poses_scanout_end[i],         //
+		    &time_warp_matrix_scanout_end[i]); //
+	}
+
 	struct render_compute_distortion_ubo_data *data =
 	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
 		data->views[i] = views[i];
-		data->post_transforms[i] = src_norm_rects[i];
+		data->pre_transforms[i] = r->distortion.uv_to_tanangle[i];
+		data->transform_timewarp_scanout_begin[i] = time_warp_matrix_scanout_begin[i];
+		data->transform_timewarp_scanout_end[i] = time_warp_matrix_scanout_end[i];
+		data->post_transforms[i] = src_rects[i];
 	}
 
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, target_image, target_image_view,
+	                          views, r->compute.distortion.timewarp_pipeline);
+}
 
-	/*
-	 * Source, target and distortion images.
-	 */
+void
+render_compute_projection_no_timewarp(struct render_compute *render,
+                                      VkSampler src_samplers[XRT_MAX_VIEWS],
+                                      VkImageView src_image_views[XRT_MAX_VIEWS],
+                                      const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                      VkImage target_image,
+                                      VkImageView target_image_view,
+                                      const struct render_viewport_data views[XRT_MAX_VIEWS])
+{
+	assert(render->r != NULL);
+	struct render_resources *r = render->r;
 
-	VkImageSubresourceRange subresource_range = {
-	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-	    .baseMipLevel = 0,
-	    .levelCount = VK_REMAINING_MIP_LEVELS,
-	    .baseArrayLayer = 0,
-	    .layerCount = VK_REMAINING_ARRAY_LAYERS,
-	};
-
-	vk_cmd_image_barrier_gpu_locked( //
-	    vk,                          //
-	    r->cmd,                      //
-	    target_image,                //
-	    0,                           //
-	    VK_ACCESS_SHADER_WRITE_BIT,  //
-	    VK_IMAGE_LAYOUT_UNDEFINED,   //
-	    VK_IMAGE_LAYOUT_GENERAL,     //
-	    subresource_range);          //
-
-	VkSampler sampler = r->samplers.clamp_to_edge;
-	VkSampler distortion_samplers[3 * XRT_MAX_VIEWS];
-	for (uint32_t i = 0; i < render->r->view_count; ++i) {
-		distortion_samplers[3 * i + 0] = sampler;
-		distortion_samplers[3 * i + 1] = sampler;
-		distortion_samplers[3 * i + 2] = sampler;
-	}
-
-	update_compute_shared_descriptor_set( //
-	    vk,                               //
-	    r->compute.src_binding,           //
-	    src_samplers,                     //
-	    src_image_views,                  //
-	    r->compute.distortion_binding,    //
-	    distortion_samplers,              //
-	    r->distortion.image_views,        //
-	    r->compute.target_binding,        //
-	    target_image_view,                //
-	    r->compute.ubo_binding,           //
-	    r->compute.distortion.ubo.buffer, //
-	    VK_WHOLE_SIZE,                    //
-	    render->shared_descriptor_set,    //
-	    render->r->view_count);           //
-
-	vk->vkCmdBindPipeline(               //
-	    r->cmd,                          //
-	    VK_PIPELINE_BIND_POINT_COMPUTE,  // pipelineBindPoint
-	    r->compute.distortion.pipeline); // pipeline
-
-	vk->vkCmdBindDescriptorSets(               //
-	    r->cmd,                                //
-	    VK_PIPELINE_BIND_POINT_COMPUTE,        // pipelineBindPoint
-	    r->compute.distortion.pipeline_layout, // layout
-	    0,                                     // firstSet
-	    1,                                     // descriptorSetCount
-	    &render->shared_descriptor_set,        // pDescriptorSets
-	    0,                                     // dynamicOffsetCount
-	    NULL);                                 // pDynamicOffsets
-
-
-	uint32_t w = 0, h = 0;
-	calc_dispatch_dims_views(views, render->r->view_count, &w, &h);
-	assert(w != 0 && h != 0);
-
-	vk->vkCmdDispatch( //
-	    r->cmd,        //
-	    w,             // groupCountX
-	    h,             // groupCountY
-	    2);            // groupCountZ
-
-	VkImageMemoryBarrier memoryBarrier = {
-	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-	    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-	    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
-	    .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-	    .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-	    .image = target_image,
-	    .subresourceRange = subresource_range,
-	};
-
-	vk->vkCmdPipelineBarrier(                 //
-	    r->cmd,                               //
-	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, //
-	    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,    //
-	    0,                                    //
-	    0,                                    //
-	    NULL,                                 //
-	    0,                                    //
-	    NULL,                                 //
-	    1,                                    //
-	    &memoryBarrier);                      //
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, target_image, target_image_view,
+	                          views, r->compute.distortion.pipeline);
 }
 
 void

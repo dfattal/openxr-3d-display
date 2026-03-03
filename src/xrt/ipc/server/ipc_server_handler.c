@@ -1,4 +1,5 @@
 // Copyright 2020-2024, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -16,7 +17,9 @@
 #include "util/u_trace_marker.h"
 
 #include "server/ipc_server.h"
+#include "server/ipc_server_objects.h"
 #include "ipc_server_generated.h"
+#include "xrt/xrt_defines.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_results.h"
 #include "xrt/xrt_config_have.h"
@@ -46,33 +49,17 @@
  *
  */
 
-static xrt_result_t
-validate_device_id(volatile struct ipc_client_state *ics, int64_t device_id, struct xrt_device **out_device)
-{
-	if (device_id >= XRT_SYSTEM_MAX_DEVICES) {
-		IPC_ERROR(ics->server, "Invalid device ID (device_id >= XRT_SYSTEM_MAX_DEVICES)!");
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	struct xrt_device *xdev = ics->server->idevs[device_id].xdev;
-	if (xdev == NULL) {
-		IPC_ERROR(ics->server, "Invalid device ID (xdev is NULL)!");
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	*out_device = xdev;
-
-	return XRT_SUCCESS;
-}
-
-#define GET_XDEV_OR_RETURN(ics, device_id, out_device)                                                                 \
+#define GET_XTRACK_OR_RETURN(ICS, ID, XTRACK)                                                                          \
 	do {                                                                                                           \
-		xrt_result_t res = validate_device_id(ics, device_id, &out_device);                                    \
-		if (res != XRT_SUCCESS) {                                                                              \
-			return res;                                                                                    \
-		}                                                                                                      \
+		xrt_result_t xret = ipc_server_objects_get_xtrack_and_validate((ICS), ID, &(XTRACK));                  \
+		IPC_CHK_AND_RET((ICS)->server, xret, "ipc_server_objects_get_xtrack_and_validate");                    \
 	} while (0)
 
+#define GET_XDEV_OR_RETURN(ICS, ID, XDEV)                                                                              \
+	do {                                                                                                           \
+		xrt_result_t xret = ipc_server_objects_get_xdev_and_validate((ICS), ID, &(XDEV));                      \
+		IPC_CHK_AND_RET((ICS)->server, xret, "ipc_server_objects_get_xdev_and_validate");                      \
+	} while (0)
 
 #if defined(XRT_HAVE_LEIA_SR_D3D11) && defined(XRT_HAVE_D3D11_SERVICE_COMPOSITOR)
 /*!
@@ -349,26 +336,6 @@ ipc_try_get_sr_view_poses(struct ipc_server *s,
 }
 #endif // XRT_HAVE_LEIA_SR_D3D11 && XRT_HAVE_D3D11_SERVICE_COMPOSITOR
 
-
-static xrt_result_t
-validate_origin_id(volatile struct ipc_client_state *ics, int64_t origin_id, struct xrt_tracking_origin **out_xtrack)
-{
-	if (origin_id >= XRT_SYSTEM_MAX_DEVICES) {
-		IPC_ERROR(ics->server, "Invalid origin ID (origin_id >= XRT_SYSTEM_MAX_DEVICES)!");
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	struct xrt_tracking_origin *xtrack = ics->server->xtracks[origin_id];
-	if (xtrack == NULL) {
-		IPC_ERROR(ics->server, "Invalid origin ID (xtrack is NULL)!");
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	*out_xtrack = xtrack;
-
-	return XRT_SUCCESS;
-}
-
 static xrt_result_t
 validate_swapchain_state(volatile struct ipc_client_state *ics, uint32_t *out_index)
 {
@@ -576,6 +543,153 @@ create_localspace(volatile struct ipc_client_state *ics, uint32_t *out_local_id,
 	return XRT_SUCCESS;
 }
 
+XRT_MAYBE_UNUSED xrt_result_t
+get_new_future_id(volatile struct ipc_client_state *ics, uint32_t *out_id)
+{
+	// Our handle is just the index for now.
+	uint32_t index = 0;
+	for (; index < IPC_MAX_CLIENT_FUTURES; ++index) {
+		if (ics->xfts[index] == NULL) {
+			break;
+		}
+	}
+
+	if (index >= IPC_MAX_CLIENT_FUTURES) {
+		IPC_ERROR(ics->server, "Too many futures!");
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	*out_id = index;
+
+	return XRT_SUCCESS;
+}
+
+static inline xrt_result_t
+validate_future_id(volatile struct ipc_client_state *ics, uint32_t future_id, struct xrt_future **out_xft)
+{
+	if (future_id >= IPC_MAX_CLIENT_FUTURES) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	if (ics->xfts[future_id] == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	*out_xft = (struct xrt_future *)ics->xfts[future_id];
+	return (*out_xft != NULL) ? XRT_SUCCESS : XRT_ERROR_ALLOCATION;
+}
+
+static inline xrt_result_t
+release_future(volatile struct ipc_client_state *ics, uint32_t future_id)
+{
+	struct xrt_future *xft = NULL;
+	xrt_result_t xret = validate_future_id(ics, future_id, &xft);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	xrt_future_reference(&xft, NULL);
+	ics->xfts[future_id] = NULL;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+send_device_inputs(volatile struct ipc_client_state *ics, struct xrt_device *xdev)
+{
+	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
+	xrt_result_t xret;
+
+	const size_t input_size = xdev->input_count * sizeof(struct xrt_input);
+	if (input_size == 0) {
+		return XRT_SUCCESS;
+	}
+
+	volatile struct ipc_client_io_blocks *iob = &ics->client_state.io_blocks;
+	// Send inputs as varlen data
+	// We don't need to do any filtering, send the inputs as-is.
+	if (!iob->block_poses && !iob->block_hand_tracking && !iob->block_inputs) {
+		// Send the full input state
+		xret = ipc_send(imc, xdev->inputs, input_size);
+		IPC_CHK_ALWAYS_RET(ics->server, xret, "ipc_send(inputs)");
+	}
+
+	struct xrt_input filtered[1024];
+	if (ARRAY_SIZE(filtered) < xdev->input_count) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	for (uint32_t i = 0; i < xdev->input_count; i++) {
+		struct xrt_input *src = &xdev->inputs[i];
+		struct xrt_input *dst = &filtered[i];
+
+		bool blocked = false;
+		switch (XRT_GET_INPUT_TYPE(src->name)) {
+		case XRT_INPUT_TYPE_POSE: //
+			blocked = iob->block_poses && dst->name != XRT_INPUT_GENERIC_HEAD_POSE;
+			break;
+		case XRT_INPUT_TYPE_HAND_TRACKING: //
+			blocked = iob->block_hand_tracking;
+			break;
+		case XRT_INPUT_TYPE_VEC1_ZERO_TO_ONE:
+		case XRT_INPUT_TYPE_VEC1_MINUS_ONE_TO_ONE:
+		case XRT_INPUT_TYPE_VEC2_MINUS_ONE_TO_ONE:
+		case XRT_INPUT_TYPE_VEC3_MINUS_ONE_TO_ONE:
+		case XRT_INPUT_TYPE_BOOLEAN: //
+			blocked = iob->block_inputs;
+			break;
+		// Don't block face or body tracking.
+		case XRT_INPUT_TYPE_BODY_TRACKING:
+		case XRT_INPUT_TYPE_FACE_TRACKING: break;
+		}
+
+		if (blocked) {
+			// Make sure it's zeroed out, and we only zero out what we send.
+			U_ZERO(dst);
+			dst->name = src->name;
+		} else {
+			memcpy(dst, src, sizeof(*dst));
+		}
+	}
+
+	xret = ipc_send(imc, filtered, input_size);
+	IPC_CHK_ALWAYS_RET(ics->server, xret, "ipc_send(filtered inputs)");
+}
+
+static xrt_result_t
+send_device_outputs(volatile struct ipc_client_state *ics, struct xrt_device *xdev)
+{
+	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
+	xrt_result_t xret;
+
+	const size_t output_size = xdev->output_count * sizeof(struct xrt_output);
+	if (output_size == 0) {
+		return XRT_SUCCESS;
+	}
+
+	volatile struct ipc_client_io_blocks *iob = &ics->client_state.io_blocks;
+	// Send outputs as varlen data
+	// We don't need to do any filtering, send the outputs as is.
+	if (!iob->block_outputs) {
+		// Send the full output state
+		xret = ipc_send(imc, xdev->outputs, output_size);
+		IPC_CHK_ALWAYS_RET(ics->server, xret, "ipc_send(outputs)");
+	}
+
+	struct xrt_output filtered[1024];
+	if (ARRAY_SIZE(filtered) < xdev->output_count) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	for (uint32_t i = 0; i < xdev->output_count; i++) {
+		struct xrt_output *dst = &filtered[i];
+		// Make sure it's zeroed out, and we only zero out what we send.
+		U_ZERO(dst);
+		dst->name = xdev->outputs[i].name;
+	}
+
+	xret = ipc_send(imc, filtered, output_size);
+	IPC_CHK_ALWAYS_RET(ics->server, xret, "ipc_send(filtered outputs)");
+}
+
 /*
  *
  * Handle functions.
@@ -622,6 +736,7 @@ ipc_handle_instance_describe_client(volatile struct ipc_client_state *ics,
 	EXT(ext_hand_tracking_enabled);
 	EXT(ext_hand_tracking_data_source_enabled);
 	EXT(ext_eye_gaze_interaction_enabled);
+	EXT(ext_future_enabled);
 	EXT(ext_hand_interaction_enabled);
 	EXT(htc_facial_tracking_enabled);
 	EXT(fb_body_tracking_enabled);
@@ -629,6 +744,7 @@ ipc_handle_instance_describe_client(volatile struct ipc_client_state *ics,
 	EXT(meta_body_tracking_calibration_enabled);
 	EXT(fb_face_tracking2_enabled);
 	EXT(ext_win32_appcontainer_compatible_enabled);
+	EXT(android_face_tracking_enabled);
 
 #undef EXT
 #undef PTT
@@ -639,6 +755,25 @@ ipc_handle_instance_describe_client(volatile struct ipc_client_state *ics,
 	IPC_INFO(ics->server, "%s", sink.buffer);
 
 	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_instance_is_system_available(volatile struct ipc_client_state *ics, bool *out_available)
+{
+	IPC_TRACE_MARKER();
+
+	xrt_result_t xret = XRT_SUCCESS;
+
+	struct ipc_server *s = ics->server;
+
+	os_mutex_lock(&s->global_state.lock);
+
+	xret = ipc_server_init_system_if_available_locked(s, ics, out_available);
+	IPC_CHK_WITH_GOTO(s, xret, "ipc_server_init_system_if_available_locked", cleanup);
+
+cleanup:
+	os_mutex_unlock(&s->global_state.lock);
+	return xret;
 }
 
 xrt_result_t
@@ -686,7 +821,7 @@ ipc_handle_session_create(volatile struct ipc_client_state *ics,
 	ics->client_state.session_visible = true;
 	ics->client_state.session_focused = true;
 	xrt_syscomp_set_state(ics->server->xsysc, ics->xc, ics->client_state.session_visible,
-	                      ics->client_state.session_focused);
+	                      ics->client_state.session_focused, os_monotonic_get_ns());
 
 	xrt_syscomp_set_z_order(ics->server->xsysc, ics->xc, ics->client_state.z_order);
 
@@ -709,6 +844,17 @@ ipc_handle_session_poll_events(volatile struct ipc_client_state *ics, union xrt_
 }
 
 xrt_result_t
+ipc_handle_session_request_exit(volatile struct ipc_client_state *ics)
+{
+	// Have we created the session?
+	if (ics->xs == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+
+	return xrt_session_request_exit(ics->xs);
+}
+
+xrt_result_t
 ipc_handle_session_begin(volatile struct ipc_client_state *ics)
 {
 	IPC_TRACE_MARKER();
@@ -727,12 +873,14 @@ ipc_handle_session_begin(volatile struct ipc_client_state *ics)
 	    .ext_hand_tracking_enabled = ics->client_state.info.ext_hand_tracking_enabled,
 	    .ext_hand_tracking_data_source_enabled = ics->client_state.info.ext_hand_tracking_data_source_enabled,
 	    .ext_eye_gaze_interaction_enabled = ics->client_state.info.ext_eye_gaze_interaction_enabled,
+	    .ext_future_enabled = ics->client_state.info.ext_future_enabled,
 	    .ext_hand_interaction_enabled = ics->client_state.info.ext_hand_interaction_enabled,
 	    .htc_facial_tracking_enabled = ics->client_state.info.htc_facial_tracking_enabled,
 	    .fb_body_tracking_enabled = ics->client_state.info.fb_body_tracking_enabled,
 	    .fb_face_tracking2_enabled = ics->client_state.info.fb_face_tracking2_enabled,
 	    .meta_body_tracking_full_body_enabled = ics->client_state.info.meta_body_tracking_full_body_enabled,
 	    .meta_body_tracking_calibration_enabled = ics->client_state.info.meta_body_tracking_calibration_enabled,
+	    .android_face_tracking_enabled = ics->client_state.info.android_face_tracking_enabled,
 	};
 
 	return xrt_comp_begin_session(ics->xc, &begin_session_info);
@@ -1044,11 +1192,7 @@ ipc_handle_space_locate_device(volatile struct ipc_client_state *ics,
 		return xret;
 	}
 
-	xret = validate_device_id(ics, xdev_id, &xdev);
-	if (xret != XRT_SUCCESS) {
-		U_LOG_E("Invalid device_id!");
-		return xret;
-	}
+	GET_XDEV_OR_RETURN(ics, xdev_id, xdev);
 
 	return xrt_space_overseer_locate_device( //
 	    xso,                                 //
@@ -1164,11 +1308,9 @@ ipc_handle_space_get_tracking_origin_offset(volatile struct ipc_client_state *ic
                                             struct xrt_pose *out_offset)
 {
 	struct xrt_space_overseer *xso = ics->server->xso;
-	struct xrt_tracking_origin *xto;
-	xrt_result_t xret = validate_origin_id(ics, origin_id, &xto);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
+	struct xrt_tracking_origin *xto = NULL;
+	GET_XTRACK_OR_RETURN(ics, origin_id, xto);
+
 	return xrt_space_overseer_get_tracking_origin_offset(xso, xto, out_offset);
 }
 
@@ -1178,11 +1320,9 @@ ipc_handle_space_set_tracking_origin_offset(volatile struct ipc_client_state *ic
                                             const struct xrt_pose *offset)
 {
 	struct xrt_space_overseer *xso = ics->server->xso;
-	struct xrt_tracking_origin *xto;
-	xrt_result_t xret = validate_origin_id(ics, origin_id, &xto);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
+	struct xrt_tracking_origin *xto = NULL;
+	GET_XTRACK_OR_RETURN(ics, origin_id, xto);
+
 	return xrt_space_overseer_set_tracking_origin_offset(xso, xto, offset);
 }
 
@@ -1866,23 +2006,28 @@ ipc_handle_system_toggle_io_client(volatile struct ipc_client_state *_ics, uint3
 {
 	struct ipc_server *s = _ics->server;
 
-	IPC_INFO(s, "System toggling io for client %u.", client_id);
+	IPC_DEBUG(s, "System toggling io for client %u.", client_id);
 
 	return ipc_server_toggle_io_client(s, client_id);
 }
 
 xrt_result_t
-ipc_handle_system_toggle_io_device(volatile struct ipc_client_state *ics, uint32_t device_id)
+ipc_handle_system_set_client_io_blocks(volatile struct ipc_client_state *_ics,
+                                       uint32_t client_id,
+                                       const struct ipc_client_io_blocks *blocks)
 {
-	if (device_id >= IPC_MAX_DEVICES) {
-		return XRT_ERROR_IPC_FAILURE;
-	}
+	struct ipc_server *s = _ics->server;
 
-	struct ipc_device *idev = &ics->server->idevs[device_id];
+	IPC_DEBUG(s,
+	          "System setting io blocks for client %u. (block_poses=%s block_hand_tracking=%s block_inputs=%s "
+	          "block_outputs=%s)",
+	          client_id,                                      //
+	          blocks->block_poses ? "true" : "false",         //
+	          blocks->block_hand_tracking ? "true" : "false", //
+	          blocks->block_inputs ? "true" : "false",        //
+	          blocks->block_outputs ? "true" : "false");
 
-	idev->io_active = !idev->io_active;
-
-	return XRT_SUCCESS;
+	return ipc_server_set_client_io_blocks(s, client_id, blocks);
 }
 
 xrt_result_t
@@ -2154,62 +2299,352 @@ ipc_handle_compositor_semaphore_destroy(volatile struct ipc_client_state *ics, u
 
 /*
  *
- * Device functions.
+ * Tracking origin functions.
  *
  */
 
 xrt_result_t
-ipc_handle_device_update_input(volatile struct ipc_client_state *ics, uint32_t id)
+ipc_handle_tracking_origin_get_list(volatile struct ipc_client_state *ics, struct ipc_tracking_origin_list *out_list)
 {
-	// To make the code a bit more readable.
-	uint32_t device_id = id;
-	struct ipc_shared_memory *ism = get_ism(ics);
-	struct ipc_device *idev = get_idev(ics, device_id);
-	struct xrt_device *xdev = idev->xdev;
-	struct ipc_shared_device *isdev = &ism->isdevs[device_id];
-
-	// Update inputs.
-	xrt_result_t xret = xrt_device_update_inputs(xdev);
-	if (xret != XRT_SUCCESS) {
-		IPC_ERROR(ics->server, "Failed to update input");
-		return xret;
-	}
-
-	// Copy data into the shared memory.
-	struct xrt_input *src = xdev->inputs;
-	struct xrt_input *dst = &ism->inputs[isdev->first_input_index];
-	size_t size = sizeof(struct xrt_input) * isdev->input_count;
-
-	bool io_active = ics->io_active && idev->io_active;
-	if (io_active) {
-		memcpy(dst, src, size);
-	} else {
-		memset(dst, 0, size);
-
-		for (uint32_t i = 0; i < isdev->input_count; i++) {
-			dst[i].name = src[i].name;
-
-			// Special case the rotation of the head.
-			if (dst[i].name == XRT_INPUT_GENERIC_HEAD_POSE) {
-				dst[i].active = src[i].active;
-			}
+	// Count and collect origin IDs.
+	uint32_t count = 0;
+	for (uint32_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
+		struct xrt_tracking_origin *xtrack = ics->objects.xtracks[i];
+		if (xtrack != NULL) {
+			out_list->origins[count].id = i;
+			count++;
 		}
 	}
 
-	// Reply.
+	out_list->origin_count = count;
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_tracking_origin_get_info(volatile struct ipc_client_state *ics,
+                                    uint32_t tracking_origin_id,
+                                    struct ipc_tracking_origin_info *out_info)
+{
+	// Validate the tracking origin ID and get the tracking origin
+	struct xrt_tracking_origin *xtrack = NULL;
+	GET_XTRACK_OR_RETURN(ics, tracking_origin_id, xtrack);
+
+	// Copy tracking origin info to output
+	memcpy(out_info->name, xtrack->name, sizeof(out_info->name));
+	out_info->type = xtrack->type;
+	out_info->offset = xtrack->initial_offset;
+
+	return XRT_SUCCESS;
+}
+
+
+/*
+ *
+ * Device functions.
+ *
+ */
+
+static void
+fill_device_info(struct xrt_device *xdev, uint32_t tracking_origin_id, struct ipc_device_info *out_info)
+{
+	// Fill in basic device info
+	out_info->name = xdev->name;
+	out_info->device_type = xdev->device_type;
+	out_info->tracking_origin_id = tracking_origin_id;
+	memcpy(out_info->str, xdev->str, sizeof(out_info->str));
+	memcpy(out_info->serial, xdev->serial, sizeof(out_info->serial));
+	out_info->supported = xdev->supported;
+
+	// Fill in binding profile count
+	out_info->binding_profile_count = xdev->binding_profile_count;
+
+	// Calculate total input/output pairs across all binding profiles
+	uint32_t total_input_pairs = 0;
+	uint32_t total_output_pairs = 0;
+	for (size_t i = 0; i < xdev->binding_profile_count; i++) {
+		total_input_pairs += xdev->binding_profiles[i].input_count;
+		total_output_pairs += xdev->binding_profiles[i].output_count;
+	}
+	out_info->total_input_pair_count = total_input_pairs;
+	out_info->total_output_pair_count = total_output_pairs;
+
+	// Fill in input/output counts
+	out_info->input_count = xdev->input_count;
+	out_info->output_count = xdev->output_count;
+}
+
+static xrt_result_t
+send_binding_profiles(struct ipc_message_channel *imc,
+                      struct ipc_server *server,
+                      struct xrt_binding_profile *binding_profiles,
+                      uint32_t binding_profile_count)
+{
+	struct ipc_binding_profile_info *profiles = NULL;
+
+	// Early out if there are no pairs.
+	if (binding_profile_count == 0) {
+		return XRT_SUCCESS;
+	}
+
+	// Allocate temporary array for all input pairs.
+	profiles = U_TYPED_ARRAY_CALLOC(struct ipc_binding_profile_info, binding_profile_count);
+	if (profiles == NULL) {
+		IPC_ERROR(server, "Failed to allocate input pairs array");
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	// Send the binding profiles as varlen data.
+	uint32_t current_input_pair_index = 0;
+	uint32_t current_output_pair_index = 0;
+	for (size_t i = 0; i < binding_profile_count; i++) {
+		struct xrt_binding_profile *xbp = &binding_profiles[i];
+		struct ipc_binding_profile_info *ibpi = &profiles[i];
+
+		// Common state.
+		ibpi->name = xbp->name;
+
+		// Input pairs.
+		ibpi->input_count = xbp->input_count;
+		ibpi->first_input_index = xbp->input_count > 0 ? current_input_pair_index : 0;
+		current_input_pair_index += xbp->input_count;
+
+		// Output pairs.
+		ibpi->output_count = xbp->output_count;
+		ibpi->first_output_index = xbp->output_count > 0 ? current_output_pair_index : 0;
+		current_output_pair_index += xbp->output_count;
+	}
+
+	// Send all input pairs in one go.
+	xrt_result_t xret = ipc_send(imc, profiles, sizeof(struct ipc_binding_profile_info) * binding_profile_count);
+	free(profiles);
+	IPC_CHK_AND_RET(server, xret, "ipc_send(binding profile)");
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+send_binding_input_pairs(struct ipc_message_channel *imc,
+                         struct ipc_server *server,
+                         struct xrt_binding_profile *binding_profiles,
+                         uint32_t binding_profile_count,
+                         uint32_t total_input_pairs)
+{
+	struct xrt_binding_input_pair *input_pairs = NULL;
+
+	// Early out if there are no pairs.
+	if (total_input_pairs == 0) {
+		return XRT_SUCCESS;
+	}
+
+	// Allocate temporary array for all input pairs.
+	input_pairs = U_TYPED_ARRAY_CALLOC(struct xrt_binding_input_pair, total_input_pairs);
+	if (input_pairs == NULL) {
+		IPC_ERROR(server, "Failed to allocate input pairs array");
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	// Copy all input pairs into the temporary array.
+	uint32_t input_offset = 0;
+	for (uint32_t i = 0; i < binding_profile_count; i++) {
+		struct xrt_binding_profile *xbp = &binding_profiles[i];
+		if (xbp->input_count > 0) {
+			size_t size = sizeof(struct xrt_binding_input_pair) * xbp->input_count;
+			memcpy(&input_pairs[input_offset], xbp->inputs, size);
+			input_offset += xbp->input_count;
+		}
+	}
+
+	// Send all input pairs in one go.
+	xrt_result_t xret = ipc_send(imc, input_pairs, sizeof(struct xrt_binding_input_pair) * total_input_pairs);
+	free(input_pairs);
+	IPC_CHK_AND_RET(server, xret, "ipc_send(input pairs)");
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+send_binding_output_pairs(struct ipc_message_channel *imc,
+                          struct ipc_server *server,
+                          struct xrt_binding_profile *binding_profiles,
+                          uint32_t binding_profile_count,
+                          uint32_t total_output_pairs)
+{
+	struct xrt_binding_output_pair *output_pairs = NULL;
+
+	// Early out if there are no pairs.
+	if (total_output_pairs == 0) {
+		return XRT_SUCCESS;
+	}
+
+	// Allocate temporary array for all output pairs.
+	output_pairs = U_TYPED_ARRAY_CALLOC(struct xrt_binding_output_pair, total_output_pairs);
+	if (output_pairs == NULL) {
+		IPC_ERROR(server, "Failed to allocate output pairs array");
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	// Copy all output pairs into the temporary array.
+	uint32_t output_offset = 0;
+	for (uint32_t i = 0; i < binding_profile_count; i++) {
+		struct xrt_binding_profile *xbp = &binding_profiles[i];
+		if (xbp->output_count > 0) {
+			size_t size = sizeof(struct xrt_binding_output_pair) * xbp->output_count;
+			memcpy(&output_pairs[output_offset], xbp->outputs, size);
+			output_offset += xbp->output_count;
+		}
+	}
+
+	// Send all output pairs in one go.
+	xrt_result_t xret = ipc_send(imc, output_pairs, sizeof(struct xrt_binding_output_pair) * total_output_pairs);
+	free(output_pairs);
+	IPC_CHK_AND_RET(server, xret, "ipc_send(output pairs)");
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_device_get_info(volatile struct ipc_client_state *ics, uint32_t device_id)
+{
+	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
+	xrt_result_t xret = XRT_SUCCESS;
+
+	// Validate the device ID and get the device
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
+
+	// Get tracking origin ID
+	uint32_t tracking_origin_id = UINT32_MAX;
+	xret = ipc_server_objects_get_xtrack_id_or_add(ics, xdev->tracking_origin, &tracking_origin_id);
+	IPC_CHK_AND_RET(ics->server, xret, "ipc_server_objects_get_xtrack_id_or_add");
+
+	// Reply structure.
+	struct ipc_device_get_info_reply reply = XRT_STRUCT_INIT;
+
+	// Use helper to fill device info
+	fill_device_info(xdev, tracking_origin_id, &reply.info);
+
+	// Send the device info.
+	xret = ipc_send(imc, &reply, sizeof(reply));
+	IPC_CHK_AND_RET(ics->server, xret, "ipc_send(device info)");
+
+	// Send input names as varlen data
+	if (xdev->input_count > 0) {
+		// Temporary, freed on all paths.
+		enum xrt_input_name *input_names = U_TYPED_ARRAY_CALLOC(enum xrt_input_name, xdev->input_count);
+		for (size_t i = 0; i < xdev->input_count; i++) {
+			input_names[i] = xdev->inputs[i].name;
+		}
+		xret = ipc_send(imc, input_names, sizeof(enum xrt_input_name) * xdev->input_count);
+		free(input_names);
+		IPC_CHK_AND_RET(ics->server, xret, "ipc_send(input names)");
+	}
+
+	// Send output names as varlen data
+	if (xdev->output_count > 0) {
+		// Temporary, freed on all paths.
+		enum xrt_output_name *output_names = U_TYPED_ARRAY_CALLOC(enum xrt_output_name, xdev->output_count);
+		for (size_t i = 0; i < xdev->output_count; i++) {
+			output_names[i] = xdev->outputs[i].name;
+		}
+		xret = ipc_send(imc, output_names, sizeof(enum xrt_output_name) * xdev->output_count);
+		free(output_names);
+		IPC_CHK_AND_RET(ics->server, xret, "ipc_send(output names)");
+	}
+
+	// Send all profiles in one go.
+	xret = send_binding_profiles(     //
+	    imc,                          //
+	    ics->server,                  //
+	    xdev->binding_profiles,       //
+	    xdev->binding_profile_count); //
+	IPC_CHK_AND_RET(ics->server, xret, "send_binding_profiles");
+
+	// Send all input pairs in one go.
+	xret = send_binding_input_pairs(        //
+	    imc,                                //
+	    ics->server,                        //
+	    xdev->binding_profiles,             //
+	    xdev->binding_profile_count,        //
+	    reply.info.total_input_pair_count); //
+	IPC_CHK_AND_RET(ics->server, xret, "send_binding_input_pairs");
+
+	// Send all output pairs in one go.
+	xret = send_binding_output_pairs(        //
+	    imc,                                 //
+	    ics->server,                         //
+	    xdev->binding_profiles,              //
+	    xdev->binding_profile_count,         //
+	    reply.info.total_output_pair_count); //
+	IPC_CHK_AND_RET(ics->server, xret, "send_binding_output_pairs");
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_device_get_info_no_arrays(volatile struct ipc_client_state *ics,
+                                     uint32_t device_id,
+                                     struct ipc_device_info *out_info)
+{
+	xrt_result_t xret = XRT_SUCCESS;
+	struct xrt_device *xdev = NULL;
+
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
+
+	// Get tracking origin ID
+	uint32_t tracking_origin_id = UINT32_MAX;
+	xret = ipc_server_objects_get_xtrack_id_or_add(ics, xdev->tracking_origin, &tracking_origin_id);
+	IPC_CHK_AND_RET(ics->server, xret, "ipc_server_objects_get_xtrack_id_or_add");
+
+	// Use helper to fill device info
+	fill_device_info(xdev, tracking_origin_id, out_info);
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_device_update_input(volatile struct ipc_client_state *ics, uint32_t id)
+{
+	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
+	uint32_t device_id = id;
+	struct xrt_device *xdev = NULL;
+	xrt_result_t xret;
+
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
+
+	// Update inputs.
+	xret = xrt_device_update_inputs(xdev);
+
+	/*
+	 * Reply structure, make sure to send the result. We need to tell the
+	 * client if the update was successful or not. We can not return the
+	 * result from the function call because we are sending varlen data.
+	 *
+	 * And if we return not success we disconnect the client, so we should
+	 * only do that if there is a problem with the connection.
+	 */
+	struct ipc_result_reply reply = {
+	    .result = xret,
+	};
+
+	xret = ipc_send(imc, &reply, sizeof(reply));
+	IPC_CHK_AND_RET(ics->server, xret, "ipc_send(result reply)");
+
+	xret = send_device_inputs(ics, xdev);
+	IPC_CHK_AND_RET(ics->server, xret, "send_device_inputs");
+
+	xret = send_device_outputs(ics, xdev);
+	IPC_CHK_AND_RET(ics->server, xret, "send_device_outputs");
+
 	return XRT_SUCCESS;
 }
 
 static struct xrt_input *
-find_input(volatile struct ipc_client_state *ics, uint32_t device_id, enum xrt_input_name name)
+find_input(struct xrt_device *xdev, enum xrt_input_name name)
 {
-	struct ipc_shared_memory *ism = get_ism(ics);
-	struct ipc_shared_device *isdev = &ism->isdevs[device_id];
-	struct xrt_input *io = &ism->inputs[isdev->first_input_index];
-
-	for (uint32_t i = 0; i < isdev->input_count; i++) {
-		if (io[i].name == name) {
-			return &io[i];
+	for (uint32_t i = 0; i < xdev->input_count; i++) {
+		if (xdev->inputs[i].name == name) {
+			return &xdev->inputs[i];
 		}
 	}
 
@@ -2225,17 +2660,18 @@ ipc_handle_device_get_tracked_pose(volatile struct ipc_client_state *ics,
 {
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
-	struct ipc_device *isdev = &ics->server->idevs[device_id];
-	struct xrt_device *xdev = isdev->xdev;
+	struct xrt_device *xdev = NULL;
+
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
 	// Find the input
-	struct xrt_input *input = find_input(ics, device_id, name);
+	struct xrt_input *input = find_input(xdev, name);
 	if (input == NULL) {
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
 	// Special case the headpose.
-	bool disabled = (!isdev->io_active || !ics->io_active) && name != XRT_INPUT_GENERIC_HEAD_POSE;
+	bool disabled = ics->client_state.io_blocks.block_poses && name != XRT_INPUT_GENERIC_HEAD_POSE;
 	bool active_on_client = input->active;
 
 	// We have been disabled but the client hasn't called update.
@@ -2260,6 +2696,10 @@ ipc_handle_device_get_hand_tracking(volatile struct ipc_client_state *ics,
                                     struct xrt_hand_joint_set *out_value,
                                     int64_t *out_timestamp)
 {
+	if (ics->client_state.io_blocks.block_hand_tracking) {
+		out_value->is_active = false;
+		return XRT_SUCCESS;
+	}
 
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
@@ -2275,6 +2715,7 @@ ipc_handle_device_get_view_poses(volatile struct ipc_client_state *ics,
                                  uint32_t id,
                                  const struct xrt_vec3 *fallback_eye_relation,
                                  int64_t at_timestamp_ns,
+                                 enum xrt_view_type view_type,
                                  uint32_t view_count)
 {
 	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
@@ -2313,6 +2754,7 @@ ipc_handle_device_get_view_poses(volatile struct ipc_client_state *ics,
 		    xdev,                                 //
 		    fallback_eye_relation,                //
 		    at_timestamp_ns,                      //
+		    view_type,                            //
 		    view_count,                           //
 		    &reply.head_relation,                 //
 		    fovs,                                 //
@@ -2359,6 +2801,7 @@ ipc_handle_device_get_view_poses_2(volatile struct ipc_client_state *ics,
                                    uint32_t id,
                                    const struct xrt_vec3 *default_eye_relation,
                                    int64_t at_timestamp_ns,
+                                   enum xrt_view_type view_type,
                                    uint32_t view_count,
                                    struct ipc_info_get_view_poses_2 *out_info)
 {
@@ -2380,6 +2823,7 @@ ipc_handle_device_get_view_poses_2(volatile struct ipc_client_state *ics,
 	    xdev,                         //
 	    default_eye_relation,         //
 	    at_timestamp_ns,              //
+	    view_type,                    //
 	    view_count,                   //
 	    &out_info->head_relation,     //
 	    out_info->fovs,               //
@@ -2590,6 +3034,10 @@ ipc_handle_device_set_output(volatile struct ipc_client_state *ics,
                              enum xrt_output_name name,
                              const struct xrt_output_value *value)
 {
+	if (ics->client_state.io_blocks.block_outputs) {
+		return XRT_SUCCESS;
+	}
+
 	// To make the code a bit more readable.
 	uint32_t device_id = id;
 	struct xrt_device *xdev = NULL;
@@ -2606,6 +3054,11 @@ ipc_handle_device_set_haptic_output(volatile struct ipc_client_state *ics,
                                     const struct ipc_pcm_haptic_buffer *buffer)
 {
 	IPC_TRACE_MARKER();
+
+	if (ics->client_state.io_blocks.block_outputs) {
+		return XRT_SUCCESS;
+	}
+
 	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
 	struct ipc_server *s = ics->server;
 
@@ -2700,6 +3153,7 @@ ipc_handle_device_get_visibility_mask(volatile struct ipc_client_state *ics,
 	// @todo verify
 	struct xrt_device *xdev = NULL;
 	GET_XDEV_OR_RETURN(ics, device_id, xdev);
+
 	struct xrt_visibility_mask *mask = NULL;
 	if (xdev->get_visibility_mask) {
 		xret = xrt_device_get_visibility_mask(xdev, type, view_index, &mask);
@@ -2746,7 +3200,28 @@ ipc_handle_device_is_form_factor_available(volatile struct ipc_client_state *ics
 	uint32_t device_id = id;
 	struct xrt_device *xdev = NULL;
 	GET_XDEV_OR_RETURN(ics, device_id, xdev);
+
 	*out_available = xrt_device_is_form_factor_available(xdev, form_factor);
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_system_devices_get_list(volatile struct ipc_client_state *ics, struct ipc_device_list *out_list)
+{
+	// Count and collect device types
+	uint32_t count = 0;
+	for (uint32_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
+		struct xrt_device *xdev = ics->objects.xdevs[i];
+		if (xdev != NULL) {
+			out_list->devices[count].id = i;
+			out_list->devices[count].device_type = xdev->device_type;
+			count++;
+		}
+	}
+
+	out_list->device_count = count;
+
 	return XRT_SUCCESS;
 }
 
@@ -2828,6 +3303,17 @@ ipc_handle_device_get_face_tracking(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
+ipc_handle_device_get_face_calibration_state_android(volatile struct ipc_client_state *ics,
+                                                     uint32_t id,
+                                                     bool *out_face_is_calibrated)
+{
+	const uint32_t device_id = id;
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, device_id, xdev);
+	return xrt_device_get_face_calibration_state_android(xdev, out_face_is_calibrated);
+}
+
+xrt_result_t
 ipc_handle_device_get_body_skeleton(volatile struct ipc_client_state *ics,
                                     uint32_t id,
                                     enum xrt_input_name body_tracking_type,
@@ -2853,7 +3339,8 @@ ipc_handle_device_get_body_joints(volatile struct ipc_client_state *ics,
 xrt_result_t
 ipc_handle_device_reset_body_tracking_calibration_meta(volatile struct ipc_client_state *ics, uint32_t id)
 {
-	struct xrt_device *xdev = get_xdev(ics, id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, id, xdev);
 	return xrt_device_reset_body_tracking_calibration_meta(xdev);
 }
 
@@ -2862,7 +3349,8 @@ ipc_handle_device_set_body_tracking_calibration_override_meta(volatile struct ip
                                                               uint32_t id,
                                                               float new_body_height)
 {
-	struct xrt_device *xdev = get_xdev(ics, id);
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, id, xdev);
 	return xrt_device_set_body_tracking_calibration_override_meta(xdev, new_body_height);
 }
 
@@ -2899,4 +3387,57 @@ ipc_handle_device_set_brightness(volatile struct ipc_client_state *ics, uint32_t
 	}
 
 	return xrt_device_set_brightness(xdev, brightness, relative);
+}
+
+xrt_result_t
+ipc_handle_device_get_compositor_info(volatile struct ipc_client_state *ics,
+                                      uint32_t id,
+                                      const struct xrt_device_compositor_mode *mode,
+                                      struct xrt_device_compositor_info *out_info)
+{
+	struct xrt_device *xdev = NULL;
+	GET_XDEV_OR_RETURN(ics, id, xdev);
+
+	return xrt_device_get_compositor_info(xdev, mode, out_info);
+}
+
+xrt_result_t
+ipc_handle_future_get_state(volatile struct ipc_client_state *ics, uint32_t future_id, enum xrt_future_state *out_state)
+{
+	struct xrt_future *xft = NULL;
+	xrt_result_t xret = validate_future_id(ics, future_id, &xft);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	return xrt_future_get_state(xft, out_state);
+}
+
+xrt_result_t
+ipc_handle_future_get_result(volatile struct ipc_client_state *ics,
+                             uint32_t future_id,
+                             struct xrt_future_result *out_ft_result)
+{
+	struct xrt_future *xft = NULL;
+	xrt_result_t xret = validate_future_id(ics, future_id, &xft);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	return xrt_future_get_result(xft, out_ft_result);
+}
+
+xrt_result_t
+ipc_handle_future_cancel(volatile struct ipc_client_state *ics, uint32_t future_id)
+{
+	struct xrt_future *xft = NULL;
+	xrt_result_t xret = validate_future_id(ics, future_id, &xft);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	return xrt_future_cancel(xft);
+}
+
+xrt_result_t
+ipc_handle_future_destroy(volatile struct ipc_client_state *ics, uint32_t future_id)
+{
+	return release_future(ics, future_id);
 }

@@ -25,6 +25,7 @@
 #include "util/u_debug.h"
 #include "util/u_git_tag.h"
 #include "util/u_system_helpers.h"
+#include "util/u_truncate_printf.h"
 
 #include "shared/ipc_utils.h"
 #include "shared/ipc_protocol.h"
@@ -123,17 +124,19 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 		IPC_ERROR(ipc_c, "GetModuleHandleExA failed: %d %s", err, ipc_winerror(err));
 		return INVALID_HANDLE_VALUE;
 	}
-	char service_path[MAX_PATH];
-	if (!GetModuleFileNameA(hmod, service_path, sizeof(service_path))) {
+	char current_path[MAX_PATH] = {0};
+	if (!GetModuleFileNameA(hmod, current_path, sizeof(current_path))) {
 		IPC_ERROR(ipc_c, "GetModuleFileNameA failed: %d %s", err, ipc_winerror(err));
 		return INVALID_HANDLE_VALUE;
 	}
-	char *p = strrchr(service_path, '\\');
+	char *p = strrchr(current_path, '\\');
 	if (!p) {
-		IPC_ERROR(ipc_c, "failed to parse the path %s", service_path);
+		IPC_ERROR(ipc_c, "failed to parse the path %s", current_path);
 		return INVALID_HANDLE_VALUE;
 	}
-	strcpy(p + 1, XRT_SERVICE_EXECUTABLE);
+
+	char service_path[MAX_PATH] = {0};
+	snprintf(service_path, MAX_PATH, "%s\\%s", current_path, XRT_SERVICE_EXECUTABLE);
 	STARTUPINFOA si = {.cb = sizeof(si)};
 	PROCESS_INFORMATION pi;
 	if (!CreateProcessA(NULL, service_path, NULL, NULL, false, 0, NULL, NULL, &si, &pi)) {
@@ -147,7 +150,8 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 			         ipc_winerror(err));
 			return INVALID_HANDLE_VALUE;
 		}
-		strcpy(p + 1, "service\\" XRT_SERVICE_EXECUTABLE);
+
+		snprintf(service_path, MAX_PATH, "%s\\service\\%s", current_path, XRT_SERVICE_EXECUTABLE);
 		if (!CreateProcessA(NULL, service_path, NULL, NULL, false, 0, NULL, NULL, &si, &pi)) {
 			err = GetLastError();
 			IPC_INFO(ipc_c,
@@ -241,7 +245,7 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 #else
 	const int flags = 0;
 #endif
-	struct sockaddr_un addr;
+	struct sockaddr_un addr = XRT_STRUCT_INIT;
 	int ret;
 
 
@@ -263,9 +267,17 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 		return false;
 	}
 
-	memset(&addr, 0, sizeof(addr));
+	// Make sure the path fits.
+	const int dst_size = (int)ARRAY_SIZE(addr.sun_path);
+	if (size >= dst_size) {
+		IPC_ERROR(ipc_c, "Total IPC path too long (%i > %i)", (int)size, dst_size);
+		return false;
+	}
+
+	// Struct zero init at declaration.
 	addr.sun_family = AF_UNIX;
-	strcpy(addr.sun_path, sock_file);
+	// Use truncate here to avoid warnings.
+	u_truncate_snprintf(addr.sun_path, dst_size, "%s", sock_file);
 
 	ret = connect(socket, (struct sockaddr *)&addr, sizeof(addr));
 	if (ret < 0) {

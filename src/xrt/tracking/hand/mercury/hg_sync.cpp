@@ -25,7 +25,6 @@
 
 
 namespace xrt::tracking::hand::mercury {
-#define DEG_TO_RAD(DEG) (DEG * M_PI / 180.)
 
 DEBUG_GET_ONCE_LOG_OPTION(mercury_log, "MERCURY_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(mercury_optimize_hand_size, "MERCURY_optimize_hand_size", true)

@@ -1,5 +1,5 @@
 // Copyright 2018-2024, Collabora, Ltd.
-// Copyright 2024-2025, NVIDIA CORPORATION.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -18,23 +18,193 @@
 #include "util/u_debug.h"
 #include "util/u_verify.h"
 
+#include "oxr_api_verify.h"
+#include "oxr_chain.h"
+#include "oxr_conversions.h"
 #include "oxr_objects.h"
 #include "oxr_logger.h"
 #include "oxr_two_call.h"
-#include "oxr_chain.h"
-#include "oxr_api_verify.h"
-#include "oxr_conversions.h"
+#include "oxr_roles.h"
 
+
+/*
+ *
+ * General helpers
+ *
+ */
 
 DEBUG_GET_ONCE_NUM_OPTION(scale_percentage, "OXR_VIEWPORT_SCALE_PERCENTAGE", 100)
 
 
+
+static struct oxr_view_config_properties *
+get_view_config_properties(struct oxr_system *sys, XrViewConfigurationType view_config_type)
+{
+	for (uint32_t i = 0; i < sys->view_config_count; i++) {
+		if (sys->view_configs[i].view_config_type == view_config_type) {
+			return &sys->view_configs[i];
+		}
+	}
+
+	return NULL;
+}
+
+static void
+fill_in_view_config_properties_blend_modes(struct oxr_view_config_properties *props,
+                                           const struct xrt_system_compositor_info *info)
+{
+	// Headless path.
+	if (info == NULL) {
+		props->blend_modes[0] = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+		props->blend_mode_count = 1;
+		return;
+	}
+
+	assert(info->supported_blend_mode_count <= ARRAY_SIZE(props->blend_modes));
+	assert(info->supported_blend_mode_count != 0);
+
+	for (uint8_t i = 0; i < info->supported_blend_mode_count; i++) {
+		assert(u_verify_blend_mode_valid(info->supported_blend_modes[i]));
+		props->blend_modes[i] = (XrEnvironmentBlendMode)info->supported_blend_modes[i];
+	}
+	props->blend_mode_count = (uint32_t)info->supported_blend_mode_count;
+}
+
+static void
+fill_in_view_config_properties_view_config_type(struct oxr_view_config_properties *props, enum xrt_view_type view_type)
+{
+	props->view_config_type = xrt_view_type_to_xr(view_type);
+	U_LOG_D("props->view_config_type = %d", props->view_config_type);
+}
+
+static void
+fill_in_view_config_properties_views(struct oxr_logger *log,
+                                     XrViewConfigurationView *xr_views,
+                                     const struct xrt_view_config *view_config,
+                                     const struct xrt_system_compositor_info *info)
+{
+	assert(view_config->view_count <= XRT_MAX_COMPOSITOR_VIEW_CONFIGS_VIEW_COUNT);
+
+	double scale = debug_get_num_option_scale_percentage() / 100.0;
+	if (scale > 2.0) {
+		scale = 2.0;
+		oxr_log(log, "Clamped scale to 200%%\n");
+	}
+
+	float view_scale_x = info ? info->recommended_view_scale_x : 0.0f;
+	float view_scale_y = info ? info->recommended_view_scale_y : 0.0f;
+
+#define imin(a, b) (a < b ? a : b)
+	for (uint32_t i = 0; i < view_config->view_count; ++i) {
+		uint32_t w_max = view_config->views[i].max.width_pixels;
+		uint32_t h_max = view_config->views[i].max.height_pixels;
+
+		uint32_t w, h;
+		if (info != NULL && view_scale_x > 0.0f && view_scale_y > 0.0f &&
+		    info->display_pixel_width > 0 && info->display_pixel_height > 0) {
+			// Display processor present: recommended = native per-eye dims.
+			// Swapchain must be at native display resolution; the view scale
+			// (communicated via XR_EXT_display_info) tells display-aware apps
+			// to render at a smaller viewport within the swapchain.
+			w = (uint32_t)(info->display_pixel_width / 2 * scale);
+			h = (uint32_t)(info->display_pixel_height * scale);
+			// Override max with actual display dimensions so recommended isn't clamped.
+			if (w_max < info->display_pixel_width) {
+				w_max = info->display_pixel_width;
+			}
+			if (h_max < info->display_pixel_height) {
+				h_max = info->display_pixel_height;
+			}
+		} else {
+			// Legacy: no display processor, use compositor recommended directly
+			w = (uint32_t)(view_config->views[i].recommended.width_pixels * scale);
+			h = (uint32_t)(view_config->views[i].recommended.height_pixels * scale);
+		}
+
+		w = imin(w, w_max);
+		h = imin(h, h_max);
+
+		xr_views[i].type = XR_TYPE_VIEW_CONFIGURATION_VIEW;
+		xr_views[i].recommendedImageRectWidth = w;
+		xr_views[i].maxImageRectWidth = w_max;
+		xr_views[i].recommendedImageRectHeight = h;
+		xr_views[i].maxImageRectHeight = h_max;
+		xr_views[i].recommendedSwapchainSampleCount = view_config->views[i].recommended.sample_count;
+		xr_views[i].maxSwapchainSampleCount = view_config->views[i].max.sample_count;
+	}
+#undef imin
+}
+
+static void
+fill_in_view_config_properties(struct oxr_logger *log,
+                               struct oxr_view_config_properties *props,
+                               const struct xrt_system_compositor_info *info,
+                               const struct xrt_view_config *view_config)
+{
+	fill_in_view_config_properties_blend_modes(props, info);
+	fill_in_view_config_properties_view_config_type(props, view_config->view_type);
+	fill_in_view_config_properties_views(log, props->views, view_config, info);
+	props->view_count = view_config->view_count;
+}
 
 static bool
 oxr_system_matches(struct oxr_logger *log, struct oxr_system *sys, XrFormFactor form_factor)
 {
 	return xr_form_factor_to_xrt(form_factor) == sys->xsys->properties.form_factor;
 }
+
+static bool
+oxr_system_get_body_tracking_support(struct oxr_logger *log,
+                                     struct oxr_instance *inst,
+                                     const enum xrt_input_name body_tracking_name)
+{
+	struct oxr_system *sys = &inst->system;
+	const struct xrt_device *body = GET_STATIC_XDEV_BY_ROLE(sys, body);
+	if (body == NULL || !body->supported.body_tracking || body->inputs == NULL) {
+		return false;
+	}
+
+	for (size_t input_idx = 0; input_idx < body->input_count; ++input_idx) {
+		const struct xrt_input *input = &body->inputs[input_idx];
+		if (input->name == body_tracking_name) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
+/*
+ *
+ * Two-call helpers.
+ *
+ */
+
+static void
+view_configuration_type_fill_in(XrViewConfigurationType *target, struct oxr_view_config_properties *source)
+{
+	*target = source->view_config_type;
+}
+
+static void
+view_configuration_view_fill_in(XrViewConfigurationView *target_view, XrViewConfigurationView *source_view)
+{
+	// clang-format off
+	target_view->recommendedImageRectWidth       = source_view->recommendedImageRectWidth;
+	target_view->maxImageRectWidth               = source_view->maxImageRectWidth;
+	target_view->recommendedImageRectHeight      = source_view->recommendedImageRectHeight;
+	target_view->maxImageRectHeight              = source_view->maxImageRectHeight;
+	target_view->recommendedSwapchainSampleCount = source_view->recommendedSwapchainSampleCount;
+	target_view->maxSwapchainSampleCount         = source_view->maxSwapchainSampleCount;
+	// clang-format on
+}
+
+
+/*
+ *
+ * 'Exported' functions.
+ *
+ */
 
 XrResult
 oxr_system_select(struct oxr_logger *log,
@@ -63,7 +233,7 @@ oxr_system_select(struct oxr_logger *log,
 		                 form_factor, xrt_form_factor_to_xr(systems[0]->xsys->properties.form_factor));
 	}
 
-	struct xrt_device *xdev = GET_XDEV_BY_ROLE(selected, head);
+	struct xrt_device *xdev = GET_STATIC_XDEV_BY_ROLE(selected, head);
 	if (xdev->supported.form_factor_check &&
 	    !xrt_device_is_form_factor_available(xdev, xr_form_factor_to_xrt(form_factor))) {
 		return oxr_error(log, XR_ERROR_FORM_FACTOR_UNAVAILABLE, "request form factor %i is unavailable now",
@@ -98,8 +268,6 @@ oxr_system_get_by_id(struct oxr_logger *log, struct oxr_instance *inst, XrSystem
 	return XR_SUCCESS;
 }
 
-
-
 XrResult
 oxr_system_fill_in(
     struct oxr_logger *log, struct oxr_instance *inst, XrSystemId systemId, uint32_t view_count, struct oxr_system *sys)
@@ -108,98 +276,42 @@ oxr_system_fill_in(
 
 	sys->inst = inst;
 	sys->systemId = systemId;
-	if (view_count == 1) {
-		sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO;
-	} else if (view_count == 2) {
-		sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-	} else {
-		assert(false && "view_count must be 1 or 2");
-	}
-	U_LOG_D("sys->view_config_type = %d", sys->view_config_type);
-	sys->dynamic_roles_cache = (struct xrt_system_roles)XRT_SYSTEM_ROLES_INIT;
 
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 	sys->vulkan_enable2_instance = VK_NULL_HANDLE;
 	sys->suggested_vulkan_physical_device = VK_NULL_HANDLE;
+	sys->vk_get_instance_proc_addr = VK_NULL_HANDLE;
 #endif
 #if defined(XR_USE_GRAPHICS_API_D3D11) || defined(XR_USE_GRAPHICS_API_D3D12)
 	U_ZERO(&(sys->suggested_d3d_luid));
 	sys->suggested_d3d_luid_valid = false;
 #endif
 
-	// Headless.
-	if (sys->xsysc == NULL) {
-		sys->blend_modes[0] = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-		sys->blend_mode_count = 1;
-		return XR_SUCCESS;
-	}
+	if (sys->xsysc != NULL) {
+		const struct xrt_system_compositor_info *info = &sys->xsysc->info;
 
-	double scale = debug_get_num_option_scale_percentage() / 100.0;
-	if (scale > 2.0) {
-		scale = 2.0;
-		oxr_log(log, "Clamped scale to 200%%\n");
-	}
+		for (uint32_t i = 0; i < info->view_config_count; i++) {
+			const struct xrt_view_config *view_config = &info->view_configs[i];
 
-	struct xrt_system_compositor_info *info = &sys->xsysc->info;
-
-#define imin(a, b) (a < b ? a : b)
-	float view_scale_x = info->recommended_view_scale_x;
-	float view_scale_y = info->recommended_view_scale_y;
-
-	for (uint32_t i = 0; i < view_count; ++i) {
-		uint32_t w_max = info->views[i].max.width_pixels;
-		uint32_t h_max = info->views[i].max.height_pixels;
-
-		uint32_t w, h;
-		if (view_scale_x > 0.0f && view_scale_y > 0.0f &&
-		    info->display_pixel_width > 0 && info->display_pixel_height > 0) {
-			// Display processor present: recommended = native per-eye dims.
-			// Swapchain must be at native display resolution; the view scale
-			// (communicated via XR_EXT_display_info) tells display-aware apps
-			// to render at a smaller viewport within the swapchain.
-			w = (uint32_t)(info->display_pixel_width / 2 * scale);
-			h = (uint32_t)(info->display_pixel_height * scale);
-			// The null compositor's max is based on the Qwerty HMD's tiny
-			// screen (e.g. 640x720), not the real display. Override max
-			// with actual display dimensions so recommended isn't clamped.
-			if (w_max < info->display_pixel_width) {
-				w_max = info->display_pixel_width;
-			}
-			if (h_max < info->display_pixel_height) {
-				h_max = info->display_pixel_height;
-			}
-		} else {
-			// Legacy: no display processor, use compositor recommended directly
-			w = (uint32_t)(info->views[i].recommended.width_pixels * scale);
-			h = (uint32_t)(info->views[i].recommended.height_pixels * scale);
+			assert(sys->view_config_count < XRT_MAX_COMPOSITOR_VIEW_CONFIGS_COUNT);
+			fill_in_view_config_properties(                 //
+			    log,                                        //
+			    &sys->view_configs[sys->view_config_count], //
+			    info,                                       //
+			    view_config);                               //
+			sys->view_config_count++;
 		}
+	} else {
+		// Headless path, view configs contain no views but still need blend modes and view types.
+		assert(view_count == 1 || view_count == 2);
 
-		w = imin(w, w_max);
-		h = imin(h, h_max);
+		enum xrt_view_type view_type = view_count == 1 ? XRT_VIEW_TYPE_MONO : XRT_VIEW_TYPE_STEREO;
 
-		sys->views[i].recommendedImageRectWidth = w;
-		sys->views[i].maxImageRectWidth = w_max;
-		sys->views[i].recommendedImageRectHeight = h;
-		sys->views[i].maxImageRectHeight = h_max;
-		sys->views[i].recommendedSwapchainSampleCount = info->views[i].recommended.sample_count;
-		sys->views[i].maxSwapchainSampleCount = info->views[i].max.sample_count;
+		// First headless config: regular mono or stereo
+		fill_in_view_config_properties_blend_modes(&sys->view_configs[0], NULL);
+		fill_in_view_config_properties_view_config_type(&sys->view_configs[0], view_type);
+		sys->view_config_count++;
 	}
-
-#undef imin
-
-
-	/*
-	 * Blend mode support.
-	 */
-
-	assert(info->supported_blend_mode_count <= ARRAY_SIZE(sys->blend_modes));
-	assert(info->supported_blend_mode_count != 0);
-
-	for (uint8_t i = 0; i < info->supported_blend_mode_count; i++) {
-		assert(u_verify_blend_mode_valid(info->supported_blend_modes[i]));
-		sys->blend_modes[i] = (XrEnvironmentBlendMode)info->supported_blend_modes[i];
-	}
-	sys->blend_mode_count = (uint32_t)info->supported_blend_mode_count;
 
 
 	/*
@@ -282,7 +394,7 @@ oxr_system_get_hand_tracking_support(struct oxr_logger *log, struct oxr_instance
 	struct oxr_system *sys = &inst->system;
 #define OXR_CHECK_RET_IS_HT_SUPPORTED(HT_ROLE)                                                                         \
 	{                                                                                                              \
-		const struct xrt_device *ht = GET_XDEV_BY_ROLE(sys, hand_tracking_##HT_ROLE);                          \
+		const struct xrt_device *ht = GET_STATIC_XDEV_BY_ROLE(sys, hand_tracking_##HT_ROLE);                   \
 		if (ht && ht->supported.hand_tracking) {                                                               \
 			return true;                                                                                   \
 		}                                                                                                      \
@@ -299,7 +411,7 @@ bool
 oxr_system_get_eye_gaze_support(struct oxr_logger *log, struct oxr_instance *inst)
 {
 	struct oxr_system *sys = &inst->system;
-	struct xrt_device *eyes = GET_XDEV_BY_ROLE(sys, eyes);
+	struct xrt_device *eyes = GET_STATIC_XDEV_BY_ROLE(sys, eyes);
 
 	return eyes && eyes->supported.eye_gaze;
 }
@@ -310,7 +422,7 @@ oxr_system_get_force_feedback_support(struct oxr_logger *log, struct oxr_instanc
 	struct oxr_system *sys = &inst->system;
 #define OXR_CHECK_RET_IS_FFB_SUPPORTED(HT_ROLE)                                                                        \
 	{                                                                                                              \
-		const struct xrt_device *ffb = GET_XDEV_BY_ROLE(sys, hand_tracking_##HT_ROLE);                         \
+		const struct xrt_device *ffb = GET_STATIC_XDEV_BY_ROLE(sys, hand_tracking_##HT_ROLE);                  \
 		if (ffb && ffb->supported.force_feedback) {                                                            \
 			return true;                                                                                   \
 		}                                                                                                      \
@@ -324,13 +436,35 @@ oxr_system_get_force_feedback_support(struct oxr_logger *log, struct oxr_instanc
 }
 
 void
+oxr_system_get_face_tracking_android_support(struct oxr_logger *log, struct oxr_instance *inst, bool *supported)
+{
+	assert(supported);
+
+	*supported = false;
+	struct oxr_system *sys = &inst->system;
+	const struct xrt_device *face_xdev = GET_STATIC_XDEV_BY_ROLE(sys, face);
+
+	if (face_xdev == NULL || !face_xdev->supported.face_tracking || face_xdev->inputs == NULL) {
+		return;
+	}
+
+	for (size_t input_idx = 0; input_idx < face_xdev->input_count; ++input_idx) {
+		const struct xrt_input *input = &face_xdev->inputs[input_idx];
+		if (input->name == XRT_INPUT_ANDROID_FACE_TRACKING) {
+			*supported = true;
+			return;
+		}
+	}
+}
+
+void
 oxr_system_get_face_tracking_htc_support(struct oxr_logger *log,
                                          struct oxr_instance *inst,
                                          bool *supports_eye,
                                          bool *supports_lip)
 {
 	struct oxr_system *sys = &inst->system;
-	struct xrt_device *face_xdev = GET_XDEV_BY_ROLE(sys, face);
+	struct xrt_device *face_xdev = GET_STATIC_XDEV_BY_ROLE(sys, face);
 
 	if (supports_eye)
 		*supports_eye = false;
@@ -365,7 +499,7 @@ oxr_system_get_face_tracking2_fb_support(struct oxr_logger *log,
 		*supports_visual = false;
 
 	struct oxr_system *sys = &inst->system;
-	struct xrt_device *face_xdev = GET_XDEV_BY_ROLE(sys, face);
+	struct xrt_device *face_xdev = GET_STATIC_XDEV_BY_ROLE(sys, face);
 
 	if (face_xdev == NULL || !face_xdev->supported.face_tracking || face_xdev->inputs == NULL) {
 		return;
@@ -380,26 +514,6 @@ oxr_system_get_face_tracking2_fb_support(struct oxr_logger *log,
 		}
 	}
 	return;
-}
-
-static bool
-oxr_system_get_body_tracking_support(struct oxr_logger *log,
-                                     struct oxr_instance *inst,
-                                     const enum xrt_input_name body_tracking_name)
-{
-	struct oxr_system *sys = &inst->system;
-	const struct xrt_device *body = GET_XDEV_BY_ROLE(sys, body);
-	if (body == NULL || !body->supported.body_tracking || body->inputs == NULL) {
-		return false;
-	}
-
-	for (size_t input_idx = 0; input_idx < body->input_count; ++input_idx) {
-		const struct xrt_input *input = &body->inputs[input_idx];
-		if (input->name == body_tracking_name) {
-			return true;
-		}
-	}
-	return false;
 }
 
 bool
@@ -422,7 +536,7 @@ oxr_system_get_body_tracking_calibration_meta_support(struct oxr_logger *log, st
 		return false;
 	}
 	struct oxr_system *sys = &inst->system;
-	const struct xrt_device *body = GET_XDEV_BY_ROLE(sys, body);
+	const struct xrt_device *body = GET_STATIC_XDEV_BY_ROLE(sys, body);
 	return body->supported.body_tracking_calibration;
 }
 
@@ -433,7 +547,7 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 	properties->vendorId = sys->xsys->properties.vendor_id;
 	memcpy(properties->systemName, sys->xsys->properties.name, sizeof(properties->systemName));
 
-	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sys, head);
+	struct xrt_device *xdev = GET_STATIC_XDEV_BY_ROLE(sys, head);
 
 	// Get from compositor.
 	struct xrt_system_compositor_info *info = sys->xsysc ? &sys->xsysc->info : NULL;
@@ -506,6 +620,20 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 	}
 #endif
 
+#ifdef OXR_HAVE_ANDROID_face_tracking
+	XrSystemFaceTrackingPropertiesANDROID *android_face_tracking_props = NULL;
+	if (sys->inst->extensions.ANDROID_face_tracking) {
+		android_face_tracking_props = OXR_GET_OUTPUT_FROM_CHAIN(
+		    properties, XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_ANDROID, XrSystemFaceTrackingPropertiesANDROID);
+	}
+
+	if (android_face_tracking_props) {
+		bool supported = false;
+		oxr_system_get_face_tracking_android_support(log, sys->inst, &supported);
+		android_face_tracking_props->supportsFaceTracking = supported;
+	}
+#endif // OXR_HAVE_HTC_facial_tracking
+
 #ifdef OXR_HAVE_HTC_facial_tracking
 	XrSystemFacialTrackingPropertiesHTC *htc_facial_tracking_props = NULL;
 	if (sys->inst->extensions.HTC_facial_tracking) {
@@ -533,6 +661,18 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 		body_tracking_fb_props->supportsBodyTracking = oxr_system_get_body_tracking_fb_support(log, sys->inst);
 	}
 #endif // OXR_HAVE_FB_body_tracking
+
+#ifdef OXR_HAVE_BD_body_tracking
+	XrSystemBodyTrackingPropertiesBD *body_tracking_bd_props = NULL;
+	if (sys->inst->extensions.BD_body_tracking) {
+		body_tracking_bd_props = OXR_GET_OUTPUT_FROM_CHAIN(
+		    properties, XR_TYPE_SYSTEM_BODY_TRACKING_PROPERTIES_BD, XrSystemBodyTrackingPropertiesBD);
+	}
+
+	if (body_tracking_bd_props) {
+		body_tracking_bd_props->supportsBodyTracking = oxr_system_get_body_tracking_bd_support(log, sys->inst);
+	}
+#endif // OXR_HAVE_BD_body_tracking
 
 #ifdef OXR_HAVE_FB_face_tracking2
 	XrSystemFaceTrackingProperties2FB *face_tracking2_fb_props = NULL;
@@ -657,8 +797,9 @@ oxr_system_enumerate_view_confs(struct oxr_logger *log,
                                 uint32_t *viewConfigurationTypeCountOutput,
                                 XrViewConfigurationType *viewConfigurationTypes)
 {
-	OXR_TWO_CALL_HELPER(log, viewConfigurationTypeCapacityInput, viewConfigurationTypeCountOutput,
-	                    viewConfigurationTypes, 1, &sys->view_config_type, XR_SUCCESS);
+	OXR_TWO_CALL_FILL_IN_HELPER(log, viewConfigurationTypeCapacityInput, viewConfigurationTypeCountOutput,
+	                            viewConfigurationTypes, sys->view_config_count, view_configuration_type_fill_in,
+	                            sys->view_configs, XR_SUCCESS);
 }
 
 XrResult
@@ -669,9 +810,13 @@ oxr_system_enumerate_blend_modes(struct oxr_logger *log,
                                  uint32_t *environmentBlendModeCountOutput,
                                  XrEnvironmentBlendMode *environmentBlendModes)
 {
-	//! @todo Take into account viewConfigurationType
+	struct oxr_view_config_properties *props = get_view_config_properties(sys, viewConfigurationType);
+	if (props == NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Didn't find view configs");
+	}
+
 	OXR_TWO_CALL_HELPER(log, environmentBlendModeCapacityInput, environmentBlendModeCountOutput,
-	                    environmentBlendModes, sys->blend_mode_count, sys->blend_modes, XR_SUCCESS);
+	                    environmentBlendModes, props->blend_mode_count, props->blend_modes, XR_SUCCESS);
 }
 
 XrResult
@@ -680,27 +825,15 @@ oxr_system_get_view_conf_properties(struct oxr_logger *log,
                                     XrViewConfigurationType viewConfigurationType,
                                     XrViewConfigurationProperties *configurationProperties)
 {
-	if (viewConfigurationType != sys->view_config_type) {
-		return oxr_error(log, XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED, "Invalid view configuration type");
+	struct oxr_view_config_properties *props = get_view_config_properties(sys, viewConfigurationType);
+	if (props == NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Didn't find view configs");
 	}
 
-	configurationProperties->viewConfigurationType = sys->view_config_type;
+	configurationProperties->viewConfigurationType = props->view_config_type;
 	configurationProperties->fovMutable = sys->xsysc->info.supports_fov_mutable;
 
 	return XR_SUCCESS;
-}
-
-static void
-view_configuration_view_fill_in(XrViewConfigurationView *target_view, XrViewConfigurationView *source_view)
-{
-	// clang-format off
-	target_view->recommendedImageRectWidth       = source_view->recommendedImageRectWidth;
-	target_view->maxImageRectWidth               = source_view->maxImageRectWidth;
-	target_view->recommendedImageRectHeight      = source_view->recommendedImageRectHeight;
-	target_view->maxImageRectHeight              = source_view->maxImageRectHeight;
-	target_view->recommendedSwapchainSampleCount = source_view->recommendedSwapchainSampleCount;
-	target_view->maxSwapchainSampleCount         = source_view->maxSwapchainSampleCount;
-	// clang-format on
 }
 
 XrResult
@@ -711,14 +844,11 @@ oxr_system_enumerate_view_conf_views(struct oxr_logger *log,
                                      uint32_t *viewCountOutput,
                                      XrViewConfigurationView *views)
 {
-	if (viewConfigurationType != sys->view_config_type) {
-		return oxr_error(log, XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED, "Invalid view configuration type");
+	struct oxr_view_config_properties *props = get_view_config_properties(sys, viewConfigurationType);
+	if (props == NULL) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Didn't find view configs");
 	}
-	if (sys->view_config_type == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO) {
-		OXR_TWO_CALL_FILL_IN_HELPER(log, viewCapacityInput, viewCountOutput, views, 1,
-		                            view_configuration_view_fill_in, sys->views, XR_SUCCESS);
-	} else {
-		OXR_TWO_CALL_FILL_IN_HELPER(log, viewCapacityInput, viewCountOutput, views, 2,
-		                            view_configuration_view_fill_in, sys->views, XR_SUCCESS);
-	}
+
+	OXR_TWO_CALL_FILL_IN_HELPER(log, viewCapacityInput, viewCountOutput, views, props->view_count,
+	                            view_configuration_view_fill_in, props->views, XR_SUCCESS);
 }

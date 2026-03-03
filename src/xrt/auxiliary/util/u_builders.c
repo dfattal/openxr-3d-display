@@ -104,12 +104,14 @@ u_builder_search(struct xrt_prober *xp,
 
 void
 u_builder_setup_tracking_origins(struct xrt_device *head,
+                                 struct xrt_device *eyes,
                                  struct xrt_device *left,
                                  struct xrt_device *right,
                                  struct xrt_device *gamepad,
                                  struct xrt_vec3 *global_tracking_origin_offset)
 {
 	struct xrt_tracking_origin *head_origin = head ? head->tracking_origin : NULL;
+	struct xrt_tracking_origin *eyes_origin = eyes ? eyes->tracking_origin : NULL;
 	struct xrt_tracking_origin *left_origin = left ? left->tracking_origin : NULL;
 	struct xrt_tracking_origin *right_origin = right ? right->tracking_origin : NULL;
 	struct xrt_tracking_origin *gamepad_origin = gamepad ? gamepad->tracking_origin : NULL;
@@ -140,24 +142,43 @@ u_builder_setup_tracking_origins(struct xrt_device *head,
 		head_origin->initial_offset.position.z = 0.0f;
 	}
 
-	if (head_origin) {
-		apply_offset(&head_origin->initial_offset.position, global_tracking_origin_offset);
+	if (eyes_origin != NULL && eyes_origin->type == XRT_TRACKING_TYPE_NONE) {
+		// "nominal height" 1.6m
+		eyes_origin->initial_offset.position.x = 0.0f;
+		eyes_origin->initial_offset.position.y = 1.6f;
+		eyes_origin->initial_offset.position.z = 0.0f;
 	}
-	if (left_origin && left_origin != head_origin) {
-		apply_offset(&left->tracking_origin->initial_offset.position, global_tracking_origin_offset);
-	}
-	if (right_origin && right_origin != head_origin && right_origin != left_origin) {
-		apply_offset(&right->tracking_origin->initial_offset.position, global_tracking_origin_offset);
-	}
-	if (gamepad_origin && gamepad_origin != head_origin && gamepad_origin != right_origin &&
-	    gamepad_origin != left_origin) {
-		apply_offset(&gamepad->tracking_origin->initial_offset.position, global_tracking_origin_offset);
+
+	struct xrt_tracking_origin *origins[] = {head_origin, eyes_origin, left_origin, right_origin, gamepad_origin};
+	bool applied[ARRAY_SIZE(origins)] = {false};
+
+	for (size_t i = 0; i < ARRAY_SIZE(origins); i++) {
+		struct xrt_tracking_origin *origin = origins[i];
+
+		if (origin == NULL) {
+			continue;
+		}
+
+		// Check if we already applied offset to this origin
+		bool already_applied = false;
+		for (size_t j = 0; j < i; j++) {
+			if (origins[j] == origin && applied[j]) {
+				already_applied = true;
+				break;
+			}
+		}
+
+		if (!already_applied) {
+			apply_offset(&origin->initial_offset.position, global_tracking_origin_offset);
+			applied[i] = true;
+		}
 	}
 }
 
 void
 u_builder_create_space_overseer_legacy(struct xrt_session_event_sink *broadcast,
                                        struct xrt_device *head,
+                                       struct xrt_device *eyes,
                                        struct xrt_device *left,
                                        struct xrt_device *right,
                                        struct xrt_device *gamepad,
@@ -179,6 +200,7 @@ u_builder_create_space_overseer_legacy(struct xrt_session_event_sink *broadcast,
 
 	u_builder_setup_tracking_origins(    //
 	    head,                            //
+	    eyes,                            //
 	    left,                            //
 	    right,                           //
 	    gamepad,                         //
@@ -243,6 +265,8 @@ u_builder_roles_helper_open_system(struct xrt_builder *xb,
 	 */
 
 	xsysd->static_roles.head = ubrh.head;
+	xsysd->static_roles.eyes = ubrh.eyes;
+	xsysd->static_roles.face = ubrh.face;
 #define U_SET_HT_ROLE(SRC)                                                                                             \
 	xsysd->static_roles.hand_tracking.SRC.left = ubrh.hand_tracking.SRC.left;                                      \
 	xsysd->static_roles.hand_tracking.SRC.right = ubrh.hand_tracking.SRC.right;
@@ -265,6 +289,7 @@ u_builder_roles_helper_open_system(struct xrt_builder *xb,
 	u_builder_create_space_overseer_legacy( //
 	    broadcast,                          // broadcast
 	    ubrh.head,                          // head
+	    ubrh.eyes,                          // eyes
 	    ubrh.left,                          // left
 	    ubrh.right,                         // right
 	    ubrh.gamepad,                       // gamepad

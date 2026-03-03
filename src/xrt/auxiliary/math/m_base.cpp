@@ -226,7 +226,11 @@ extern "C" void
 math_quat_to_euler_angles(const struct xrt_quat *quat, struct xrt_vec3 *euler_angles)
 {
 	Eigen::Quaternionf eigen_quat(quat->w, quat->x, quat->y, quat->z);
+#if EIGEN_MAJOR_VERSION >= 5
+	Eigen::Vector3f eigen_euler = eigen_quat.toRotationMatrix().canonicalEulerAngles(2, 1, 0);
+#else
 	Eigen::Vector3f eigen_euler = eigen_quat.toRotationMatrix().eulerAngles(2, 1, 0);
+#endif
 
 	euler_angles->x = eigen_euler.x();
 	euler_angles->y = eigen_euler.y();
@@ -307,6 +311,12 @@ math_quat_validate(const struct xrt_quat *quat)
 {
 	const float FLOAT_EPSILON = Eigen::NumTraits<float>::epsilon();
 	return quat_validate(FLOAT_EPSILON, quat);
+}
+
+extern "C" bool
+math_quat_is_identity(const struct xrt_quat *quat, float epsilon)
+{
+	return map_quat(*quat).isApprox(Eigen::Quaternionf::Identity(), epsilon);
 }
 
 extern "C" bool

@@ -159,10 +159,7 @@ twrap_slam_create_device(struct xrt_frame_context *xfctx,
 
 
 
-	dx->base.update_inputs = u_device_noop_update_inputs;
-	dx->base.get_tracked_pose = twrap_slam_get_tracked_pose;
-	dx->base.get_view_poses = u_device_ni_get_view_poses;
-	dx->base.destroy = twrap_slam_destroy;
+	u_device_populate_function_pointers(&dx->base, twrap_slam_get_tracked_pose, twrap_slam_destroy);
 	dx->base.name = name;
 	dx->base.tracking_origin->type = XRT_TRACKING_TYPE_OTHER;
 	dx->base.inputs[0].name = XRT_INPUT_GENERIC_TRACKER_POSE;

@@ -31,10 +31,18 @@ else()
 endif()
 
 if(NOT WIN32 AND NOT APPLE)
-	# GNU ld flag; not accepted by MSVC linker or macOS Apple ld.
+	# Even clang's gnu-style driver on windows doesn't accept this argument.
+	# Apple's compiler doesn't like it either.
 
 	set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined")
 	set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,--no-undefined")
+endif()
+
+if(APPLE)
+	# Suppress warnings about duplicate libraries in the link line.
+	# This happens because CMake's transitive dependency handling can
+	# result in the same static library appearing multiple times.
+	add_link_options("-Wl,-no_warn_duplicate_libraries")
 endif()
 
 # Must call before adding targets that will use xrt-optimized-math

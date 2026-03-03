@@ -1,5 +1,5 @@
 // Copyright 2020-2024, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -37,9 +37,42 @@ static xrt_result_t
 ipc_client_xdev_update_inputs(struct xrt_device *xdev)
 {
 	struct ipc_client_xdev *icx = ipc_client_xdev(xdev);
+	struct ipc_connection *ipc_c = icx->ipc_c;
+	xrt_result_t xret;
 
-	xrt_result_t xret = ipc_call_device_update_input(icx->ipc_c, icx->device_id);
-	IPC_CHK_ALWAYS_RET(icx->ipc_c, xret, "ipc_call_device_update_input");
+	// Lock connection for varlen IPC
+	ipc_client_connection_lock(ipc_c);
+
+	// Send the request
+	xret = ipc_send_device_update_input_locked(ipc_c, icx->device_id);
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send_device_update_input_locked", out_unlock);
+
+	// Receive the reply (standard reply struct)
+	struct ipc_result_reply reply = {0};
+	xret = ipc_receive(&ipc_c->imc, &reply, sizeof(reply));
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive(reply)", out_unlock);
+
+	// Check reply result
+	xret = reply.result;
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "reply.result", out_unlock);
+
+	// Receive inputs and outputs as varlen data directly into our allocated array
+	const size_t input_size = xdev->input_count * sizeof(struct xrt_input);
+	const size_t output_size = xdev->output_count * sizeof(struct xrt_output);
+
+	if (input_size > 0) {
+		xret = ipc_receive(&ipc_c->imc, xdev->inputs, input_size);
+		IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive(inputs)", out_unlock);
+	}
+	if (output_size > 0) {
+		xret = ipc_receive(&ipc_c->imc, xdev->outputs, output_size);
+		IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive(outputs)", out_unlock);
+	}
+
+out_unlock:
+	ipc_client_connection_unlock(ipc_c);
+
+	return xret;
 }
 
 static xrt_result_t
@@ -93,6 +126,16 @@ ipc_client_xdev_get_face_tracking(struct xrt_device *xdev,
 	    at_timestamp_ns,                                   //
 	    out_value);                                        //
 	IPC_CHK_ALWAYS_RET(icx->ipc_c, xret, "ipc_call_device_get_face_tracking");
+}
+
+static xrt_result_t
+ipc_client_xdev_get_face_calibration_state_android(struct xrt_device *xdev, bool *out_face_is_calibrated)
+{
+	struct ipc_client_xdev *icx = ipc_client_xdev(xdev);
+
+	xrt_result_t xret =
+	    ipc_call_device_get_face_calibration_state_android(icx->ipc_c, icx->device_id, out_face_is_calibrated);
+	IPC_CHK_ALWAYS_RET(icx->ipc_c, xret, "ipc_call_device_get_face_calibration_state_android");
 }
 
 static xrt_result_t
@@ -210,13 +253,26 @@ ipc_client_xdev_set_output(struct xrt_device *xdev, enum xrt_output_name name, c
 	return xret;
 }
 
-xrt_result_t
+static xrt_result_t
 ipc_client_xdev_get_output_limits(struct xrt_device *xdev, struct xrt_output_limits *limits)
 {
 	struct ipc_client_xdev *icx = ipc_client_xdev(xdev);
 
 	xrt_result_t xret = ipc_call_device_get_output_limits(icx->ipc_c, icx->device_id, limits);
 	IPC_CHK_ONLY_PRINT(icx->ipc_c, xret, "ipc_call_device_get_output_limits");
+
+	return xret;
+}
+
+static xrt_result_t
+ipc_client_xdev_get_compositor_info(struct xrt_device *xdev,
+                                    const struct xrt_device_compositor_mode *mode,
+                                    struct xrt_device_compositor_info *out_info)
+{
+	struct ipc_client_xdev *icx = ipc_client_xdev(xdev);
+
+	xrt_result_t xret = ipc_call_device_get_compositor_info(icx->ipc_c, icx->device_id, mode, out_info);
+	IPC_CHK_ONLY_PRINT(icx->ipc_c, xret, "ipc_call_device_get_compositor_info");
 
 	return xret;
 }
@@ -263,7 +319,7 @@ ipc_client_xdev_destroy_plane_detection_ext(struct xrt_device *xdev, uint64_t pl
 }
 
 /*!
- * Helper function for @ref xrt_device::get_plane_detection_state.
+ * Helper function for @ref xrt_device::get_plane_detection_state_ext.
  *
  * @public @memberof xrt_device
  */
@@ -285,7 +341,7 @@ ipc_client_xdev_get_plane_detection_state_ext(struct xrt_device *xdev,
 }
 
 /*!
- * Helper function for @ref xrt_device::get_plane_detections.
+ * Helper function for @ref xrt_device::get_plane_detections_ext.
  *
  * @public @memberof xrt_device
  */
@@ -387,25 +443,34 @@ out:
  *
  */
 
-void
+xrt_result_t
 ipc_client_xdev_init(struct ipc_client_xdev *icx,
                      struct ipc_connection *ipc_c,
-                     struct xrt_tracking_origin *xtrack,
-                     uint32_t device_id)
+                     struct ipc_client_tracking_origin_manager *ictom,
+                     uint32_t device_id,
+                     u_device_destroy_function_t destroy_fn)
 {
 	// Helpers.
-	struct ipc_shared_memory *ism = ipc_c->ism;
-	struct ipc_shared_device *isdev = &ism->isdevs[device_id];
+	xrt_result_t xret = XRT_SUCCESS;
+
+	// Queried later.
+	struct ipc_binding_profile_info *temp_ibpis = NULL;
 
 	// Important fields.
 	icx->ipc_c = ipc_c;
 	icx->device_id = device_id;
 
+	/*
+	 * Fill in not implemented or noop versions first,
+	 * destroy gets filled in by either device or HMD.
+	 */
+	u_device_populate_function_pointers(&icx->base, ipc_client_xdev_get_tracked_pose, destroy_fn);
+
 	// Shared implemented functions.
 	icx->base.update_inputs = ipc_client_xdev_update_inputs;
-	icx->base.get_tracked_pose = ipc_client_xdev_get_tracked_pose;
 	icx->base.get_hand_tracking = ipc_client_xdev_get_hand_tracking;
 	icx->base.get_face_tracking = ipc_client_xdev_get_face_tracking;
+	icx->base.get_face_calibration_state_android = ipc_client_xdev_get_face_calibration_state_android;
 	icx->base.get_body_skeleton = ipc_client_xdev_get_body_skeleton;
 	icx->base.get_body_joints = ipc_client_xdev_get_body_joints;
 	icx->base.reset_body_tracking_calibration_meta = ipc_client_xdev_reset_body_tracking_calibration_meta;
@@ -414,6 +479,7 @@ ipc_client_xdev_init(struct ipc_client_xdev *icx,
 	icx->base.get_presence = ipc_client_xdev_get_presence;
 	icx->base.set_output = ipc_client_xdev_set_output;
 	icx->base.get_output_limits = ipc_client_xdev_get_output_limits;
+	icx->base.get_compositor_info = ipc_client_xdev_get_compositor_info;
 
 	// Plane detection EXT.
 	icx->base.begin_plane_detection_ext = ipc_client_xdev_begin_plane_detection_ext;
@@ -421,70 +487,201 @@ ipc_client_xdev_init(struct ipc_client_xdev *icx,
 	icx->base.get_plane_detection_state_ext = ipc_client_xdev_get_plane_detection_state_ext;
 	icx->base.get_plane_detections_ext = ipc_client_xdev_get_plane_detections_ext;
 
-	// Not implemented functions, some get overridden.
-	icx->base.get_view_poses = u_device_ni_get_view_poses;
-	icx->base.compute_distortion = u_device_ni_compute_distortion;
-	icx->base.get_visibility_mask = u_device_ni_get_visibility_mask;
-	icx->base.is_form_factor_available = u_device_ni_is_form_factor_available;
-	icx->base.get_battery_status = u_device_ni_get_battery_status;
+	// Lock the connection so we can do varlen IPC calls.
+	ipc_client_connection_lock(ipc_c);
 
-	// Copying the information from the isdev.
-	icx->base.device_type = isdev->device_type;
-	icx->base.supported = isdev->supported;
-	icx->base.tracking_origin = xtrack;
-	icx->base.name = isdev->name;
+	// Call IPC to get device info with varlen data
+	xret = ipc_send_device_get_info_locked(ipc_c, device_id);
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send_device_get_info_locked", out_free_and_unlock);
+
+	struct ipc_device_info info = {0};
+	xret = ipc_receive_device_get_info_locked(ipc_c, &info);
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive_device_get_info_locked", out_free_and_unlock);
+
+	// Copying the information from the info.
+	icx->base.device_type = info.device_type;
+	icx->base.supported = info.supported;
+	icx->base.name = info.name;
 
 	// Print name.
-	snprintf(icx->base.str, XRT_DEVICE_NAME_LEN, "%s", isdev->str);
-	snprintf(icx->base.serial, XRT_DEVICE_NAME_LEN, "%s", isdev->serial);
+	snprintf(icx->base.str, XRT_DEVICE_NAME_LEN, "%s", info.str);
+	snprintf(icx->base.serial, XRT_DEVICE_NAME_LEN, "%s", info.serial);
 
-	// Setup inputs, by pointing directly to the shared memory.
-	assert(isdev->input_count > 0);
-	icx->base.inputs = &ism->inputs[isdev->first_input_index];
-	icx->base.input_count = isdev->input_count;
+	/*
+	 * Allocate inputs array on client side. We receive the input names
+	 * from the server, so we can use them to fill the inputs array.
+	 */
+	icx->base.input_count = info.input_count;
+	if (info.input_count > 0) {
+		// Allocate inputs array.
+		icx->base.inputs = U_TYPED_ARRAY_CALLOC(struct xrt_input, info.input_count);
+		// Allocate input names array (temporary, freed on all paths).
+		enum xrt_input_name *input_names = U_TYPED_ARRAY_CALLOC(enum xrt_input_name, info.input_count);
 
-	// Setup outputs, if any point directly into the shared memory.
-	icx->base.output_count = isdev->output_count;
-	if (isdev->output_count > 0) {
-		icx->base.outputs = &ism->outputs[isdev->first_output_index];
+		// Receive input names from server.
+		xret = ipc_receive(&ipc_c->imc, input_names, sizeof(enum xrt_input_name) * info.input_count);
+		if (xret == XRT_SUCCESS) {
+			// On success, fill the inputs array with the input names.
+			for (size_t i = 0; i < info.input_count; i++) {
+				icx->base.inputs[i].name = input_names[i];
+			}
+		}
+		free(input_names);
+		IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive(input names)", out_free_and_unlock);
+	} else {
+		icx->base.inputs = NULL;
+	}
+
+	/*
+	 * Allocate outputs array on client side. We receive the output names
+	 * from the server, so we can use them to fill the outputs array.
+	 */
+	icx->base.output_count = info.output_count;
+	if (info.output_count > 0) {
+		// Allocate outputs array.
+		icx->base.outputs = U_TYPED_ARRAY_CALLOC(struct xrt_output, info.output_count);
+		// Allocate output names array (temporary, freed on all paths).
+		enum xrt_output_name *output_names = U_TYPED_ARRAY_CALLOC(enum xrt_output_name, info.output_count);
+
+		// Receive output names from server.
+		xret = ipc_receive(&ipc_c->imc, output_names, sizeof(enum xrt_output_name) * info.output_count);
+		if (xret == XRT_SUCCESS) {
+			// On success, fill the outputs array with the output names.
+			for (size_t i = 0; i < info.output_count; i++) {
+				icx->base.outputs[i].name = output_names[i];
+			}
+		}
+		free(output_names);
+		IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive(output names)", out_free_and_unlock);
 	} else {
 		icx->base.outputs = NULL;
 	}
 
+	// Receive binding profiles from varlen data.
+	if (info.binding_profile_count > 0) {
+		/*
+		 * This needs to live until after all of the bindings have
+		 * been setup as it contains the offsets into the input and
+		 * output pairs arrays.
+		 */
+		temp_ibpis = U_TYPED_ARRAY_CALLOC(struct ipc_binding_profile_info, info.binding_profile_count);
+		xret = ipc_receive(&ipc_c->imc, temp_ibpis,
+		                   sizeof(struct ipc_binding_profile_info) * info.binding_profile_count);
+		IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive(binding profiles)", out_free_and_unlock);
+	}
+
+	// Receive all input pairs from varlen data.
+	if (info.total_input_pair_count > 0) {
+		size_t size = sizeof(struct xrt_binding_input_pair) * info.total_input_pair_count;
+
+		// Is freed by ipc_client_xdev_fini.
+		icx->all_input_pairs = U_TYPED_ARRAY_CALLOC(struct xrt_binding_input_pair, info.total_input_pair_count);
+		xret = ipc_receive(&ipc_c->imc, icx->all_input_pairs, size);
+		IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive(input pairs)", out_free_and_unlock);
+	}
+
+	// Receive all output pairs from varlen data.
+	if (info.total_output_pair_count > 0) {
+		size_t size = sizeof(struct xrt_binding_output_pair) * info.total_output_pair_count;
+
+		// Is freed by ipc_client_xdev_fini.
+		icx->all_output_pairs =
+		    U_TYPED_ARRAY_CALLOC(struct xrt_binding_output_pair, info.total_output_pair_count);
+		xret = ipc_receive(&ipc_c->imc, icx->all_output_pairs, size);
+		IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive(output pairs)", out_free_and_unlock);
+	}
+
 	// Setup binding profiles.
-	icx->base.binding_profile_count = isdev->binding_profile_count;
-	if (isdev->binding_profile_count > 0) {
+	icx->base.binding_profile_count = info.binding_profile_count;
+	if (info.binding_profile_count > 0) {
+		// Is freed by ipc_client_xdev_fini.
 		icx->base.binding_profiles =
-		    U_TYPED_ARRAY_CALLOC(struct xrt_binding_profile, isdev->binding_profile_count);
+		    U_TYPED_ARRAY_CALLOC(struct xrt_binding_profile, info.binding_profile_count);
 	}
 
-	for (size_t i = 0; i < isdev->binding_profile_count; i++) {
+	// Wire up binding profiles with received pairs
+	uint32_t input_pair_offset = 0;
+	uint32_t output_pair_offset = 0;
+	for (size_t i = 0; i < info.binding_profile_count; i++) {
 		struct xrt_binding_profile *xbp = &icx->base.binding_profiles[i];
-		struct ipc_shared_binding_profile *isbp =
-		    &ism->binding_profiles[isdev->first_binding_profile_index + i];
+		struct ipc_binding_profile_info *ibpi = &temp_ibpis[i];
 
-		xbp->name = isbp->name;
-		if (isbp->input_count > 0) {
-			xbp->inputs = &ism->input_pairs[isbp->first_input_index];
-			xbp->input_count = isbp->input_count;
+		xbp->name = ibpi->name;
+		xbp->input_count = ibpi->input_count;
+		xbp->output_count = ibpi->output_count;
+
+		// Point to the appropriate section of the received arrays.
+		if (ibpi->input_count > 0) {
+			xbp->inputs = &icx->all_input_pairs[input_pair_offset];
+			input_pair_offset += ibpi->input_count;
+		} else {
+			xbp->inputs = NULL;
 		}
-		if (isbp->output_count > 0) {
-			xbp->outputs = &ism->output_pairs[isbp->first_output_index];
-			xbp->output_count = isbp->output_count;
+
+		// Ditto for outputs.
+		if (ibpi->output_count > 0) {
+			xbp->outputs = &icx->all_output_pairs[output_pair_offset];
+			output_pair_offset += ibpi->output_count;
+		} else {
+			xbp->outputs = NULL;
 		}
 	}
+
+out_free_and_unlock:
+	// Out of the critical section.
+	ipc_client_connection_unlock(ipc_c);
+
+	// Free temporary binding profile structures (we've copied the data).
+	free(temp_ibpis);
+
+	// Check if we failed during the critical section.
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_client_xdev_init(failed during critical section)", err_fini);
+
+	// Get the tracking origin, can't do this with the critical section, so do it after.
+	struct xrt_tracking_origin *xtrack = NULL;
+	xret = ipc_client_tracking_origin_manager_get(ictom, info.tracking_origin_id, &xtrack);
+	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_client_tracking_origin_manager_get", err_fini);
+
+	icx->base.tracking_origin = xtrack;
+
+	// Return success.
+	return XRT_SUCCESS;
+
+err_fini:
+	// Cleans up any allocations.
+	ipc_client_xdev_fini(icx);
+
+	return xret;
 }
 
 void
 ipc_client_xdev_fini(struct ipc_client_xdev *icx)
 {
-	// We do not own these, so don't free them.
-	icx->base.inputs = NULL;
-	icx->base.outputs = NULL;
+	// Free inputs array
+	if (icx->base.inputs != NULL) {
+		free(icx->base.inputs);
+		icx->base.inputs = NULL;
+	}
 
-	// We allocated the bindings profiles.
+	// Free outputs array
+	if (icx->base.outputs != NULL) {
+		free(icx->base.outputs);
+		icx->base.outputs = NULL;
+	}
+
+	// Free binding profiles.
 	if (icx->base.binding_profiles != NULL) {
 		free(icx->base.binding_profiles);
 		icx->base.binding_profiles = NULL;
+	}
+
+	if (icx->all_input_pairs != NULL) {
+		free(icx->all_input_pairs);
+		icx->all_input_pairs = NULL;
+	}
+
+	if (icx->all_output_pairs != NULL) {
+		free(icx->all_output_pairs);
+		icx->all_output_pairs = NULL;
 	}
 }

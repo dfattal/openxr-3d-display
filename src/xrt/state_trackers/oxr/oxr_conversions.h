@@ -16,6 +16,8 @@
 #include "xrt/xrt_vulkan_includes.h"
 #include "xrt/xrt_openxr_includes.h"
 
+#include "oxr_defines.h"
+
 
 /*
  *
@@ -293,4 +295,79 @@ xrt_hand_tracking_data_source_to_xr(enum xrt_input_name ht_input_name)
 	case XRT_INPUT_HT_CONFORMING_RIGHT: return XR_HAND_TRACKING_DATA_SOURCE_CONTROLLER_EXT;
 	default: assert(false); return XR_HAND_TRACKING_DATA_SOURCE_MAX_ENUM_EXT;
 	}
+}
+
+
+/*
+ *
+ * Basic types
+ *
+ */
+
+static inline XrExtent2Di
+xrt_size_to_xr(const struct xrt_size *x)
+{
+	return (XrExtent2Di){
+	    .width = x->w,
+	    .height = x->h,
+	};
+}
+
+static inline XrVector2f
+xrt_vec2_to_xr(const struct xrt_vec2 *v)
+{
+	return (XrVector2f){
+	    .x = v->x,
+	    .y = v->y,
+	};
+}
+
+static inline XrVector3f
+xrt_vec3_to_xr(const struct xrt_vec3 *v)
+{
+	return (XrVector3f){
+	    .x = v->x,
+	    .y = v->y,
+	    .z = v->z,
+	};
+}
+
+static inline XrQuaternionf
+xrt_quat_to_xr(const struct xrt_quat *q)
+{
+	return (XrQuaternionf){
+	    .x = q->x,
+	    .y = q->y,
+	    .z = q->z,
+	    .w = q->w,
+	};
+}
+
+static inline XrPosef
+xrt_pose_to_xr(const struct xrt_pose *q)
+{
+	return (XrPosef){
+	    .orientation = xrt_quat_to_xr(&q->orientation),
+	    .position = xrt_vec3_to_xr(&q->position),
+	};
+}
+
+
+/*
+ *
+ * View things
+ *
+ */
+
+static inline XrViewConfigurationType
+xrt_view_type_to_xr(enum xrt_view_type view_type)
+{
+	switch (view_type) {
+	case XRT_VIEW_TYPE_MONO: return XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO;
+	case XRT_VIEW_TYPE_STEREO: return XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+	}
+
+	// Used as default, to get warnings.
+	assert(false && "Invalid view type");
+	return XR_VIEW_CONFIGURATION_TYPE_MAX_ENUM;
 }

@@ -1,4 +1,5 @@
 // Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -25,9 +26,9 @@ extern "C" {
 //! Major version of the API.
 #define MND_API_VERSION_MAJOR 1
 //! Minor version of the API.
-#define MND_API_VERSION_MINOR 5
+#define MND_API_VERSION_MINOR 6
 //! Patch version of the API.
-#define MND_API_VERSION_PATCH 1
+#define MND_API_VERSION_PATCH 0
 
 /*!
  * Result codes for operations, negative are errors, zero or positives are
@@ -60,7 +61,16 @@ typedef enum mnd_client_flags
 	MND_CLIENT_SESSION_VISIBLE = (1u << 2u),
 	MND_CLIENT_SESSION_FOCUSED = (1u << 3u),
 	MND_CLIENT_SESSION_OVERLAY = (1u << 4u),
+	//! @deprecated Deprecated in version 1.6.
 	MND_CLIENT_IO_ACTIVE = (1u << 5u),
+	//! Supported in version 1.6 and above.
+	MND_CLIENT_POSES_BLOCKED = (1u << 6u),
+	//! Supported in version 1.6 and above.
+	MND_CLIENT_HT_BLOCKED = (1u << 7u),
+	//! Supported in version 1.6 and above.
+	MND_CLIENT_INPUTS_BLOCKED = (1u << 8u),
+	//! Supported in version 1.6 and above.
+	MND_CLIENT_OUTPUTS_BLOCKED = (1u << 9u),
 } mnd_client_flags_t;
 
 /*!
@@ -115,6 +125,22 @@ typedef enum mnd_reference_space_type
 	MND_SPACE_REFERENCE_TYPE_STAGE,
 	MND_SPACE_REFERENCE_TYPE_UNBOUNDED,
 } mnd_reference_space_type_t;
+
+/*!
+ * Bitflags for IO blocking.
+ *
+ * Bitflags are only to be used here, this should not be used as a template
+ * for future libmonado interfaces.
+ *
+ * Supported in version 1.6.0 and above.
+ */
+typedef enum mnd_io_block_flags
+{
+	MND_IO_BLOCK_POSES = (1u << 0u),
+	MND_IO_BLOCK_HT = (1u << 1u),
+	MND_IO_BLOCK_INPUTS = (1u << 2u),
+	MND_IO_BLOCK_OUTPUTS = (1u << 3u),
+} mnd_io_block_flags_t;
 
 /*
  *
@@ -249,6 +275,8 @@ mnd_root_set_client_focused(mnd_root_t *root, uint32_t client_id);
 /*!
  * Toggle io activity for the client at the given index.
  *
+ * @deprecated Deprecated in version 1.6.
+ *
  * @param root      The libmonado state.
  * @param client_id ID of the client to toggle IO for.
  *
@@ -258,6 +286,18 @@ mnd_root_set_client_focused(mnd_root_t *root, uint32_t client_id);
  */
 mnd_result_t
 mnd_root_toggle_client_io_active(mnd_root_t *root, uint32_t client_id);
+
+/*!
+ * Block certain types of IO for the client at the given index.
+ *
+ * Supported in version 1.6 and above.
+ *
+ * @param root        The libmonado state.
+ * @param client_id   ID of the client to block IO for.
+ * @param block_flags Which types of IO to block.
+ */
+mnd_result_t
+mnd_root_set_client_io_blocks(mnd_root_t *root, uint32_t client_id, mnd_io_block_flags_t block_flags);
 
 /*!
  * Get the number of devices
@@ -406,7 +446,7 @@ mnd_root_recenter_local_spaces(mnd_root_t *root);
  *
  * @param root The libmonado state.
  * @param type The reference space.
- * @param offset A pointer to where the offset should be written.
+ * @param[out] out_offset A pointer to where the offset should be written.
  *
  * @return MND_SUCCESS on success
  */
@@ -433,13 +473,13 @@ mnd_root_set_reference_space_offset(mnd_root_t *root, mnd_reference_space_type_t
  * Supported in version 1.3 and above.
  *
  * @param root The libmonado state.
- * @param origin_id The ID of the tracking origin.
- * @param offset A pointer to where the offset should be written.
+ * @param origin_index The index of the tracking origin into the internal list.
+ * @param[out] out_offset A pointer to where the offset should be written.
  *
  * @return MND_SUCCESS on success
  */
 mnd_result_t
-mnd_root_get_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, mnd_pose_t *out_offset);
+mnd_root_get_tracking_origin_offset(mnd_root_t *root, uint32_t origin_index, mnd_pose_t *out_offset);
 
 /*!
  * Apply an offset to the specified tracking origin.
@@ -447,13 +487,13 @@ mnd_root_get_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, mnd_po
  * Supported in version 1.3 and above.
  *
  * @param root The libmonado state.
- * @param origin_id The ID of the tracking origin.
+ * @param origin_index The index of the tracking origin into the internal list.
  * @param offset A pointer to valid xrt_pose.
  *
  * @return MND_SUCCESS on success
  */
 mnd_result_t
-mnd_root_set_tracking_origin_offset(mnd_root_t *root, uint32_t origin_id, const mnd_pose_t *offset);
+mnd_root_set_tracking_origin_offset(mnd_root_t *root, uint32_t origin_index, const mnd_pose_t *offset);
 
 /*!
  * Retrieve the number of tracking origins available.
@@ -474,13 +514,13 @@ mnd_root_get_tracking_origin_count(mnd_root_t *root, uint32_t *out_track_count);
  * Supported in version 1.3 and above.
  *
  * @param root The libmonado state.
- * @param origin_id The ID of a tracking origin.
+ * @param origin_index The index of the tracking origin into the internal list.
  * @param out_string The pointer to write the name's pointer to.
  *
  * @return MND_SUCCESS on success
  */
 mnd_result_t
-mnd_root_get_tracking_origin_name(mnd_root_t *root, uint32_t origin_id, const char **out_string);
+mnd_root_get_tracking_origin_name(mnd_root_t *root, uint32_t origin_index, const char **out_string);
 
 /*!
  * Get battery status of a device.

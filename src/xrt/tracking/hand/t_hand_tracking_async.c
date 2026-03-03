@@ -137,16 +137,10 @@ ht_async_mainloop(void *ptr)
 			struct xrt_space_relation wrist_rel =
 			    hta->working.hands[i].values.hand_joint_set_default[XRT_HAND_JOINT_WRIST].relation;
 
-			m_relation_history_estimate_motion( //
-			    hta->present.relation_hist[i],  //
-			    &wrist_rel,                     //
-			    hta->working.timestamp,         //
-			    &wrist_rel);                    //
-
-			m_relation_history_push(           //
-			    hta->present.relation_hist[i], //
-			    &wrist_rel,                    //
-			    hta->working.timestamp);       //
+			m_relation_history_push_with_motion_estimation( //
+			    hta->present.relation_hist[i],              //
+			    &wrist_rel,                                 //
+			    hta->working.timestamp);                    //
 		}
 
 		hta->hand_tracking_work_active = false;

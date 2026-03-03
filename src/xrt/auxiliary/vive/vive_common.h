@@ -12,6 +12,8 @@
 
 #include "xrt/xrt_compiler.h"
 
+#include "util/u_time.h"
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,6 +66,11 @@ enum VIVE_VARIANT
 enum VIVE_VARIANT
 vive_determine_variant(const char *model_number);
 
+bool
+vive_variant_scanout_info(enum VIVE_VARIANT variant,
+                          time_duration_ns frame_period_ns,
+                          time_duration_ns *out_scanout_time_ns,
+                          enum xrt_scanout_direction *out_scanout_direction);
 
 #ifdef __cplusplus
 }

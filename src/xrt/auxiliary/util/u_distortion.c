@@ -17,6 +17,18 @@
 
 #include <assert.h>
 
+static inline float
+vertical_offset_meters(const struct u_cardboard_distortion_arguments *args)
+{
+	switch (args->vertical_alignment) {
+	case U_CARDBOARD_VERTICAL_ALIGNMENT_TOP:
+		return args->screen.h_meters - args->tray_to_lens_distance_meters - 0.003f;
+	case U_CARDBOARD_VERTICAL_ALIGNMENT_BOTTOM: return args->tray_to_lens_distance_meters - 0.003f;
+	case U_CARDBOARD_VERTICAL_ALIGNMENT_CENTER:
+	default: return args->screen.h_meters * 0.5f;
+	}
+}
+
 void
 u_distortion_cardboard_calculate(const struct u_cardboard_distortion_arguments *args,
                                  struct xrt_hmd_parts *parts,
@@ -78,9 +90,8 @@ u_distortion_cardboard_calculate(const struct u_cardboard_distortion_arguments *
 			                          args->screen_to_lens_distance_meters;
 		}
 
-		// Cardboard vertical alignment bottom
-		values->screen.offset.y =
-		    (args->tray_to_lens_distance_meters - 0.003f) / args->screen_to_lens_distance_meters;
+		// Cardboard vertical alignment
+		values->screen.offset.y = vertical_offset_meters(args) / args->screen_to_lens_distance_meters;
 
 		// Tanangle to texture coordinates
 		values->texture.size.x = tanf(-args->fov.angle_left) + tanf(args->fov.angle_right);

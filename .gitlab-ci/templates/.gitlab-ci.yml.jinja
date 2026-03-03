@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: CC0-1.0
-# SPDX-FileCopyrightText: 2018-2024 Collabora, Ltd. and the Monado contributors
+# SPDX-FileCopyrightText: 2018-2026 Collabora, Ltd. and the Monado contributors
 
 {# ignore the warning, this is actually the template to edit. #}
 ###############################################
@@ -134,42 +134,33 @@ reuse:
 {% endif %}
 
   script:
-
     - .gitlab-ci/prebuild.sh
-{#- regular or NDK cmake builds -#}
-{%- if "cmake" in job.name or "ndk" in job.name %}
-
-    - .gitlab-ci/ci-cmake-build.sh {{- make_cmake_args(job.cmake_defines) }}
-{%- if job.pahole %}
-
-    - src/xrt/ipc/shared/proto.py src/xrt/ipc/shared/proto.json structs.txt
-    - mkdir -p "{{ job.name}}"
-    - pahole --sizes --class_name file://structs.txt build/src/xrt/targets/openxr/libopenxr_monado.so > "{{ job.name}}/ipc-sizes.txt"{% endif %}
-
 {#- gradle builds -#}
-{%- elif "android" in job.name %}
+{% if "android" in job.name %}
 
 {% if "Release" in job.name %}
     - base64 --decode ${MONADO_ANDROID_KEYSTORE} > monado-release.jks
 {% endif %}
     - .gitlab-ci/ci-gradle-build.sh {{ job.target }}
 
+{#- regular or NDK cmake builds -#}
 {%- else %}
 
-{# error message #}
-  CANNOT GUESS JOB TYPE
+    - .gitlab-ci/ci-cmake-build.sh {{- make_cmake_args(job.cmake_defines) }}
+{%- if job.pahole %}
 
-{%- endif %}
-
-{%- if "cmake" in job.name %}
+    - mkdir -p "{{ job.name}}"
+    - pahole --sizes --class_name file://build/ipc-structs.txt build/src/xrt/targets/openxr/libopenxr_monado.so > "{{ job.name}}/ipc-sizes.txt"{% endif %}
+{%- if not "ndk" in job.name %}
 
     - cd build && ctest --output-on-failure
-{%- endif %}
+{% endif %}
+{% endif %}
 
 {%- if job.artifact_path or job.pahole %}
 
   artifacts:
-{%- if job.name == "debian:cmake"%}
+{%- if job.name == "debian:trixie"%}
 
     untracked: true
 {%- endif %}
@@ -207,25 +198,33 @@ windows:
 # Check compatibility of IPC protocol between 32 and 64 bits
 ipc-32-64-compatibility:
   stage: check
-  dependencies: ["debian:cmake-no-opencv", "debian:cmake:32bit"]
-  needs: ["debian:cmake-no-opencv", "debian:cmake:32bit"]
-  script:
-    - diff -du "debian:cmake-no-opencv/ipc-sizes.txt" "debian:cmake:32bit/ipc-sizes.txt"
-    - cmp "debian:cmake-no-opencv/ipc-sizes.txt" "debian:cmake:32bit/ipc-sizes.txt"
-
-clang-tidy:
   extends:
     - .build-rules
-    - .monado.image.debian:bookworm
-  stage: check
-  dependencies:
-    - debian:cmake
-  needs:
-    - debian:cmake
+  dependencies: ["debian:bookworm", "debian:bookworm:32bit"]
+  needs: ["debian:bookworm", "debian:bookworm:32bit"]
   script:
-    - file $(which run-clang-tidy)
+    - diff -du "debian:bookworm/ipc-sizes.txt" "debian:bookworm:32bit/ipc-sizes.txt"
+    - cmp "debian:bookworm/ipc-sizes.txt" "debian:bookworm:32bit/ipc-sizes.txt"
+
+debian:trixie:clang-tidy:
+  extends:
+    - .build-rules
+    - .monado.image.debian:trixie
+  stage: check
+  needs:
+    - debian:trixie
+  script:
+    - run-clang-tidy -quiet -allow-no-checks -p build
+
+ndk:arm64-v8a:clang-tidy:
+  extends:
+    - .build-rules
+    - .monado.image.debian:trixie-ndk
+  stage: check
+  needs:
+    - ndk:arm64-v8a
+  script:
     - run-clang-tidy -quiet -p build
-    {# TODO -allow-no-checks when we have debian trixie #}
 
 {% for distro in distributions -%} {%- for image in distro.images if "deb_version_suffix" in image %}
 

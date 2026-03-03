@@ -1,5 +1,5 @@
-// Copyright 2019-2024, Collabora, Ltd.
-// Copyright 2024-2025, NVIDIA CORPORATION.
+// Copyright 2019-2026, Collabora, Ltd.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -49,6 +49,7 @@
 #include "vk/vk_cmd.h"
 #include "vk/vk_hud_blend.h"
 #include "vk/vk_image_readback_to_xf_pool.h"
+#include "vk/vk_submit_helpers.h"
 
 #ifdef XRT_HAVE_CNSDK
 #include "leia/leia_cnsdk.h"
@@ -76,14 +77,32 @@ DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL
 
 /*
  *
- * Small internal helpers.
+ * Helper macros for adding semaphores to lists.
  *
  */
 
-#define CHAIN(STRUCT, NEXT)                                                                                            \
+#define ADD_WAIT(LIST, SEMAPHORE, STAGE, IS_TIMELINE)                                                                  \
 	do {                                                                                                           \
-		(STRUCT).pNext = NEXT;                                                                                 \
-		NEXT = (VkBaseInStructure *)&(STRUCT);                                                                 \
+		VkSemaphore _semaphore = SEMAPHORE;                                                                    \
+		if (_semaphore != VK_NULL_HANDLE) {                                                                    \
+			if (IS_TIMELINE) {                                                                             \
+				vk_semaphore_list_wait_add_timeline(&LIST, _semaphore, (uint64_t)frame_id, STAGE);     \
+			} else {                                                                                       \
+				vk_semaphore_list_wait_add_binary(&LIST, _semaphore, STAGE);                           \
+			}                                                                                              \
+		}                                                                                                      \
+	} while (false)
+
+#define ADD_SIGNAL(LIST, SEMAPHORE, IS_TIMELINE)                                                                       \
+	do {                                                                                                           \
+		VkSemaphore _semaphore = SEMAPHORE;                                                                    \
+		if (_semaphore != VK_NULL_HANDLE) {                                                                    \
+			if (IS_TIMELINE) {                                                                             \
+				vk_semaphore_list_signal_add_timeline(&LIST, _semaphore, (uint64_t)frame_id);          \
+			} else {                                                                                       \
+				vk_semaphore_list_signal_add_binary(&LIST, _semaphore);                                \
+			}                                                                                              \
+		}                                                                                                      \
 	} while (false)
 
 
@@ -312,7 +331,8 @@ static void
 calc_pose_data(struct comp_renderer *r,
                enum comp_target_fov_source fov_source,
                struct xrt_fov out_fovs[XRT_MAX_VIEWS],
-               struct xrt_pose out_world[XRT_MAX_VIEWS],
+               struct xrt_pose out_world_scanout_begin[XRT_MAX_VIEWS],
+               struct xrt_pose out_world_scanout_end[XRT_MAX_VIEWS],
                struct xrt_pose out_eye[XRT_MAX_VIEWS],
                uint32_t view_count)
 {
@@ -324,24 +344,78 @@ calc_pose_data(struct comp_renderer *r,
 	    0.0f,
 	};
 
-	struct xrt_space_relation head_relation = XRT_SPACE_RELATION_ZERO;
+	struct xrt_space_relation head_relation[2] = XRT_SPACE_RELATION_ZERO;
 	struct xrt_fov xdev_fovs[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
-	struct xrt_pose xdev_poses[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
+	struct xrt_pose xdev_poses[2][XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
 
-	xrt_result_t xret = xrt_device_get_view_poses(       //
-	    r->c->xdev,                                      //
-	    &default_eye_relation,                           //
-	    r->c->frame.rendering.predicted_display_time_ns, // at_timestamp_ns
-	    view_count,                                      //
-	    &head_relation,                                  // out_head_relation
-	    xdev_fovs,                                       // out_fovs
-	    xdev_poses);                                     // out_poses
+	// Determine view type based on view count
+	enum xrt_view_type view_type = (view_count == 1) ? XRT_VIEW_TYPE_MONO : XRT_VIEW_TYPE_STEREO;
+
+	int64_t scanout_time_ns = 0;
+	if (r->c->xdev->supported.compositor_info) {
+		struct xrt_device_compositor_mode compositor_mode = {
+		    .frame_interval_ns = r->c->frame_interval_ns,
+		};
+		struct xrt_device_compositor_info device_compositor_info;
+		xrt_result_t xret = xrt_device_get_compositor_info( //
+		    r->c->xdev,                                     //
+		    &compositor_mode,                               //
+		    &device_compositor_info);                       //
+
+		if (xret != XRT_SUCCESS) {
+			COMP_WARN(r->c, "xrt_device_get_compositor_info failed, assuming 0 scanout time");
+		} else if (device_compositor_info.scanout_direction == XRT_SCANOUT_DIRECTION_TOP_TO_BOTTOM) {
+			scanout_time_ns = device_compositor_info.scanout_time_ns;
+		} else {
+			COMP_SPEW(r->c,
+			          "Unable to apply scanout compensation as only DIRECTION_TOP_TO_BOTTOM is supported");
+		}
+	}
+
+	int64_t begin_timestamp_ns = r->c->frame.rendering.predicted_display_time_ns;
+	int64_t end_timestamp_ns = begin_timestamp_ns + scanout_time_ns;
+
+	// Pose at beginning of scanout
+	xrt_result_t xret = xrt_device_get_view_poses( //
+	    r->c->xdev,                                //
+	    &default_eye_relation,                     //
+	    begin_timestamp_ns,                        // at_timestamp_ns
+	    view_type,                                 //
+	    view_count,                                //
+	    &head_relation[0],                         // out_head_relation
+	    xdev_fovs,                                 // out_fovs
+	    xdev_poses[0]);                            //
 	if (xret != XRT_SUCCESS) {
 		struct u_pp_sink_stack_only sink;
 		u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
 		u_pp_xrt_result(dg, xret);
 		U_LOG_E("xrt_device_get_view_poses failed: %s", sink.buffer);
 		return;
+	}
+
+	// Pose at end of scanout
+	if (scanout_time_ns != 0) {
+		xret = xrt_device_get_view_poses( //
+		    r->c->xdev,                   //
+		    &default_eye_relation,        //
+		    end_timestamp_ns,             // at_timestamp_ns
+		    view_type,                    //
+		    view_count,                   //
+		    &head_relation[1],            // out_head_relation
+		    xdev_fovs,                    // out_fovs
+		    xdev_poses[1]);               // out_poses
+		if (xret != XRT_SUCCESS) {
+			struct u_pp_sink_stack_only sink;
+			u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+			u_pp_xrt_result(dg, xret);
+			U_LOG_E("xrt_device_get_view_poses failed: %s", sink.buffer);
+			return;
+		}
+	} else {
+		for (size_t i = 0; i < XRT_MAX_VIEWS; ++i) {
+			xdev_poses[1][i] = xdev_poses[0][i];
+		}
+		head_relation[1] = head_relation[0];
 	}
 
 	struct xrt_fov dist_fov[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
@@ -358,22 +432,32 @@ calc_pose_data(struct comp_renderer *r,
 
 	for (uint32_t i = 0; i < view_count; i++) {
 		const struct xrt_fov fov = use_xdev ? xdev_fovs[i] : dist_fov[i];
-		const struct xrt_pose eye_pose = xdev_poses[i];
+		const struct xrt_pose eye_pose_scanout_start = xdev_poses[0][i];
+		const struct xrt_pose eye_pose_scanout_end = xdev_poses[1][i];
 
-		struct xrt_space_relation result = {0};
+		struct xrt_space_relation result_scanout_start = {0};
+		struct xrt_space_relation result_scanout_end = {0};
 		struct xrt_relation_chain xrc = {0};
-		m_relation_chain_push_pose_if_not_identity(&xrc, &eye_pose);
-		m_relation_chain_push_relation(&xrc, &head_relation);
-		m_relation_chain_resolve(&xrc, &result);
+
+		m_relation_chain_push_pose_if_not_identity(&xrc, &eye_pose_scanout_start);
+		m_relation_chain_push_relation(&xrc, &head_relation[0]);
+		m_relation_chain_resolve(&xrc, &result_scanout_start);
+
+		xrc = (struct xrt_relation_chain){0};
+
+		m_relation_chain_push_pose_if_not_identity(&xrc, &eye_pose_scanout_end);
+		m_relation_chain_push_relation(&xrc, &head_relation[1]);
+		m_relation_chain_resolve(&xrc, &result_scanout_end);
 
 		// Results to callers.
 		out_fovs[i] = fov;
-		out_world[i] = result.pose;
-		out_eye[i] = eye_pose;
+		out_world_scanout_begin[i] = result_scanout_start.pose;
+		out_world_scanout_end[i] = result_scanout_end.pose;
+		out_eye[i] = eye_pose_scanout_start;
 
 		// For remote rendering targets.
 		r->c->base.frame_params.fovs[i] = fov;
-		r->c->base.frame_params.poses[i] = result.pose;
+		r->c->base.frame_params.poses[i] = result_scanout_start.pose;
 	}
 }
 
@@ -565,11 +649,11 @@ renderer_ensure_images_and_renderings(struct comp_renderer *r, bool force_recrea
 		info.formats[info.format_count++] = r->c->settings.formats[i];
 	}
 
-	comp_target_create_images(r->c->target, &info);
+	comp_target_create_images(target, &info, r->c->base.vk.main_queue);
 
 	bool pre_rotate = false;
-	if (r->c->target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
-	    r->c->target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
+	if (target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
+	    target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
 		pre_rotate = true;
 	}
 
@@ -692,69 +776,28 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 
 
 	/*
-	 * Regular semaphore setup.
+	 * Semaphore and queue submit info setup.
 	 */
 
-	// Convenience.
 	struct comp_target *ct = r->c->target;
-#define WAIT_SEMAPHORE_COUNT 1
+	struct vk_semaphore_list_wait wait_sems = XRT_STRUCT_INIT;
+	struct vk_semaphore_list_signal signal_sems = XRT_STRUCT_INIT;
+	struct vk_submit_info_builder builder = XRT_STRUCT_INIT;
 
-	VkSemaphore wait_sems[WAIT_SEMAPHORE_COUNT] = {ct->semaphores.present_complete};
-	VkPipelineStageFlags stage_flags[WAIT_SEMAPHORE_COUNT] = {pipeline_stage_flag};
+	// Add wait semaphore (present_complete from target).
+	ADD_WAIT(wait_sems, ct->semaphores.present_complete, pipeline_stage_flag, false);
 
-	VkSemaphore *wait_sems_ptr = NULL;
-	VkPipelineStageFlags *stage_flags_ptr = NULL;
-	uint32_t wait_sem_count = 0;
-	if (wait_sems[0] != VK_NULL_HANDLE) {
-		wait_sems_ptr = wait_sems;
-		stage_flags_ptr = stage_flags;
-		wait_sem_count = WAIT_SEMAPHORE_COUNT;
-	}
+	// Add signal semaphore (render_complete to target).
+	ADD_SIGNAL(signal_sems, ct->semaphores.render_complete, ct->semaphores.render_complete_is_timeline);
 
-#define SIGNAL_SEMAPHRE_COUNT 1
-	VkSemaphore signal_sems[SIGNAL_SEMAPHRE_COUNT] = {ct->semaphores.render_complete};
-
-	uint32_t signal_sem_count = 0;
-	VkSemaphore *signal_sems_ptr = NULL;
-	if (signal_sems[0] != VK_NULL_HANDLE) {
-		signal_sems_ptr = signal_sems;
-		signal_sem_count = SIGNAL_SEMAPHRE_COUNT;
-	}
-
-	// Next pointer for VkSubmitInfo
-	const void *next = NULL;
-
-#ifdef VK_KHR_timeline_semaphore
-	assert(!comp_frame_is_invalid_locked(&r->c->frame.rendering));
-	uint64_t render_complete_signal_values[SIGNAL_SEMAPHRE_COUNT] = {(uint64_t)frame_id};
-
-	VkTimelineSemaphoreSubmitInfoKHR timeline_info = {
-	    .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO_KHR,
-	};
-
-	if (ct->semaphores.render_complete_is_timeline) {
-		timeline_info = (VkTimelineSemaphoreSubmitInfoKHR){
-		    .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO_KHR,
-		    .signalSemaphoreValueCount = signal_sem_count,
-		    .pSignalSemaphoreValues = render_complete_signal_values,
-		};
-
-		CHAIN(timeline_info, next);
-	}
-#endif
-
-
-	VkSubmitInfo comp_submit_info = {
-	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-	    .pNext = next,
-	    .pWaitDstStageMask = stage_flags_ptr,
-	    .pWaitSemaphores = wait_sems_ptr,
-	    .waitSemaphoreCount = wait_sem_count,
-	    .commandBufferCount = 1,
-	    .pCommandBuffers = &cmd,
-	    .signalSemaphoreCount = signal_sem_count,
-	    .pSignalSemaphores = signal_sems_ptr,
-	};
+	// Build the submit info struct, handles all of the semaphores for us.
+	vk_submit_info_builder_prepare( //
+	    &builder,                   //
+	    &wait_sems,                 //
+	    &cmd,                       //
+	    1,                          //
+	    &signal_sems,               //
+	    NULL);                      //
 
 	// Everything prepared, now we are submitting.
 	comp_target_mark_submit_begin(ct, frame_id, os_monotonic_get_ns());
@@ -765,7 +808,7 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 	 * us avoid taking a lot of locks. The queue lock will be taken by
 	 * @ref vk_cmd_submit_locked tho.
 	 */
-	ret = vk_cmd_submit_locked(vk, vk->main_queue, 1, &comp_submit_info, r->fences[r->acquired_buffer]);
+	ret = vk_cmd_submit_locked(vk, vk->main_queue, 1, &builder.submit_info, r->fences[r->acquired_buffer]);
 
 	// We have now completed the submit, even if we failed.
 	comp_target_mark_submit_end(ct, frame_id, os_monotonic_get_ns());
@@ -843,13 +886,13 @@ renderer_present_swapchain_image(struct comp_renderer *r, uint64_t desired_prese
 	assert(!comp_frame_is_invalid_locked(&r->c->frame.rendering));
 	uint64_t render_complete_signal_value = (uint64_t)r->c->frame.rendering.id;
 
-	ret = comp_target_present(           //
-	    r->c->target,                    //
-	    r->c->base.vk.main_queue->queue, //
-	    r->acquired_buffer,              //
-	    render_complete_signal_value,    //
-	    desired_present_time_ns,         //
-	    present_slop_ns);                //
+	ret = comp_target_present(        //
+	    r->c->target,                 //
+	    r->c->base.vk.main_queue,     //
+	    r->acquired_buffer,           //
+	    render_complete_signal_value, //
+	    desired_present_time_ns,      //
+	    present_slop_ns);             //
 	r->acquired_buffer = -1;
 
 	if (ret == VK_ERROR_OUT_OF_DATE_KHR || ret == VK_SUBOPTIMAL_KHR) {
@@ -1771,13 +1814,15 @@ dispatch_graphics(struct comp_renderer *r,
 
 	// Device view information.
 	struct xrt_fov fovs[XRT_MAX_VIEWS];
-	struct xrt_pose world_poses[XRT_MAX_VIEWS];
+	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS];
 	struct xrt_pose eye_poses[XRT_MAX_VIEWS];
 	calc_pose_data(                //
 	    r,                         //
 	    fov_source,                //
 	    fovs,                      //
-	    world_poses,               //
+	    world_poses_scanout_begin, //
+	    world_poses_scanout_end,   //
 	    eye_poses,                 //
 	    effective_view_count);     //
 
@@ -1785,7 +1830,7 @@ dispatch_graphics(struct comp_renderer *r,
 	// open for HUD overlay blit (in mono path; stereo uses do_weaving).
 	chl_frame_state_gfx_set_views( //
 	    frame_state,               //
-	    world_poses,               //
+	    world_poses_scanout_begin, //
 	    eye_poses,                 //
 	    fovs,                      //
 	    layer_count);              //
@@ -1972,13 +2017,15 @@ dispatch_compute(struct comp_renderer *r,
 
 	// Device view information.
 	struct xrt_fov fovs[XRT_MAX_VIEWS];
-	struct xrt_pose world_poses[XRT_MAX_VIEWS];
+	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS];
 	struct xrt_pose eye_poses[XRT_MAX_VIEWS];
 	calc_pose_data(                //
 	    r,                         //
 	    fov_source,                //
 	    fovs,                      //
-	    world_poses,               //
+	    world_poses_scanout_begin, //
+	    world_poses_scanout_end,   //
 	    eye_poses,                 //
 	    effective_view_count);     //
 
@@ -2005,7 +2052,8 @@ dispatch_compute(struct comp_renderer *r,
 	    render,                          //
 	    layers,                          //
 	    layer_count,                     //
-	    world_poses,                     //
+	    world_poses_scanout_begin,       //
+	    world_poses_scanout_end,         //
 	    eye_poses,                       //
 	    fovs,                            //
 	    target_image,                    //

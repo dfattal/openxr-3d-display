@@ -183,51 +183,55 @@ m_relation_history_get(const struct m_relation_history *rh,
 	}
 }
 
-bool
-m_relation_history_estimate_motion(struct m_relation_history *rh,
-                                   const struct xrt_space_relation *in_relation,
-                                   int64_t timestamp,
-                                   struct xrt_space_relation *out_relation)
+static void
+m_relation_history_estimate_motion(struct xrt_space_relation const &old_relation,
+                                   struct xrt_space_relation const &new_relation,
+                                   float dt,
+                                   struct xrt_vec3 &out_linear_velocity,
+                                   struct xrt_vec3 &out_angular_velocity,
+                                   enum xrt_space_relation_flags &out_flags)
 {
+	assert(dt != 0.0f);
+
+	enum xrt_space_relation_flags shared_flags =
+	    (enum xrt_space_relation_flags)(old_relation.relation_flags & new_relation.relation_flags);
+
+	// If both relations have position data, estimate linear velocity
+	if (shared_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) {
+		out_flags = (enum xrt_space_relation_flags)(out_flags | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
+
+		out_linear_velocity = (new_relation.pose.position - old_relation.pose.position) / dt;
+	}
+
+	// If both relations have orientation data, estimate angular velocity
+	if (shared_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) {
+		out_flags = (enum xrt_space_relation_flags)(out_flags | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+
+		math_quat_finite_difference(&old_relation.pose.orientation, &new_relation.pose.orientation, dt,
+		                            &out_angular_velocity);
+	}
+}
+
+bool
+m_relation_history_push_with_motion_estimation(struct m_relation_history *rh,
+                                               struct xrt_space_relation const *in_relation,
+                                               int64_t timestamp)
+{
+	assert((in_relation->relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) == 0);
+	assert((in_relation->relation_flags & XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT) == 0);
+
+	struct xrt_space_relation final_relation = *in_relation;
 
 	int64_t last_time_ns;
 	struct xrt_space_relation last_relation;
-	if (!m_relation_history_get_latest(rh, &last_time_ns, &last_relation)) {
-		return false;
-	};
+	if (m_relation_history_get_latest(rh, &last_time_ns, &last_relation) && timestamp > last_time_ns) {
+		float dt = (float)time_ns_to_s(timestamp - last_time_ns);
 
-	float dt = (float)time_ns_to_s(timestamp - last_time_ns);
-
-	// Used to find out what values are valid in both the old relation and the new relation
-	enum xrt_space_relation_flags tmp_flags =
-	    (enum xrt_space_relation_flags)(last_relation.relation_flags & in_relation->relation_flags);
-
-	// Brevity
-	enum xrt_space_relation_flags &outf = out_relation->relation_flags;
-
-
-	if (tmp_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) {
-		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_POSITION_VALID_BIT);
-		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
-
-		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
-
-		out_relation->linear_velocity = (in_relation->pose.position - last_relation.pose.position) / dt;
+		m_relation_history_estimate_motion(last_relation, *in_relation, dt, final_relation.linear_velocity,
+		                                   final_relation.angular_velocity, final_relation.relation_flags);
 	}
 
-	if (tmp_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) {
-		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT);
-		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-
-		outf = (enum xrt_space_relation_flags)(outf | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
-
-		math_quat_finite_difference(&last_relation.pose.orientation, &in_relation->pose.orientation, dt,
-		                            &out_relation->angular_velocity);
-	}
-
-	out_relation->pose = in_relation->pose;
-
-	return true;
+	return m_relation_history_push(rh, &final_relation, timestamp);
 }
 
 bool

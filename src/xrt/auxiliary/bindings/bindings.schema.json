@@ -44,7 +44,9 @@
                 "slide_meta",
                 "proximity",
                 "proximity_fb",
-                "proximity_meta"
+                "proximity_meta",
+                "double_tap_logitech",
+                "docked_logitech"
             ]
         },
         "subActionPathName": {
@@ -68,7 +70,8 @@
                 "knuckles",
                 "oculus_touch",
                 "vive_controller",
-                "vive_pro"
+                "vive_pro",
+                "flipvr_controller_vc1b"
             ]
         },
         "monadoDeviceName": {

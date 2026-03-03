@@ -1,4 +1,5 @@
 // Copyright 2020-2023, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -16,10 +17,13 @@
 
 #include "util/u_threading.h"
 #include "util/u_logging.h"
+#include "util/u_system_helpers.h"
 
 #include "shared/ipc_utils.h"
 #include "shared/ipc_protocol.h"
 #include "shared/ipc_message_channel.h"
+
+#include "ipc_client_tracking_origin.h"
 
 #include <stdio.h>
 
@@ -69,6 +73,23 @@ struct ipc_connection
 #endif // XRT_OS_ANDROID
 };
 
+/*!
+ * Client side implementation of the system devices struct.
+ */
+struct ipc_client_system_devices
+{
+	//! @public Base
+	struct u_system_devices base;
+
+	//! Connection to service.
+	struct ipc_connection *ipc_c;
+
+	//! Tracking origin manager for on-demand fetching
+	struct ipc_client_tracking_origin_manager tracking_origin_manager;
+
+	struct xrt_reference feature_use[XRT_DEVICE_FEATURE_MAX_ENUM];
+};
+
 
 /*
  *
@@ -114,10 +135,14 @@ ipc_client_create_native_compositor(struct xrt_system_compositor *xsysc,
                                     struct xrt_compositor_native **out_xcn);
 
 struct xrt_device *
-ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *xtrack, uint32_t device_id);
+ipc_client_hmd_create(struct ipc_connection *ipc_c,
+                      struct ipc_client_tracking_origin_manager *ictom,
+                      uint32_t device_id);
 
 struct xrt_device *
-ipc_client_device_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *xtrack, uint32_t device_id);
+ipc_client_device_create(struct ipc_connection *ipc_c,
+                         struct ipc_client_tracking_origin_manager *ictom,
+                         uint32_t device_id);
 
 struct xrt_system *
 ipc_client_system_create(struct ipc_connection *ipc_c, struct xrt_system_compositor *xsysc);
@@ -125,8 +150,14 @@ ipc_client_system_create(struct ipc_connection *ipc_c, struct xrt_system_composi
 struct xrt_space_overseer *
 ipc_client_space_overseer_create(struct ipc_connection *ipc_c);
 
-struct xrt_system_devices *
-ipc_client_system_devices_create(struct ipc_connection *ipc_c);
+uint32_t
+ipc_client_space_get_id(struct xrt_space *space);
+
+xrt_result_t
+ipc_client_system_devices_create(struct ipc_connection *ipc_c, struct ipc_client_system_devices **out_icsd);
 
 struct xrt_session *
 ipc_client_session_create(struct ipc_connection *ipc_c);
+
+struct xrt_future *
+ipc_client_future_create(struct ipc_connection *ipc_c, uint32_t future_id);

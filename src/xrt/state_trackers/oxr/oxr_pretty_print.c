@@ -1,4 +1,5 @@
 // Copyright 2019-2022, Collabora, Ltd.
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -9,9 +10,9 @@
 
 #include "oxr_objects.h" // For now needs to come before oxr_logger.h
 #include "oxr_logger.h"
-#include "oxr_input_transform.h"
 #include "oxr_pretty_print.h"
-
+#include "actions/oxr_input_transform.h"
+#include "actions/oxr_input.h"
 
 /*
  *
@@ -87,6 +88,28 @@ oxr_pp_space_indented(struct oxr_sink_logger *slog, const struct oxr_space *spc,
 void
 oxr_pp_relation_indented(struct oxr_sink_logger *slog, const struct xrt_space_relation *relation, const char *name)
 {
+	oxr_slog(slog, "\n\t%s.flags =", name);
+	if (relation->relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) {
+		oxr_slog(slog, " POSITION_VALID");
+	}
+	if (relation->relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) {
+		oxr_slog(slog, " POSITION_TRACKED");
+	}
+
+	if (relation->relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) {
+		oxr_slog(slog, " ORIENTATION_VALID");
+	}
+	if (relation->relation_flags & XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT) {
+		oxr_slog(slog, " ORIENTATION_TRACKED");
+	}
+
+	if (relation->relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) {
+		oxr_slog(slog, " LINEAR_VELOCITY_VALID");
+	}
+	if (relation->relation_flags & XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT) {
+		oxr_slog(slog, " ANGULAR_VELOCITY_VALID");
+	}
+
 	print_pose_field(slog, &relation->pose, name, "pose");
 	if ((relation->relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0) {
 		print_vec3_field(slog, &relation->linear_velocity, name, "linear_velocity");

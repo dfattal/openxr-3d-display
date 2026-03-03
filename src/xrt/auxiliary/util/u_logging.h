@@ -1,4 +1,5 @@
 // Copyright 2020-2025, Collabora, Ltd.
+// Copyright 2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -68,6 +69,17 @@ typedef void (*u_log_sink_func_t)(const char *file,
                                   const char *format,
                                   va_list args,
                                   void *data);
+
+/*!
+ * Function typedef for filtering log messages.
+ *
+ * @param file   Source file name associated with a message.
+ * @param line   Source file line associated with a message.
+ * @param func   Function name associated with a message.
+ * @param level  Message level: used for formatting or forwarding to native log functions.
+ * @return true if message should be logged, false to filter it out.
+ */
+typedef bool (*u_log_filter_func_t)(const char *file, int line, const char *func, enum u_logging_level level);
 
 /*!
  * For places where you really want printf, prints a new-line.
@@ -270,6 +282,18 @@ enum u_logging_level
 u_log_get_global_level(void);
 
 /*!
+ * Sets the output file for the logging instead of stderr, this function is
+ * externally synchronized with ALL other logging functions. Which means do not
+ * call any other logging function from different threads during a call to this
+ * function. Also to avoid leaks call this function with NULL to close the
+ * internally managed FILE object.
+ *
+ * WANRING THIS FUNCTION IS EXTERNALLY SYNCHRONIZED WITH ALL OTHER FUNCTIONS.
+ */
+void
+u_log_set_output_file(const char *filename);
+
+/*!
  * @brief Main non-device-related log implementation function: do not call directly, use a macro that wraps it.
  *
  * This function always logs: level is used for printing or passed to native logging functions.
@@ -377,6 +401,14 @@ u_log_print_result(enum u_logging_level cond_level,
                    const char *calling_fn,
                    xrt_result_t xret,
                    const char *called_fn);
+
+/*!
+ * @brief Add function to set the filter
+ *
+ * @param filter Filter function to set
+ */
+void
+u_log_set_filter(u_log_filter_func_t filter);
 
 /*!
  * @}

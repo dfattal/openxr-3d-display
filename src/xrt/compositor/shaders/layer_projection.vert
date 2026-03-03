@@ -11,8 +11,10 @@
 layout (binding = 0, std140) uniform Config
 {
 	vec4 post_transform;
-	vec4 to_tanget;
+	vec4 to_tangent;
 	mat4 mvp;
+	vec4 color_scale;
+	vec4 color_bias;
 } ubo;
 
 layout (location = 0) out vec2 out_uv;
@@ -34,8 +36,8 @@ void main()
 	// We now get a unmodified UV position.
 	vec2 in_uv = pos[gl_VertexIndex % 4];
 
-	// Turn the UV into tanget angle space.
-	vec2 pos = fma(in_uv, ubo.to_tanget.zw, ubo.to_tanget.xy);
+	// Turn the UV into tangent angle space.
+	vec2 pos = fma(in_uv, ubo.to_tangent.zw, ubo.to_tangent.xy);
 
 	// Flip to OpenXR coordinate system.
 	pos.y = -pos.y;

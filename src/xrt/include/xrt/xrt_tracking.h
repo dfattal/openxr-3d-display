@@ -1,4 +1,5 @@
 // Copyright 2019, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -43,23 +44,26 @@ typedef int64_t timepoint_ns;
  */
 enum xrt_tracking_type
 {
-	// The device(s) are never tracked.
+	//! The device(s) are never tracked.
 	XRT_TRACKING_TYPE_NONE,
 
-	// The device(s) are tracked by RGB camera(s).
+	//! The device(s) are tracked by RGB camera(s).
 	XRT_TRACKING_TYPE_RGB,
 
-	// The device(s) are tracked by Ligthhouse
+	//! The device(s) are tracked by Ligthhouse
 	XRT_TRACKING_TYPE_LIGHTHOUSE,
 
-	// The device(s) are tracked by magnetic fields, eg. Razer Hydra.
+	//! The device(s) are tracked by magnetic fields, eg. Razer Hydra.
 	XRT_TRACKING_TYPE_MAGNETIC,
 
-	// The device(s) are tracked by external SLAM
+	//! The device(s) are tracked by external SLAM
 	XRT_TRACKING_TYPE_EXTERNAL_SLAM,
 
-	// The device(s) are tracked by other methods.
+	//! The device(s) are tracked by other methods.
 	XRT_TRACKING_TYPE_OTHER,
+
+	//! The device(s) are (re)attachable.
+	XRT_TRACKING_TYPE_ATTACHABLE,
 };
 
 /*!
@@ -308,28 +312,28 @@ struct xrt_tracked_slam
  */
 
 //! @public @memberof xrt_imu_sink
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_sink_push_imu(struct xrt_imu_sink *sink, struct xrt_imu_sample *sample)
 {
 	sink->push_imu(sink, sample);
 }
 
 //! @public @memberof xrt_pose_sink
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_sink_push_pose(struct xrt_pose_sink *sink, struct xrt_pose_sample *sample)
 {
 	sink->push_pose(sink, sample);
 }
 
 //! @public @memberof xrt_hand_masks_sink
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_sink_push_hand_masks(struct xrt_hand_masks_sink *sink, struct xrt_hand_masks_sample *hand_masks)
 {
 	sink->push_hand_masks(sink, hand_masks);
 }
 
 //! @public @memberof xrt_tracked_psmv
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_tracked_psmv_get_tracked_pose(struct xrt_tracked_psmv *psmv,
                                   enum xrt_input_name name,
                                   timepoint_ns when_ns,
@@ -339,14 +343,14 @@ xrt_tracked_psmv_get_tracked_pose(struct xrt_tracked_psmv *psmv,
 }
 
 //! @public @memberof xrt_tracked_psmv
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_tracked_psmv_push_imu(struct xrt_tracked_psmv *psmv, timepoint_ns timestamp_ns, struct xrt_tracking_sample *sample)
 {
 	psmv->push_imu(psmv, timestamp_ns, sample);
 }
 
 //! @public @memberof xrt_tracked_psmv
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_tracked_psmv_destroy(struct xrt_tracked_psmv **xtmv_ptr)
 {
 	struct xrt_tracked_psmv *xtmv = *xtmv_ptr;
@@ -359,7 +363,7 @@ xrt_tracked_psmv_destroy(struct xrt_tracked_psmv **xtmv_ptr)
 }
 
 //! @public @memberof xrt_tracked_psmv
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_tracked_psvr_get_tracked_pose(struct xrt_tracked_psvr *psvr,
                                   timepoint_ns when_ns,
                                   struct xrt_space_relation *out_relation)
@@ -368,14 +372,14 @@ xrt_tracked_psvr_get_tracked_pose(struct xrt_tracked_psvr *psvr,
 }
 
 //! @public @memberof xrt_tracked_psmv
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_tracked_psvr_push_imu(struct xrt_tracked_psvr *psvr, timepoint_ns timestamp_ns, struct xrt_tracking_sample *sample)
 {
 	psvr->push_imu(psvr, timestamp_ns, sample);
 }
 
 //! @public @memberof xrt_tracked_psmv
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_tracked_psvr_destroy(struct xrt_tracked_psvr **xtvr_ptr)
 {
 	struct xrt_tracked_psvr *xtvr = *xtvr_ptr;
@@ -389,7 +393,7 @@ xrt_tracked_psvr_destroy(struct xrt_tracked_psvr **xtvr_ptr)
 
 
 //! @public @memberof xrt_tracked_slam
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_tracked_slam_get_tracked_pose(struct xrt_tracked_slam *slam,
                                   timepoint_ns when_ns,
                                   struct xrt_space_relation *out_relation)

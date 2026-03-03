@@ -413,21 +413,21 @@ wmr_controller_og_create(struct wmr_controller_connection *conn,
 	struct wmr_controller_og *ctrl = U_DEVICE_ALLOCATE(struct wmr_controller_og, flags, 11, 1);
 	struct wmr_controller_base *wcb = (struct wmr_controller_base *)(ctrl);
 
-	if (!wmr_controller_base_init(wcb, conn, controller_type, log_level)) {
+	if (!wmr_controller_base_init(wcb, conn, controller_type, log_level, wmr_controller_og_destroy)) {
 		wmr_controller_og_destroy(&wcb->base);
 		return NULL;
 	}
 
 	wcb->handle_input_packet = handle_input_packet;
 
+	// Only set those we want to overwrite.
+	wcb->base.update_inputs = wmr_controller_og_update_inputs;
+
 	if (pid == ODYSSEY_CONTROLLER_PID) {
 		wcb->base.name = XRT_DEVICE_SAMSUNG_ODYSSEY_CONTROLLER;
 	} else {
 		wcb->base.name = XRT_DEVICE_WMR_CONTROLLER;
 	}
-	wcb->base.destroy = wmr_controller_og_destroy;
-	wcb->base.update_inputs = wmr_controller_og_update_inputs;
-	wcb->base.set_output = u_device_ni_set_output;
 
 	if (pid == ODYSSEY_CONTROLLER_PID) {
 		SET_ODYSSEY_INPUT(wcb, MENU_CLICK);

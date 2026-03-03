@@ -1,4 +1,5 @@
 // Copyright 2018-2022, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -17,7 +18,9 @@
 #include "oxr_logger.h"
 #include "oxr_api_verify.h"
 #include "oxr_chain.h"
-#include "oxr_subaction.h"
+
+#include "actions/oxr_subaction.h"
+#include "actions/oxr_input.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -424,10 +427,12 @@ oxr_verify_extensions(struct oxr_logger *log, const struct oxr_extension_status 
 	}
 #endif
 
+#ifdef OXR_HAVE_EXT_dpad_binding
 	if (extensions->EXT_dpad_binding && !extensions->KHR_binding_modification) {
 		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
 		                 "XR_EXT_dpad_binding requires XR_KHR_binding_modification");
 	}
+#endif
 
 	return XR_SUCCESS;
 }
@@ -444,14 +449,33 @@ oxr_verify_view_config_type(struct oxr_logger *log,
 		return XR_SUCCESS;
 	}
 
+	// Valid in OpenXR 1.1 and forward.
 	if (OXR_API_VERSION_AT_LEAST(inst, 1, 1)) {
 		if (view_conf == XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO_WITH_FOVEATED_INSET) {
-			return XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED;
+			return XR_SUCCESS;
 		}
 	}
 
 	return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "(%s == 0x%08x) invalid view configuration type",
 	                 view_conf_name, view_conf);
+}
+
+XrResult
+oxr_verify_view_config_type_supported(struct oxr_logger *log,
+                                      struct oxr_system *sys,
+                                      XrViewConfigurationType view_conf,
+                                      const char *view_conf_name)
+{
+	for (uint32_t i = 0; i < sys->view_config_count; i++) {
+		struct oxr_view_config_properties *props = &sys->view_configs[i];
+		if (props->view_config_type == view_conf) {
+			return XR_SUCCESS;
+		}
+	}
+
+	return oxr_error(log, XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED,
+	                 "(%s == 0x%08x) unsupported view configuration type by system %" PRIu64, view_conf_name,
+	                 view_conf, sys->systemId);
 }
 
 XrResult
@@ -568,21 +592,33 @@ XrResult
 oxr_verify_XrGraphicsBindingOpenGLXlibKHR(struct oxr_logger *log, const XrGraphicsBindingOpenGLXlibKHR *next)
 {
 	if (next->type != XR_TYPE_GRAPHICS_BINDING_OPENGL_XLIB_KHR) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "Graphics binding has invalid type");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, "Graphics binding has invalid type");
 	}
 
 	if (next->xDisplay == NULL) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "xDisplay is NULL");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingOpenGLXlibKHR::xDisplay is NULL");
 	}
 
 	if (next->glxContext == NULL) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "glxContext is NULL");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingOpenGLXlibKHR::glxContext is NULL");
 	}
 
 	if (next->glxDrawable == NULL) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "glxDrawable is NULL");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingOpenGLXlibKHR::glxDrawable is NULL");
 	}
 
+	if (next->glxFBConfig == NULL) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingOpenGLXlibKHR::glxFBConfig is NULL");
+	}
+
+	if (next->visualid == 0) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingOpenGLXlibKHR::visualid is 0");
+	}
 
 	return XR_SUCCESS;
 }
@@ -595,7 +631,7 @@ XrResult
 oxr_verify_XrGraphicsBindingOpenGLWin32KHR(struct oxr_logger *log, const XrGraphicsBindingOpenGLWin32KHR *next)
 {
 	if (next->type != XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "Graphics binding has invalid type");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, "Graphics binding has invalid type");
 	}
 
 	if (next->hDC == NULL) {
@@ -620,7 +656,32 @@ oxr_verify_XrGraphicsBindingVulkanKHR(struct oxr_logger *log, const XrGraphicsBi
 	/* XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR aliased to
 	 * XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR */
 	if (next->type != XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "Graphics binding has invalid type");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, "Graphics binding has invalid type");
+	}
+
+	if (next->instance == VK_NULL_HANDLE) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingVulkanKHR(2)::instance is invalid");
+	}
+
+	if (next->physicalDevice == VK_NULL_HANDLE) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingVulkanKHR(2)::physicalDevice is invalid");
+	}
+
+	if (next->device == VK_NULL_HANDLE) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingVulkanKHR(2)::device is invalid");
+	}
+
+	if (next->queueFamilyIndex == VK_QUEUE_FAMILY_IGNORED) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingVulkanKHR(2)::queueFamilyIndex is invalid");
+	}
+
+	if (next->queueIndex == UINT32_MAX) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingVulkanKHR(2)::queueIndex is invalid");
 	}
 
 	return XR_SUCCESS;
@@ -641,18 +702,20 @@ oxr_verify_XrGraphicsBindingEGLMNDX(struct oxr_logger *log, const XrGraphicsBind
 	}
 
 	if (next->getProcAddress == NULL) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
 		                 "XrGraphicsBindingEGLMNDX::getProcAddress cannot be NULL");
 	}
 
 	if (next->display == NULL) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "XrGraphicsBindingEGLMNDX::display cannot be NULL");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingEGLMNDX::display cannot be NULL");
 	}
 
 	// The next->config field can be NULL if EGL_KHR_no_config_context is supported by the display.
 
 	if (next->context == NULL) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "XrGraphicsBindingEGLMNDX::context cannot be NULL");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingEGLMNDX::context cannot be NULL");
 	}
 
 	return XR_SUCCESS;
@@ -665,7 +728,19 @@ XrResult
 oxr_verify_XrGraphicsBindingOpenGLESAndroidKHR(struct oxr_logger *log, const XrGraphicsBindingOpenGLESAndroidKHR *next)
 {
 	if (next->type != XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "Graphics binding has invalid type");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, "Graphics binding has invalid type");
+	}
+
+	if (next->display == NULL) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingOpenGLESAndroidKHR::display cannot be NULL");
+	}
+
+	// The next->config field can be NULL if EGL_KHR_no_config_context is supported by the display.
+
+	if (next->context == NULL) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingOpenGLESAndroidKHR::context cannot be NULL");
 	}
 
 	return XR_SUCCESS;
@@ -678,7 +753,7 @@ XrResult
 oxr_verify_XrGraphicsBindingD3D11KHR(struct oxr_logger *log, const XrGraphicsBindingD3D11KHR *next)
 {
 	if (next->type != XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "Graphics binding has invalid type");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, "Graphics binding has invalid type");
 	}
 	if (next->device == NULL) {
 		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
@@ -693,7 +768,7 @@ XrResult
 oxr_verify_XrGraphicsBindingD3D12KHR(struct oxr_logger *log, const XrGraphicsBindingD3D12KHR *next)
 {
 	if (next->type != XR_TYPE_GRAPHICS_BINDING_D3D12_KHR) {
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "Graphics binding has invalid type");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, "Graphics binding has invalid type");
 	}
 	if (next->device == NULL) {
 		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
@@ -701,7 +776,8 @@ oxr_verify_XrGraphicsBindingD3D12KHR(struct oxr_logger *log, const XrGraphicsBin
 	}
 	if (next->queue == NULL) {
 		// not specified in spec nor cts, so assume it's this
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE, "XrGraphicsBindingD3D12KHR::queue cannot be NULL");
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingD3D12KHR::queue cannot be NULL");
 	}
 	return XR_SUCCESS;
 }

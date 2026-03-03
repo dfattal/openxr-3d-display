@@ -526,7 +526,8 @@ bool
 wmr_controller_base_init(struct wmr_controller_base *wcb,
                          struct wmr_controller_connection *conn,
                          enum xrt_device_type controller_type,
-                         enum u_logging_level log_level)
+                         enum u_logging_level log_level,
+                         u_device_destroy_function_t destroy_fn)
 {
 	DRV_TRACE_MARKER();
 
@@ -544,7 +545,8 @@ wmr_controller_base_init(struct wmr_controller_base *wcb,
 		snprintf(wcb->base.serial, XRT_DEVICE_NAME_LEN, "Right Controller");
 	}
 
-	wcb->base.get_tracked_pose = wmr_controller_base_get_tracked_pose;
+	// Set all functions.
+	u_device_populate_function_pointers(&wcb->base, wmr_controller_base_get_tracked_pose, destroy_fn);
 
 	wcb->base.name = XRT_DEVICE_WMR_CONTROLLER;
 	wcb->base.device_type = controller_type;

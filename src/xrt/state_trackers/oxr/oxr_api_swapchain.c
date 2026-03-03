@@ -1,4 +1,5 @@
 // Copyright 2019-2020, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -95,6 +96,13 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 
 	// Short hand.
 	struct oxr_instance *inst = sess->sys->inst;
+	struct xrt_compositor_info *xc_info = &sess->compositor->info;
+	struct xrt_system_compositor_info *xsysc_info = &sess->sys->xsysc->info;
+
+
+	/*
+	 * Usage flags.
+	 */
 
 	XrSwapchainUsageFlags flags = 0;
 	flags |= XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
@@ -115,10 +123,15 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 		                 "(createInfo->usageFlags == 0x%04" PRIx64 ") contains invalid flags",
 		                 createInfo->usageFlags);
 	}
+
+
+	/*
+	 * Format.
+	 */
+
 	bool format_supported = false;
-	struct xrt_compositor *c = sess->compositor;
-	for (uint32_t i = 0; i < c->info.format_count; i++) {
-		if (c->info.formats[i] == createInfo->format) {
+	for (uint32_t i = 0; i < xc_info->format_count; i++) {
+		if (xc_info->formats[i] == createInfo->format) {
 			format_supported = true;
 			break;
 		}
@@ -128,6 +141,11 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 		return oxr_error(&log, XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED,
 		                 "(createInfo->format == 0x%04" PRIx64 ") is not supported", createInfo->format);
 	}
+
+
+	/*
+	 * Format list.
+	 */
 
 #ifdef OXR_HAVE_KHR_vulkan_swapchain_format_list
 	const XrVulkanSwapchainFormatListCreateInfoKHR *format_list = NULL;
@@ -149,6 +167,31 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 		}
 	}
 #endif
+
+
+	/*
+	 * Sample count.
+	 */
+
+	if (createInfo->sampleCount == 0) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "(createInfo->sampleCount == 0) must not be zero");
+	}
+
+	// TODO Find the max of the views[0].max.sample_count limits.
+	assert(xsysc_info->view_config_count > 0);
+	assert(xsysc_info->view_configs[0].view_count > 0);
+	uint32_t max_sample_count = xsysc_info->view_configs[0].views[0].max.sample_count;
+
+	if (createInfo->sampleCount > max_sample_count) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(createInfo->sampleCount == %u) must not be larger then max (%u)",
+		                 createInfo->sampleCount, max_sample_count);
+	}
+
+
+	/*
+	 * Validation done.
+	 */
 
 	ret = sess->create_swapchain(&log, sess, createInfo, &sc);
 	if (ret != XR_SUCCESS) {

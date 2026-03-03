@@ -1,4 +1,5 @@
 // Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -43,11 +44,11 @@ get_vk(struct sdl_compositor *c)
 	return &c->base.vk;
 }
 
-#define SC_TRACE(c, ...) U_LOG_IFL_T(c->base.vk.log_level, __VA_ARGS__);
-#define SC_DEBUG(c, ...) U_LOG_IFL_D(c->base.vk.log_level, __VA_ARGS__);
-#define SC_INFO(c, ...) U_LOG_IFL_I(c->base.vk.log_level, __VA_ARGS__);
-#define SC_WARN(c, ...) U_LOG_IFL_W(c->base.vk.log_level, __VA_ARGS__);
-#define SC_ERROR(c, ...) U_LOG_IFL_E(c->base.vk.log_level, __VA_ARGS__);
+#define SC_TRACE(c, ...) U_LOG_IFL_T(get_vk(c)->log_level, __VA_ARGS__);
+#define SC_DEBUG(c, ...) U_LOG_IFL_D(get_vk(c)->log_level, __VA_ARGS__);
+#define SC_INFO(c, ...) U_LOG_IFL_I(get_vk(c)->log_level, __VA_ARGS__);
+#define SC_WARN(c, ...) U_LOG_IFL_W(get_vk(c)->log_level, __VA_ARGS__);
+#define SC_ERROR(c, ...) U_LOG_IFL_E(get_vk(c)->log_level, __VA_ARGS__);
 
 
 /*
@@ -137,13 +138,15 @@ static const char *optional_device_extensions[] = {
 };
 
 static VkResult
-select_instances_extensions(struct sdl_compositor *c, struct u_string_list *required, struct u_string_list *optional)
+select_instances_extensions(struct sdl_compositor *c,
+                            struct u_extension_list_builder *required_builder,
+                            struct u_extension_list_builder *optional_builder)
 {
 #ifdef VK_KHR_portability_enumeration
 	u_string_list_append(optional, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
 #ifdef VK_EXT_display_surface_counter
-	u_string_list_append(optional, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME);
+	u_extension_list_builder_append(optional_builder, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME);
 #endif
 
 	return VK_SUCCESS;
@@ -156,25 +159,32 @@ compositor_init_vulkan(struct sdl_compositor *c, enum u_logging_level log_level)
 	VkResult ret;
 
 	// every backend needs at least the common extensions
-	struct u_string_list *required_instance_ext_list =
-	    u_string_list_create_from_array(instance_extensions_common, ARRAY_SIZE(instance_extensions_common));
+	struct u_extension_list_builder *required_instance_ext_builder = u_extension_list_builder_create_from_array( //
+	    instance_extensions_common,                                                                              //
+	    ARRAY_SIZE(instance_extensions_common));                                                                 //
 
-	struct u_string_list *optional_instance_ext_list = u_string_list_create();
+	struct u_extension_list_builder *optional_instance_ext_builder = u_extension_list_builder_create();
 
-	ret = select_instances_extensions(c, required_instance_ext_list, optional_instance_ext_list);
+	ret = select_instances_extensions(c, required_instance_ext_builder, optional_instance_ext_builder);
 	if (ret != VK_SUCCESS) {
 		VK_ERROR(vk, "select_instances_extensions: %s\n\tFailed to select instance extensions.",
 		         vk_result_string(ret));
-		u_string_list_destroy(&required_instance_ext_list);
-		u_string_list_destroy(&optional_instance_ext_list);
+		u_extension_list_builder_destroy(&required_instance_ext_builder);
+		u_extension_list_builder_destroy(&optional_instance_ext_builder);
 		return ret;
 	}
 
-	struct u_string_list *required_device_extension_list =
-	    u_string_list_create_from_array(required_device_extensions, ARRAY_SIZE(required_device_extensions));
+	// Consumes the builder and returns a new list.
+	struct u_extension_list *required_instance_ext_list =
+	    u_extension_list_builder_build(&required_instance_ext_builder);
+	struct u_extension_list *optional_instance_ext_list =
+	    u_extension_list_builder_build(&optional_instance_ext_builder);
 
-	struct u_string_list *optional_device_extension_list =
-	    u_string_list_create_from_array(optional_device_extensions, ARRAY_SIZE(optional_device_extensions));
+	struct u_extension_list *required_device_extension_list =
+	    u_extension_list_create_from_array(required_device_extensions, ARRAY_SIZE(required_device_extensions));
+
+	struct u_extension_list *optional_device_extension_list =
+	    u_extension_list_create_from_array(optional_device_extensions, ARRAY_SIZE(optional_device_extensions));
 
 	struct comp_vulkan_arguments vk_args = {
 	    .get_instance_proc_address = vkGetInstanceProcAddr,
@@ -193,10 +203,10 @@ compositor_init_vulkan(struct sdl_compositor *c, enum u_logging_level log_level)
 	struct comp_vulkan_results vk_res = {0};
 	bool bundle_ret = comp_vulkan_init_bundle(vk, &vk_args, &vk_res);
 
-	u_string_list_destroy(&required_instance_ext_list);
-	u_string_list_destroy(&optional_instance_ext_list);
-	u_string_list_destroy(&required_device_extension_list);
-	u_string_list_destroy(&optional_device_extension_list);
+	u_extension_list_destroy(&required_instance_ext_list);
+	u_extension_list_destroy(&optional_instance_ext_list);
+	u_extension_list_destroy(&required_device_extension_list);
+	u_extension_list_destroy(&optional_device_extension_list);
 
 	if (!bundle_ret) {
 		return false;
@@ -253,7 +263,7 @@ compositor_init_info(struct sdl_compositor *c)
 	struct comp_vulkan_formats formats = {0};
 	comp_vulkan_formats_check(vk, &formats);
 	comp_vulkan_formats_copy_to_info(&formats, info);
-	comp_vulkan_formats_log(c->base.vk.log_level, &formats);
+	comp_vulkan_formats_log(vk->log_level, &formats);
 
 	return true;
 }
@@ -263,7 +273,13 @@ compositor_init_sys_info(struct sdl_compositor *c, struct sdl_program *sp, struc
 {
 	struct xrt_system_compositor_info *sys_info = &c->sys_info;
 
-	// Required by OpenXR spec.
+	/*
+	 * Required by OpenXR spec (minimum 16).
+	 *
+	 * NOTE: When using Vulkan compositor components (c/render, c/util),
+	 * call render_max_layers_capable() to clamp this value based on
+	 * actual device limits.
+	 */
 	sys_info->max_layers = XRT_MAX_LAYERS;
 
 	// UUIDs and LUID already set in vk init.
@@ -284,19 +300,22 @@ compositor_init_sys_info(struct sdl_compositor *c, struct sdl_program *sp, struc
 	}
 
 	// clang-format off
-	sys_info->views[0].recommended.width_pixels  = w;
-	sys_info->views[0].recommended.height_pixels = h;
-	sys_info->views[0].recommended.sample_count  = 1;
-	sys_info->views[0].max.width_pixels          = max;
-	sys_info->views[0].max.height_pixels         = max;
-	sys_info->views[0].max.sample_count          = 1;
+	sys_info->view_configs[0].view_type = XRT_VIEW_TYPE_STEREO;
+	sys_info->view_configs[0].view_count = 2;
 
-	sys_info->views[1].recommended.width_pixels  = min; // Second view is minimum
-	sys_info->views[1].recommended.height_pixels = min; // Second view is minimum
-	sys_info->views[1].recommended.sample_count  = 1;
-	sys_info->views[1].max.width_pixels          = max;
-	sys_info->views[1].max.height_pixels         = max;
-	sys_info->views[1].max.sample_count          = 1;
+	sys_info->view_configs[0].views[0].recommended.width_pixels  = w;
+	sys_info->view_configs[0].views[0].recommended.height_pixels = h;
+	sys_info->view_configs[0].views[0].recommended.sample_count  = 1;
+	sys_info->view_configs[0].views[0].max.width_pixels          = max;
+	sys_info->view_configs[0].views[0].max.height_pixels         = max;
+	sys_info->view_configs[0].views[0].max.sample_count          = 1;
+
+	sys_info->view_configs[0].views[1].recommended.width_pixels  = min; // Second view is minimum
+	sys_info->view_configs[0].views[1].recommended.height_pixels = min; // Second view is minimum
+	sys_info->view_configs[0].views[1].recommended.sample_count  = 1;
+	sys_info->view_configs[0].views[1].max.width_pixels          = max;
+	sys_info->view_configs[0].views[1].max.height_pixels         = max;
+	sys_info->view_configs[0].views[1].max.sample_count          = 1;
 	// clang-format on
 
 	// Copy the list directly.

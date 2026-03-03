@@ -1,4 +1,4 @@
-# Copyright 2019-2021, Collabora, Ltd.
+# Copyright 2019-2025, Collabora, Ltd.
 #
 # SPDX-License-Identifier: BSL-1.0
 
@@ -152,6 +152,13 @@ if(XRT_BUILD_DRIVER_XREAL_AIR)
 	list(APPEND ENABLED_HEADSET_DRIVERS xreal_air)
 endif()
 
+if(XRT_BUILD_DRIVER_UVC)
+	add_library(drv_uvc STATIC uvc/uvc_interface.h uvc/uvc_driver.c uvc/uvc_internal.h)
+	target_link_libraries(drv_uvc PRIVATE xrt-interfaces aux_os aux_util ${LIBUSB1_LIBRARIES})
+	target_include_directories(drv_uvc PUBLIC ${LIBUSB1_INCLUDE_DIRS})
+	list(APPEND ENABLED_DRIVERS uvc)
+endif()
+
 if(XRT_BUILD_DRIVER_ULV2)
 	add_library(drv_ulv2 STATIC ultraleap_v2/ulv2_driver.cpp ultraleap_v2/ulv2_interface.h)
 	target_link_libraries(drv_ulv2 PRIVATE xrt-interfaces aux_util aux_math LeapV2::LeapV2)
@@ -226,6 +233,30 @@ if(XRT_BUILD_DRIVER_PSVR)
 	list(APPEND ENABLED_HEADSET_DRIVERS psvr)
 endif()
 
+if(XRT_BUILD_DRIVER_PSVR2)
+	add_library(
+		drv_psvr2 STATIC
+		psvr2/psvr2.c
+		psvr2/psvr2.h
+		psvr2/psvr2_interface.h
+		psvr2/psvr2_prober.c
+		psvr2/psvr2_protocol.h
+		psvr2/psvr2_distortion.c
+		psvr2/psvr2_eye.c
+		)
+	target_link_libraries(
+		drv_psvr2
+		PRIVATE
+			xrt-interfaces
+			aux_os
+			aux_util
+			aux_tracking
+			${LIBUSB1_LIBRARIES}
+		)
+	target_include_directories(drv_psvr2 PRIVATE ${LIBUSB1_INCLUDE_DIRS})
+	list(APPEND ENABLED_HEADSET_DRIVERS psvr2)
+endif()
+
 if(XRT_BUILD_DRIVER_REALSENSE)
 	add_library(
 		drv_realsense STATIC
@@ -271,7 +302,21 @@ if(XRT_BUILD_DRIVER_ROKID)
 endif()
 
 if(XRT_BUILD_DRIVER_RIFT)
-	add_library(drv_rift STATIC rift/rift_hmd.c rift/rift_distortion.c rift/rift_prober.c)
+	add_library(
+		drv_rift STATIC
+		rift/rift_interface.h
+		rift/rift_internal.h
+		rift/rift_bindings.c
+		rift/rift_bindings.h
+		rift/rift_driver.c
+		rift/rift_distortion.c
+		rift/rift_prober.c
+		rift/rift_usb.c
+		rift/rift_usb.h
+		rift/rift_radio.c
+		rift/rift_radio.h
+		rift/rift_touch_calibration.cpp
+		)
 	target_include_directories(drv_rift SYSTEM PRIVATE)
 	target_link_libraries(
 		drv_rift
@@ -284,6 +329,36 @@ if(XRT_BUILD_DRIVER_RIFT)
 			xrt-external-tinyceres
 		)
 	list(APPEND ENABLED_HEADSET_DRIVERS rift)
+endif()
+
+if(XRT_BUILD_DRIVER_RIFT_SENSOR)
+	add_library(
+		drv_rift_sensor STATIC
+		rift_sensor/ar0134.c
+		rift_sensor/ar0134.h
+		rift_sensor/esp570.c
+		rift_sensor/esp570.h
+		rift_sensor/esp770u.c
+		rift_sensor/esp770u.h
+		rift_sensor/mt9v034.c
+		rift_sensor/mt9v034.h
+		rift_sensor/rift_sensor_interface.h
+		rift_sensor/rift_sensor_internal.h
+		rift_sensor/rift_sensor.c
+		)
+	target_include_directories(drv_rift_sensor SYSTEM PRIVATE)
+	target_link_libraries(
+		drv_rift_sensor
+		PRIVATE
+			xrt-interfaces
+			aux_util
+			aux_util_sink
+			aux_math
+			drv_includes
+			drv_uvc
+			${LIBUSB1_LIBRARIES}
+		)
+	target_include_directories(drv_rift_sensor PUBLIC ${LIBUSB1_INCLUDE_DIRS})
 endif()
 
 if(XRT_BUILD_DRIVER_RIFT_S)
@@ -388,7 +463,14 @@ if(XRT_BUILD_DRIVER_HANDTRACKING)
 endif()
 
 if(XRT_BUILD_DRIVER_SURVIVE)
-	add_library(drv_survive STATIC survive/survive_driver.c survive/survive_interface.h)
+	add_library(
+		drv_survive STATIC
+		survive/survive_driver.c
+		survive/survive_interface.h
+		survive/survive_internal.h
+		survive/survive_vp2.c
+		survive/survive_vp2.h
+		)
 	target_link_libraries(
 		drv_survive
 		PRIVATE
@@ -397,6 +479,8 @@ if(XRT_BUILD_DRIVER_SURVIVE)
 			aux_util
 			aux_math
 			aux_vive
+			drv_includes
+			drv_vp2
 			PkgConfig::SURVIVE
 		)
 	list(APPEND ENABLED_HEADSET_DRIVERS survive)
@@ -416,6 +500,7 @@ if(XRT_BUILD_DRIVER_ANDROID)
 			aux_android
 			${ANDROID_LIBRARY}
 		)
+	target_link_libraries(drv_android PRIVATE xrt-external-cardboard)
 	list(APPEND ENABLED_DRIVERS android)
 endif()
 
@@ -512,9 +597,17 @@ if(XRT_BUILD_DRIVER_SIMULAVR)
 	list(APPEND ENABLED_HEADSET_DRIVERS svr)
 endif()
 
-if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE)
-	add_library(drv_vp2 STATIC vp2/vp2_hid.c vp2/vp2_hid.h)
-	target_link_libraries(drv_vp2 PRIVATE aux_os aux_util aux_math aux_vive)
+if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE OR XRT_BUILD_DRIVER_SURVIVE)
+	add_library(drv_vp2 STATIC vp2/vp2_hid.c vp2/vp2_hid.h vp2/vp2_config.cpp vp2/vp2_config.h)
+	target_link_libraries(
+		drv_vp2
+		PRIVATE
+			aux_os
+			aux_util
+			aux_math
+			aux_vive
+			xrt-external-cjson
+		)
 endif()
 
 if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE)
@@ -717,6 +810,23 @@ if(APPLE)
 endif()
 
 list(APPEND ENABLED_DRIVERS drv_sim_display)
+
+if(XRT_BUILD_DRIVER_SOLARXR)
+	add_library(
+		drv_solarxr STATIC
+		solarxr/feeder.c
+		solarxr/feeder.h
+		solarxr/protocol.c
+		solarxr/protocol.h
+		solarxr/solarxr_device.c
+		solarxr/solarxr_interface.h
+		solarxr/solarxr_ipc_message.h
+		solarxr/solarxr_ipc_socket.c
+		solarxr/solarxr_ipc_socket.h
+		)
+	target_link_libraries(drv_solarxr PRIVATE xrt-interfaces aux_util ipc_shared)
+	list(APPEND ENABLED_DRIVERS solarxr)
+endif()
 
 if(XRT_BUILD_SAMPLES)
 	# We build the sample driver to make sure it stays valid,

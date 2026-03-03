@@ -1,5 +1,5 @@
-// Copyright 2019-2021, Collabora, Ltd.
-// Copyright 2024-2025, NVIDIA CORPORATION.
+// Copyright 2019-2026, Collabora, Ltd.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -368,7 +368,7 @@ do_update_timings_google_display_timing(struct comp_target_swapchain *cts)
 static void
 do_update_timings_vblank_thread(struct comp_target_swapchain *cts)
 {
-	if (!cts->vblank.has_started) {
+	if (!cts->vblank.thread_running) {
 		return;
 	}
 
@@ -453,10 +453,7 @@ vblank_event_func(struct comp_target *ct, int64_t *out_timestamp_ns)
 
 	VkFence vblank_event_fence = VK_NULL_HANDLE;
 	ret = vk->vkRegisterDisplayEventEXT(vk->device, cts->display, &event_info, NULL, &vblank_event_fence);
-	if (ret == VK_ERROR_OUT_OF_HOST_MEMORY) {
-		COMP_ERROR(ct->c, "vkRegisterDisplayEventEXT: %s (started too early?)", vk_result_string(ret));
-		return false;
-	} else if (ret != VK_SUCCESS) {
+	if (ret != VK_SUCCESS) {
 		COMP_ERROR(ct->c, "vkRegisterDisplayEventEXT: %s", vk_result_string(ret));
 		return false;
 	}
@@ -539,6 +536,11 @@ run_vblank_event_thread(void *ptr)
 		// We should wait for a vblank event.
 		cts->vblank.should_wait = false;
 
+		if (!cts->vblank.event_active) {
+			cts->vblank.event_active = true;
+			continue;
+		}
+
 		// Unlock while waiting.
 		os_thread_helper_unlock(&cts->vblank.event_thread);
 
@@ -575,7 +577,7 @@ create_vblank_event_thread(struct comp_target *ct)
 	COMP_DEBUG(ct->c, "Started vblank (first pixel out) event thread.");
 
 	// Set this here.
-	cts->vblank.has_started = true;
+	cts->vblank.thread_running = true;
 
 	return true;
 }
@@ -634,12 +636,16 @@ target_init_semaphores(struct comp_target_swapchain *cts)
  */
 
 static void
-comp_target_swapchain_create_images(struct comp_target *ct, const struct comp_target_create_images_info *create_info)
+comp_target_swapchain_create_images(struct comp_target *ct,
+                                    const struct comp_target_create_images_info *create_info,
+                                    struct vk_bundle_queue *present_queue)
 {
 	struct comp_target_swapchain *cts = (struct comp_target_swapchain *)ct;
 	struct vk_bundle *vk = get_vk(cts);
 	VkBool32 supported;
 	VkResult ret;
+
+	assert(present_queue != NULL);
 
 	int64_t now_ns = os_monotonic_get_ns();
 	// Some platforms really don't like the pacing_compositor code.
@@ -680,16 +686,16 @@ comp_target_swapchain_create_images(struct comp_target *ct, const struct comp_ta
 	}
 
 	// Can we create swapchains from the surface on this device and queue.
-	ret = vk->vkGetPhysicalDeviceSurfaceSupportKHR( //
-	    vk->physical_device,                        // physicalDevice
-	    vk->main_queue->family_index,               // queueFamilyIndex
-	    cts->surface.handle,                        // surface
-	    &supported);                                // pSupported
-	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "vkGetPhysicalDeviceSurfaceSupportKHR: %s", vk_result_string(ret));
-		goto error_print_and_free;
-	} else if (!supported) {
-		COMP_ERROR(ct->c, "vkGetPhysicalDeviceSurfaceSupportKHR: Surface not supported!");
+	ret = comp_target_queue_supports_present(ct, present_queue, &supported);
+	VK_CHK_WITH_GOTO(ret, "comp_target_queue_supports_present", error_print_and_free);
+	if (!supported) {
+		/*
+		 * As the code is written now this won't actually fail in this
+		 * function, we can happily create the images. But when trying
+		 * to present the images it will fail.
+		 */
+		COMP_ERROR(ct->c, "Queue family (index: %u) does not support presentation ops for %s surfaces.",
+		           present_queue->family_index, ct->name);
 		goto error_print_and_free;
 	}
 
@@ -818,12 +824,12 @@ comp_target_swapchain_create_images(struct comp_target *ct, const struct comp_ta
 	}
 
 	if (vk->has_EXT_display_control && cts->display != VK_NULL_HANDLE) {
-		if (cts->vblank.has_started) {
+		if (cts->vblank.thread_running) {
 			// Already running.
 		} else if (create_vblank_event_thread(ct)) {
 			COMP_INFO(ct->c, "Started vblank event thread!");
 		} else {
-			COMP_ERROR(ct->c, "Failed to register vblank event");
+			COMP_ERROR(ct->c, "Failed to start vblank event thread!");
 		}
 	} else if (!cts->has_logged_vblank_info) {
 		cts->has_logged_vblank_info = true;
@@ -869,7 +875,7 @@ comp_target_swapchain_acquire_next_image(struct comp_target *ct, uint32_t *out_i
 
 static VkResult
 comp_target_swapchain_present(struct comp_target *ct,
-                              VkQueue queue,
+                              struct vk_bundle_queue *present_queue,
                               uint32_t index,
                               uint64_t timeline_semaphore_value,
                               int64_t desired_present_time_ns,
@@ -878,6 +884,7 @@ comp_target_swapchain_present(struct comp_target *ct,
 	struct comp_target_swapchain *cts = (struct comp_target_swapchain *)ct;
 	struct vk_bundle *vk = get_vk(cts);
 
+	assert(present_queue != NULL);
 	assert(cts->current_frame_id > 0);
 	assert(cts->current_frame_id <= UINT32_MAX);
 
@@ -928,12 +935,12 @@ comp_target_swapchain_present(struct comp_target *ct,
 
 
 	// Need to take the queue lock for present.
-	vk_queue_lock(vk->main_queue);
-	VkResult ret = vk->vkQueuePresentKHR(queue, &present_info);
-	vk_queue_unlock(vk->main_queue);
+	vk_queue_lock(present_queue);
+	VkResult ret = vk->vkQueuePresentKHR(present_queue->queue, &present_info);
+	vk_queue_unlock(present_queue);
 
 #ifdef VK_EXT_display_control
-	if (cts->vblank.has_started) {
+	if (cts->vblank.thread_running) {
 		os_thread_helper_lock(&cts->vblank.event_thread);
 		if (!cts->vblank.should_wait) {
 			cts->vblank.should_wait = true;
@@ -1098,10 +1105,10 @@ comp_target_swapchain_cleanup(struct comp_target_swapchain *cts)
 	struct vk_bundle *vk = get_vk(cts);
 
 	// Thread if it has been started must be stopped first.
-	if (cts->vblank.has_started) {
+	if (cts->vblank.thread_running) {
 		// Destroy also stops the thread.
 		os_thread_helper_destroy(&cts->vblank.event_thread);
-		cts->vblank.has_started = false;
+		cts->vblank.thread_running = false;
 	}
 
 	destroy_image_views(cts);
@@ -1127,6 +1134,26 @@ comp_target_swapchain_cleanup(struct comp_target_swapchain *cts)
 	u_pc_destroy(&cts->upc);
 }
 
+static VkResult
+comp_target_swapchain_queue_supports_present(struct comp_target *ct,
+                                             struct vk_bundle_queue *queue,
+                                             VkBool32 *out_supported)
+{
+	COMP_TRACE_MARKER();
+
+	struct comp_target_swapchain *cts = (struct comp_target_swapchain *)ct;
+	struct vk_bundle *vk = get_vk(cts);
+
+	VkResult ret = vk->vkGetPhysicalDeviceSurfaceSupportKHR( //
+	    vk->physical_device,                                 // physicalDevice
+	    queue->family_index,                                 // queueFamilyIndex
+	    cts->surface.handle,                                 // surface
+	    out_supported);                                      // pSupported
+
+	VK_CHK_AND_RET(ret, "vkGetPhysicalDeviceSurfaceSupportKHR");
+	return VK_SUCCESS;
+}
+
 void
 comp_target_swapchain_init_and_set_fnptrs(struct comp_target_swapchain *cts,
                                           enum comp_target_display_timing_usage timing_usage)
@@ -1142,6 +1169,7 @@ comp_target_swapchain_init_and_set_fnptrs(struct comp_target_swapchain *cts,
 	cts->base.mark_timing_point = comp_target_swapchain_mark_timing_point;
 	cts->base.update_timings = comp_target_swapchain_update_timings;
 	cts->base.info_gpu = comp_target_swapchain_info_gpu;
+	cts->base.queue_supports_present = comp_target_swapchain_queue_supports_present;
 
 	os_thread_helper_init(&cts->vblank.event_thread);
 }

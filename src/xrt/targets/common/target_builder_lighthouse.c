@@ -555,7 +555,7 @@ lighthouse_open_system_impl(struct xrt_builder *xb,
 	}
 	case DRIVER_SURVIVE: {
 #ifdef XRT_BUILD_DRIVER_SURVIVE
-		xsysd->xdev_count += survive_get_devices(&xsysd->xdevs[xsysd->xdev_count], &lhs->hmd_config);
+		xsysd->xdev_count += survive_get_devices(xp, &xsysd->xdevs[xsysd->xdev_count], &lhs->hmd_config);
 #endif
 		break;
 	}
@@ -620,11 +620,14 @@ lighthouse_open_system_impl(struct xrt_builder *xb,
 
 	// Device indices.
 	int head_idx = -1;
+	int eyes_idx = -1;
+	int face_idx = -1;
 	int left_idx = -1;
 	int right_idx = -1;
 	int gamepad_idx = -1;
 
-	u_device_assign_xdev_roles(xsysd->xdevs, xsysd->xdev_count, &head_idx, &left_idx, &right_idx, &gamepad_idx);
+	u_device_assign_xdev_roles(xsysd->xdevs, xsysd->xdev_count, &head_idx, &eyes_idx, &face_idx, &left_idx,
+	                           &right_idx, &gamepad_idx);
 
 	if (head_idx < 0) {
 		LH_ERROR("Unable to find HMD");
@@ -637,6 +640,8 @@ lighthouse_open_system_impl(struct xrt_builder *xb,
 	struct xrt_device *left = NULL, *right = NULL;
 	struct xrt_device *unobstructed_left_ht = NULL, *unobstructed_right_ht = NULL;
 	struct xrt_device *conforming_left_ht = NULL, *conforming_right_ht = NULL;
+	struct xrt_device *face = (face_idx >= 0) ? xsysd->xdevs[face_idx] : NULL;
+	struct xrt_device *eyes = (eyes_idx >= 0) ? xsysd->xdevs[eyes_idx] : NULL;
 
 	// Always have a head.
 	head = xsysd->xdevs[head_idx];
@@ -742,6 +747,8 @@ end_valve_index:
 
 	// Assign to role(s).
 	ubrh->head = head;
+	ubrh->face = face;
+	ubrh->eyes = eyes;
 	ubrh->left = left;
 	ubrh->right = right;
 	ubrh->hand_tracking.unobstructed.left = unobstructed_left_ht;

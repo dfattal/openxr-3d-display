@@ -1,5 +1,5 @@
 # Copyright 2018-2024, Collabora, Ltd.
-# Copyright 2024-2025, NVIDIA CORPORATION.
+# Copyright 2024-2026, NVIDIA CORPORATION.
 #
 # SPDX-License-Identifier: BSL-1.0
 
@@ -7,6 +7,7 @@ set(tests
     tests_cxx_wrappers
     tests_deque
     tests_generic_callbacks
+    tests_glue_device
     tests_history_buf
     tests_id_ringbuffer
     tests_json
@@ -27,7 +28,7 @@ if(XRT_HAVE_D3D11)
 	list(APPEND tests tests_aux_d3d_d3d11 tests_comp_client_d3d11)
 endif()
 if(XRT_HAVE_D3D12)
-	list(APPEND tests tests_comp_client_d3d12)
+	list(APPEND tests tests_aux_d3d_d3d12 tests_comp_client_d3d12)
 endif()
 if(XRT_HAVE_VULKAN)
 	list(APPEND tests tests_comp_client_vulkan tests_uv_to_tangent)
@@ -52,11 +53,13 @@ foreach(testname ${tests})
 	target_link_libraries(${testname} PRIVATE xrt-external-catch2)
 	target_link_libraries(${testname} PRIVATE aux_util)
 	add_test(NAME ${testname} COMMAND ${testname} --success --allow-running-no-tests)
+	set_target_properties(${testname} PROPERTIES FOLDER monado_tests)
 endforeach()
 
 # For tests that require more than just aux_util, link those other libs down here.
 
 target_link_libraries(tests_cxx_wrappers PRIVATE xrt-interfaces)
+target_link_libraries(tests_glue_device PRIVATE xrt-interfaces aux_glue)
 target_link_libraries(tests_history_buf PRIVATE aux_math)
 target_link_libraries(tests_lowpass_float PRIVATE aux_math)
 target_link_libraries(tests_lowpass_integer PRIVATE aux_math)
@@ -86,6 +89,7 @@ if(XRT_HAVE_D3D11)
 endif()
 
 if(XRT_HAVE_D3D12)
+	target_link_libraries(tests_aux_d3d_d3d12 PRIVATE aux_d3d)
 	target_link_libraries(tests_comp_client_d3d12 PRIVATE comp_client comp_mock)
 endif()
 
@@ -110,4 +114,8 @@ endif()
 
 if(XRT_HAVE_VULKAN AND XRT_HAVE_D3D11)
 	target_link_libraries(tests_aux_d3d_d3d11 PRIVATE comp_util aux_vk)
+endif()
+
+if(XRT_HAVE_VULKAN AND XRT_HAVE_D3D12)
+	target_link_libraries(tests_aux_d3d_d3d12 PRIVATE comp_util aux_vk)
 endif()

@@ -1,4 +1,5 @@
 // Copyright 2018-2024, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -22,6 +23,7 @@ extern "C" {
 struct oxr_action_set;
 struct oxr_extension_status;
 struct oxr_instance;
+struct oxr_system;
 struct oxr_logger;
 struct oxr_subaction_paths;
 
@@ -88,10 +90,17 @@ struct oxr_subaction_paths;
 	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_face_tracker2_fb, FTRACKER, name, new_thing->sess->sys->inst)
 #define OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(log, thing, new_thing, name) \
 	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_body_tracker_fb, BTRACKER, name, new_thing->sess->sys->inst)
+#define OXR_VERIFY_BODY_TRACKER_BD_AND_INIT_LOG(log, thing, new_thing, name) \
+	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_body_tracker_bd, BTRACKER_BD, name, new_thing->sess->sys->inst)
 #define OXR_VERIFY_XDEVLIST_AND_INIT_LOG(log, thing, new_thing, name) \
 	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_xdev_list, XDEVLIST, name, new_thing->sess->sys->inst)
 #define OXR_VERIFY_PLANE_DETECTOR_AND_INIT_LOG(log, thing, new_thing, name) \
 	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_plane_detector_ext, PLANEDET, name, new_thing->sess->sys->inst)
+#define OXR_VERIFY_FUTURE_AND_INIT_LOG(log, thing, new_thing, name) \
+	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_future_ext, FUTURE, name, new_thing->inst); \
+	OXR_VERIFY_FUTURE_VALID(log, new_thing)
+#define OXR_VERIFY_FACE_TRACKER_ANDROID_AND_INIT_LOG(log, thing, new_thing, name) \
+	OXR_VERIFY_AND_SET_AND_INIT(log, thing, new_thing, oxr_face_tracker_android, FTRACKER, name, new_thing->sess->sys->inst)
 // clang-format on
 
 #define OXR_VERIFY_INSTANCE_NOT_NULL(log, arg, new_arg) OXR_VERIFY_SET(log, arg, new_arg, oxr_instance, INSTANCE);
@@ -103,6 +112,7 @@ struct oxr_subaction_paths;
 #define OXR_VERIFY_ACTIONSET_NOT_NULL(log, arg, new_arg) OXR_VERIFY_SET(log, arg, new_arg, oxr_action_set, ACTIONSET);
 #define OXR_VERIFY_XDEVLIST_NOT_NULL(log, arg, new_arg) OXR_VERIFY_SET(log, arg, new_arg, oxr_xdev_list, XDEVLIST);
 
+#define OXR_VERIFY_FUTURE_NOT_NULL(log, arg, new_arg) OXR_VERIFY_SET(log, arg, new_arg, oxr_future_ext, FUTURE);
 /*!
  * Checks if a required extension is enabled.
  *
@@ -196,6 +206,25 @@ struct oxr_subaction_paths;
 		}                                                                                                      \
 	} while (false)
 
+#define OXR_VERIFY_TWO_CALL_ARRAY(log, inputCapacity, countOutput, array)                                              \
+	do {                                                                                                           \
+		OXR_VERIFY_ARG_NOT_NULL(log, countOutput);                                                             \
+		if (inputCapacity > 0) {                                                                               \
+			OXR_VERIFY_ARG_NOT_NULL(log, array);                                                           \
+		}                                                                                                      \
+	} while (false)
+
+#define OXR_VERIFY_TWO_CALL_ARRAY_AND_TYPE(log, inputCapacity, countOutput, array, type_enum)                          \
+	do {                                                                                                           \
+		OXR_VERIFY_ARG_NOT_NULL(log, countOutput);                                                             \
+		if (inputCapacity > 0) {                                                                               \
+			OXR_VERIFY_ARG_NOT_NULL(log, array);                                                           \
+			for (uint32_t i = 0; i < inputCapacity; ++i) {                                                 \
+				OXR_VERIFY_ARG_ARRAY_ELEMENT_TYPE(log, array, i, type_enum);                           \
+			}                                                                                              \
+		}                                                                                                      \
+	} while (false)
+
 #define OXR_VERIFY_SUBACTION_PATHS(log, count, paths)                                                                  \
 	do {                                                                                                           \
 		if (count > 0 && paths == NULL) {                                                                      \
@@ -231,9 +260,28 @@ struct oxr_subaction_paths;
 		}                                                                                                      \
 	} while (false)
 
+#define OXR_VERIFY_FORM_FACTOR(log, form_factor)                                                                       \
+	do {                                                                                                           \
+		XrFormFactor _form_factor = (form_factor);                                                             \
+		if (_form_factor != XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY &&                                             \
+		    _form_factor != XR_FORM_FACTOR_HANDHELD_DISPLAY) {                                                 \
+                                                                                                                       \
+			return oxr_error(log, XR_ERROR_FORM_FACTOR_UNSUPPORTED,                                        \
+			                 "(" #form_factor " == 0x%08x) is not a valid form factor", _form_factor);     \
+		}                                                                                                      \
+	} while (false)
+
 #define OXR_VERIFY_VIEW_CONFIG_TYPE(log, inst, view_conf)                                                              \
 	do {                                                                                                           \
 		XrResult verify_ret = oxr_verify_view_config_type(log, inst, view_conf, #view_conf);                   \
+		if (verify_ret != XR_SUCCESS) {                                                                        \
+			return verify_ret;                                                                             \
+		}                                                                                                      \
+	} while (false)
+
+#define OXR_VERIFY_VIEW_CONFIG_TYPE_SUPPORTED(log, sys, view_conf)                                                     \
+	do {                                                                                                           \
+		XrResult verify_ret = oxr_verify_view_config_type_supported(log, sys, view_conf, #view_conf);          \
 		if (verify_ret != XR_SUCCESS) {                                                                        \
 			return verify_ret;                                                                             \
 		}                                                                                                      \
@@ -304,17 +352,6 @@ struct oxr_subaction_paths;
 		}                                                                                                      \
 	} while (false)
 
-#define OXR_VERIFY_FORM_FACTOR(log, form_factor)                                                                       \
-	do {                                                                                                           \
-		XrFormFactor _form_factor = (form_factor);                                                             \
-		if (_form_factor != XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY &&                                             \
-		    _form_factor != XR_FORM_FACTOR_HANDHELD_DISPLAY) {                                                 \
-                                                                                                                       \
-			return oxr_error(log, XR_ERROR_FORM_FACTOR_UNSUPPORTED,                                        \
-			                 "(" #form_factor " == 0x%08x) is not a valid form factor", _form_factor);     \
-		}                                                                                                      \
-	} while (false)
-
 #define OXR_VERIFY_HAND_TRACKING_DATA_SOURCE_OR_NULL(log, data_source_info)                                            \
 	do {                                                                                                           \
 		if (data_source_info != NULL) {                                                                        \
@@ -322,6 +359,21 @@ struct oxr_subaction_paths;
 			if (verify_ret != XR_SUCCESS) {                                                                \
 				return verify_ret;                                                                     \
 			}                                                                                              \
+		}                                                                                                      \
+	} while (false)
+
+#define OXR_VERIFY_FUTURE_VALID(LOG, OXR_FT)                                                                           \
+	do {                                                                                                           \
+		if (OXR_FT->xft == NULL) {                                                                             \
+			return oxr_error(LOG, XR_ERROR_FUTURE_INVALID_EXT, "future is not valid");                     \
+		}                                                                                                      \
+	} while (false)
+
+#define OXR_VERIFY_ARG_TIME_NOT_ZERO(log, xr_time)                                                                     \
+	do {                                                                                                           \
+		if (xr_time <= (XrTime)0) {                                                                            \
+			return oxr_error(log, XR_ERROR_TIME_INVALID, "(time == %" PRIi64 ") is not a valid time.",     \
+			                 xr_time);                                                                     \
 		}                                                                                                      \
 	} while (false)
 
@@ -397,6 +449,12 @@ oxr_verify_view_config_type(struct oxr_logger *log,
                             struct oxr_instance *inst,
                             XrViewConfigurationType view_conf,
                             const char *view_conf_name);
+
+XrResult
+oxr_verify_view_config_type_supported(struct oxr_logger *log,
+                                      struct oxr_system *sys,
+                                      XrViewConfigurationType view_conf,
+                                      const char *view_conf_name);
 
 XrResult
 oxr_verify_XrSessionCreateInfo(struct oxr_logger * /*log*/,

@@ -1,4 +1,5 @@
 // Copyright 2021-2023, Collabora Ltd.
+// Copyright 2025, NVIDIA CORPORATION.
 // Author: Jakob Bornecrantz <jakob@collabora.com>
 // Author: Christoph Haag <christoph.haag@collabora.com>
 // SPDX-License-Identifier: BSL-1.0
@@ -7,15 +8,32 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "srgb.inc.glsl"
+#include "layer_defines.inc.glsl"
 
-//! @todo should this be a spcialization const?
-#define XRT_LAYER_PROJECTION 0
-#define XRT_LAYER_PROJECTION_DEPTH 1
-#define XRT_LAYER_QUAD 2
-#define XRT_LAYER_CUBE 3
-#define XRT_LAYER_CYLINDER 4
-#define XRT_LAYER_EQUIRECT1 5
-#define XRT_LAYER_EQUIRECT2 6
+#define LAYER ubo.layers[layer]
+
+#define RENDER_MAX_LAYERS (128) // has to match RENDER_MAX_LAYERS in render_interface.h
+
+struct layer_data
+{
+	uint layer_type;
+	uint unpremultiplied_alpha;
+
+	// This struct is used in an array, gets padded to vec4.
+	uint _padding0;
+	uint _padding1;
+};
+
+struct image_info
+{
+	uint color_image_index;
+	uint depth_image_index;
+
+	// This struct is used in an array, gets padded to vec4.
+	uint _padding0;
+	uint _padding1;
+};
+
 
 const float PI = acos(-1);
 
@@ -24,55 +42,61 @@ layout(constant_id = 1) const bool do_timewarp = false;
 layout(constant_id = 2) const bool do_color_correction = true;
 
 //! This is always set by the render_resource pipeline creation code to the actual limit.
-layout(constant_id = 3) const int RENDER_MAX_LAYERS = 128;
-layout(constant_id = 4) const int SAMPLER_ARRAY_SIZE = 16;
+layout(constant_id = 3) const int SAMPLER_ARRAY_SIZE = 16;
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 // layer 0 color, [optional: layer 0 depth], layer 1, ...
 layout(set = 0, binding = 0) uniform sampler2D source[SAMPLER_ARRAY_SIZE];
 layout(set = 0, binding = 2) uniform writeonly restrict image2D target;
+struct Layer {
+	vec4 post_transform;
+
+	// Per-layer data.
+	layer_data layer_data;
+
+	// which image/sampler(s) correspond to each layer
+	image_info image_info;
+
+	// shared between cylinder and equirect2
+	mat4 mv_inverse;
+
+
+	// for cylinder layer
+	vec4 cylinder_data;
+
+
+	// for equirect2 layer
+	vec4 eq2_data;
+
+
+	// for projection layers
+
+	// timewarp matrices
+	mat4 transform;
+
+
+	// for quad layers
+
+	// all quad transforms and coordinates are in view space
+	vec4 quad_position;
+	vec4 quad_normal;
+	mat4 inverse_quad_transform;
+
+	// quad extent in world scale
+	vec2 quad_extent;
+
+	// color scale and bias for all layers
+	vec4 color_scale;
+	vec4 color_bias;
+};
 layout(set = 0, binding = 3, std140) uniform restrict Config
 {
 	ivec4 view;
 	ivec4 layer_count;
 
 	vec4 pre_transform;
-	vec4 post_transform[RENDER_MAX_LAYERS];
-
-	// corresponds to enum xrt_layer_type
-	uvec2 layer_type_and_unpremultiplied[RENDER_MAX_LAYERS];
-
-	// which image/sampler(s) correspond to each layer
-	ivec2 images_samplers[RENDER_MAX_LAYERS];
-
-	// shared between cylinder and equirect2
-	mat4 mv_inverse[RENDER_MAX_LAYERS];
-
-
-	// for cylinder layer
-	vec4 cylinder_data[RENDER_MAX_LAYERS];
-
-
-	// for equirect2 layer
-	vec4 eq2_data[RENDER_MAX_LAYERS];
-
-
-	// for projection layers
-
-	// timewarp matrices
-	mat4 transform[RENDER_MAX_LAYERS];
-
-
-	// for quad layers
-
-	// all quad transforms and coordinates are in view space
-	vec4 quad_position[RENDER_MAX_LAYERS];
-	vec4 quad_normal[RENDER_MAX_LAYERS];
-	mat4 inverse_quad_transform[RENDER_MAX_LAYERS];
-
-	// quad extent in world scale
-	vec2 quad_extent[RENDER_MAX_LAYERS];
+	Layer layers[RENDER_MAX_LAYERS];
 } ubo;
 
 
@@ -98,7 +122,7 @@ vec2 transform_uv_subimage(vec2 uv, uint layer)
 	vec2 values = uv;
 
 	// To deal with OpenGL flip and sub image view.
-	values.xy = fma(values.xy, ubo.post_transform[layer].zw, ubo.post_transform[layer].xy);
+	values.xy = fma(values.xy, LAYER.post_transform.zw, LAYER.post_transform.xy);
 
 	// Ready to be used.
 	return values.xy;
@@ -113,14 +137,14 @@ vec2 transform_uv_timewarp(vec2 uv, uint layer)
 	values.y = -values.y; // Flip to OpenXR coordinate system.
 
 	// Timewarp.
-	values = ubo.transform[layer] * values;
+	values = LAYER.transform * values;
 	values.xy = values.xy * (1.0 / max(values.w, 0.00001));
 
 	// From [-1, 1] to [0, 1]
 	values.xy = values.xy * 0.5 + 0.5;
 
 	// To deal with OpenGL flip and sub image view.
-	values.xy = fma(values.xy, ubo.post_transform[layer].zw, ubo.post_transform[layer].xy);
+	values.xy = fma(values.xy, LAYER.post_transform.zw, LAYER.post_transform.xy);
 
 	// Done.
 	return values.xy;
@@ -138,18 +162,18 @@ vec2 transform_uv(vec2 uv, uint layer)
 vec4 do_cylinder(vec2 view_uv, uint layer)
 {
 	// Get ray position in model space.
-	const vec3 ray_origin = (ubo.mv_inverse[layer] * vec4(0, 0, 0, 1)).xyz;
+	const vec3 ray_origin = (LAYER.mv_inverse * vec4(0, 0, 0, 1)).xyz;
 
 	// [0 .. 1] to tangent lengths (at unit Z).
 	const vec2 uv = fma(view_uv, ubo.pre_transform.zw, ubo.pre_transform.xy);
 
 	// With Z at the unit plane and flip y for OpenXR coordinate system,
 	// transform the ray into model space.
-	const vec3 ray_dir = normalize((ubo.mv_inverse[layer] * vec4(uv.x, -uv.y, -1, 0)).xyz);
+	const vec3 ray_dir = normalize((LAYER.mv_inverse * vec4(uv.x, -uv.y, -1, 0)).xyz);
 
-	const float radius = ubo.cylinder_data[layer].x;
-	const float central_angle = ubo.cylinder_data[layer].y;
-	const float aspect_ratio = ubo.cylinder_data[layer].z;
+	const float radius = LAYER.cylinder_data.x;
+	const float central_angle = LAYER.cylinder_data.y;
+	const float aspect_ratio = LAYER.cylinder_data.z;
 
 	vec3 dir_from_cyl;
 	// CPU code will set +INFINITY to zero.
@@ -209,7 +233,7 @@ vec4 do_cylinder(vec2 view_uv, uint layer)
 	const float chan = central_angle / (PI * 2.f);
 
 	// height in radii, radius only matters for determining intersection
-	const float height = central_angle * aspect_ratio;
+	const float height = central_angle / aspect_ratio;
 
 	// Normalize [0, 2π] to [0, 1]
 	const float uhan = 0.5 + chan / 2.f;
@@ -224,9 +248,9 @@ vec4 do_cylinder(vec2 view_uv, uint layer)
 		vec2 extent = vec2(uhan - lhan, ymax - ymin);
 		vec2 sample_point = (vec2(lon, y) - offset) / extent;
 
-		vec2 uv_sub = fma(sample_point, ubo.post_transform[layer].zw, ubo.post_transform[layer].xy);
+		vec2 uv_sub = fma(sample_point, LAYER.post_transform.zw, LAYER.post_transform.xy);
 
-		uint index = ubo.images_samplers[layer].x;
+		uint index = LAYER.image_info.color_image_index;
 #ifdef DEBUG
 		out_color += texture(source[index], uv_sub) / 2.f;
 #else
@@ -243,19 +267,19 @@ vec4 do_cylinder(vec2 view_uv, uint layer)
 vec4 do_equirect2(vec2 view_uv, uint layer)
 {
 	// Get ray position in model space.
-	const vec3 ray_origin = (ubo.mv_inverse[layer] * vec4(0, 0, 0, 1)).xyz;
+	const vec3 ray_origin = (LAYER.mv_inverse * vec4(0, 0, 0, 1)).xyz;
 
 	// [0 .. 1] to tangent lengths (at unit Z).
 	const vec2 uv = fma(view_uv, ubo.pre_transform.zw, ubo.pre_transform.xy);
 
 	// With Z at the unit plane and flip y for OpenXR coordinate system,
 	// transform the ray into model space.
-	const vec3 ray_dir = normalize((ubo.mv_inverse[layer] * vec4(uv.x, -uv.y, -1, 0)).xyz);
+	const vec3 ray_dir = normalize((LAYER.mv_inverse * vec4(uv.x, -uv.y, -1, 0)).xyz);
 
-	const float radius = ubo.eq2_data[layer].x;
-	const float central_horizontal_angle = ubo.eq2_data[layer].y;
-	const float upper_vertical_angle = ubo.eq2_data[layer].z;
-	const float lower_vertical_angle = ubo.eq2_data[layer].w;
+	const float radius = LAYER.eq2_data.x;
+	const float central_horizontal_angle = LAYER.eq2_data.y;
+	const float upper_vertical_angle = LAYER.eq2_data.z;
+	const float lower_vertical_angle = LAYER.eq2_data.w;
 
 	vec3 dir_from_sph;
 	// CPU code will set +INFINITY to zero.
@@ -323,9 +347,9 @@ vec4 do_equirect2(vec2 view_uv, uint layer)
 		vec2 ll_extent = vec2(uhan - lhan, uvan - lvan);
 		vec2 sample_point = (vec2(lon, lat) - ll_offset) / ll_extent;
 
-		vec2 uv_sub = fma(sample_point, ubo.post_transform[layer].zw, ubo.post_transform[layer].xy);
+		vec2 uv_sub = fma(sample_point, LAYER.post_transform.zw, LAYER.post_transform.xy);
 
-		uint index = ubo.images_samplers[layer].x;
+		uint index = LAYER.image_info.color_image_index;
 #ifdef DEBUG
 		out_color += texture(source[index], uv_sub) / 2.0;
 #else
@@ -341,7 +365,7 @@ vec4 do_equirect2(vec2 view_uv, uint layer)
 
 vec4 do_projection(vec2 view_uv, uint layer)
 {
-	uint source_image_index = ubo.images_samplers[layer].x;
+	uint source_image_index = LAYER.image_info.color_image_index;
 
 	// Do any transformation needed.
 	vec2 uv = transform_uv(view_uv, layer);
@@ -373,13 +397,13 @@ vec3 get_direction(vec2 uv)
 
 vec4 do_quad(vec2 view_uv, uint layer)
 {
-	uint source_image_index = ubo.images_samplers[layer].x;
+	uint source_image_index = LAYER.image_info.color_image_index;
 
 	// center point of the plane in view space.
-	vec3 quad_position = ubo.quad_position[layer].xyz;
+	vec3 quad_position = LAYER.quad_position.xyz;
 
 	// normal vector of the plane.
-	vec3 normal = ubo.quad_normal[layer].xyz;
+	vec3 normal = LAYER.quad_normal.xyz;
 	normal = normalize(normal);
 
 	// coordinate system is the view space, therefore the camera/eye position is in the origin.
@@ -421,20 +445,20 @@ vec4 do_quad(vec2 view_uv, uint layer)
 		vec3 intersection = camera + intersection_dist * direction;
 
 		// ps for "plane space"
-		vec2 intersection_ps = (ubo.inverse_quad_transform[layer] * vec4(intersection.xyz, 1.0)).xy;
+		vec2 intersection_ps = (LAYER.inverse_quad_transform * vec4(intersection.xyz, 1.0)).xy;
 
 		bool in_plane_bounds =
-			intersection_ps.x >= - ubo.quad_extent[layer].x / 2. && //
-			intersection_ps.x <= ubo.quad_extent[layer].x / 2. && //
-			intersection_ps.y >= - ubo.quad_extent[layer].y / 2. && //
-			intersection_ps.y <= ubo.quad_extent[layer].y / 2.;
+			intersection_ps.x >= - LAYER.quad_extent.x / 2. && //
+			intersection_ps.x <= LAYER.quad_extent.x / 2. && //
+			intersection_ps.y >= - LAYER.quad_extent.y / 2. && //
+			intersection_ps.y <= LAYER.quad_extent.y / 2.;
 
 		if (in_plane_bounds) {
 			// intersection_ps is in [-quad_extent .. quad_extent]. Transform to  [0 .. quad_extent], then scale to [ 0 .. 1 ] for sampling
-			vec2 plane_uv = (intersection_ps.xy + ubo.quad_extent[layer] / 2.) / ubo.quad_extent[layer];
+			vec2 plane_uv = (intersection_ps.xy + LAYER.quad_extent / 2.) / LAYER.quad_extent;
 
 			// sample on the desired subimage, not the entire texture
-			plane_uv = fma(plane_uv, ubo.post_transform[layer].zw, ubo.post_transform[layer].xy);
+			plane_uv = fma(plane_uv, LAYER.post_transform.zw, LAYER.post_transform.xy);
 
 			colour = texture(source[source_image_index], plane_uv);
 		} else {
@@ -459,24 +483,26 @@ vec4 do_layers(vec2 view_uv)
 	for (uint layer = 0; layer < layer_count; layer++) {
 		vec4 rgba = vec4(0, 0, 0, 0);
 
-		switch (ubo.layer_type_and_unpremultiplied[layer].x) {
-		case XRT_LAYER_CYLINDER:
+		switch (LAYER.layer_data.layer_type) {
+		case LAYER_COMP_TYPE_QUAD:
+			rgba = do_quad(view_uv, layer);
+			break;
+		case LAYER_COMP_TYPE_CYLINDER:
 			rgba = do_cylinder(view_uv, layer);
 			break;
-		case XRT_LAYER_EQUIRECT2:
+		case LAYER_COMP_TYPE_EQUIRECT2:
 			rgba = do_equirect2(view_uv, layer);
 			break;
-		case XRT_LAYER_PROJECTION:
-		case XRT_LAYER_PROJECTION_DEPTH:
+		case LAYER_COMP_TYPE_PROJECTION:
 			rgba = do_projection(view_uv, layer);
-			break;
-		case XRT_LAYER_QUAD:
-			rgba = do_quad(view_uv, layer);
 			break;
 		default: break;
 		}
 
-		if (ubo.layer_type_and_unpremultiplied[layer].y != 0) {
+		// Apply color scale and bias
+		rgba = clamp(rgba * LAYER.color_scale + LAYER.color_bias, 0.0, 1.0);
+
+		if (LAYER.layer_data.unpremultiplied_alpha != 0) {
 			// Unpremultipled blend factor of src.a.
 			accum.rgb = mix(accum.rgb, rgba.rgb, rgba.a);
 		} else {

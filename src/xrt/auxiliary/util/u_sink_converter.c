@@ -1073,7 +1073,7 @@ convert_half_scale(struct xrt_frame_sink *xs, struct xrt_frame *xf)
 			sum += xf->data[(((y * 2) + 1) * xf->stride) + (x * 2)];
 			sum += xf->data[(((y * 2) + 1) * xf->stride) + (x * 2) + 1];
 
-			converted->data[(y * converted->stride) + x] = sum / 4;
+			converted->data[(y * converted->stride) + x] = (uint8_t)(sum / 4);
 		}
 	}
 

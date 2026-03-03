@@ -1,5 +1,5 @@
 // Copyright 2018-2024, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -37,9 +37,12 @@ DEBUG_GET_ONCE_BOOL_OPTION(negotiate, "OXR_DEBUG_NEGOTIATE", false)
 
 
 #ifdef XRT_OS_WINDOWS
+//! @todo Remove these once clang format is updated
+//! @todo Check if this is actually needed? This was added one month before the libopenxr.def file?
+// clang-format off
 __declspec(dllexport) XRAPI_ATTR XrResult XRAPI_CALL
-    xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo *loaderInfo,
-                                      XrNegotiateRuntimeRequest *runtimeRequest);
+xrNegotiateLoaderRuntimeInterface(const XrNegotiateLoaderInfo *loaderInfo, XrNegotiateRuntimeRequest *runtimeRequest);
+// clang-format on
 #endif
 
 XRAPI_ATTR XrResult XRAPI_CALL
@@ -394,6 +397,12 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrLocateBodyJointsFB, FB_body_tracking);
 #endif
 
+#ifdef OXR_HAVE_BD_body_tracking
+	ENTRY_IF_EXT(xrCreateBodyTrackerBD, BD_body_tracking);
+	ENTRY_IF_EXT(xrDestroyBodyTrackerBD, BD_body_tracking);
+	ENTRY_IF_EXT(xrLocateBodyJointsBD, BD_body_tracking);
+#endif
+
 #ifdef OXR_HAVE_FB_face_tracking2
 	ENTRY_IF_EXT(xrCreateFaceTracker2FB, FB_face_tracking2);
 	ENTRY_IF_EXT(xrDestroyFaceTracker2FB, FB_face_tracking2);
@@ -412,6 +421,18 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 #ifdef OXR_HAVE_META_body_tracking_calibration
 	ENTRY_IF_EXT(xrResetBodyTrackingCalibrationMETA, META_body_tracking_calibration);
 	ENTRY_IF_EXT(xrSuggestBodyTrackingCalibrationOverrideMETA, META_body_tracking_calibration);
+#endif // OXR_HAVE_META_body_tracking_calibration
+
+#ifdef OXR_HAVE_EXT_future
+	ENTRY_IF_EXT(xrPollFutureEXT, EXT_future);
+	ENTRY_IF_EXT(xrCancelFutureEXT, EXT_future);
+#endif // OXR_HAVE_EXT_future
+
+#ifdef OXR_HAVE_ANDROID_face_tracking
+	ENTRY_IF_EXT(xrCreateFaceTrackerANDROID, ANDROID_face_tracking);
+	ENTRY_IF_EXT(xrDestroyFaceTrackerANDROID, ANDROID_face_tracking);
+	ENTRY_IF_EXT(xrGetFaceCalibrationStateANDROID, ANDROID_face_tracking);
+	ENTRY_IF_EXT(xrGetFaceStateANDROID, ANDROID_face_tracking);
 #endif
 
 #ifdef OXR_HAVE_KHR_extended_struct_name_lengths

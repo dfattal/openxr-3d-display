@@ -1,7 +1,7 @@
 {
     "name": "monado",
     "homepage": "https://monado.freedesktop.org",
-    "version-string": "25.0",
+    "version-string": "25.1",
     "dependencies": [
         {
             "name": "wil",
@@ -50,5 +50,5 @@
             ]
         }
     },
-    "builtin-baseline": "c82f74667287d3dc386bce81e44964370c91a289"
+    "builtin-baseline": "4334d8b4c8916018600212ab4dd4bbdc343065d1"
 }

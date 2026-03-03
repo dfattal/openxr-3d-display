@@ -200,6 +200,113 @@ ensure_native_fence_is_loaded(EGLDisplay dpy, PFNEGLGETPROCADDRESSPROC get_gl_pr
 #endif
 }
 
+struct egl_attrs
+{
+	EGLint api;
+	EGLint major;
+	EGLint minor;
+	bool compat_profile; // Only for desktop OpenGL
+	bool robust;
+	bool lose_context_on_reset;
+	EGLint image_prio;
+};
+
+static int
+make_egl_attrs(EGLint *attrs, size_t len, const struct egl_attrs *params)
+{
+	if (params->api != EGL_OPENGL_API && params->api != EGL_OPENGL_ES_API) {
+		U_LOG_E("make_egl_attrs: only OpenGL and OpenGL ES is supported");
+		return -1;
+	}
+
+	size_t attrc = 0;
+
+#define ADD_ATTR(v)                                                                                                    \
+	do {                                                                                                           \
+		if (!len) {                                                                                            \
+			return -1;                                                                                     \
+		}                                                                                                      \
+		len--;                                                                                                 \
+		attrs[attrc++] = (v);                                                                                  \
+	} while (0)
+
+#define ADD_PAIR(k, v)                                                                                                 \
+	do {                                                                                                           \
+		ADD_ATTR(k);                                                                                           \
+		ADD_ATTR(v);                                                                                           \
+	} while (0)
+
+	EGLint khr_flags = 0;
+
+	ADD_PAIR(EGL_CONTEXT_MAJOR_VERSION, params->major);
+	ADD_PAIR(EGL_CONTEXT_MINOR_VERSION, params->minor);
+
+	if (params->api == EGL_OPENGL_API && params->compat_profile) {
+		ADD_PAIR(EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT);
+	}
+
+	if (params->robust) {
+		if (params->api == EGL_OPENGL_ES_API) {
+			ADD_PAIR(EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT, EGL_TRUE);
+		} else if (params->api == EGL_OPENGL_API) {
+			khr_flags |= EGL_CONTEXT_OPENGL_ROBUST_ACCESS_BIT_KHR;
+		}
+	}
+
+	if (params->lose_context_on_reset) {
+		if (params->api == EGL_OPENGL_ES_API) {
+			ADD_PAIR(EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT, EGL_LOSE_CONTEXT_ON_RESET_EXT);
+		} else if (params->api == EGL_OPENGL_API) {
+			ADD_PAIR(EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_KHR, EGL_LOSE_CONTEXT_ON_RESET_KHR);
+		}
+	}
+
+	if (params->api == EGL_OPENGL_API && khr_flags) {
+		ADD_PAIR(EGL_CONTEXT_FLAGS_KHR, khr_flags);
+	}
+
+	if (params->image_prio && params->image_prio != EGL_CONTEXT_PRIORITY_MEDIUM_IMG) {
+		ADD_PAIR(EGL_CONTEXT_PRIORITY_LEVEL_IMG, params->image_prio);
+	}
+
+	ADD_ATTR(EGL_NONE);
+
+#undef ADD_ATTR
+#undef ADD_PAIR
+
+	return attrc;
+}
+
+static void
+print_egl_attrs(EGLint *attrs)
+{
+	int i = 0;
+	EGL_DEBUG("egl attributes:");
+	do {
+		EGL_DEBUG("> attr: %d 0x%x", i, attrs[i]);
+	} while (attrs[i++] != EGL_NONE);
+}
+
+static EGLint
+get_reset_strategy(EGLint api_type, EGLDisplay display, EGLContext app_context)
+{
+	EGLint ext;
+	switch (api_type) {
+	case EGL_OPENGL_ES_API: ext = EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT; break;
+	case EGL_OPENGL_API:
+		/* This is non-standard, but supported in mesa */
+		ext = EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_KHR;
+		break;
+	default: return 0;
+	}
+
+	EGLint strategy = 0;
+	if (!eglQueryContext(display, app_context, ext, &strategy)) {
+		return 0;
+	}
+	return strategy;
+}
+
 static xrt_result_t
 create_context(
     EGLDisplay display, EGLConfig config, EGLContext app_context, EGLint api_type, EGLContext *out_our_context)
@@ -207,32 +314,95 @@ create_context(
 	EGLint old_api_type = eglQueryAPI();
 
 	eglBindAPI(api_type);
+	const char *api_string =
+	    api_type == EGL_OPENGL_API ? "opengl" : (api_type == EGL_OPENGL_ES_API ? "opengl_es" : "");
 
-	size_t attrc = 0;
-	EGLint attrs[9] = {0};
-
-	attrs[attrc++] = EGL_CONTEXT_MAJOR_VERSION;
-	attrs[attrc++] = 3;
 	// Panfrost only supports 3.1
-	attrs[attrc++] = EGL_CONTEXT_MINOR_VERSION;
-	attrs[attrc++] = 1;
+	const EGLint major = 3;
+	const EGLint minor = 1;
 
-	if (api_type == EGL_OPENGL_API) {
-		attrs[attrc++] = EGL_CONTEXT_OPENGL_PROFILE_MASK;
-		attrs[attrc++] = EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT;
+	EGLint image_prio;
+	if (!eglQueryContext(display, app_context, EGL_CONTEXT_PRIORITY_LEVEL_IMG, &image_prio)) {
+		image_prio = 0;
 	}
 
-	EGLint strategy;
-	if (api_type == EGL_OPENGL_ES_API &&
-	    eglQueryContext(display, app_context, EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT, &strategy)) {
-		attrs[attrc++] = EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT;
-		attrs[attrc++] = strategy;
+	const size_t attrs_len = 21;
+	EGLint attrs[4][attrs_len];
+	int attrc = 0;
+
+	struct egl_attrs build_attrs = {
+	    .api = api_type,
+	    .major = major,
+	    .minor = minor,
+	    .compat_profile = true,
+	    .image_prio = image_prio,
+	};
+
+	/* If the source context was created with robust and/or lose notify enabled,
+	 * then we need to enable it too or we get EGL_BAD_MATCH.
+	 *
+	 * Problems with those options:
+	 * 1. Different way to activate them for OpenGL and OpenGL ES.
+	 * 2. No standard way to know if the options were used to create the original context.
+	 *    (with an exception for OpenGL ES)
+	 *
+	 * So, the most reliable way to create our shared context is to try all those combinations...
+	 */
+	EGLint reset_strategy = get_reset_strategy(api_type, display, app_context);
+	EGL_DEBUG("Current reset strategy (%s): 0x%x", api_string, reset_strategy);
+	if (reset_strategy) {
+		build_attrs.lose_context_on_reset = (reset_strategy == EGL_LOSE_CONTEXT_ON_RESET);
+
+		if (make_egl_attrs(attrs[attrc++], attrs_len, &build_attrs) == -1) {
+			return XRT_ERROR_OPENGL;
+		}
+
+		build_attrs.robust = true;
+		if (make_egl_attrs(attrs[attrc++], attrs_len, &build_attrs) == -1) {
+			return XRT_ERROR_OPENGL;
+		}
+	} else {
+		/* Try context with all optional features disabled first */
+		if (make_egl_attrs(attrs[attrc++], attrs_len, &build_attrs) == -1) {
+			return XRT_ERROR_OPENGL;
+		}
+
+		/* Then, try all combination of robustness and lose notification */
+		build_attrs.robust = false;
+		build_attrs.lose_context_on_reset = true;
+		if (make_egl_attrs(attrs[attrc++], attrs_len, &build_attrs) == -1) {
+			return XRT_ERROR_OPENGL;
+		}
+
+		build_attrs.robust = true;
+		build_attrs.lose_context_on_reset = false;
+		if (make_egl_attrs(attrs[attrc++], attrs_len, &build_attrs) == -1) {
+			return XRT_ERROR_OPENGL;
+		}
+
+		build_attrs.robust = true;
+		build_attrs.lose_context_on_reset = true;
+		if (make_egl_attrs(attrs[attrc++], attrs_len, &build_attrs) == -1) {
+			return XRT_ERROR_OPENGL;
+		}
 	}
 
-	attrs[attrc++] = EGL_NONE;
-	assert(attrc <= ARRAY_SIZE(attrs));
+	assert((unsigned)attrc <= ARRAY_SIZE(attrs));
 
-	EGLContext our_context = eglCreateContext(display, config, app_context, attrs);
+	EGLContext our_context = EGL_NO_CONTEXT;
+	const char *last_error = "";
+	for (int i = 0; i != attrc; i++) {
+		our_context = eglCreateContext(display, config, app_context, attrs[i]);
+		if (our_context != EGL_NO_CONTEXT) {
+			EGL_DEBUG("eglCreateContext (%s): try %d, context created", api_string, i);
+			print_egl_attrs(attrs[i]);
+			break;
+		}
+
+		last_error = egl_error_str(eglGetError());
+		EGL_DEBUG("eglCreateContext (%s): try %d, %s", api_string, i, last_error);
+		print_egl_attrs(attrs[i]);
+	}
 
 	// Restore old API type.
 	if (old_api_type == EGL_NONE) {
@@ -240,7 +410,7 @@ create_context(
 	}
 
 	if (our_context == EGL_NO_CONTEXT) {
-		EGL_ERROR("eglCreateContext: %s", egl_error_str(eglGetError()));
+		EGL_ERROR("eglCreateContext (%s): %s", api_string, last_error);
 		return XRT_ERROR_OPENGL;
 	}
 

@@ -47,21 +47,6 @@
 static xrt_atomic_s32_t g_sim_display_output_mode = SIM_DISPLAY_OUTPUT_SBS;
 
 /*!
- * Cross-platform atomic load for xrt_atomic_s32_t.
- */
-static inline int32_t
-xrt_atomic_s32_load(xrt_atomic_s32_t *p)
-{
-#if defined(__GNUC__)
-	return __sync_add_and_fetch(p, 0);
-#elif defined(_MSC_VER)
-	return InterlockedCompareExchange((volatile LONG *)p, 0, 0);
-#else
-#error "compiler not supported"
-#endif
-}
-
-/*!
  * Cross-platform atomic exchange for xrt_atomic_s32_t.
  */
 static inline int32_t
@@ -247,6 +232,7 @@ static xrt_result_t
 sim_display_get_view_poses(struct xrt_device *xdev,
                            const struct xrt_vec3 *default_eye_relation,
                            int64_t at_timestamp_ns,
+                           enum xrt_view_type view_type,
                            uint32_t view_count,
                            struct xrt_space_relation *out_head_relation,
                            struct xrt_fov *out_fovs,

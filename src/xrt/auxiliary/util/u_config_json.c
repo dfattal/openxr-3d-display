@@ -14,6 +14,7 @@
 #include "util/u_file.h"
 #include "util/u_json.h"
 #include "util/u_debug.h"
+#include "util/u_pretty_print.h"
 
 #include "u_config_json.h"
 
@@ -504,7 +505,7 @@ u_config_json_save_overrides(struct u_config_json *json, struct xrt_tracking_ove
 
 		cJSON_AddItemToObject(entry, "offset", make_pose(&overrides[i].offset));
 
-		const char *input_name_string = xrt_input_name_string(overrides[i].input_name);
+		const char *input_name_string = u_str_xrt_input_name(overrides[i].input_name);
 		cJSON_AddStringToObject(entry, "xrt_input_name", input_name_string);
 
 		cJSON_AddItemToArray(o, entry);

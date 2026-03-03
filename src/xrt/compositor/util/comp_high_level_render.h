@@ -172,7 +172,8 @@ chl_frame_state_gfx_default_pipeline(struct chl_frame_state *frame_state,
  */
 void
 chl_frame_state_cs_set_views(struct chl_frame_state *frame_state,
-                             const struct xrt_pose world_pose[XRT_MAX_VIEWS],
+                             const struct xrt_pose world_pose_scanout_begin[XRT_MAX_VIEWS],
+                             const struct xrt_pose world_pose_scanout_end[XRT_MAX_VIEWS],
                              const struct xrt_pose eye_pose[XRT_MAX_VIEWS],
                              const struct xrt_fov fov[XRT_MAX_VIEWS],
                              uint32_t layer_count);
@@ -200,19 +201,21 @@ chl_frame_state_cs_default_pipeline(struct chl_frame_state *frame_state,
                                     struct render_compute *render,
                                     const struct comp_layer *layers,
                                     uint32_t layer_count,
-                                    const struct xrt_pose world_poses[XRT_MAX_VIEWS],
+                                    const struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS],
+                                    const struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS],
                                     const struct xrt_pose eye_poses[XRT_MAX_VIEWS],
                                     const struct xrt_fov fovs[XRT_MAX_VIEWS],
                                     VkImage target_image,
                                     VkImageView target_storage_view,
                                     const struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS])
 {
-	chl_frame_state_cs_set_views( //
-	    frame_state,              //
-	    world_poses,              //
-	    eye_poses,                //
-	    fovs,                     //
-	    layer_count);             //
+	chl_frame_state_cs_set_views(  //
+	    frame_state,               //
+	    world_poses_scanout_begin, //
+	    world_poses_scanout_end,   //
+	    eye_poses,                 //
+	    fovs,                      //
+	    layer_count);              //
 
 	chl_frame_state_cs_set_target( //
 	    frame_state,               //

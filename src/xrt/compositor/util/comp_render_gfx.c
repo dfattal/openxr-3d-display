@@ -285,6 +285,8 @@ do_cylinder_layer(struct render_gfx *render,
 		data.aspect_ratio = c->aspect_ratio;
 	}
 
+	apply_bias_and_scale_from_layer(layer_data, &data.color_scale, &data.color_bias);
+
 	// Can fail if we have too many layers.
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 	ret = render_gfx_layer_cylinder_alloc_and_write( //
@@ -351,6 +353,8 @@ do_equirect2_layer(struct render_gfx *render,
 	data.upper_vertical_angle = eq2->upper_vertical_angle;
 	data.lower_vertical_angle = eq2->lower_vertical_angle;
 
+	apply_bias_and_scale_from_layer(layer_data, &data.color_scale, &data.color_bias);
+
 	// Can fail if we have too many layers.
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 	ret = render_gfx_layer_equirect2_alloc_and_write( //
@@ -409,11 +413,13 @@ do_projection_layer(struct render_gfx *render,
 	    &data.post_transform); // out_norm_rect
 
 	// Used to go from UV to tangent space.
-	render_calc_uv_to_tangent_lengths_rect(&vd->fov, &data.to_tanget);
+	render_calc_uv_to_tangent_lengths_rect(&vd->fov, &data.to_tangent);
 
 	// Create MVP matrix, rotation only so we get 3dof timewarp.
 	struct xrt_vec3 scale = {1, 1, 1};
 	calc_mvp_rot_only(state, layer_data, &vd->pose, &scale, &data.mvp);
+
+	apply_bias_and_scale_from_layer(layer_data, &data.color_scale, &data.color_bias);
 
 	// Can fail if we have too many layers.
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
@@ -467,6 +473,8 @@ do_quad_layer(struct render_gfx *render,
 	// Create MVP matrix, full 6dof mvp needed.
 	struct xrt_vec3 scale = {q->size.x, q->size.y, 1};
 	calc_mvp_full(state, layer_data, &q->pose, &scale, &data.mvp);
+
+	apply_bias_and_scale_from_layer(layer_data, &data.color_scale, &data.color_bias);
 
 	// Can fail if we have too many layers.
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
@@ -531,11 +539,11 @@ crg_distortion_common(struct render_gfx *render,
 		if (do_timewarp) {
 			data.pre_transform = d->views[i].pre_transform;
 
-			render_calc_time_warp_matrix( //
-			    &md->views[i].src_pose,   //
-			    &md->views[i].src_fov,    //
-			    &d->views[i].world_pose,  //
-			    &data.transform);         //
+			render_calc_time_warp_matrix(              //
+			    &md->views[i].src_pose,                //
+			    &md->views[i].src_fov,                 //
+			    &d->views[i].world_pose_scanout_begin, //
+			    &data.transform);                      //
 		}
 
 		ret = render_gfx_mesh_alloc_and_write( //
@@ -596,7 +604,7 @@ crg_distortion_after_squash(struct render_gfx *render, const struct comp_render_
 
 	struct gfx_mesh_data md = XRT_STRUCT_INIT;
 	for (uint32_t i = 0; i < d->target.view_count; i++) {
-		struct xrt_pose src_pose = d->views[i].world_pose;
+		struct xrt_pose src_pose = d->views[i].world_pose_scanout_begin;
 		struct xrt_fov src_fov = d->views[i].fov;
 		VkImageView src_image_view = d->views[i].squash_as_src.sample_view;
 		struct xrt_normalized_rect src_norm_rect = d->views[i].squash_as_src.norm_rect;
@@ -693,7 +701,7 @@ comp_render_gfx_layers(struct render_gfx *render,
 	for (uint32_t view = 0; view < d->squash_view_count; view++) {
 
 		// Data for this view, convenience.
-		const struct xrt_pose world_pose = d->views[view].world_pose;
+		const struct xrt_pose world_pose = d->views[view].world_pose_scanout_begin;
 		const struct xrt_pose eye_pose = d->views[view].eye_pose;
 		const struct xrt_fov new_fov = d->views[view].fov;
 

@@ -264,7 +264,7 @@ normalizeGrayscaleImage(cv::Mat &data_in, cv::Mat &data_out)
 }
 
 void
-setup_ort_api(HandTracking *hgt, onnx_wrap *wrap, std::filesystem::path path)
+setup_ort_api(HandTracking *hgt, onnx_wrap *wrap, const std::filesystem::path &path)
 {
 	wrap->api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
 	OrtSessionOptions *opts = nullptr;

@@ -482,7 +482,7 @@ u_pc_fake_create(int64_t estimated_frame_period_ns, int64_t now_ns, struct u_pac
 	};
 
 	// Set comp_time_ms to a percentage of the frame time.
-	float comp_time_fraction_percent = fabs(debug_get_float_option_comp_time_fraction_percent());
+	float comp_time_fraction_percent = fabsf(debug_get_float_option_comp_time_fraction_percent());
 	ft->comp_time_ns = get_percent_of_time(estimated_frame_period_ns, comp_time_fraction_percent);
 
 	// Or at least a certain amount of time.

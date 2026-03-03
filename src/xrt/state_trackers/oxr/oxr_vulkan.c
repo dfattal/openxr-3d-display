@@ -1,4 +1,5 @@
 // Copyright 2018-2024, Collabora, Ltd.
+// Copyright 2024-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -14,7 +15,7 @@
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
-#include "util/u_string_list.h"
+#include "util/u_extension_list.h"
 
 #include "vk/vk_helpers.h"
 
@@ -31,7 +32,7 @@
  *
  */
 
-#define GET_PROC(name) PFN_##name name = (PFN_##name)getProc(vkInstance, #name)
+#define GET_PROC(INST, NAME) PFN_vk##NAME loaded_##NAME = (PFN_vk##NAME)vulkanGetInstanceProcAddr(INST, "vk" #NAME)
 
 #define UUID_STR_SIZE (XRT_UUID_SIZE * 3 + 1)
 
@@ -194,22 +195,19 @@ vk_check_extension(VkExtensionProperties *props, uint32_t prop_count, const char
 
 static XrResult
 vk_get_instance_ext_props(struct oxr_logger *log,
-                          VkInstance instance,
-                          PFN_vkGetInstanceProcAddr GetInstanceProcAddr,
+                          PFN_vkGetInstanceProcAddr vulkanGetInstanceProcAddr,
                           VkExtensionProperties **out_props,
                           uint32_t *out_prop_count)
 {
-	PFN_vkEnumerateInstanceExtensionProperties EnumerateInstanceExtensionProperties =
-	    (PFN_vkEnumerateInstanceExtensionProperties)vkGetInstanceProcAddr(NULL,
-	                                                                      "vkEnumerateInstanceExtensionProperties");
+	GET_PROC(VK_NULL_HANDLE, EnumerateInstanceExtensionProperties);
 
-	if (!EnumerateInstanceExtensionProperties) {
+	if (!loaded_EnumerateInstanceExtensionProperties) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
-		                 "Failed to get EnumerateInstanceExtensionProperties fp");
+		                 "Failed to get vkEnumerateInstanceExtensionProperties function pointer.");
 	}
 
 	uint32_t prop_count = 0;
-	VkResult res = EnumerateInstanceExtensionProperties(NULL, &prop_count, NULL);
+	VkResult res = loaded_EnumerateInstanceExtensionProperties(NULL, &prop_count, NULL);
 	if (res != VK_SUCCESS) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
 		                 "Failed to enumerate instance extension properties count (%d)", res);
@@ -218,7 +216,7 @@ vk_get_instance_ext_props(struct oxr_logger *log,
 
 	VkExtensionProperties *props = U_TYPED_ARRAY_CALLOC(VkExtensionProperties, prop_count);
 
-	res = EnumerateInstanceExtensionProperties(NULL, &prop_count, props);
+	res = loaded_EnumerateInstanceExtensionProperties(NULL, &prop_count, props);
 	if (res != VK_SUCCESS) {
 		free(props);
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
@@ -239,10 +237,10 @@ oxr_vk_create_vulkan_instance(struct oxr_logger *log,
                               VkResult *vulkanResult)
 {
 
-	PFN_vkGetInstanceProcAddr GetInstanceProcAddr = createInfo->pfnGetInstanceProcAddr;
+	PFN_vkGetInstanceProcAddr vulkanGetInstanceProcAddr = createInfo->pfnGetInstanceProcAddr;
+	GET_PROC(NULL, CreateInstance);
 
-	PFN_vkCreateInstance CreateInstance = (PFN_vkCreateInstance)GetInstanceProcAddr(NULL, "vkCreateInstance");
-	if (!CreateInstance) {
+	if (!loaded_CreateInstance) {
 		//! @todo: clarify in spec
 		*vulkanResult = VK_ERROR_INITIALIZATION_FAILED;
 		return XR_SUCCESS;
@@ -250,13 +248,12 @@ oxr_vk_create_vulkan_instance(struct oxr_logger *log,
 
 	VkExtensionProperties *props = NULL;
 	uint32_t prop_count = 0;
-	XrResult res = vk_get_instance_ext_props(log, sys->vulkan_enable2_instance, createInfo->pfnGetInstanceProcAddr,
-	                                         &props, &prop_count);
+	XrResult res = vk_get_instance_ext_props(log, createInfo->pfnGetInstanceProcAddr, &props, &prop_count);
 	if (res != XR_SUCCESS) {
 		return res;
 	}
 
-	struct u_string_list *instance_ext_list = u_string_list_create_from_array(
+	struct u_extension_list_builder *instance_ext_builder = u_extension_list_builder_create_from_array(
 	    required_vk_instance_extensions, ARRAY_SIZE(required_vk_instance_extensions));
 
 #if defined(VK_EXT_debug_utils)
@@ -270,7 +267,7 @@ oxr_vk_create_vulkan_instance(struct oxr_logger *log,
 			continue;
 		}
 
-		u_string_list_append_unique(instance_ext_list, optional_vk_instance_extensions[i]);
+		u_extension_list_builder_append_unique(instance_ext_builder, optional_vk_instance_extensions[i]);
 
 #if defined(VK_EXT_debug_utils)
 		if (strcmp(optional_vk_instance_extensions[i], VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
@@ -280,15 +277,17 @@ oxr_vk_create_vulkan_instance(struct oxr_logger *log,
 	}
 
 	for (uint32_t i = 0; i < createInfo->vulkanCreateInfo->enabledExtensionCount; i++) {
-		u_string_list_append_unique(instance_ext_list,
-		                            createInfo->vulkanCreateInfo->ppEnabledExtensionNames[i]);
+		u_extension_list_builder_append_unique(instance_ext_builder,
+		                                       createInfo->vulkanCreateInfo->ppEnabledExtensionNames[i]);
 	}
 
-	VkInstanceCreateInfo modified_info = *createInfo->vulkanCreateInfo;
-	modified_info.ppEnabledExtensionNames = u_string_list_get_data(instance_ext_list);
-	modified_info.enabledExtensionCount = u_string_list_get_size(instance_ext_list);
+	struct u_extension_list *instance_ext_list = u_extension_list_builder_build(&instance_ext_builder);
 
-	*vulkanResult = CreateInstance(&modified_info, createInfo->vulkanAllocator, vulkanInstance);
+	VkInstanceCreateInfo modified_info = *createInfo->vulkanCreateInfo;
+	modified_info.ppEnabledExtensionNames = u_extension_list_get_data(instance_ext_list);
+	modified_info.enabledExtensionCount = u_extension_list_get_size(instance_ext_list);
+
+	*vulkanResult = loaded_CreateInstance(&modified_info, createInfo->vulkanAllocator, vulkanInstance);
 
 
 	// Logging
@@ -312,30 +311,28 @@ oxr_vk_create_vulkan_instance(struct oxr_logger *log,
 	}
 #endif
 
-	u_string_list_destroy(&instance_ext_list);
+	u_extension_list_destroy(&instance_ext_list);
 
 	return XR_SUCCESS;
 }
 
 static XrResult
 vk_get_device_ext_props(struct oxr_logger *log,
-                        VkInstance instance,
-                        PFN_vkGetInstanceProcAddr GetInstanceProcAddr,
+                        VkInstance vulkanInstance,
+                        PFN_vkGetInstanceProcAddr vulkanGetInstanceProcAddr,
                         VkPhysicalDevice physical_device,
                         VkExtensionProperties **out_props,
                         uint32_t *out_prop_count)
 {
-	PFN_vkEnumerateDeviceExtensionProperties EnumerateDeviceExtensionProperties =
-	    (PFN_vkEnumerateDeviceExtensionProperties)GetInstanceProcAddr(instance,
-	                                                                  "vkEnumerateDeviceExtensionProperties");
+	GET_PROC(vulkanInstance, EnumerateDeviceExtensionProperties);
 
-	if (!EnumerateDeviceExtensionProperties) {
+	if (!loaded_EnumerateDeviceExtensionProperties) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
-		                 "Failed to get vkEnumerateDeviceExtensionProperties fp");
+		                 "Failed to get vkEnumerateDeviceExtensionProperties function pointer");
 	}
 
 	uint32_t prop_count = 0;
-	VkResult res = EnumerateDeviceExtensionProperties(physical_device, NULL, &prop_count, NULL);
+	VkResult res = loaded_EnumerateDeviceExtensionProperties(physical_device, NULL, &prop_count, NULL);
 	if (res != VK_SUCCESS) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE,
 		                 "Failed to enumerate device extension properties count (%d)", res);
@@ -344,7 +341,7 @@ vk_get_device_ext_props(struct oxr_logger *log,
 
 	VkExtensionProperties *props = U_TYPED_ARRAY_CALLOC(VkExtensionProperties, prop_count);
 
-	res = EnumerateDeviceExtensionProperties(physical_device, NULL, &prop_count, props);
+	res = loaded_EnumerateDeviceExtensionProperties(physical_device, NULL, &prop_count, props);
 	if (res != VK_SUCCESS) {
 		free(props);
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to enumerate device extension properties (%d)",
@@ -359,21 +356,20 @@ vk_get_device_ext_props(struct oxr_logger *log,
 
 static XrResult
 vk_get_device_features(struct oxr_logger *log,
-                       VkInstance instance,
-                       PFN_vkGetInstanceProcAddr GetInstanceProcAddr,
+                       VkInstance vulkanInstance,
+                       PFN_vkGetInstanceProcAddr vulkanGetInstanceProcAddr,
                        VkPhysicalDevice physical_device,
                        VkPhysicalDeviceFeatures2KHR *physical_device_features)
 {
-	PFN_vkGetPhysicalDeviceFeatures2KHR GetPhysicalDeviceFeatures2 =
-	    (PFN_vkGetPhysicalDeviceFeatures2KHR)GetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2KHR");
+	GET_PROC(vulkanInstance, GetPhysicalDeviceFeatures2KHR);
 
-	if (!GetPhysicalDeviceFeatures2) {
-		oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to get vkGetPhysicalDeviceFeatures2 fp");
+	if (!loaded_GetPhysicalDeviceFeatures2KHR) {
+		oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to get vkGetPhysicalDeviceFeatures2KHR fp");
 	}
 
-	GetPhysicalDeviceFeatures2(    //
-	    physical_device,           // physicalDevice
-	    physical_device_features); // pFeatures
+	loaded_GetPhysicalDeviceFeatures2KHR( //
+	    physical_device,                  // physicalDevice
+	    physical_device_features);        // pFeatures
 
 	return XR_SUCCESS;
 }
@@ -399,11 +395,10 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 {
 	XrResult res;
 
-	PFN_vkGetInstanceProcAddr GetInstanceProcAddr = createInfo->pfnGetInstanceProcAddr;
+	PFN_vkGetInstanceProcAddr vulkanGetInstanceProcAddr = createInfo->pfnGetInstanceProcAddr;
+	GET_PROC(sys->vulkan_enable2_instance, CreateDevice);
 
-	PFN_vkCreateDevice CreateDevice =
-	    (PFN_vkCreateDevice)GetInstanceProcAddr(sys->vulkan_enable2_instance, "vkCreateDevice");
-	if (!CreateDevice) {
+	if (!loaded_CreateDevice) {
 		//! @todo: clarify in spec
 		*vulkanResult = VK_ERROR_INITIALIZATION_FAILED;
 		return XR_SUCCESS;
@@ -411,12 +406,12 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 
 	VkPhysicalDevice physical_device = createInfo->vulkanPhysicalDevice;
 
-	struct u_string_list *device_extension_list =
-	    u_string_list_create_from_array(required_vk_device_extensions, ARRAY_SIZE(required_vk_device_extensions));
+	struct u_extension_list_builder *device_extension_builder = u_extension_list_builder_create_from_array(
+	    required_vk_device_extensions, ARRAY_SIZE(required_vk_device_extensions));
 
 	for (uint32_t i = 0; i < createInfo->vulkanCreateInfo->enabledExtensionCount; i++) {
-		u_string_list_append_unique(device_extension_list,
-		                            createInfo->vulkanCreateInfo->ppEnabledExtensionNames[i]);
+		u_extension_list_builder_append_unique(device_extension_builder,
+		                                       createInfo->vulkanCreateInfo->ppEnabledExtensionNames[i]);
 	}
 
 
@@ -442,7 +437,7 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 			continue;
 		}
 
-		u_string_list_append_unique(device_extension_list, optional_device_extensions[i]);
+		u_extension_list_builder_append_unique(device_extension_builder, optional_device_extensions[i]);
 
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
 		if (strcmp(optional_device_extensions[i], VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME) == 0) {
@@ -460,6 +455,7 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 
 	free(props);
 
+	struct u_extension_list *device_extension_list = u_extension_list_builder_build(&device_extension_builder);
 
 	VkPhysicalDeviceFeatures2KHR physical_device_features = {
 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR,
@@ -473,7 +469,7 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 	    .timelineSemaphore = VK_FALSE,
 	};
 
-	if (u_string_list_contains(device_extension_list, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
+	if (u_extension_list_contains(device_extension_list, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
 		physical_device_features.pNext = &timeline_semaphore_info;
 	}
 #endif
@@ -486,8 +482,8 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 
 
 	VkDeviceCreateInfo modified_info = *createInfo->vulkanCreateInfo;
-	modified_info.ppEnabledExtensionNames = u_string_list_get_data(device_extension_list);
-	modified_info.enabledExtensionCount = u_string_list_get_size(device_extension_list);
+	modified_info.ppEnabledExtensionNames = u_extension_list_get_data(device_extension_list);
+	modified_info.enabledExtensionCount = u_extension_list_get_size(device_extension_list);
 
 #ifdef VK_KHR_timeline_semaphore
 	VkPhysicalDeviceTimelineSemaphoreFeatures timeline_semaphore = {
@@ -517,7 +513,7 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 	}
 #endif
 
-	*vulkanResult = CreateDevice(physical_device, &modified_info, createInfo->vulkanAllocator, vulkanDevice);
+	*vulkanResult = loaded_CreateDevice(physical_device, &modified_info, createInfo->vulkanAllocator, vulkanDevice);
 
 
 	// Logging
@@ -565,7 +561,7 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 	}
 #endif
 
-	u_string_list_destroy(&device_extension_list);
+	u_extension_list_destroy(&device_extension_list);
 
 	return XR_SUCCESS;
 }
@@ -575,12 +571,13 @@ XrResult
 oxr_vk_get_physical_device(struct oxr_logger *log,
                            struct oxr_instance *inst,
                            struct oxr_system *sys,
-                           VkInstance vkInstance,
-                           PFN_vkGetInstanceProcAddr getProc,
+                           VkInstance vulkanInstance,
+                           PFN_vkGetInstanceProcAddr vulkanGetInstanceProcAddr,
                            VkPhysicalDevice *vkPhysicalDevice)
 {
-	GET_PROC(vkEnumeratePhysicalDevices);
-	GET_PROC(vkGetPhysicalDeviceProperties2KHR);
+	GET_PROC(vulkanInstance, EnumeratePhysicalDevices);
+	GET_PROC(vulkanInstance, GetPhysicalDeviceProperties2KHR);
+
 	VkResult vk_ret;
 	uint32_t count;
 
@@ -588,7 +585,7 @@ oxr_vk_get_physical_device(struct oxr_logger *log,
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, " sys->xsysc == NULL");
 	}
 
-	vk_ret = vkEnumeratePhysicalDevices(vkInstance, &count, NULL);
+	vk_ret = loaded_EnumeratePhysicalDevices(vulkanInstance, &count, NULL);
 	if (vk_ret != VK_SUCCESS) {
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Call to vkEnumeratePhysicalDevices returned %u",
 		                 vk_ret);
@@ -599,7 +596,7 @@ oxr_vk_get_physical_device(struct oxr_logger *log,
 	}
 
 	VkPhysicalDevice *phys = U_TYPED_ARRAY_CALLOC(VkPhysicalDevice, count);
-	vk_ret = vkEnumeratePhysicalDevices(vkInstance, &count, phys);
+	vk_ret = loaded_EnumeratePhysicalDevices(vulkanInstance, &count, phys);
 	if (vk_ret != VK_SUCCESS) {
 		free(phys);
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Call to vkEnumeratePhysicalDevices returned %u",
@@ -626,7 +623,7 @@ oxr_vk_get_physical_device(struct oxr_logger *log,
 		    .pNext = &pdidp,
 		};
 
-		vkGetPhysicalDeviceProperties2KHR(phys[i], &pdp2);
+		loaded_GetPhysicalDeviceProperties2KHR(phys[i], &pdp2);
 
 		// These should always be true
 		static_assert(VK_UUID_SIZE == XRT_UUID_SIZE, "uuid sizes mismatch");
@@ -660,7 +657,7 @@ oxr_vk_get_physical_device(struct oxr_logger *log,
 
 	// vulkan_enable2 needs the physical device in xrCreateVulkanDeviceKHR
 	if (inst->extensions.KHR_vulkan_enable2) {
-		sys->vulkan_enable2_instance = vkInstance;
+		sys->vulkan_enable2_instance = vulkanInstance;
 	}
 	sys->suggested_vulkan_physical_device = *vkPhysicalDevice;
 	if (log_level <= U_LOGGING_DEBUG) {

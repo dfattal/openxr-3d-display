@@ -1,4 +1,5 @@
 // Copyright 2019, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -24,6 +25,8 @@
 #include "xrt_windows.h"
 // Older MSVC versions do not have stdalign.h, define it manually using __declspec(align).
 #define XRT_ALIGNAS(n) __declspec(align(n))
+#elif defined(XRT_DOXYGEN)
+#define XRT_ALIGNAS(align)
 #else // _MSC_VER
 #include <stdalign.h>
 #define XRT_ALIGNAS(align) alignas(align)
@@ -81,6 +84,32 @@
 #define XRT_MAYBE_UNUSED [[maybe_unused]]
 #else
 #define XRT_MAYBE_UNUSED
+#endif
+
+
+/*
+ * To indicate that all pointer parameters must not be null.
+ *
+ * Note: MSVC does not have a function-level equivalent. To get similar checking
+ * on MSVC, individual parameters would need SAL annotations like _In_, _Out_, etc.
+ */
+#if defined(__GNUC__)
+#define XRT_NONNULL_ALL __attribute__((nonnull))
+#else
+#define XRT_NONNULL_ALL
+#endif
+
+
+/*
+ * To indicate that the first parameter must not be null.
+ *
+ * Note: MSVC does not have a function-level equivalent. To get similar checking
+ * on MSVC, individual parameters would need SAL annotations like _In_, _Out_, etc.
+ */
+#if defined(__GNUC__)
+#define XRT_NONNULL_FIRST __attribute__((nonnull(1)))
+#else
+#define XRT_NONNULL_FIRST
 #endif
 
 
@@ -156,6 +185,28 @@ xrt_atomic_s32_cmpxchg(xrt_atomic_s32_t *p, int32_t old_, int32_t new_)
 	return __sync_val_compare_and_swap(p, old_, new_);
 #elif defined(_MSC_VER)
 	return InterlockedCompareExchange((volatile LONG *)p, old_, new_);
+#else
+#error "compiler not supported"
+#endif
+}
+static inline void
+xrt_atomic_s32_store(xrt_atomic_s32_t *p, int32_t v)
+{
+#if defined(__GNUC__)
+	__atomic_store_n(p, v, __ATOMIC_SEQ_CST);
+#elif defined(_MSC_VER)
+	InterlockedExchange((volatile LONG *)p, v);
+#else
+#error "compiler not supported"
+#endif
+}
+static inline int32_t
+xrt_atomic_s32_load(xrt_atomic_s32_t *p)
+{
+#if defined(__GNUC__)
+	return __atomic_load_n(p, __ATOMIC_SEQ_CST);
+#elif defined(_MSC_VER)
+	return InterlockedCompareExchange((volatile LONG *)p, 0, 0);
 #else
 #error "compiler not supported"
 #endif

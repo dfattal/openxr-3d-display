@@ -63,10 +63,24 @@ bool
 m_relation_history_push(struct m_relation_history *rh, struct xrt_space_relation const *in_relation, int64_t timestamp);
 
 /*!
+ * Pushes a new pose to the history, estimating linear and angular velocity based on the previous entry.
+ *
+ * If the history is full, it will also pop a pose out of the other side of the buffer.
+ *
+ * @return false if the timestamp is earlier than the most recent timestamp already recorded
+ *
+ * @public @memberof m_relation_history
+ */
+bool
+m_relation_history_push_with_motion_estimation(struct m_relation_history *rh,
+                                               struct xrt_space_relation const *in_relation,
+                                               int64_t timestamp);
+
+/*!
  * Interpolates or extrapolates to the desired timestamp.
  *
- * Read-only operation - doesn't remove anything from the buffer or anything like that - you can call this as often as
- * you want.
+ * Read-only operation - doesn't remove anything from the buffer or anything like that - you can call this as often
+ * as you want.
  *
  * @public @memberof m_relation_history
  */
@@ -74,22 +88,6 @@ enum m_relation_history_result
 m_relation_history_get(const struct m_relation_history *rh,
                        int64_t at_timestamp_ns,
                        struct xrt_space_relation *out_relation);
-
-/*!
- * Estimates the movement (velocity and angular velocity) of a new relation based on
- * the latest relation found in the buffer (as returned by m_relation_history_get_latest).
- *
- * Read-only on m_relation_history and in_relation.
- * Copies in_relation->pose to out_relation->pose, and writes new flags and linear/angular velocities to
- * out_relation->pose. OK to alias in_relation and out_relation.
- *
- * @public @memberof m_relation_history
- */
-bool
-m_relation_history_estimate_motion(struct m_relation_history *rh,
-                                   const struct xrt_space_relation *in_relation,
-                                   int64_t timestamp,
-                                   struct xrt_space_relation *out_relation);
 
 /*!
  * Get the latest report in the buffer, if any.

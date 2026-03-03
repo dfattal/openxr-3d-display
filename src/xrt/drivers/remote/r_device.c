@@ -193,12 +193,9 @@ r_device_create(struct r_hub *r, bool is_left)
 	    struct r_device, flags, input_count, output_count);
 
 	// Setup the basics.
+	u_device_populate_function_pointers(&rd->base, r_device_get_tracked_pose, r_device_destroy);
 	rd->base.update_inputs = r_device_update_inputs;
-	rd->base.get_tracked_pose = r_device_get_tracked_pose;
 	rd->base.get_hand_tracking = r_device_get_hand_tracking;
-	rd->base.get_view_poses = u_device_ni_get_view_poses;
-	rd->base.set_output = u_device_ni_set_output;
-	rd->base.destroy = r_device_destroy;
 	rd->base.tracking_origin = &r->origin;
 	rd->base.supported.orientation_tracking = true;
 	rd->base.supported.position_tracking = true;

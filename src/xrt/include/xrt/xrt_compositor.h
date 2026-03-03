@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -640,7 +641,7 @@ struct xrt_swapchain
  * @ingroup xrt_iface
  * @relates xrt_swapchain
  */
-static inline void
+XRT_NONNULL_FIRST static inline void
 xrt_swapchain_reference(struct xrt_swapchain **dst, struct xrt_swapchain *src)
 {
 	struct xrt_swapchain *old_dst = *dst;
@@ -669,7 +670,7 @@ xrt_swapchain_reference(struct xrt_swapchain **dst, struct xrt_swapchain *src)
  *
  * @public @memberof xrt_swapchain
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 {
 	return xsc->acquire_image(xsc, out_index);
@@ -682,7 +683,7 @@ xrt_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
  *
  * @public @memberof xrt_swapchain
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_swapchain_inc_image_use(struct xrt_swapchain *xsc, uint32_t index)
 {
 	return xsc->inc_image_use(xsc, index);
@@ -695,7 +696,7 @@ xrt_swapchain_inc_image_use(struct xrt_swapchain *xsc, uint32_t index)
  *
  * @public @memberof xrt_swapchain
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_swapchain_dec_image_use(struct xrt_swapchain *xsc, uint32_t index)
 {
 	return xsc->dec_image_use(xsc, index);
@@ -708,7 +709,7 @@ xrt_swapchain_dec_image_use(struct xrt_swapchain *xsc, uint32_t index)
  *
  * @public @memberof xrt_swapchain
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t index)
 {
 	return xsc->wait_image(xsc, timeout_ns, index);
@@ -721,7 +722,7 @@ xrt_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t
  *
  * @public @memberof xrt_swapchain
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction direction, uint32_t index)
 {
 	return xsc->barrier_image(xsc, direction, index);
@@ -734,7 +735,7 @@ xrt_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_directio
  *
  * @public @memberof xrt_swapchain
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 {
 	return xsc->release_image(xsc, index);
@@ -770,7 +771,7 @@ struct xrt_compositor_fence
  *
  * @public @memberof xrt_compositor_fence
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_compositor_fence_wait(struct xrt_compositor_fence *xcf, uint64_t timeout)
 {
 	return xcf->wait(xcf, timeout);
@@ -836,7 +837,7 @@ struct xrt_compositor_semaphore
  * @ingroup xrt_iface
  * @relates xrt_compositor_semaphore
  */
-static inline void
+XRT_NONNULL_FIRST static inline void
 xrt_compositor_semaphore_reference(struct xrt_compositor_semaphore **dst, struct xrt_compositor_semaphore *src)
 {
 	struct xrt_compositor_semaphore *old_dst = *dst;
@@ -865,7 +866,7 @@ xrt_compositor_semaphore_reference(struct xrt_compositor_semaphore **dst, struct
  *
  * @public @memberof xrt_compositor_semaphore
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_compositor_semaphore_wait(struct xrt_compositor_semaphore *xcsem, uint64_t value, uint64_t timeout)
 {
 	return xcsem->wait(xcsem, value, timeout);
@@ -877,15 +878,6 @@ xrt_compositor_semaphore_wait(struct xrt_compositor_semaphore *xcsem, uint64_t v
  * Compositor.
  *
  */
-
-/*!
- * View type to be rendered to by the compositor.
- */
-enum xrt_view_type
-{
-	XRT_VIEW_TYPE_MONO = 1,
-	XRT_VIEW_TYPE_STEREO = 2,
-};
 
 enum xrt_compositor_frame_point
 {
@@ -1004,12 +996,14 @@ struct xrt_begin_session_info
 	bool ext_hand_tracking_enabled;
 	bool ext_hand_tracking_data_source_enabled;
 	bool ext_eye_gaze_interaction_enabled;
+	bool ext_future_enabled;
 	bool ext_hand_interaction_enabled;
 	bool htc_facial_tracking_enabled;
 	bool fb_body_tracking_enabled;
 	bool fb_face_tracking2_enabled;
 	bool meta_body_tracking_full_body_enabled;
 	bool meta_body_tracking_calibration_enabled;
+	bool android_face_tracking_enabled;
 };
 
 /*!
@@ -1082,7 +1076,14 @@ struct xrt_compositor
 	                             struct xrt_compositor_fence **out_xcf);
 
 	/*!
-	 * Create a compositor semaphore, also returns a native handle.
+	 * Create a compositor semaphore, also returns a native handle of the
+	 * semaphore which is owned by the @ref xrt_compositor_semaphore struct.
+	 * The return values are always both valid, or on an error condition
+	 * encountered and error is returned, both not valid (untouched).
+	 *
+	 * @param[in]  xc         Compositor self pointer.
+	 * @param[out] out_handle Native handle owned by the samephore.
+	 * @param[out] out_handle Return of the created semahpore.
 	 */
 	xrt_result_t (*create_semaphore)(struct xrt_compositor *xc,
 	                                 xrt_graphics_sync_handle_t *out_handle,
@@ -1485,7 +1486,7 @@ struct xrt_compositor
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_get_swapchain_create_properties(struct xrt_compositor *xc,
                                          const struct xrt_swapchain_create_info *info,
                                          struct xrt_swapchain_create_properties *xsccp)
@@ -1505,7 +1506,7 @@ xrt_comp_get_swapchain_create_properties(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_create_swapchain(struct xrt_compositor *xc,
                           const struct xrt_swapchain_create_info *info,
                           struct xrt_swapchain **out_xsc)
@@ -1520,7 +1521,7 @@ xrt_comp_create_swapchain(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_import_swapchain(struct xrt_compositor *xc,
                           const struct xrt_swapchain_create_info *info,
                           struct xrt_image_native *native_images,
@@ -1537,7 +1538,7 @@ xrt_comp_import_swapchain(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_import_fence(struct xrt_compositor *xc,
                       xrt_graphics_sync_handle_t handle,
                       struct xrt_compositor_fence **out_xcf)
@@ -1552,7 +1553,7 @@ xrt_comp_import_fence(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_create_semaphore(struct xrt_compositor *xc,
                           xrt_graphics_sync_handle_t *out_handle,
                           struct xrt_compositor_semaphore **out_xcsem)
@@ -1569,7 +1570,7 @@ xrt_comp_create_semaphore(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
 {
 	return xc->create_passthrough(xc, info);
@@ -1582,7 +1583,7 @@ xrt_comp_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthro
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_create_passthrough_layer(struct xrt_compositor *xc, const struct xrt_passthrough_layer_create_info *info)
 {
 	return xc->create_passthrough_layer(xc, info);
@@ -1595,7 +1596,7 @@ xrt_comp_create_passthrough_layer(struct xrt_compositor *xc, const struct xrt_pa
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_destroy_passthrough(struct xrt_compositor *xc)
 {
 	return xc->destroy_passthrough(xc);
@@ -1613,7 +1614,7 @@ xrt_comp_destroy_passthrough(struct xrt_compositor *xc)
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
 {
 	return xc->begin_session(xc, info);
@@ -1626,7 +1627,7 @@ xrt_comp_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_end_session(struct xrt_compositor *xc)
 {
 	return xc->end_session(xc);
@@ -1648,7 +1649,7 @@ xrt_comp_end_session(struct xrt_compositor *xc)
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_predict_frame(struct xrt_compositor *xc,
                        int64_t *out_frame_id,
                        int64_t *out_wake_time_ns,
@@ -1672,7 +1673,7 @@ xrt_comp_predict_frame(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_mark_frame(struct xrt_compositor *xc, int64_t frame_id, enum xrt_compositor_frame_point point, int64_t when_ns)
 {
 	return xc->mark_frame(xc, frame_id, point, when_ns);
@@ -1685,7 +1686,7 @@ xrt_comp_mark_frame(struct xrt_compositor *xc, int64_t frame_id, enum xrt_compos
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_wait_frame(struct xrt_compositor *xc,
                     int64_t *out_frame_id,
                     int64_t *out_predicted_display_time,
@@ -1701,7 +1702,7 @@ xrt_comp_wait_frame(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
 	return xc->begin_frame(xc, frame_id);
@@ -1714,7 +1715,7 @@ xrt_comp_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
 	return xc->discard_frame(xc, frame_id);
@@ -1736,7 +1737,7 @@ xrt_comp_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
 	return xc->layer_begin(xc, data);
@@ -1749,7 +1750,7 @@ xrt_comp_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_dat
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_layer_projection(struct xrt_compositor *xc,
                           struct xrt_device *xdev,
                           struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
@@ -1765,7 +1766,7 @@ xrt_comp_layer_projection(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_layer_projection_depth(struct xrt_compositor *xc,
                                 struct xrt_device *xdev,
                                 struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
@@ -1782,7 +1783,7 @@ xrt_comp_layer_projection_depth(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_layer_quad(struct xrt_compositor *xc,
                     struct xrt_device *xdev,
                     struct xrt_swapchain *xsc,
@@ -1798,7 +1799,7 @@ xrt_comp_layer_quad(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_layer_cube(struct xrt_compositor *xc,
                     struct xrt_device *xdev,
                     struct xrt_swapchain *xsc,
@@ -1814,7 +1815,7 @@ xrt_comp_layer_cube(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_layer_cylinder(struct xrt_compositor *xc,
                         struct xrt_device *xdev,
                         struct xrt_swapchain *xsc,
@@ -1831,7 +1832,7 @@ xrt_comp_layer_cylinder(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_layer_equirect1(struct xrt_compositor *xc,
                          struct xrt_device *xdev,
                          struct xrt_swapchain *xsc,
@@ -1847,7 +1848,7 @@ xrt_comp_layer_equirect1(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_layer_equirect2(struct xrt_compositor *xc,
                          struct xrt_device *xdev,
                          struct xrt_swapchain *xsc,
@@ -1863,7 +1864,7 @@ xrt_comp_layer_equirect2(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_layer_passthrough(struct xrt_compositor *xc, struct xrt_device *xdev, const struct xrt_layer_data *data)
 {
 	return xc->layer_passthrough(xc, xdev, data);
@@ -1892,6 +1893,7 @@ xrt_comp_layer_window_space(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
+XRT_NONNULL_FIRST
 static inline xrt_result_t
 xrt_comp_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
@@ -1905,7 +1907,7 @@ xrt_comp_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_layer_commit_with_semaphore(struct xrt_compositor *xc, struct xrt_compositor_semaphore *xcsem, uint64_t value)
 {
 	return xc->layer_commit_with_semaphore(xc, xcsem, value);
@@ -1920,7 +1922,7 @@ xrt_comp_layer_commit_with_semaphore(struct xrt_compositor *xc, struct xrt_compo
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_get_display_refresh_rate(struct xrt_compositor *xc, float *out_display_refresh_rate_hz)
 {
 	return xc->get_display_refresh_rate(xc, out_display_refresh_rate_hz);
@@ -1933,7 +1935,7 @@ xrt_comp_get_display_refresh_rate(struct xrt_compositor *xc, float *out_display_
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_request_display_refresh_rate(struct xrt_compositor *xc, float display_refresh_rate_hz)
 {
 	return xc->request_display_refresh_rate(xc, display_refresh_rate_hz);
@@ -1947,7 +1949,7 @@ xrt_comp_request_display_refresh_rate(struct xrt_compositor *xc, float display_r
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_set_performance_level(struct xrt_compositor *xc, enum xrt_perf_domain domain, enum xrt_perf_set_level level)
 {
 	return xc->set_performance_level(xc, domain, level);
@@ -1960,7 +1962,7 @@ xrt_comp_set_performance_level(struct xrt_compositor *xc, enum xrt_perf_domain d
  *
  * @public @memberof xrt_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_get_reference_bounds_rect(struct xrt_compositor *xc,
                                    enum xrt_reference_space_type reference_space_type,
                                    struct xrt_vec2 *bounds)
@@ -1980,7 +1982,7 @@ xrt_comp_get_reference_bounds_rect(struct xrt_compositor *xc,
  *
  * @public @memberof xrt_compositor
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_comp_destroy(struct xrt_compositor **xc_ptr)
 {
 	struct xrt_compositor *xc = *xc_ptr;
@@ -2000,7 +2002,7 @@ xrt_comp_destroy(struct xrt_compositor **xc_ptr)
 /*!
  * @brief Set thread attributes according to thread type
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_set_thread_hint(struct xrt_compositor *xc, enum xrt_thread_hint hint, uint32_t thread_id)
 {
 	return xc->set_thread_hint(xc, hint, thread_id);
@@ -2320,7 +2322,7 @@ struct xrt_compositor_native
  *
  * @public @memberof xrt_compositor_native
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_comp_native_create_swapchain(struct xrt_compositor_native *xcn,
                                  const struct xrt_swapchain_create_info *info,
                                  struct xrt_swapchain_native **out_xscn)
@@ -2347,7 +2349,7 @@ xrt_comp_native_create_swapchain(struct xrt_compositor_native *xcn,
  *
  * @public @memberof xrt_compositor_native
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_comp_native_destroy(struct xrt_compositor_native **xcn_ptr)
 {
 	struct xrt_compositor_native *xcn = *xcn_ptr;
@@ -2358,6 +2360,38 @@ xrt_comp_native_destroy(struct xrt_compositor_native **xcn_ptr)
 	xcn->base.destroy(&xcn->base);
 	*xcn_ptr = NULL;
 }
+
+/*!
+ * Holds information about the view configuration properties for a view in a system compositor.
+ */
+struct xrt_view_config_properties
+{
+	struct
+	{
+		uint32_t width_pixels;
+		uint32_t height_pixels;
+		uint32_t sample_count;
+	} recommended; //!< Recommended for this view.
+
+	struct
+	{
+		uint32_t width_pixels;
+		uint32_t height_pixels;
+		uint32_t sample_count;
+	} max; //!< Maximums for this view.
+};
+
+struct xrt_view_config
+{
+	//! Which view type this is for, mono, stereo, quad_with_inset, etc...
+	enum xrt_view_type view_type;
+
+	//! Must match the view_type, in the future view_types might have variable views.
+	uint32_t view_count;
+
+	//! The per view information.
+	struct xrt_view_config_properties views[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_VIEW_COUNT];
+};
 
 
 /*
@@ -2372,22 +2406,8 @@ xrt_comp_native_destroy(struct xrt_compositor_native **xcn_ptr)
  */
 struct xrt_system_compositor_info
 {
-	struct
-	{
-		struct
-		{
-			uint32_t width_pixels;
-			uint32_t height_pixels;
-			uint32_t sample_count;
-		} recommended; //!< Recommended for this view.
-
-		struct
-		{
-			uint32_t width_pixels;
-			uint32_t height_pixels;
-			uint32_t sample_count;
-		} max;          //!< Maximums for this view.
-	} views[XRT_MAX_VIEWS]; //!< View configuration information.
+	uint32_t view_config_count;
+	struct xrt_view_config view_configs[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_COUNT];
 
 	//! Maximum number of composition layers supported, never changes.
 	uint32_t max_layers;
@@ -2505,7 +2525,8 @@ struct xrt_multi_compositor_control
 	xrt_result_t (*set_state)(struct xrt_system_compositor *xsc,
 	                          struct xrt_compositor *xc,
 	                          bool visible,
-	                          bool focused);
+	                          bool focused,
+	                          int64_t timestamp_ns);
 
 	/*!
 	 * Set the rendering Z order for rendering, visible has higher priority
@@ -2604,14 +2625,15 @@ struct xrt_system_compositor
  *
  * @public @memberof xrt_system_compositor
  */
-static inline xrt_result_t
-xrt_syscomp_set_state(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, bool visible, bool focused)
+XRT_NONNULL_ALL static inline xrt_result_t
+xrt_syscomp_set_state(
+    struct xrt_system_compositor *xsc, struct xrt_compositor *xc, bool visible, bool focused, int64_t timestamp_ns)
 {
 	if (xsc->xmcc == NULL) {
 		return XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED;
 	}
 
-	return xsc->xmcc->set_state(xsc, xc, visible, focused);
+	return xsc->xmcc->set_state(xsc, xc, visible, focused, timestamp_ns);
 }
 
 /*!
@@ -2624,7 +2646,7 @@ xrt_syscomp_set_state(struct xrt_system_compositor *xsc, struct xrt_compositor *
  *
  * @public @memberof xrt_system_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_syscomp_set_z_order(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, int64_t z_order)
 {
 	if (xsc->xmcc == NULL) {
@@ -2645,7 +2667,7 @@ xrt_syscomp_set_z_order(struct xrt_system_compositor *xsc, struct xrt_compositor
  *
  * @public @memberof xrt_system_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_syscomp_set_main_app_visibility(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, bool visible)
 {
 	if (xsc->xmcc == NULL) {
@@ -2665,7 +2687,7 @@ xrt_syscomp_set_main_app_visibility(struct xrt_system_compositor *xsc, struct xr
  *
  * @public @memberof xrt_system_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_syscomp_notify_loss_pending(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, int64_t loss_time_ns)
 {
 	if (xsc->xmcc == NULL) {
@@ -2685,7 +2707,7 @@ xrt_syscomp_notify_loss_pending(struct xrt_system_compositor *xsc, struct xrt_co
  *
  * @public @memberof xrt_system_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_syscomp_notify_lost(struct xrt_system_compositor *xsc, struct xrt_compositor *xc)
 {
 	if (xsc->xmcc == NULL) {
@@ -2705,7 +2727,7 @@ xrt_syscomp_notify_lost(struct xrt_system_compositor *xsc, struct xrt_compositor
  *
  * @public @memberof xrt_system_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_syscomp_notify_display_refresh_changed(struct xrt_system_compositor *xsc,
                                            struct xrt_compositor *xc,
                                            float from_display_refresh_rate_hz,
@@ -2726,7 +2748,7 @@ xrt_syscomp_notify_display_refresh_changed(struct xrt_system_compositor *xsc,
  *
  * @public @memberof xrt_system_compositor
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_syscomp_create_native_compositor(struct xrt_system_compositor *xsc,
                                      const struct xrt_session_info *xsi,
                                      struct xrt_session_event_sink *xses,
@@ -2743,7 +2765,7 @@ xrt_syscomp_create_native_compositor(struct xrt_system_compositor *xsc,
  *
  * @public @memberof xrt_system_compositor
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_syscomp_destroy(struct xrt_system_compositor **xsc_ptr)
 {
 	struct xrt_system_compositor *xsc = *xsc_ptr;
@@ -2799,7 +2821,7 @@ struct xrt_image_native_allocator
  *
  * @public @memberof xrt_image_native_allocate
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_images_allocate(struct xrt_image_native_allocator *xina,
                     const struct xrt_swapchain_create_info *xsci,
                     size_t image_count,
@@ -2815,7 +2837,7 @@ xrt_images_allocate(struct xrt_image_native_allocator *xina,
  *
  * @public @memberof xrt_image_native_allocate
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_images_free(struct xrt_image_native_allocator *xina, size_t image_count, struct xrt_image_native *images)
 {
 	return xina->images_free(xina, image_count, images);
@@ -2829,7 +2851,7 @@ xrt_images_free(struct xrt_image_native_allocator *xina, size_t image_count, str
  *
  * @public @memberof xrt_image_native_allocator
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_images_destroy(struct xrt_image_native_allocator **xina_ptr)
 {
 	struct xrt_image_native_allocator *xina = *xina_ptr;

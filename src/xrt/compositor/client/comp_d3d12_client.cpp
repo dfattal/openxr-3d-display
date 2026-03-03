@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -801,6 +802,10 @@ client_d3d12_compositor_layer_projection(struct xrt_compositor *xc,
 	}
 	struct xrt_layer_data d = *data;
 
+	// Scale to compensate for power-of-two texture sizes.
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		client_d3d12_swapchain_scale_rect(xsc[i], &d.proj.v[i].sub.norm_rect);
+	}
 	// No flip required: D3D12 swapchain image convention matches Vulkan.
 	return xrt_comp_layer_projection(&c->xcn->base, xdev, xscn, &d);
 }
@@ -1033,6 +1038,11 @@ client_d3d12_compositor_destroy(struct xrt_compositor *xc)
 static void
 client_d3d12_compositor_init_try_timeline_semaphores(struct client_d3d12_compositor *c)
 {
+	struct xrt_compositor_semaphore *xcsem{nullptr};
+	HANDLE timeline_semaphore_handle_raw{};
+	xrt_result_t xret;
+
+	// Set the value to something non-zero.
 	c->timeline_semaphore_value = 1;
 
 	// See if we can make a "timeline semaphore", also known as ID3D12Fence
@@ -1040,9 +1050,15 @@ client_d3d12_compositor_init_try_timeline_semaphores(struct client_d3d12_composi
 		return;
 	}
 
-	struct xrt_compositor_semaphore *xcsem = nullptr;
-	wil::unique_handle timeline_semaphore_handle;
-	if (XRT_SUCCESS != xrt_comp_create_semaphore(&(c->xcn->base), timeline_semaphore_handle.put(), &xcsem)) {
+	/*
+	 * This call returns a HANDLE in the out_handle argument, it is owned by
+	 * the returned xrt_compositor_semaphore object we should not track it.
+	 */
+	xret = xrt_comp_create_semaphore(   //
+	    &(c->xcn->base),                // xc
+	    &timeline_semaphore_handle_raw, // out_handle
+	    &xcsem);                        // out_xcsem
+	if (xret != XRT_SUCCESS) {
 		D3D_WARN(c, "Native compositor tried but failed to created a timeline semaphore for us.");
 		return;
 	}
@@ -1054,10 +1070,7 @@ client_d3d12_compositor_init_try_timeline_semaphores(struct client_d3d12_composi
 	// Try to import, importFence throws on failure.
 	wil::com_ptr<ID3D12Fence1> fence = xrt::auxiliary::d3d::d3d12::importFence( //
 	    *(c->device),                                                           //
-	    timeline_semaphore_handle.get());                                       //
-
-	// The fence now owns the handle., importFence throws on failure.
-	timeline_semaphore_handle.release();
+	    timeline_semaphore_handle_raw);                                         //
 
 	// Check flags.
 	D3D12_FENCE_FLAGS flags = fence->GetCreationFlags();

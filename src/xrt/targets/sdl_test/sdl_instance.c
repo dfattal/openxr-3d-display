@@ -149,6 +149,7 @@ sdl_system_devices_init(struct sdl_program *sp)
 	u_builder_create_space_overseer_legacy( //
 	    &sp->usys->broadcast,               // broadcast
 	    head,                               // head
+	    NULL,                               // eyes
 	    NULL,                               // left
 	    NULL,                               // right
 	    NULL,                               // gamepad

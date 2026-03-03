@@ -137,7 +137,7 @@ u_device_free(struct xrt_device *xdev);
  */
 void
 u_device_assign_xdev_roles(
-    struct xrt_device **xdevs, size_t xdev_count, int *head, int *left, int *right, int *gamepad);
+    struct xrt_device **xdevs, size_t xdev_count, int *head, int *eyes, int *face, int *left, int *right, int *gamepad);
 
 /*!
  * Helper function for `get_view_pose` in an HMD driver.
@@ -171,6 +171,7 @@ xrt_result_t
 u_device_get_view_poses(struct xrt_device *xdev,
                         const struct xrt_vec3 *default_eye_relation,
                         int64_t at_timestamp_ns,
+                        enum xrt_view_type view_type,
                         uint32_t view_count,
                         struct xrt_space_relation *out_head_relation,
                         struct xrt_fov *out_fovs,
@@ -205,80 +206,45 @@ u_device_noop_update_inputs(struct xrt_device *xdev);
 
 /*
  *
- * Not implemented function helpers.
+ * Helper function to fill in defaults.
  *
  */
 
 /*!
- * Not implemented function for @ref xrt_device::get_hand_tracking.
+ * Function pointer type for the device's get_tracked_pose function.
  *
  * @ingroup aux_util
  */
-xrt_result_t
-u_device_ni_get_hand_tracking(struct xrt_device *xdev,
-                              enum xrt_input_name name,
-                              int64_t desired_timestamp_ns,
-                              struct xrt_hand_joint_set *out_value,
-                              int64_t *out_timestamp_ns);
+typedef xrt_result_t (*u_device_get_tracked_pose_function_t)(struct xrt_device *xdev,
+                                                             const enum xrt_input_name name,
+                                                             const int64_t at_timestamp_ns,
+                                                             struct xrt_space_relation *const out_relation);
 
 /*!
- * Not implemented function for @ref xrt_device::set_output.
+ * Function pointer type for the device's destroy function.
  *
  * @ingroup aux_util
  */
-xrt_result_t
-u_device_ni_set_output(struct xrt_device *xdev, enum xrt_output_name name, const struct xrt_output_value *value);
+typedef void (*u_device_destroy_function_t)(struct xrt_device *xdev);
 
 /*!
- * Not implemented function for @ref xrt_device::get_view_poses.
+ * Populate the device's function pointers with default implementations.
  *
+ * This function fills in all device function pointers with either noop or
+ * not-implemented versions, allowing drivers to override only the functions
+ * they actually implement. The exceptions are get_tracked_pose and destroy,
+ * which must be implemented by the driver and are passed in as function
+ * pointers, these must not be NULL.
+ *
+ * @param[in,out] xdev The device to populate with default function pointers.
+ * @param[in] get_tracked_pose_fn The function pointer to the device's get_tracked_pose function.
+ * @param[in] destroy_fn The function pointer to the device's destroy function.
  * @ingroup aux_util
  */
-xrt_result_t
-u_device_ni_get_view_poses(struct xrt_device *xdev,
-                           const struct xrt_vec3 *default_eye_relation,
-                           int64_t at_timestamp_ns,
-                           uint32_t view_count,
-                           struct xrt_space_relation *out_head_relation,
-                           struct xrt_fov *out_fovs,
-                           struct xrt_pose *out_poses);
-
-/*!
- * Not implemented function for @ref xrt_device::compute_distortion.
- *
- * @ingroup aux_util
- */
-xrt_result_t
-u_device_ni_compute_distortion(
-    struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *out_result);
-
-/*!
- * Not implemented function for @ref xrt_device::get_visibility_mask.
- *
- * @ingroup aux_util
- */
-xrt_result_t
-u_device_ni_get_visibility_mask(struct xrt_device *xdev,
-                                enum xrt_visibility_mask_type type,
-                                uint32_t view_index,
-                                struct xrt_visibility_mask **out_mask);
-
-/*!
- * Not implemented function for @ref xrt_device::is_form_factor_available.
- *
- * @ingroup aux_util
- */
-bool
-u_device_ni_is_form_factor_available(struct xrt_device *xdev, enum xrt_form_factor form_factor);
-
-/*!
- * Not implemented function for @ref xrt_device::get_battery_status.
- *
- * @ingroup aux_util
- */
-xrt_result_t
-u_device_ni_get_battery_status(struct xrt_device *xdev, bool *out_present, bool *out_charging, float *out_charge);
-
+void
+u_device_populate_function_pointers(struct xrt_device *xdev,
+                                    u_device_get_tracked_pose_function_t get_tracked_pose_fn,
+                                    u_device_destroy_function_t destroy_fn);
 
 #ifdef __cplusplus
 }

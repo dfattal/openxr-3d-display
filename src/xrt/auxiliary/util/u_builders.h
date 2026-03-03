@@ -83,6 +83,8 @@ struct u_builder_search_results
 struct u_builder_roles_helper
 {
 	struct xrt_device *head;
+	struct xrt_device *eyes;
+	struct xrt_device *face;
 	struct xrt_device *left;
 	struct xrt_device *right;
 	struct xrt_device *gamepad;
@@ -164,6 +166,7 @@ u_builder_search(struct xrt_prober *xp,
  */
 void
 u_builder_setup_tracking_origins(struct xrt_device *head,
+                                 struct xrt_device *eyes,
                                  struct xrt_device *left,
                                  struct xrt_device *right,
                                  struct xrt_device *gamepad,
@@ -180,6 +183,7 @@ u_builder_setup_tracking_origins(struct xrt_device *head,
 void
 u_builder_create_space_overseer_legacy(struct xrt_session_event_sink *broadcast,
                                        struct xrt_device *head,
+                                       struct xrt_device *eyes,
                                        struct xrt_device *left,
                                        struct xrt_device *right,
                                        struct xrt_device *gamepad,

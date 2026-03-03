@@ -151,16 +151,24 @@ legacy_open_system_impl(struct xrt_builder *xb,
 	 * Setup the roles.
 	 */
 
-	int head_idx, left_idx, right_idx, gamepad_idx;
-	u_device_assign_xdev_roles(xsysd->xdevs, xsysd->xdev_count, &head_idx, &left_idx, &right_idx, &gamepad_idx);
+	int head_idx, eyes_idx, face_idx, left_idx, right_idx, gamepad_idx;
+	u_device_assign_xdev_roles(xsysd->xdevs, xsysd->xdev_count, &head_idx, &eyes_idx, &face_idx, &left_idx,
+	                           &right_idx, &gamepad_idx);
 
 	struct xrt_device *head = NULL;
+	struct xrt_device *eyes = NULL, *face = NULL;
 	struct xrt_device *left = NULL, *right = NULL, *gamepad = NULL;
 	struct xrt_device *unobstructed_left_ht = NULL, *unobstructed_right_ht = NULL;
 	struct xrt_device *conforming_left_ht = NULL, *conforming_right_ht = NULL;
 
 	if (head_idx >= 0) {
 		head = xsysd->xdevs[head_idx];
+	}
+	if (eyes_idx >= 0) {
+		eyes = xsysd->xdevs[eyes_idx];
+	}
+	if (face_idx >= 0) {
+		face = xsysd->xdevs[face_idx];
 	}
 	if (left_idx >= 0) {
 		left = xsysd->xdevs[left_idx];
@@ -181,6 +189,8 @@ legacy_open_system_impl(struct xrt_builder *xb,
 
 	// Assign to role(s).
 	ubrh->head = head;
+	ubrh->eyes = eyes;
+	ubrh->face = face;
 	ubrh->left = left;
 	ubrh->right = right;
 	ubrh->gamepad = gamepad;

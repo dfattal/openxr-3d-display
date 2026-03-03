@@ -78,6 +78,7 @@ static xrt_result_t
 r_hmd_get_view_poses(struct xrt_device *xdev,
                      const struct xrt_vec3 *default_eye_relation,
                      int64_t at_timestamp_ns,
+                     enum xrt_view_type view_type,
                      uint32_t view_count,
                      struct xrt_space_relation *out_head_relation,
                      struct xrt_fov *out_fovs,
@@ -90,6 +91,7 @@ r_hmd_get_view_poses(struct xrt_device *xdev,
 		    xdev,                       //
 		    default_eye_relation,       //
 		    at_timestamp_ns,            //
+		    view_type,                  //
 		    view_count,                 //
 		    out_head_relation,          //
 		    out_fovs,                   //
@@ -122,12 +124,8 @@ r_hmd_create(struct r_hub *r)
 	    struct r_hmd, flags, input_count, output_count);
 
 	// Setup the basics.
-	rh->base.update_inputs = u_device_noop_update_inputs;
-	rh->base.get_tracked_pose = r_hmd_get_tracked_pose;
-	rh->base.get_hand_tracking = u_device_ni_get_hand_tracking;
+	u_device_populate_function_pointers(&rh->base, r_hmd_get_tracked_pose, r_hmd_destroy);
 	rh->base.get_view_poses = r_hmd_get_view_poses;
-	rh->base.set_output = u_device_ni_set_output;
-	rh->base.destroy = r_hmd_destroy;
 	rh->base.tracking_origin = &r->origin;
 	rh->base.supported.orientation_tracking = true;
 	rh->base.supported.position_tracking = true;

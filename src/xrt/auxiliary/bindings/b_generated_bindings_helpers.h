@@ -17,14 +17,8 @@
 extern "C" {
 #endif
 
-const char *
-xrt_input_name_string(enum xrt_input_name input);
-
 enum xrt_input_name
 xrt_input_name_enum(const char *input);
-
-const char *
-xrt_output_name_string(enum xrt_output_name output);
 
 enum xrt_output_name
 xrt_output_name_enum(const char *output);

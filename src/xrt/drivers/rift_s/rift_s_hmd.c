@@ -40,8 +40,6 @@
 
 #include "rift_s_hmd.h"
 
-#define DEG_TO_RAD(D) ((D)*M_PI / 180.)
-
 
 static xrt_result_t
 rift_s_get_tracked_pose(struct xrt_device *xdev,

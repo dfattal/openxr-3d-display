@@ -200,8 +200,9 @@ create_readback_resources(struct offscreen_target *ot, struct vk_bundle *vk, VkE
 }
 
 static void
-target_create_images(struct comp_target *ct, const struct comp_target_create_images_info *create_info)
+target_create_images(struct comp_target *ct, const struct comp_target_create_images_info *create_info, struct vk_bundle_queue *present_queue)
 {
+	(void)present_queue;
 	struct offscreen_target *ot = (struct offscreen_target *)ct;
 	struct vk_bundle *vk = &ot->base.c->base.vk;
 	bool use_unorm = false, use_srgb = false, maybe_convert = false;
@@ -298,7 +299,7 @@ target_acquire(struct comp_target *ct, uint32_t *out_index)
 
 static VkResult
 target_present(struct comp_target *ct,
-               VkQueue queue,
+               struct vk_bundle_queue *present_queue,
                uint32_t index,
                uint64_t timeline_semaphore_value,
                int64_t desired_present_time_ns,
@@ -405,7 +406,7 @@ target_present(struct comp_target *ct,
 	}
 
 	vk->vkResetFences(vk->device, 1, &ot->readback_fence);
-	ret = vk->vkQueueSubmit(queue, 1, &submit_info, ot->readback_fence);
+	ret = vk->vkQueueSubmit(present_queue->queue, 1, &submit_info, ot->readback_fence);
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(ct->c, "Failed to submit readback commands: %d", ret);
 		vk->vkFreeCommandBuffers(vk->device, ot->cmd_pool, 1, &cmd);

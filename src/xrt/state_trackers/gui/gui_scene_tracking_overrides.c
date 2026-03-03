@@ -11,6 +11,7 @@
 #include "util/u_misc.h"
 #include "util/u_format.h"
 #include "util/u_logging.h"
+#include "util/u_pretty_print.h"
 
 #include "util/u_config_json.h"
 
@@ -23,7 +24,6 @@
 #include "gui_common.h"
 #include "gui_imgui.h"
 
-#include "bindings/b_generated_bindings_helpers.h"
 
 struct gui_tracking_overrides
 {
@@ -243,7 +243,7 @@ scene_render(struct gui_scene *scene, struct gui_program *p)
 					continue;
 				}
 
-				const char *name_str = xrt_input_name_string(input_name);
+				const char *name_str = u_str_xrt_input_name(input_name);
 				bool selected = o->input_name == input_name;
 				if (igCheckbox(name_str, &selected)) {
 					o->input_name = input_name;

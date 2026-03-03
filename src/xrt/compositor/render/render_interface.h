@@ -1,4 +1,5 @@
 // Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -15,6 +16,8 @@
 
 #include "vk/vk_helpers.h"
 #include "vk/vk_cmd_pool.h"
+
+#include "shaders/render_shaders_interface.h"
 
 
 #ifdef __cplusplus
@@ -54,15 +57,21 @@ extern "C" {
 /*!
  * Max number of layers for layer squasher, can be different from
  * @ref XRT_MAX_LAYERS as the render module is separate from the compositor.
+ * It has to match RENDER_MAX_LAYERS in the layer.comp shader.
  */
-#define RENDER_MAX_LAYERS (XRT_MAX_LAYERS)
+#define RENDER_MAX_LAYERS (128)
+
+/*!
+ * The maximum number samplers per view that can be used by the compute shader
+ * for layer composition (layer.comp)
+ */
+#define RENDER_CS_MAX_SAMPLERS_PER_VIEW 2
 
 /*!
  * Max number of images that can be given at a single time to the layer
  * squasher in a single dispatch.
  */
-#define RENDER_MAX_IMAGES_SIZE (RENDER_MAX_LAYERS * XRT_MAX_VIEWS)
-#define RENDER_MAX_IMAGES_COUNT(RENDER_RESOURCES) (RENDER_MAX_LAYERS * RENDER_RESOURCES->view_count)
+#define RENDER_MAX_IMAGES_SIZE (RENDER_MAX_LAYERS * RENDER_CS_MAX_SAMPLERS_PER_VIEW)
 
 /*!
  * Maximum number of times that the layer squasher shader can run per
@@ -87,12 +96,36 @@ extern "C" {
 //! The binding that the shared layer fragment shader has its source on.
 #define RENDER_BINDING_LAYER_SHARED_SRC 1
 
+/*!
+ * The maximum number samplers per view that can be used by the compute shader
+ * for layer composition (layer.comp)
+ */
+#define RENDER_CS_MAX_SAMPLERS_PER_VIEW 2
 
 /*
  *
  * Util functions.
  *
  */
+
+/*!
+ * Determines the maximum number of compositor layers supported based on Vulkan
+ * device limits and the composition path being used.
+ *
+ * @param vk                 Vulkan bundle containing device properties
+ * @param use_compute        True if using compute pipeline path, false for graphics
+ * @param desired_max_layers Maximum layers requested by the compositor
+ * @return                   Actual maximum layers supported, clamped by device limits (minimum 16)
+ *
+ */
+uint32_t
+render_max_layers_capable(const struct vk_bundle *vk, bool use_compute, uint32_t desired_max_layers);
+
+/*!
+ * Create a simplified projection matrix for timewarp.
+ */
+void
+render_calc_time_warp_projection(const struct xrt_fov *fov, struct xrt_matrix_4x4 *result);
 
 /*!
  * Calculates a timewarp matrix which takes in NDC coords and gives out results
@@ -121,54 +154,6 @@ render_calc_time_warp_matrix(const struct xrt_pose *src_pose,
  */
 void
 render_calc_uv_to_tangent_lengths_rect(const struct xrt_fov *fov, struct xrt_normalized_rect *out_rect);
-
-
-/*
- *
- * Shaders.
- *
- */
-
-/*!
- * Holds all shaders.
- */
-struct render_shaders
-{
-	VkShaderModule blit_comp;
-	VkShaderModule clear_comp;
-	VkShaderModule layer_comp;
-	VkShaderModule distortion_comp;
-
-	VkShaderModule mesh_vert;
-	VkShaderModule mesh_frag;
-
-
-	/*
-	 * New layer renderer.
-	 */
-
-	VkShaderModule layer_cylinder_vert;
-	VkShaderModule layer_cylinder_frag;
-
-	VkShaderModule layer_equirect2_vert;
-	VkShaderModule layer_equirect2_frag;
-
-	VkShaderModule layer_projection_vert;
-	VkShaderModule layer_quad_vert;
-	VkShaderModule layer_shared_frag;
-};
-
-/*!
- * Loads all of the shaders that the compositor uses.
- */
-bool
-render_shaders_load(struct render_shaders *s, struct vk_bundle *vk);
-
-/*!
- * Unload and cleanup shaders.
- */
-void
-render_shaders_fini(struct render_shaders *s, struct vk_bundle *vk);
 
 
 /*
@@ -924,6 +909,8 @@ struct render_gfx_layer_cylinder_data
 	float central_angle;
 	float aspect_ratio;
 	float _pad;
+	struct xrt_colour_rgba_f32 color_scale;
+	struct xrt_colour_rgba_f32 color_bias;
 };
 
 /*!
@@ -943,6 +930,8 @@ struct render_gfx_layer_equirect2_data
 	float central_horizontal_angle;
 	float upper_vertical_angle;
 	float lower_vertical_angle;
+	struct xrt_colour_rgba_f32 color_scale;
+	struct xrt_colour_rgba_f32 color_bias;
 };
 
 /*!
@@ -953,8 +942,10 @@ struct render_gfx_layer_equirect2_data
 struct render_gfx_layer_projection_data
 {
 	struct xrt_normalized_rect post_transform;
-	struct xrt_normalized_rect to_tanget;
+	struct xrt_normalized_rect to_tangent;
 	struct xrt_matrix_4x4 mvp;
+	struct xrt_colour_rgba_f32 color_scale;
+	struct xrt_colour_rgba_f32 color_bias;
 };
 
 /*!
@@ -966,6 +957,8 @@ struct render_gfx_layer_quad_data
 {
 	struct xrt_normalized_rect post_transform;
 	struct xrt_matrix_4x4 mvp;
+	struct xrt_colour_rgba_f32 color_scale;
+	struct xrt_colour_rgba_f32 color_bias;
 };
 
 /*!
@@ -1201,87 +1194,111 @@ struct render_compute_layer_ubo_data
 	struct
 	{
 		uint32_t value;
-		uint32_t padding[3];
+		uint32_t padding0; // Padding up to a vec4.
+		uint32_t padding1;
+		uint32_t padding2;
 	} layer_count;
 
 	struct xrt_normalized_rect pre_transform;
-	struct xrt_normalized_rect post_transforms[RENDER_MAX_LAYERS];
 
-	//! std140 uvec2, corresponds to enum xrt_layer_type and unpremultiplied alpha.
 	struct
 	{
-		uint32_t val;
-		uint32_t unpremultiplied;
-		uint32_t padding[XRT_MAX_VIEWS];
-	} layer_type[RENDER_MAX_LAYERS];
+		struct xrt_normalized_rect post_transforms;
 
-	//! Which image/sampler(s) correspond to each layer.
-	struct
-	{
-		uint32_t images[XRT_MAX_VIEWS];
-		//! @todo Implement separated samplers and images (and change to samplers[2])
-		uint32_t padding[XRT_MAX_VIEWS];
-	} images_samplers[RENDER_MAX_LAYERS];
+		/*!
+		 * Corresponds to enum xrt_layer_type and unpremultiplied alpha.
+		 *
+		 * std140 uvec2, because it is an array it gets padded to vec4.
+		 */
+		struct
+		{
+			uint32_t layer_type;
+			uint32_t unpremultiplied_alpha;
+			uint32_t _padding0;
+			uint32_t _padding1;
+		} layer_data;
 
-	//! Shared between cylinder and equirect2.
-	struct xrt_matrix_4x4 mv_inverse[RENDER_MAX_LAYERS];
+		/*!
+		 * Which image/sampler(s) correspond to each layer.
+		 *
+		 * std140 uvec2, because it is an array it gets padded to vec4.
+		 */
+		struct
+		{
+			uint32_t color_image_index;
+			uint32_t depth_image_index;
 
+			//! @todo Implement separated samplers and images (and change to samplers[2])
+			uint32_t _padding0;
+			uint32_t _padding1;
+		} image_info;
 
-	/*!
-	 * For cylinder layer
-	 */
-	struct
-	{
-		float radius;
-		float central_angle;
-		float aspect_ratio;
-		float padding;
-	} cylinder_data[RENDER_MAX_LAYERS];
-
-
-	/*!
-	 * For equirect2 layers
-	 */
-	struct
-	{
-		float radius;
-		float central_horizontal_angle;
-		float upper_vertical_angle;
-		float lower_vertical_angle;
-	} eq2_data[RENDER_MAX_LAYERS];
+		//! Shared between cylinder and equirect2.
+		struct xrt_matrix_4x4 mv_inverse;
 
 
-	/*!
-	 * For projection layers
-	 */
+		/*!
+		 * For cylinder layer
+		 */
+		struct
+		{
+			float radius;
+			float central_angle;
+			float aspect_ratio;
+			float padding;
+		} cylinder_data;
 
-	//! Timewarp matrices
-	struct xrt_matrix_4x4 transforms[RENDER_MAX_LAYERS];
+
+		/*!
+		 * For equirect2 layers
+		 */
+		struct
+		{
+			float radius;
+			float central_horizontal_angle;
+			float upper_vertical_angle;
+			float lower_vertical_angle;
+		} eq2_data;
 
 
-	/*!
-	 * For quad layers
-	 */
+		/*!
+		 * For projection layers
+		 */
 
-	//! All quad transforms and coordinates are in view space
-	struct
-	{
-		struct xrt_vec3 val;
-		float padding;
-	} quad_position[RENDER_MAX_LAYERS];
-	struct
-	{
-		struct xrt_vec3 val;
-		float padding;
-	} quad_normal[RENDER_MAX_LAYERS];
-	struct xrt_matrix_4x4 inverse_quad_transform[RENDER_MAX_LAYERS];
+		//! Timewarp matrices
+		struct xrt_matrix_4x4 transforms_timewarp;
 
-	//! Quad extent in world scale
-	struct
-	{
-		struct xrt_vec2 val;
-		float padding[XRT_MAX_VIEWS];
-	} quad_extent[RENDER_MAX_LAYERS];
+		/*!
+		 * For quad layers
+		 */
+
+		//! All quad transforms and coordinates are in view space
+		struct
+		{
+			struct xrt_vec3 val;
+			float padding;
+		} quad_position;
+		struct
+		{
+			struct xrt_vec3 val;
+			float padding;
+		} quad_normal;
+		struct xrt_matrix_4x4 inverse_quad_transform;
+
+		//! Quad extent in world scale
+		struct
+		{
+			struct xrt_vec2 val;
+			float padding0;
+			float padding1;
+		} quad_extent;
+
+		/*!
+		 * Color scale and bias for all layers
+		 */
+		struct xrt_colour_rgba_f32 color_scale;
+		struct xrt_colour_rgba_f32 color_bias;
+	} layers[RENDER_MAX_LAYERS];
 };
 
 /*!
@@ -1294,7 +1311,8 @@ struct render_compute_distortion_ubo_data
 	struct render_viewport_data views[XRT_MAX_VIEWS];
 	struct xrt_normalized_rect pre_transforms[XRT_MAX_VIEWS];
 	struct xrt_normalized_rect post_transforms[XRT_MAX_VIEWS];
-	struct xrt_matrix_4x4 transforms[XRT_MAX_VIEWS];
+	struct xrt_matrix_4x4 transform_timewarp_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_matrix_4x4 transform_timewarp_scanout_end[XRT_MAX_VIEWS];
 };
 
 /*!
@@ -1364,7 +1382,8 @@ render_compute_projection_timewarp(struct render_compute *render,
                                    const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
                                    const struct xrt_pose src_poses[XRT_MAX_VIEWS],
                                    const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
-                                   const struct xrt_pose new_poses[XRT_MAX_VIEWS],
+                                   const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
+                                   const struct xrt_pose new_poses_scanout_end[XRT_MAX_VIEWS],
                                    VkImage target_image,
                                    VkImageView target_image_view,
                                    const struct render_viewport_data views[XRT_MAX_VIEWS]);
@@ -1373,13 +1392,28 @@ render_compute_projection_timewarp(struct render_compute *render,
  * @public @memberof render_compute
  */
 void
-render_compute_projection(struct render_compute *render,
-                          VkSampler src_samplers[XRT_MAX_VIEWS],
-                          VkImageView src_image_views[XRT_MAX_VIEWS],
-                          const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
-                          VkImage target_image,
-                          VkImageView target_image_view,
-                          const struct render_viewport_data views[XRT_MAX_VIEWS]);
+render_compute_projection_scanout_compensation(struct render_compute *render,
+                                               VkSampler src_samplers[XRT_MAX_VIEWS],
+                                               VkImageView src_image_views[XRT_MAX_VIEWS],
+                                               const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                               const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
+                                               const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
+                                               const struct xrt_pose new_poses_scanout_end[XRT_MAX_VIEWS],
+                                               VkImage target_image,
+                                               VkImageView target_image_view,
+                                               const struct render_viewport_data views[XRT_MAX_VIEWS]);
+
+/*!
+ * @public @memberof render_compute
+ */
+void
+render_compute_projection_no_timewarp(struct render_compute *render,
+                                      VkSampler src_samplers[XRT_MAX_VIEWS],
+                                      VkImageView src_image_views[XRT_MAX_VIEWS],
+                                      const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                      VkImage target_image,
+                                      VkImageView target_image_view,
+                                      const struct render_viewport_data views[XRT_MAX_VIEWS]);
 
 /*!
  * @public @memberof render_compute

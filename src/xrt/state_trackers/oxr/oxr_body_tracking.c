@@ -1,4 +1,5 @@
 // Copyright 2024, Collabora, Ltd.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -20,6 +21,7 @@
 #include "oxr_handle.h"
 #include "oxr_conversions.h"
 #include "oxr_chain.h"
+#include "oxr_roles.h"
 
 static enum xrt_body_joint_set_type_fb
 oxr_to_xrt_body_joint_set_type_fb(XrBodyJointSetFB joint_set_type)
@@ -71,7 +73,7 @@ oxr_create_body_tracker_fb(struct oxr_logger *log,
 	}
 #endif
 
-	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sess->sys, body);
+	struct xrt_device *xdev = GET_STATIC_XDEV_BY_ROLE(sess->sys, body);
 	if (xdev == NULL || !xdev->supported.body_tracking) {
 		return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED, "No device found for body tracking role");
 	}

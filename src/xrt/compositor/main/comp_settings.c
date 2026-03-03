@@ -1,4 +1,5 @@
 // Copyright 2019, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -10,7 +11,11 @@
 #include "util/u_debug.h"
 #include "comp_settings.h"
 
+#ifdef XRT_OS_ANDROID
 #define USE_COMPUTE_DEFAULT false
+#else
+#define USE_COMPUTE_DEFAULT true
+#endif
 
 // clang-format off
 DEBUG_GET_ONCE_LOG_OPTION(log, "XRT_COMPOSITOR_LOG", U_LOGGING_INFO)
@@ -119,6 +124,13 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 
 		// Fallback
 		add_format(s, VK_FORMAT_R8G8B8A8_SRGB);
+#elif defined(XRT_OS_OSX)
+		/*
+		 * On MacOS the most ubiquitous sRGB format is B8G8R8A8_SRGB,
+		 * and it's the only sRGB (non-linear) format available.
+		 * https://vulkan.gpuinfo.org/listsurfaceformats.php?platform=macos
+		 */
+		add_format(s, VK_FORMAT_B8G8R8A8_SRGB);
 #else
 #error "Need to pick default swapchain format for this platform!"
 #endif

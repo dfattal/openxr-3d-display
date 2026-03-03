@@ -1,4 +1,5 @@
 // Copyright 2020, Collabora, Ltd.
+// Copyright 2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -293,6 +294,11 @@ swapchain_server_create(struct ipc_client_compositor *icc,
 	    &use_dedicated_allocation,    // out
 	    remote_handles,               // handles
 	    XRT_MAX_SWAPCHAIN_IMAGES);    // handles
+	if (xret == XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED) {
+		// Don't error print this, will spam CTS logs.
+		IPC_DEBUG(icc->ipc_c, "Got XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED");
+		return xret;
+	}
 	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_swapchain_create");
 
 	struct ipc_client_swapchain *ics = U_TYPED_CALLOC(struct ipc_client_swapchain);
@@ -350,7 +356,12 @@ swapchain_server_import(struct ipc_client_compositor *icc,
 	    handles,                      // handles
 	    image_count,                  // handles
 	    &id);                         // out
-	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_swapchain_create");
+	if (xret == XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED) {
+		// Don't error print this, not an error.
+		IPC_DEBUG(icc->ipc_c, "Got XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED");
+		return xret;
+	}
+	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_swapchain_import");
 
 	struct ipc_client_swapchain *ics = U_TYPED_CALLOC(struct ipc_client_swapchain);
 	ics->base.base.image_count = image_count;

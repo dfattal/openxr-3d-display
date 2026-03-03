@@ -1,4 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
+// Copyright 2025, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -606,7 +607,7 @@ init_composite_resources(struct multi_compositor *mc, struct vk_bundle *vk, uint
 	    {
 	        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 	        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-	        .module = mc->session_render.shaders.layer_shared_frag,
+	        .module = mc->session_render.shaders.layer_quad_frag,
 	        .pName = "main",
 	    },
 	};
@@ -1449,7 +1450,7 @@ recreate_session_swapchain(struct multi_compositor *mc, struct vk_bundle *vk)
 	    .color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
 	    .present_mode = VK_PRESENT_MODE_FIFO_KHR,
 	};
-	comp_target_create_images(ct, &info);
+	comp_target_create_images(ct, &info, vk->main_queue);
 
 	if (!comp_target_has_images(ct)) {
 		U_LOG_E("[per-session] Failed to recreate swapchain images");
@@ -2200,13 +2201,8 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 
 	// Use pre-allocated command buffer for this swapchain image
 	VkCommandBuffer cmd = mc->session_render.cmd_buffers[buffer_index];
-	ret = vk->vkResetCommandBuffer(cmd, 0);
-	if (ret != VK_SUCCESS) {
-		U_LOG_E("[per-session] Failed to reset command buffer: %s", vk_result_string(ret));
-		return;
-	}
 
-	// Begin command buffer
+	// Begin command buffer (implicitly resets with ONE_TIME_SUBMIT)
 	VkCommandBufferBeginInfo begin_info = {
 	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
 	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
@@ -2835,7 +2831,7 @@ submit_and_present:
 	mc->session_render.fenced_buffer = -1; // Fence already waited, no deferred wait needed
 
 	// Present the image (GPU work is complete, semaphore already signaled)
-	ret = comp_target_present(ct, vk->main_queue->queue, buffer_index, 0, display_time_ns, 0);
+	ret = comp_target_present(ct, vk->main_queue, buffer_index, 0, display_time_ns, 0);
 	if (ret == VK_ERROR_OUT_OF_DATE_KHR) {
 		U_LOG_W("[per-session] Present returned OUT_OF_DATE, flagging for recreation");
 		mc->session_render.swapchain_needs_recreate = true;
@@ -3173,6 +3169,7 @@ update_session_state_locked(struct multi_system_compositor *msc)
 	    .fb_face_tracking2_enabled = false,
 	    .meta_body_tracking_full_body_enabled = false,
 	    .meta_body_tracking_calibration_enabled = false,
+	    .android_face_tracking_enabled = false,
 	};
 
 	switch (msc->sessions.state) {
@@ -3313,8 +3310,17 @@ multi_main_loop(struct multi_system_compositor *msc)
 		U_LOG_I("Stopped native session, shutting down.");
 		xrt_comp_end_session(xc);
 		break;
-	case MULTI_SYSTEM_STATE_STOPPED: break;
-	default: assert(false);
+	case MULTI_SYSTEM_STATE_STOPPED: U_LOG_I("Already stopped, nothing to clean up."); break;
+	case MULTI_SYSTEM_STATE_INIT_WARM_START:
+		U_LOG_I("Cleaning up from warm start state.");
+		xrt_comp_end_session(xc);
+		break;
+	case MULTI_SYSTEM_STATE_INVALID:
+		U_LOG_W("Cleaning up from invalid state.");
+		// Best effort cleanup
+		xrt_comp_end_session(xc);
+		break;
+	default: U_LOG_E("Unknown session state during cleanup: %d", msc->sessions.state); assert(false);
 	}
 
 	os_thread_helper_unlock(&msc->oth);
@@ -3338,7 +3344,8 @@ thread_func(void *ptr)
  */
 
 static xrt_result_t
-system_compositor_set_state(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, bool visible, bool focused)
+system_compositor_set_state(
+    struct xrt_system_compositor *xsc, struct xrt_compositor *xc, bool visible, bool focused, int64_t timestamp_ns)
 {
 	struct multi_system_compositor *msc = multi_system_compositor(xsc);
 	struct multi_compositor *mc = multi_compositor(xc);
@@ -3353,6 +3360,7 @@ system_compositor_set_state(struct xrt_system_compositor *xsc, struct xrt_compos
 		xse.type = XRT_SESSION_EVENT_STATE_CHANGE;
 		xse.state.visible = visible;
 		xse.state.focused = focused;
+		xse.state.timestamp_ns = timestamp_ns;
 
 		return multi_compositor_push_event(mc, &xse);
 	}

@@ -18,6 +18,8 @@
 
 #include "xrt/xrt_defines.h"
 
+#include "math/m_mathinclude.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -74,6 +76,25 @@ extern "C" {
  * @ingroup aux_math
  */
 #define CLAMP(X, A, B) (MIN(MAX((X), (A)), (B)))
+
+/*!
+ * Degrees to radians conversion.
+ *
+ * @ingroup aux_math
+ */
+// clang-format off
+// @todo: Remove the clang-format off/on when we move to a newer clang-format in CI.
+#define DEG_TO_RAD(DEG) ((DEG) * M_PI / 180.)
+// clang-format on
+
+/*!
+ * Radians to degrees conversion.
+ *
+ * @ingroup aux_math
+ */
+// clang-format off
+#define RAD_TO_DEG(RAD) ((RAD) * 180.0 / M_PI)
+// clang-format on
 
 
 /*
@@ -272,6 +293,15 @@ math_quat_from_vec_a_to_vec_b(const struct xrt_vec3 *vec_a, const struct xrt_vec
  */
 bool
 math_quat_validate(const struct xrt_quat *quat);
+
+/*!
+ * Check if this quat is (approximately) identity.
+ *
+ * @relates xrt_quat
+ * @ingroup aux_math
+ */
+bool
+math_quat_is_identity(const struct xrt_quat *quat, float epsilon);
 
 /*!
  * Check if this quat is within 1% of unit length.
@@ -877,6 +907,33 @@ math_compute_fovs(double w_total,
                   double h_1,
                   double vertfov_total,
                   struct xrt_fov *fov);
+
+/*!
+ * Compute the FOV to use when parallelizing canted views.
+ *
+ * Some applications do not support rendering for view orientations that are
+ * not parallel to each other.
+ * When using a headset with physically canted displays, such applications
+ * require parallelizing the views, i.e. forcing the orientations of the views
+ * to be parallel.
+ * When the application passes content rendered for parallel views to the
+ * compositor, the compositor typically reprojects this content such that it
+ * matches the physical canting of the displays, effectively rotating the view
+ * orientation.
+ *
+ * When rotating the view orientation, parts of the FOV are cut off on the side
+ * the view roates away from and parts of previously unseen content is pulled
+ * in from the side the view rotates towards. Therefore, when parallezing
+ * views, the application should render with an adjusted FOV that covers the
+ * area that will be in the FOV of the view *after* the compositor reprojects
+ * it back to the physical canted orientation.
+ *
+ * @ingroup aux_math
+ */
+void
+math_compute_parallelized_fov(const struct xrt_fov *fov,
+                              const struct xrt_quat *canted_view_orientation,
+                              struct xrt_fov *out_parallelized_fov);
 
 #ifdef __cplusplus
 }

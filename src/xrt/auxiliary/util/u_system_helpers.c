@@ -7,6 +7,7 @@
  * @ingroup aux_util
  */
 
+#include "util/u_debug.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_prober.h"
 
@@ -17,6 +18,18 @@
 
 #include <assert.h>
 #include <limits.h>
+
+
+/*
+ *
+ * Env variable options.
+ *
+ */
+
+DEBUG_GET_ONCE_OPTION(ht_left_unobstructed, "XRT_DEVICE_HAND_TRACKER_LEFT_UNOBSTRUCTED_SERIAL", NULL)
+DEBUG_GET_ONCE_OPTION(ht_right_unobstructed, "XRT_DEVICE_HAND_TRACKER_RIGHT_UNOBSTRUCTED_SERIAL", NULL)
+DEBUG_GET_ONCE_OPTION(ht_left_conforming, "XRT_DEVICE_HAND_TRACKER_LEFT_CONFORMING_SERIAL", NULL)
+DEBUG_GET_ONCE_OPTION(ht_right_conforming, "XRT_DEVICE_HAND_TRACKER_RIGHT_CONFORMING_SERIAL", NULL)
 
 
 /*
@@ -51,6 +64,7 @@ type_to_small_string(enum xrt_device_feature_type type)
 	case XRT_DEVICE_FEATURE_HAND_TRACKING_LEFT: return "hand_tracking_left";
 	case XRT_DEVICE_FEATURE_HAND_TRACKING_RIGHT: return "hand_tracking_right";
 	case XRT_DEVICE_FEATURE_EYE_TRACKING: return "eye_tracking";
+	case XRT_DEVICE_FEATURE_FACE_TRACKING: return "face_tracking";
 	default: return "invalid";
 	}
 }
@@ -148,6 +162,8 @@ feature_inc(struct xrt_system_devices *xsysd, enum xrt_device_feature_type type)
 		xret = set_hand_tracking_enabled(xsysd, XRT_HAND_RIGHT, true);
 	} else if (type == XRT_DEVICE_FEATURE_EYE_TRACKING) {
 		xret = xrt_device_begin_feature(xsysd->static_roles.eyes, type);
+	} else if (type == XRT_DEVICE_FEATURE_FACE_TRACKING) {
+		xret = xrt_device_begin_feature(xsysd->static_roles.face, type);
 	} else {
 		xret = XRT_ERROR_FEATURE_NOT_SUPPORTED;
 	}
@@ -180,7 +196,11 @@ feature_dec(struct xrt_system_devices *xsysd, enum xrt_device_feature_type type)
 	} else if (type == XRT_DEVICE_FEATURE_HAND_TRACKING_RIGHT) {
 		xret = set_hand_tracking_enabled(xsysd, XRT_HAND_RIGHT, false);
 	} else if (type == XRT_DEVICE_FEATURE_EYE_TRACKING) {
+		// @todo When eyes are moved from the static roles, we need to end features on the old device when
+		// swapping which device is in the eyes role
 		xret = xrt_device_end_feature(xsysd->static_roles.eyes, type);
+	} else if (type == XRT_DEVICE_FEATURE_FACE_TRACKING) {
+		xret = xrt_device_end_feature(xsysd->static_roles.face, type);
 	} else {
 		xret = XRT_ERROR_FEATURE_NOT_SUPPORTED;
 	}
@@ -312,10 +332,20 @@ u_system_devices_create_from_prober(struct xrt_instance *xinst,
 struct xrt_device *
 u_system_devices_get_ht_device(struct xrt_system_devices *xsysd, enum xrt_input_name name)
 {
+	const char *ht_serial = NULL;
+	switch (name) {
+	case XRT_INPUT_HT_UNOBSTRUCTED_LEFT: ht_serial = debug_get_option_ht_left_unobstructed(); break;
+	case XRT_INPUT_HT_UNOBSTRUCTED_RIGHT: ht_serial = debug_get_option_ht_right_unobstructed(); break;
+	case XRT_INPUT_HT_CONFORMING_LEFT: ht_serial = debug_get_option_ht_left_conforming(); break;
+	case XRT_INPUT_HT_CONFORMING_RIGHT: ht_serial = debug_get_option_ht_right_conforming(); break;
+	default: break;
+	}
+
 	for (uint32_t i = 0; i < xsysd->xdev_count; i++) {
 		struct xrt_device *xdev = xsysd->xdevs[i];
 
-		if (xdev == NULL || !xdev->supported.hand_tracking) {
+		if (xdev == NULL || !xdev->supported.hand_tracking ||
+		    (ht_serial != NULL && (strncmp(xdev->serial, ht_serial, XRT_DEVICE_NAME_LEN) != 0))) {
 			continue;
 		}
 

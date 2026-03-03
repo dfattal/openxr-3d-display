@@ -41,7 +41,7 @@ swapchain_destroy(struct xrt_swapchain *xsc)
 {
 	struct comp_swapchain *sc = comp_swapchain(xsc);
 
-	VK_TRACE(sc->vk, "DESTROY");
+	VK_DEBUG(sc->vk, "%p DESTROY(not-actual)", (void *)sc);
 
 	u_threading_stack_push(&sc->cscs->destroy_swapchains, sc);
 }
@@ -483,6 +483,8 @@ error:
 static void
 really_destroy(struct comp_swapchain *sc)
 {
+	VK_DEBUG(sc->vk, "%p REALLY_DESTROY", (void *)sc);
+
 	// Reuse close function.
 	comp_swapchain_teardown(sc);
 

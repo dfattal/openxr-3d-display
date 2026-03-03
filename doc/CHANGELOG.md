@@ -6,6 +6,275 @@ SPDX-License-Identifier: CC0-1.0
 SPDX-FileCopyrightText: 2020-2025 Collabora, Ltd. and the Monado contributors
 -->
 
+## Monado 25.1.0 (2025-12-09)
+
+This is the second stable Monado release of 2025. It contains a variety of
+features, fixes, and improvements over the previous release, and is a
+recommended upgrade for all users and downstream projects. Important fixes _may_
+be backported from "main" to a 25.1.x stable branch, depending on severity.
+
+Over 50 commit authors or co-authors in the Monado community contributed over
+550 commits merged since Monado 25.0 -- thank you! Thanks also to those whose
+efforts in community spaces do not show up in the commit log: your contributions
+are an important part of the open ecosystem of XR.
+
+- Major changes
+  - Add: Support for the `XR_EXT_hand_tracking_data_source` extension.
+    ([!2509](https://gitlab.freedesktop.org/monado/monado/merge_requests/2509),
+    [!2521](https://gitlab.freedesktop.org/monado/monado/merge_requests/2521),
+    [!2522](https://gitlab.freedesktop.org/monado/monado/merge_requests/2522),
+    [!2523](https://gitlab.freedesktop.org/monado/monado/merge_requests/2523))
+  - Add: `OXR_HAND_TRACKING_PRIORITIZE_CONFORMING` debug environment variable. When
+    enabled, prioritizes the conforming hand-tracking source over the unobstructed
+    source when both are active. This is useful for debugging or forcing
+    controller-based hand poses.
+    ([!2509](https://gitlab.freedesktop.org/monado/monado/merge_requests/2509),
+    [!2521](https://gitlab.freedesktop.org/monado/monado/merge_requests/2521),
+    [!2522](https://gitlab.freedesktop.org/monado/monado/merge_requests/2522),
+    [!2523](https://gitlab.freedesktop.org/monado/monado/merge_requests/2523))
+  - Change: Differentiated the hand-tracking device role and `xrt_input_name` into
+    two distinct types: **`unobstructed`**, for standard hand-tracking where the
+    hand is free, and **`conforming`**, for hand-tracking where a held object
+    (e.g., a controller) obstructs full finger motion. This change allows for more
+    flexible device configurations, supporting either a single `xrt_device` for
+    both roles or separate devices for each.
+    ([!2509](https://gitlab.freedesktop.org/monado/monado/merge_requests/2509),
+    [!2521](https://gitlab.freedesktop.org/monado/monado/merge_requests/2521),
+    [!2522](https://gitlab.freedesktop.org/monado/monado/merge_requests/2522),
+    [!2523](https://gitlab.freedesktop.org/monado/monado/merge_requests/2523))
+  - Add: New `xrt` primitive: `xrt_future`, the internal Monado representation of
+    OpenXR futures.
+    ([!2554](https://gitlab.freedesktop.org/monado/monado/merge_requests/2554))
+  - Add: Support for `XR_EXT_future` extension, enabling implementation of new
+    extensions with asynchronous functions.
+    ([!2554](https://gitlab.freedesktop.org/monado/monado/merge_requests/2554))
+  - Add: Developer documentation for using futures and implementing async
+    functions, including server, client, and IPC integration guidelines.
+    ([!2554](https://gitlab.freedesktop.org/monado/monado/merge_requests/2554))
+  - Add: New UI button to the Android About page for scanning Cardboard calibration
+    QR codes and saving them to device
+    ([!2560](https://gitlab.freedesktop.org/monado/monado/merge_requests/2560),
+    [!2614](https://gitlab.freedesktop.org/monado/monado/merge_requests/2614))
+  - Change: Android driver support for loading Cardboard calibration from device
+    ([!2560](https://gitlab.freedesktop.org/monado/monado/merge_requests/2560),
+    [!2614](https://gitlab.freedesktop.org/monado/monado/merge_requests/2614))
+- XRT Interface
+  - Add: `XRT_ERROR_OUTPUT_UNSUPPORTED`
+    ([!2360](https://gitlab.freedesktop.org/monado/monado/merge_requests/2360))
+  - Add: `XRT_ERROR_OUTPUT_REQUEST_FAILURE`
+    ([!2360](https://gitlab.freedesktop.org/monado/monado/merge_requests/2360))
+  - Add: Brightness control feature and callbacks
+    ([!2426](https://gitlab.freedesktop.org/monado/monado/merge_requests/2426))
+  - Add: Support for `XR_EXT_plane_detection` extension implementation on
+    `xrt_device` driver.
+    ([!2439](https://gitlab.freedesktop.org/monado/monado/merge_requests/2439))
+  - Add: Support for `XR_FB_haptic_pcm` extension implementation on `xrt_device`
+    driver.
+    ([!2463](https://gitlab.freedesktop.org/monado/monado/merge_requests/2463))
+  - Add: Byte order constants and conversion functions.
+    ([!2477](https://gitlab.freedesktop.org/monado/monado/merge_requests/2477))
+  - Add: Support for `XR_META_body_tracking_full_body` extension implementation on
+    `xrt_device` driver.
+    ([!2481](https://gitlab.freedesktop.org/monado/monado/merge_requests/2481))
+  - Add: Support for `XR_EXT_user_presence` extension implementation on
+    `xrt_device` driver.
+    ([!2507](https://gitlab.freedesktop.org/monado/monado/merge_requests/2507))
+  - Add: Support for `XR_META_body_tracking_calibration` extension implementation
+    on `xrt_device` driver.
+    ([!2547](https://gitlab.freedesktop.org/monado/monado/merge_requests/2547))
+  - Add: Support for `XR_ANDROID_face_tracking`  extension implementation on
+    `xrt_device` driver.
+    ([!2605](https://gitlab.freedesktop.org/monado/monado/merge_requests/2605))
+  - Add: A `get_compositor_info` function to `xrt_device` to allow drivers to
+    provide live per-mode information about composition/pacing parameters such as
+    display scanout time and direction.
+    ([!2617](https://gitlab.freedesktop.org/monado/monado/merge_requests/2617))
+  - Add: `XRT_DEVICE_FEATURE_FACE_TRACKING` for dynamically enabling face tracking
+    on an `xrt_device` when needed.
+    ([!2649](https://gitlab.freedesktop.org/monado/monado/merge_requests/2649))
+  - Change: `xrt_device_get_hand_tracking`, `xrt_device_set_output`,
+    `xrt_device_get_view_pose`, `xrt_device_compute_distortion` now return
+    `xrt_result_t` to improve error handling in the state tracker.
+    ([!2357](https://gitlab.freedesktop.org/monado/monado/merge_requests/2357),
+    [!2360](https://gitlab.freedesktop.org/monado/monado/merge_requests/2360),
+    [!2365](https://gitlab.freedesktop.org/monado/monado/merge_requests/2365),
+    [!2367](https://gitlab.freedesktop.org/monado/monado/merge_requests/2367))
+  - Change: Make the `supported` fields on `xrt_device` be a struct. This makes it
+    trivial for the IPC layer to correctly expose the supported functionality and
+    methods of the device. There were multiple cases where fields were missed in
+    the IPC layer.
+    ([!2466](https://gitlab.freedesktop.org/monado/monado/merge_requests/2466))
+  - Change: Expose the form factor on the system; this removes the assumption in
+    Monado that the system is always an HMD form factor.
+    ([!2492](https://gitlab.freedesktop.org/monado/monado/merge_requests/2492))
+  - Change: Add `xrt_view_type` argument to  `xrt_device::get_view_poses` function,
+    this decouples the type of the view from the number. Letting us have different
+    semantics for the same view count.
+    ([!2612](https://gitlab.freedesktop.org/monado/monado/merge_requests/2612))
+  - Change: Make it possible for the compositor to expose multiple view
+    configurations types supported, and letting the compositor control the sizes
+    for them separately. This change introduces `xrt_view_config` and
+    `xrt_view_config_properties` which are added to @ref
+    xrt_system_compositor_info.
+    ([!2612](https://gitlab.freedesktop.org/monado/monado/merge_requests/2612))
+  - Change: Allow for late creation of the `xrt_system` and other system level
+    structs. Allowing the server to launch and accept apps and decide which form
+    factor or view configuration to support until a later date.
+    ([!2612](https://gitlab.freedesktop.org/monado/monado/merge_requests/2612))
+  - Change: Enable the use of [X_macro](https://en.wikipedia.org/wiki/X_macro)
+    pattern with more of the enums in the `xrt_defines.h` header. Code has been
+    changed to use these as well reducing the amount of generated code needed.
+    ([!2633](https://gitlab.freedesktop.org/monado/monado/merge_requests/2633))
+- libmonado Interface
+  - Add: mnd_root_get_device_brightness and mnd_root_set_device_brightness
+    ([!2426](https://gitlab.freedesktop.org/monado/monado/merge_requests/2426))
+  - Add: Checks for new hand-tracking role names for
+    `mnd_root_get_device_from_role`
+    ([!2522](https://gitlab.freedesktop.org/monado/monado/merge_requests/2522))
+  - Change: Deprecated the role name strings `"hand-tracking-[left|right]"` for
+    `mnd_root_get_device_from_role`, these now map to `"hand-tracking-
+    unobstructed-[left|right]"`, to removed in the future.
+    ([!2522](https://gitlab.freedesktop.org/monado/monado/merge_requests/2522))
+  - Fix: `monado.py` using old hand-tracking role names in
+    `Monado.get_device_roles`
+    ([!2522](https://gitlab.freedesktop.org/monado/monado/merge_requests/2522))
+- State Trackers
+  - Add: support for extension XR_KHR_extended_struct_name_lengths
+    ([!2480](https://gitlab.freedesktop.org/monado/monado/merge_requests/2480))
+  - Change: Refactor GUI state tracker into a base that can be more easily reused
+    and that brings in fewer dependencies.
+    ([!2399](https://gitlab.freedesktop.org/monado/monado/merge_requests/2399))
+  - Change: In `oxr_session_update_action_bindings`, change the selection priority
+    for dynamic roles to prioritize the device name
+    ([!2421](https://gitlab.freedesktop.org/monado/monado/merge_requests/2421))
+  - Change: Update OpenXR headers to latest SDK version
+    ([!2603](https://gitlab.freedesktop.org/monado/monado/merge_requests/2603))
+  - Fix: Bug where `interaction_profile_find_in_session` would return
+    unconditionally after finding the first profile. When multiple profiles share a
+    name (e.g., `touch_plus` in both `XR_META_touch_controller_plus` and the OpenXR
+    1.1 core spec), only the first was ever considered.
+    ([!2421](https://gitlab.freedesktop.org/monado/monado/merge_requests/2421))
+  - Fix: Report proper timestamps in XrEventDataSessionStateChanged instead of 0.
+    ([!2647](https://gitlab.freedesktop.org/monado/monado/merge_requests/2647))
+  - st/oxr: Implement XR_EXT_user_presence
+    ([!2507](https://gitlab.freedesktop.org/monado/monado/merge_requests/2507))
+- Drivers
+  - d/blubur_s1: Add Blubur S1 driver
+    ([!2590](https://gitlab.freedesktop.org/monado/monado/merge_requests/2590))
+  - d/hydra: Fix driver bugs and make Razer Hydra consistent with other interaction
+    profiles.
+    ([!2469](https://gitlab.freedesktop.org/monado/monado/merge_requests/2469))
+  - d/hydra: Rewrite to add prediction, relation history, and filtered motion
+    vectors.
+    ([!2471](https://gitlab.freedesktop.org/monado/monado/merge_requests/2471))
+  - d/rift: Add Rift DK2 driver
+    ([!2428](https://gitlab.freedesktop.org/monado/monado/merge_requests/2428))
+  - d/solarxr: Add SolarXR IPC driver
+    ([!2253](https://gitlab.freedesktop.org/monado/monado/merge_requests/2253),
+    [!2611](https://gitlab.freedesktop.org/monado/monado/merge_requests/2611))
+  - d/steamvr_lh: Support get_brightness and set_brightness
+    ([!2426](https://gitlab.freedesktop.org/monado/monado/merge_requests/2426))
+  - d/vp2 + d/steamvr_lh: Add basic implementation of Vive Pro 2 HID protocol, and
+    integrate with steamvr_lh to fix various HMD-specific issues
+    ([!2569](https://gitlab.freedesktop.org/monado/monado/merge_requests/2569))
+  - d/wmr: Add support for Fujitsu FMVHDS1 headset
+    ([!2544](https://gitlab.freedesktop.org/monado/monado/merge_requests/2544))
+  - d/xreal_air: Support xreal air 2 ultra
+    ([!2436](https://gitlab.freedesktop.org/monado/monado/merge_requests/2436))
+  - steamvr_lh: Generate hand tracking and palm pose from skeleton
+    ([!2425](https://gitlab.freedesktop.org/monado/monado/merge_requests/2425))
+- IPC
+  - Add: Interface to the server to better control the debug gui.
+    ([!2400](https://gitlab.freedesktop.org/monado/monado/merge_requests/2400))
+  - Add: `device_get_brightness` and `device_set_brightness`
+    ([!2426](https://gitlab.freedesktop.org/monado/monado/merge_requests/2426))
+  - Add: `IPC_EXIT_WHEN_IDLE` to stop the runtime when no clients are connected.
+    ([!2462](https://gitlab.freedesktop.org/monado/monado/merge_requests/2462))
+  - Add: `IPC_EXIT_WHEN_IDLE_DELAY_MS` to control the timeout delay on idle runtime
+    escape.
+    ([!2462](https://gitlab.freedesktop.org/monado/monado/merge_requests/2462))
+  - Add: Plumbing for `xrt_device` presence functions
+    ([!2507](https://gitlab.freedesktop.org/monado/monado/merge_requests/2507))
+  - Change: Refactor client device to share more code, this change introduces the
+    shared `ipc_client_xdev` struct.
+    ([!2466](https://gitlab.freedesktop.org/monado/monado/merge_requests/2466))
+  - Change: Bump `IPC_MAX_CLIENTS` from 8 to 32.
+    ([!2644](https://gitlab.freedesktop.org/monado/monado/merge_requests/2644))
+- Compositor
+  - Add: Debug image target, lets you build and run the main compositor without any
+    windowing backend. Images could be viewed in debug UI or read back using the
+    u_var system.
+    ([!2490](https://gitlab.freedesktop.org/monado/monado/merge_requests/2490))
+  - Change: Improve EGL context creation on client, and use and match reset
+    notification strategy when creating a shared context.
+    ([!2004](https://gitlab.freedesktop.org/monado/monado/merge_requests/2004))
+  - Change: Read preferred minimum image count for vulkan swapchain creation from
+    the environment variable `XRT_COMPOSITOR_PREFERRED_IMAGE_COUNT`, with 2 as
+    default.
+    ([!2452](https://gitlab.freedesktop.org/monado/monado/merge_requests/2452),
+    [#505](https://gitlab.freedesktop.org/monado/monado/issues/505))
+  - Change: Mark support for `fovMutable`.
+    ([!2553](https://gitlab.freedesktop.org/monado/monado/merge_requests/2553))
+  - Change: Support compensation for rolling scanout HMDs. Implements per-scanline
+    timewarp to correct projection distortion on devices with rolling (non-global)
+    refresh patterns. This addresses visual artifacts on HMDs that refresh line-by-
+    line rather than all at once. **Limitations**: Currently only supports top-to-
+    bottom scanout direction.
+    ([!2596](https://gitlab.freedesktop.org/monado/monado/merge_requests/2596),
+    [!2615](https://gitlab.freedesktop.org/monado/monado/merge_requests/2615),
+    [!2616](https://gitlab.freedesktop.org/monado/monado/merge_requests/2616),
+    [!2617](https://gitlab.freedesktop.org/monado/monado/merge_requests/2617),
+    [!2620](https://gitlab.freedesktop.org/monado/monado/merge_requests/2620),
+    [#508](https://gitlab.freedesktop.org/monado/monado/issues/508))
+- Helper Libraries
+  - a/bindings: Add MNDX_oculus_remote interaction profile extension
+    ([!2487](https://gitlab.freedesktop.org/monado/monado/merge_requests/2487))
+  - a/math: Make relation history motion estimation API take in a single mutable
+    relation
+    ([!2613](https://gitlab.freedesktop.org/monado/monado/merge_requests/2613))
+  - a/util: Support for BC4 frames
+    ([!2457](https://gitlab.freedesktop.org/monado/monado/merge_requests/2457))
+  - a/util: Add full gamepad role support to builder interfaces
+    ([!2486](https://gitlab.freedesktop.org/monado/monado/merge_requests/2486))
+  - a/util: Make sink split support >2 downstreams
+    ([!2498](https://gitlab.freedesktop.org/monado/monado/merge_requests/2498))
+  - a/vk: Fix up KHR_present_wait support
+    ([!2541](https://gitlab.freedesktop.org/monado/monado/merge_requests/2541))
+  - a/vk: Add environment variable for skipping memory size check, which is useful
+    for renderdoc.
+    ([!2559](https://gitlab.freedesktop.org/monado/monado/merge_requests/2559))
+  - m/relation_history: Introduce an option for "filtered motion vectors" to
+    calculate reasonable motion vectors of noisy input.
+    ([!2471](https://gitlab.freedesktop.org/monado/monado/merge_requests/2471))
+  - u/debug_gui: Add an interface to control the window title and if the window
+    opens or not.
+    ([!2400](https://gitlab.freedesktop.org/monado/monado/merge_requests/2400))
+  - u/system: Make the system reusable by other code.
+    ([!2398](https://gitlab.freedesktop.org/monado/monado/merge_requests/2398))
+- Misc. Features
+  - t/ctl: Add --set-brightness option
+    ([!2426](https://gitlab.freedesktop.org/monado/monado/merge_requests/2426))
+- Misc. Fixes
+  - Fix: Wrong sort order for stored requested hand-tracking data-sources
+    ([!2521](https://gitlab.freedesktop.org/monado/monado/merge_requests/2521))
+  - Fix: `tests_aux_d3d_d3d11` failing in `DuplicateHandle` before importing.
+    ([!2579](https://gitlab.freedesktop.org/monado/monado/merge_requests/2579))
+  - qwerty_sdl: Fix QWERTY driver using mapped keyboard keys (fixes movement on
+    different keyboard layouts, e.g. Colemak or Dvorak)
+    ([!2430](https://gitlab.freedesktop.org/monado/monado/merge_requests/2430))
+  - steamvr_lh: Lighthouse builder assigning optical hand-tracking to the wrong
+    device role
+    ([!2521](https://gitlab.freedesktop.org/monado/monado/merge_requests/2521))
+  - survive,vive: Fix hand orientations being swapped for LT based controllers
+    after HT roles/input name separation changes
+    ([!2523](https://gitlab.freedesktop.org/monado/monado/merge_requests/2523))
+  - u_debug_gui: Properly scale ImGui interface to match the display DPI (make it
+    easy to read on 4K screens)
+    ([!2430](https://gitlab.freedesktop.org/monado/monado/merge_requests/2430))
+  - vive: Fix typo converting hand-tracking input-name checks to
+    `XRT_INPUT_HT_CONFORMING_[LEFT|RIGHT]`
+    ([!2523](https://gitlab.freedesktop.org/monado/monado/merge_requests/2523))
+
 ## Monado 25.0.0 (2025-04-18)
 
 This is the first stable Monado release of 2025. It contains a variety of

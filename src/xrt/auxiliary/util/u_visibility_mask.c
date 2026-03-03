@@ -96,17 +96,17 @@ u_visibility_mask_get_default(enum xrt_visibility_mask_type type,
 
 	const struct xrt_fov copy = *fov;
 
-	const double tan_left = tan(copy.angle_left);
-	const double tan_right = tan(copy.angle_right);
+	const float tan_left = tanf(copy.angle_left);
+	const float tan_right = tanf(copy.angle_right);
 
-	const double tan_down = tan(copy.angle_down);
-	const double tan_up = tan(copy.angle_up);
+	const float tan_down = tanf(copy.angle_down);
+	const float tan_up = tanf(copy.angle_up);
 
-	const double tan_half_width = (tan_right - tan_left);
-	const double tan_half_height = (tan_up - tan_down);
+	const float tan_half_width = (tan_right - tan_left);
+	const float tan_half_height = (tan_up - tan_down);
 
-	const double tan_offset_x = ((tan_right + tan_left) - tan_half_width) / 2;
-	const double tan_offset_y = (-(tan_up + tan_down) - tan_half_height) / 2;
+	const float tan_offset_x = ((tan_right + tan_left) - tan_half_width) / 2;
+	const float tan_offset_y = (-(tan_up + tan_down) - tan_half_height) / 2;
 
 	struct xrt_vec2 *dst = xrt_visibility_mask_get_vertices(mask);
 	for (uint32_t i = 0; i < nvertices; i++) {

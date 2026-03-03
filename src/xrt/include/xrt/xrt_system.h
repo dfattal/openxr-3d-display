@@ -1,5 +1,5 @@
 // Copyright 2020-2024, Collabora, Ltd.
-// Copyright 2023-2025, NVIDIA CORPORATION.
+// Copyright 2023-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -14,6 +14,7 @@
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_device.h"
+#include "xrt/xrt_limits.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -113,7 +114,7 @@ xrt_system_create_session(struct xrt_system *xsys,
  *
  * @public @memberof xrt_system
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_system_destroy(struct xrt_system **xsys_ptr)
 {
 	struct xrt_system *xsys = *xsys_ptr;
@@ -133,14 +134,6 @@ xrt_system_destroy(struct xrt_system **xsys_ptr)
  */
 
 /*!
- * Maximum number of devices simultaneously usable by an implementation of
- * @ref xrt_system_devices
- *
- * @ingroup xrt_iface
- */
-#define XRT_SYSTEM_MAX_DEVICES (32)
-
-/*!
  * Data associating a device index (in @ref xrt_system_devices::xdevs) with a
  * given "role" for dynamic role switching.
  *
@@ -149,10 +142,10 @@ xrt_system_destroy(struct xrt_system **xsys_ptr)
  * Populated by a call from the @ref xrt_system_devices interface.
  *
  * When the caller of @ref xrt_system_devices_get_roles sees a change (based on
- * comparing @ref generation_id) the caller must do the needed actions to handle
- * device changes. For example, for the OpenXR state tracker this may include
- * rebinding, queuing a change to the current interaction profile, and queuing
- * the events associated with such a change.
+ * comparing @ref xrt_system_roles::generation_id) the caller must do the needed
+ * actions to handle device changes. For example, for the OpenXR state tracker
+ * this may include rebinding, queuing a change to the current interaction
+ * profile, and queuing the events associated with such a change.
  *
  * @see xrt_system_devices
  * @ingroup xrt_iface
@@ -362,7 +355,7 @@ struct xrt_system_devices
  *
  * @public @memberof xrt_system_devices
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_system_devices_get_roles(struct xrt_system_devices *xsysd, struct xrt_system_roles *out_roles)
 {
 	return xsysd->get_roles(xsysd, out_roles);
@@ -375,7 +368,7 @@ xrt_system_devices_get_roles(struct xrt_system_devices *xsysd, struct xrt_system
  *
  * @public @memberof xrt_system_devices
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_system_devices_feature_inc(struct xrt_system_devices *xsysd, enum xrt_device_feature_type type)
 {
 	return xsysd->feature_inc(xsysd, type);
@@ -388,7 +381,7 @@ xrt_system_devices_feature_inc(struct xrt_system_devices *xsysd, enum xrt_device
  *
  * @public @memberof xrt_system_devices
  */
-static inline xrt_result_t
+XRT_NONNULL_ALL static inline xrt_result_t
 xrt_system_devices_feature_dec(struct xrt_system_devices *xsysd, enum xrt_device_feature_type type)
 {
 	return xsysd->feature_dec(xsysd, type);
@@ -404,7 +397,7 @@ xrt_system_devices_feature_dec(struct xrt_system_devices *xsysd, enum xrt_device
  *
  * @public @memberof xrt_system_devices
  */
-static inline void
+XRT_NONNULL_ALL static inline void
 xrt_system_devices_destroy(struct xrt_system_devices **xsysd_ptr)
 {
 	struct xrt_system_devices *xsysd = *xsysd_ptr;

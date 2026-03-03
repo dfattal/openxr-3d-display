@@ -345,9 +345,7 @@ hydra_device_parse_controller(struct hydra_device *hd, uint8_t *buf, int64_t now
 	    (XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) |
 	    (XRT_SPACE_RELATION_POSITION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT);
 
-	m_relation_history_estimate_motion(state->relation_history, &space_relation, now, &space_relation);
-
-	m_relation_history_push(state->relation_history, &space_relation, now);
+	m_relation_history_push_with_motion_estimation(state->relation_history, &space_relation, now);
 
 	state->buttons = hydra_read_uint8(&buf);
 
@@ -799,10 +797,8 @@ hydra_found(struct xrt_prober *xp,
 	for (size_t i = 0; i < 2; ++i) {
 		struct hydra_device *hd = hs->devs[i];
 
-		hd->base.destroy = hydra_device_destroy;
+		u_device_populate_function_pointers(&hd->base, hydra_device_get_tracked_pose, hydra_device_destroy);
 		hd->base.update_inputs = hydra_device_update_inputs;
-		hd->base.get_tracked_pose = hydra_device_get_tracked_pose;
-		hd->base.set_output = u_device_ni_set_output;
 		hd->base.name = XRT_DEVICE_HYDRA;
 		snprintf(hd->base.str, XRT_DEVICE_NAME_LEN, "%s %i", "Razer Hydra Controller", (int)(i + 1));
 		snprintf(hd->base.serial, XRT_DEVICE_NAME_LEN, "%s%i", "RZRHDRC", (int)(i + 1));
