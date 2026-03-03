@@ -1739,8 +1739,8 @@ A complete reference implementation is available in the CNSDK-OpenXR repository:
 | Runtime: session creation | `src/xrt/state_trackers/oxr/oxr_session.c` |
 | Runtime: CNSDK integration | `src/xrt/compositor/main/comp_renderer.c` |
 | Runtime: LeiaSR integration | `src/xrt/drivers/leiasr/` |
-| D3D11 test application (Win32) | `test_apps/sr_cube_openxr_ext/` |
-| OpenGL test application (Win32) | `test_apps/sr_cube_openxr_ext_gl/` |
+| D3D11 test application (Win32) | `test_apps/cube_ext_d3d11/` |
+| OpenGL test application (Win32) | `test_apps/cube_ext_gl/` |
 | Common Kooima projection | `test_apps/common/xr_session_common.cpp` |
 
 The runtime is based on Monado (open-source OpenXR runtime) with platform-specific SDK

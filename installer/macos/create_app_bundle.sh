@@ -5,7 +5,7 @@ set -e
 
 ARTIFACT_DIR="${1:?Usage: $0 <artifact-dir> [output.app] [binary-name]}"
 APP_BUNDLE="${2:-SimCubeOpenXR.app}"
-BINARY_NAME="${3:-sim_cube_openxr}"
+BINARY_NAME="${3:-cube_vk_macos}"
 VERSION="${SRMONADO_VERSION:-1.0.0}"
 
 # Derive display name from app bundle filename (e.g. "SimCubeOpenXR" from "SimCubeOpenXR.app")

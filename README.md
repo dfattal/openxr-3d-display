@@ -68,7 +68,7 @@ You don't need a 3D display to develop against this runtime. The **sim_display**
 
 ```bash
 # After building, run the test cube app
-XR_RUNTIME_JSON=./build/openxr_monado-dev.json ./build/test_apps/sim_cube_openxr/sim_cube_openxr
+XR_RUNTIME_JSON=./build/openxr_monado-dev.json ./build/test_apps/cube_vk_macos/cube_vk_macos
 ```
 
 Use WASD + mouse to move the simulated eye position and observe perspective-correct stereo rendering.

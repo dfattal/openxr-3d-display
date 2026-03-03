@@ -14,7 +14,7 @@ Local macOS builds work for the runtime and sim_display test app. Use the conven
 # Prerequisites: brew install cmake ninja eigen vulkan-sdk
 ./scripts/build_macos.sh
 ```
-This builds the runtime (with qwerty/debug GUI disabled), OpenXR loader, and sim_cube_openxr test app. Note: the Vulkan compositor will fail at runtime with `VK_ERROR_EXTENSION_NOT_PRESENT` because MoltenVK lacks `VK_KHR_external_memory_fd` — this is a known MoltenVK limitation, not a build issue.
+This builds the runtime (with qwerty/debug GUI disabled), OpenXR loader, and cube_vk_macos test app. Note: the Vulkan compositor will fail at runtime with `VK_ERROR_EXTENSION_NOT_PRESENT` because MoltenVK lacks `VK_KHR_external_memory_fd` — this is a known MoltenVK limitation, not a build issue.
 
 ### Windows CI Build (Primary)
 This project primarily targets **Windows** with LeiaSR SDK and D3D11 support. Use `/ci-monitor` to:
@@ -136,10 +136,10 @@ For substantial changes, create a fragment in `doc/changes/<section>/mr.NUMBER.m
 - Artifact: `SRMonado` (runtime + installer + test apps)
 
 **macOS** (`.github/workflows/build-macos.yml`):
-- Builds runtime with Vulkan SDK via MoltenVK, packages sim_cube_openxr test app
+- Builds runtime with Vulkan SDK via MoltenVK, packages cube_vk_macos and cube_ext_vk_macos test apps
 - Bundles libvulkan, MoltenVK, and OpenXR loader for self-contained artifact
 - Toggle test app build with `BUILD_TEST_APP: true/false` env var
-- Artifact: `SRMonado-macOS` (runtime + test app + run script)
+- Artifact: `SRMonado-macOS` (runtime + test apps + run scripts)
 
 ## Claude Code Skills
 
@@ -192,8 +192,9 @@ After building test apps locally, copy binaries to `_package/SRMonado-macOS/bin/
 
 | Test App | Build Output | Package Binary | Run Script |
 |----------|-------------|---------------|------------|
-| sim_cube_openxr | `test_apps/sim_cube_openxr/build/sim_cube_openxr` | `_package/SRMonado-macOS/bin/sim_cube_openxr` | `run_sim_cube.sh` |
-| sim_cube_openxr_ext_macos | `test_apps/sim_cube_openxr_ext_macos/build/sim_cube_openxr_ext_macos` | `_package/SRMonado-macOS/bin/sim_cube_openxr_ext_macos` | `run_sim_cube_ext.sh` |
+| cube_vk_macos | `test_apps/cube_vk_macos/build/cube_vk_macos` | `_package/SRMonado-macOS/bin/cube_vk_macos` | `run_cube_vk.sh` |
+| cube_ext_vk_macos | `test_apps/cube_ext_vk_macos/build/cube_ext_vk_macos` | `_package/SRMonado-macOS/bin/cube_ext_vk_macos` | `run_cube_ext_vk.sh` |
+| gaussian_splatting_vk_macos | `demos/gaussian_splatting_vk_macos/build/gaussian_splatting_vk_macos` | `_package/SRMonado-macOS/bin/gaussian_splatting_vk_macos` | `run_gaussian_splatting.sh` |
 
 When adding new test apps, follow the same pattern: binary goes in `bin/`, run script in the package root.
 

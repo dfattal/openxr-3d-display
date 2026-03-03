@@ -4,11 +4,11 @@ Five test applications that demonstrate the **external window binding** and **di
 
 | App | Graphics API | Platform | Directory |
 |-----|-------------|----------|-----------|
-| `sr_cube_openxr_ext` | D3D11 | Windows | `sr_cube_openxr_ext/` |
-| `sr_cube_openxr_ext_vk` | Vulkan | Windows | `sr_cube_openxr_ext_vk/` |
-| `sr_cube_openxr_ext_gl` | OpenGL | Windows | `sr_cube_openxr_ext_gl/` |
-| `sr_cube_openxr_ext_d3d12` | D3D12 | Windows | `sr_cube_openxr_ext_d3d12/` |
-| `sim_cube_openxr_ext_macos` | Vulkan | macOS | `sim_cube_openxr_ext_macos/` |
+| `cube_ext_d3d11` | D3D11 | Windows | `test_apps/cube_ext_d3d11/` |
+| `cube_ext_vk` | Vulkan | Windows | `test_apps/cube_ext_vk/` |
+| `cube_ext_gl` | OpenGL | Windows | `test_apps/cube_ext_gl/` |
+| `cube_ext_d3d12` | D3D12 | Windows | `test_apps/cube_ext_d3d12/` |
+| `cube_ext_vk_macos` | Vulkan | macOS | `test_apps/cube_ext_vk_macos/` |
 
 ## OpenXR Extensions Demonstrated
 
@@ -261,7 +261,7 @@ Requires `LEIASR_SDKROOT` environment variable for SR SDK support. All four Wind
 Run the test app:
 
 ```bash
-./_package/SRMonado-macOS/run_sim_cube_ext.sh
+./_package/SRMonado-macOS/run_cube_ext_vk.sh
 ```
 
 ### Environment Variables

@@ -99,27 +99,38 @@ jobs:
           cmake --build /tmp/openxr-sdk/build
           cmake --install /tmp/openxr-sdk/build
 
-      - name: Build test app (sim_cube_openxr)
+      - name: Build test app (cube_vk_macos)
         if: env.BUILD_TEST_APP == 'true'
         run: |
-          cmake -B test_apps/sim_cube_openxr/build \
-            -S test_apps/sim_cube_openxr -G Ninja \
+          cmake -B test_apps/cube_vk_macos/build \
+            -S test_apps/cube_vk_macos -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=/tmp/openxr-install
-          cmake --build test_apps/sim_cube_openxr/build
+          cmake --build test_apps/cube_vk_macos/build
 
-      - name: Package test app
+      - name: Build test app (cube_ext_vk_macos)
+        if: env.BUILD_TEST_APP == 'true'
+        run: |
+          cmake -B test_apps/cube_ext_vk_macos/build \
+            -S test_apps/cube_ext_vk_macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=/tmp/openxr-install
+          cmake --build test_apps/cube_ext_vk_macos/build
+
+      - name: Package test apps
         if: env.BUILD_TEST_APP == 'true'
         run: |
           mkdir -p _package/SRMonado-macOS/bin
-          cp test_apps/sim_cube_openxr/build/sim_cube_openxr _package/SRMonado-macOS/bin/
+          cp test_apps/cube_vk_macos/build/cube_vk_macos _package/SRMonado-macOS/bin/
+          cp test_apps/cube_ext_vk_macos/build/cube_ext_vk_macos _package/SRMonado-macOS/bin/
           # Bundle the OpenXR loader dylib so it works without system install
           cp /tmp/openxr-install/lib/libopenxr_loader*.dylib _package/SRMonado-macOS/lib/
-          # Fix rpaths so test app and loader find bundled libvulkan/MoltenVK
-          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/sim_cube_openxr 2>/dev/null || true
+          # Fix rpaths so test apps and loader find bundled libvulkan/MoltenVK
+          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/cube_vk_macos 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/cube_ext_vk_macos 2>/dev/null || true
           install_name_tool -add_rpath @loader_path _package/SRMonado-macOS/lib/libopenxr_loader*.dylib 2>/dev/null || true
-          # Create run script
-          cat > _package/SRMonado-macOS/run_sim_cube.sh <<'SCRIPT'
+          # Create run script for cube_vk_macos
+          cat > _package/SRMonado-macOS/run_cube_vk.sh <<'SCRIPT'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
           export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
@@ -127,27 +138,27 @@ jobs:
           export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
           export SIM_DISPLAY_ENABLE=1
           export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
-          echo "Starting sim_cube_openxr with $SIM_DISPLAY_OUTPUT output..."
-          exec "$DIR/bin/sim_cube_openxr" "$@"
+          echo "Starting cube_vk_macos with $SIM_DISPLAY_OUTPUT output..."
+          exec "$DIR/bin/cube_vk_macos" "$@"
           SCRIPT
-          chmod +x _package/SRMonado-macOS/run_sim_cube.sh
+          chmod +x _package/SRMonado-macOS/run_cube_vk.sh
 
-      - name: Build 3DGS test app (sim_3dgs_openxr_ext_macos)
+      - name: Build 3DGS demo app (gaussian_splatting_vk_macos)
         if: env.BUILD_TEST_APP == 'true'
         run: |
-          cmake -B test_apps/sim_3dgs_openxr_ext_macos/build \
-            -S test_apps/sim_3dgs_openxr_ext_macos -G Ninja \
+          cmake -B demos/gaussian_splatting_vk_macos/build \
+            -S demos/gaussian_splatting_vk_macos -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=/tmp/openxr-install
-          cmake --build test_apps/sim_3dgs_openxr_ext_macos/build
+          cmake --build demos/gaussian_splatting_vk_macos/build
 
-      - name: Package 3DGS test app
+      - name: Package 3DGS demo app
         if: env.BUILD_TEST_APP == 'true'
         run: |
-          cp test_apps/sim_3dgs_openxr_ext_macos/build/sim_3dgs_openxr_ext_macos _package/SRMonado-macOS/bin/
-          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/sim_3dgs_openxr_ext_macos 2>/dev/null || true
+          cp demos/gaussian_splatting_vk_macos/build/gaussian_splatting_vk_macos _package/SRMonado-macOS/bin/
+          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/gaussian_splatting_vk_macos 2>/dev/null || true
           # Create run script
-          cat > _package/SRMonado-macOS/run_sim_3dgs_ext.sh <<'SCRIPT'
+          cat > _package/SRMonado-macOS/run_gaussian_splatting.sh <<'SCRIPT'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
           export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
@@ -155,10 +166,10 @@ jobs:
           export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
           export SIM_DISPLAY_ENABLE=1
           export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
-          echo "Starting sim_3dgs_openxr_ext_macos with $SIM_DISPLAY_OUTPUT output..."
-          exec "$DIR/bin/sim_3dgs_openxr_ext_macos" "$@"
+          echo "Starting gaussian_splatting_vk_macos (3D Gaussian Splatting) with $SIM_DISPLAY_OUTPUT output..."
+          exec "$DIR/bin/gaussian_splatting_vk_macos" "$@"
           SCRIPT
-          chmod +x _package/SRMonado-macOS/run_sim_3dgs_ext.sh
+          chmod +x _package/SRMonado-macOS/run_gaussian_splatting.sh
 
       - name: Build macOS installer (.pkg)
         run: |

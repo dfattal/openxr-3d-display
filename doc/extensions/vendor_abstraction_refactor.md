@@ -1012,7 +1012,7 @@ flexibility.
 texture interop failures. D3D12→Vulkan interop does not have that problem (both
 are explicit APIs with compatible memory models, NT handle sharing works on Intel,
 AMD, and NVIDIA). D3D12 apps currently work through the Vulkan multi compositor
-path (`sr_cube_openxr_ext_d3d12` test app).
+path (`cube_ext_d3d12` test app).
 
 **SR SDK support**: The SR SDK already has a full D3D12 weaver (`IDX12Weaver1` in
 `SimulatedRealityDirectX.dll`). API: `setInputViewTexture(ID3D12Resource*, ...)`,
