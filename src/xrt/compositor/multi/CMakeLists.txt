@@ -15,3 +15,6 @@ target_link_libraries(
 	PUBLIC xrt-interfaces comp_includes
 	PRIVATE aux_util aux_os aux_vk
 	)
+if(WIN32)
+	target_include_directories(comp_multi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../d3d11)
+endif()

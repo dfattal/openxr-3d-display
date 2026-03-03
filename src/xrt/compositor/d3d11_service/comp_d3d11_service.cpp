@@ -3253,7 +3253,7 @@ compositor_destroy(struct xrt_compositor *xc)
  */
 
 static xrt_result_t
-system_set_state(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, bool visible, bool focused)
+system_set_state(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, bool visible, bool focused, int64_t timestamp_ns)
 {
 	struct d3d11_service_compositor *c = d3d11_service_compositor_from_xrt(xc);
 
@@ -3602,11 +3602,14 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 
 	// Fill system compositor info
 	sys->base.info.max_layers = XRT_MAX_LAYERS;
-	sys->base.info.views[0].recommended.width_pixels = sys->view_width;
-	sys->base.info.views[0].recommended.height_pixels = sys->view_height;
-	sys->base.info.views[0].max.width_pixels = sys->view_width * 2;
-	sys->base.info.views[0].max.height_pixels = sys->view_height * 2;
-	sys->base.info.views[1] = sys->base.info.views[0];
+	sys->base.info.view_configs[0].view_type = XRT_VIEW_TYPE_STEREO;
+	sys->base.info.view_configs[0].view_count = 2;
+	sys->base.info.view_configs[0].views[0].recommended.width_pixels = sys->view_width;
+	sys->base.info.view_configs[0].views[0].recommended.height_pixels = sys->view_height;
+	sys->base.info.view_configs[0].views[0].max.width_pixels = sys->view_width * 2;
+	sys->base.info.view_configs[0].views[0].max.height_pixels = sys->view_height * 2;
+	sys->base.info.view_configs[0].views[1] = sys->base.info.view_configs[0].views[0];
+	sys->base.info.view_config_count = 1;
 
 	// Set supported blend modes (Chrome WebXR requires at least OPAQUE)
 	sys->base.info.supported_blend_modes[0] = XRT_BLEND_MODE_OPAQUE;
