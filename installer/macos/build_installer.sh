@@ -74,7 +74,7 @@ pkgbuild --root "$WORK_DIR/payload-runtime" \
 
 # --- 3. Build .app bundle for test app ---
 echo "--- Building .app bundle ---"
-if [ -f "$ARTIFACT_DIR/bin/sim_cube_openxr" ]; then
+if [ -f "$ARTIFACT_DIR/bin/cube_vk_macos" ]; then
     "$SCRIPT_DIR/create_app_bundle.sh" "$ARTIFACT_DIR" "$WORK_DIR/SimCubeOpenXR.app"
 
     # --- 4. Build test app component pkg ---
@@ -86,7 +86,7 @@ if [ -f "$ARTIFACT_DIR/bin/sim_cube_openxr" ]; then
         "$WORK_DIR/testapp.pkg"
     HAS_TESTAPP=true
 else
-    echo "Warning: sim_cube_openxr not found, skipping test app component"
+    echo "Warning: cube_vk_macos not found, skipping test app component"
     HAS_TESTAPP=false
 fi
 

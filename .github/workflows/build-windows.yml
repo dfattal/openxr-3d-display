@@ -22,7 +22,7 @@ jobs:
       GH_TOKEN: ${{ secrets.LEIALOFT_GITHUB_TOKEN }}
 
     steps:
-    
+
       - name: Checkout repository and submodules
         uses: actions/checkout@v4
         with:
@@ -71,7 +71,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --target install
 
-      - name: Build Installer                                                                                                                                                                                                                                                                                     
+      - name: Build Installer
         run: cmake --build build --config Release --target installer
 
       - name: Upload artifacts
@@ -118,7 +118,7 @@ jobs:
       #     # Get dynamic values
       #     $commit=$(git rev-parse --short HEAD)
       #     $log=Get-Content changelog.txt -Raw
-          
+
       #     curl.exe -X POST "https://zealot.leiapix.com/api/apps/upload" `
       #       -F "token=$token" `
       #       -F "file=@$($exePath.FullName)" `
@@ -192,7 +192,7 @@ jobs:
 
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
 
-  # Test app build (D3D11 with XR_EXT_session_target) - toggle by changing 'if: false' to 'if: true'
+  # D3D11 test app with XR_EXT_win32_window_binding (app creates window)
   TestAppSessionTarget:
     if: true  # <-- Change to 'false' to disable test app build
     runs-on: windows-2022
@@ -234,9 +234,9 @@ jobs:
           Write-Host "OpenXR SDK contents:"
           Get-ChildItem -Recurse openxr_sdk | Select-Object FullName
 
-      - name: Build test app (sr_cube_openxr_ext)
+      - name: Build D3D11 test app (cube_ext_d3d11)
         run: |
-          cd test_apps/sr_cube_openxr_ext
+          cd test_apps/cube_ext_d3d11
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -251,7 +251,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/sr_cube_openxr_ext/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_d3d11/build/
             Write-Host "Copied $($loaderDll.FullName) to test app build"
           } else {
             Write-Host "Warning: openxr_loader.dll not found"
@@ -265,8 +265,8 @@ jobs:
       - name: Verify binary architectures
         run: |
           Write-Host "=== Checking binary architectures ==="
-          $exe = "test_apps/sr_cube_openxr_ext/build/sr_cube_openxr_ext.exe"
-          $dll = "test_apps/sr_cube_openxr_ext/build/openxr_loader.dll"
+          $exe = "test_apps/cube_ext_d3d11/build/cube_ext_d3d11.exe"
+          $dll = "test_apps/cube_ext_d3d11/build/openxr_loader.dll"
 
           Write-Host "`nEXE architecture:"
           dumpbin /headers $exe | Select-String -Pattern "machine \(|File Type:"
@@ -281,166 +281,19 @@ jobs:
           dumpbin /dependents $dll
 
           Write-Host "`nAll DLLs in build directory:"
-          Get-ChildItem test_apps/sr_cube_openxr_ext/build/*.dll | ForEach-Object { Write-Host "  $($_.Name)" }
+          Get-ChildItem test_apps/cube_ext_d3d11/build/*.dll | ForEach-Object { Write-Host "  $($_.Name)" }
 
       - name: Upload test app
         uses: actions/upload-artifact@v4
         with:
-          name: SRCubeOpenXRExt
+          name: CubeExtD3D11
           if-no-files-found: error
           path: |
-            test_apps/sr_cube_openxr_ext/build/sr_cube_openxr_ext.exe
-            test_apps/sr_cube_openxr_ext/build/*.dll
-            test_apps/sr_cube_openxr_ext/build/textures/
+            test_apps/cube_ext_d3d11/build/cube_ext_d3d11.exe
+            test_apps/cube_ext_d3d11/build/*.dll
+            test_apps/cube_ext_d3d11/build/textures/
 
-  # Standalone Vulkan cube test (no OpenXR) - DISABLED: removed in test_apps refactor
-  # VulkanCubeStandalone:
-  #   if: false  # <-- Disabled - test app removed
-  #   runs-on: windows-2022
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-
-  # Vulkan test app build (WITH session_target) - DISABLED: removed in test_apps refactor
-  # VulkanTestApp:
-  #   if: false  # <-- Disabled - test app removed
-  #   runs-on: windows-2022
-  #   needs: Runtime
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-
-  # Vulkan test app WITHOUT session_target extension - DISABLED: removed in test_apps refactor
-  # VulkanTestNoSessionTarget:
-  #   if: false  # <-- Disabled - test app removed
-  #   runs-on: windows-2022
-  #   needs: Runtime
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-
-  # Native SR SDK app (no OpenXR) - Direct LeiaSR SDK integration
-  TestAppNative:
-    if: true  # <-- Change to 'false' to disable
-    runs-on: windows-2022
-
-    env:
-      GH_TOKEN: ${{ secrets.LEIALOFT_GITHUB_TOKEN }}
-      SR_TAG: 1.35.0.2011
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.LEIALOFT_GITHUB_TOKEN }}
-          submodules: recursive
-
-      - name: Download Simulated Reality SDK
-        run: |
-          gh release download -R LeiaInc/SR-SDK-Windows-Releases-Internal-Public $env:SR_TAG -p LeiaSR-SDK-$env:SR_TAG-win64.zip -D .
-          tar -xf LeiaSR-SDK-$env:SR_TAG-win64.zip -C .
-          Write-Host "SR SDK contents:"
-          Get-ChildItem -Recurse LeiaSR-SDK-$env:SR_TAG-win64 | Select-Object FullName
-
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Build native SR test app (sr_cube_native)
-        run: |
-          cd test_apps/sr_cube_native
-          cmake -S . -B build -G Ninja `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/LeiaSR-SDK-$env:SR_TAG-win64"
-          cmake --build build
-
-      - name: Copy required DLLs
-        run: |
-          # Copy SR SDK DLLs
-          $srSdkBin = "${{ github.workspace }}/LeiaSR-SDK-$env:SR_TAG-win64/bin"
-          if (Test-Path $srSdkBin) {
-            Get-ChildItem -Path $srSdkBin -Filter "*.dll" | ForEach-Object {
-              Copy-Item $_.FullName -Destination test_apps/sr_cube_native/build/
-              Write-Host "Copied $($_.Name)"
-            }
-          }
-
-      - name: Upload native SR test app
-        uses: actions/upload-artifact@v4
-        with:
-          name: SRCubeNative
-          if-no-files-found: error
-          path: |
-            test_apps/sr_cube_native/build/sr_cube_native.exe
-            test_apps/sr_cube_native/build/*.dll
-            test_apps/sr_cube_native/build/textures/
-
-  # Native SR SDK Vulkan app (no OpenXR) - Direct LeiaSR SDK + Vulkan weaver
-  TestAppNativeVulkan:
-    if: true  # <-- Change to 'false' to disable
-    runs-on: windows-2022
-
-    env:
-      GH_TOKEN: ${{ secrets.LEIALOFT_GITHUB_TOKEN }}
-      SR_TAG: 1.35.0.2011
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.LEIALOFT_GITHUB_TOKEN }}
-          submodules: recursive
-
-      - name: Download Simulated Reality SDK
-        run: |
-          gh release download -R LeiaInc/SR-SDK-Windows-Releases-Internal-Public $env:SR_TAG -p LeiaSR-SDK-$env:SR_TAG-win64.zip -D .
-          tar -xf LeiaSR-SDK-$env:SR_TAG-win64.zip -C .
-          gh release download -R LeiaInc/SR-SDK-Windows-Releases-Internal-Public $env:SR_TAG -p SimulatedRealityVulkanBeta.lib -D LeiaSR-SDK-$env:SR_TAG-win64/lib
-          gh release download -R LeiaInc/SR-SDK-Windows-Releases-Internal-Public $env:SR_TAG -p vkweaver.h -D LeiaSR-SDK-$env:SR_TAG-win64/include/sr/weaver
-          Write-Host "SR SDK contents:"
-          Get-ChildItem -Recurse LeiaSR-SDK-$env:SR_TAG-win64 | Select-Object FullName
-
-      - name: Install Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.3.283.0
-          cache: true
-
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Build native Vulkan SR test app (sr_cube_native_vk)
-        env:
-          LEIASR_SDKROOT: ${{ github.workspace }}/LeiaSR-SDK-${{ env.SR_TAG }}-win64
-        run: |
-          cd test_apps/sr_cube_native_vk
-          cmake -S . -B build -G Ninja `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/LeiaSR-SDK-$env:SR_TAG-win64"
-          cmake --build build
-
-      - name: Copy required DLLs
-        run: |
-          # Copy SR SDK DLLs
-          $srSdkBin = "${{ github.workspace }}/LeiaSR-SDK-$env:SR_TAG-win64/bin"
-          if (Test-Path $srSdkBin) {
-            Get-ChildItem -Path $srSdkBin -Filter "*.dll" | ForEach-Object {
-              Copy-Item $_.FullName -Destination test_apps/sr_cube_native_vk/build/
-              Write-Host "Copied $($_.Name)"
-            }
-          }
-
-      - name: Upload native Vulkan SR test app
-        uses: actions/upload-artifact@v4
-        with:
-          name: SRCubeNativeVK
-          if-no-files-found: error
-          path: |
-            test_apps/sr_cube_native_vk/build/sr_cube_native_vk.exe
-            test_apps/sr_cube_native_vk/build/*.dll
-
-  # D3D11 test app WITHOUT session_target extension - Standard OpenXR app
+  # D3D11 test app WITHOUT window binding extension - Standard OpenXR app
   TestAppStandard:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
@@ -473,9 +326,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build D3D11 test app (sr_cube_openxr)
+      - name: Build D3D11 test app (cube_d3d11)
         run: |
-          cd test_apps/sr_cube_openxr
+          cd test_apps/cube_d3d11
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -488,20 +341,20 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/sr_cube_openxr/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_d3d11/build/
           }
 
       - name: Upload D3D11 test app (standard OpenXR)
         uses: actions/upload-artifact@v4
         with:
-          name: SRCubeOpenXR
+          name: CubeD3D11
           if-no-files-found: error
           path: |
-            test_apps/sr_cube_openxr/build/sr_cube_openxr.exe
-            test_apps/sr_cube_openxr/build/*.dll
-            test_apps/sr_cube_openxr/build/textures/
+            test_apps/cube_d3d11/build/cube_d3d11.exe
+            test_apps/cube_d3d11/build/*.dll
+            test_apps/cube_d3d11/build/textures/
 
-  # D3D12 test app with XR_EXT_session_target
+  # D3D12 test app with XR_EXT_win32_window_binding
   TestAppD3D12:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
@@ -534,9 +387,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build D3D12 test app (sr_cube_openxr_ext_d3d12)
+      - name: Build D3D12 test app (cube_ext_d3d12)
         run: |
-          cd test_apps/sr_cube_openxr_ext_d3d12
+          cd test_apps/cube_ext_d3d12
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -549,20 +402,20 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/sr_cube_openxr_ext_d3d12/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_d3d12/build/
           }
 
       - name: Upload D3D12 test app
         uses: actions/upload-artifact@v4
         with:
-          name: SRCubeOpenXRExtD3D12
+          name: CubeExtD3D12
           if-no-files-found: error
           path: |
-            test_apps/sr_cube_openxr_ext_d3d12/build/sr_cube_openxr_ext_d3d12.exe
-            test_apps/sr_cube_openxr_ext_d3d12/build/*.dll
-            test_apps/sr_cube_openxr_ext_d3d12/build/textures/
+            test_apps/cube_ext_d3d12/build/cube_ext_d3d12.exe
+            test_apps/cube_ext_d3d12/build/*.dll
+            test_apps/cube_ext_d3d12/build/textures/
 
-  # OpenGL test app with XR_EXT_session_target
+  # OpenGL test app with XR_EXT_win32_window_binding
   TestAppOpenGL:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
@@ -595,9 +448,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build OpenGL test app (sr_cube_openxr_ext_gl)
+      - name: Build OpenGL test app (cube_ext_gl)
         run: |
-          cd test_apps/sr_cube_openxr_ext_gl
+          cd test_apps/cube_ext_gl
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -610,20 +463,20 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/sr_cube_openxr_ext_gl/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_gl/build/
           }
 
       - name: Upload OpenGL test app
         uses: actions/upload-artifact@v4
         with:
-          name: SRCubeOpenXRExtGL
+          name: CubeExtGL
           if-no-files-found: error
           path: |
-            test_apps/sr_cube_openxr_ext_gl/build/sr_cube_openxr_ext_gl.exe
-            test_apps/sr_cube_openxr_ext_gl/build/*.dll
-            test_apps/sr_cube_openxr_ext_gl/build/textures/
+            test_apps/cube_ext_gl/build/cube_ext_gl.exe
+            test_apps/cube_ext_gl/build/*.dll
+            test_apps/cube_ext_gl/build/textures/
 
-  # Vulkan test app with XR_EXT_session_target (requires Vulkan SDK)
+  # Vulkan test app with XR_EXT_win32_window_binding (requires Vulkan SDK)
   TestAppVulkan:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
@@ -662,9 +515,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build Vulkan test app (sr_cube_openxr_ext_vk)
+      - name: Build Vulkan test app (cube_ext_vk)
         run: |
-          cd test_apps/sr_cube_openxr_ext_vk
+          cd test_apps/cube_ext_vk
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -677,20 +530,20 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/sr_cube_openxr_ext_vk/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_vk/build/
           }
 
       - name: Upload Vulkan test app
         uses: actions/upload-artifact@v4
         with:
-          name: SRCubeOpenXRExtVK
+          name: CubeExtVK
           if-no-files-found: error
           path: |
-            test_apps/sr_cube_openxr_ext_vk/build/sr_cube_openxr_ext_vk.exe
-            test_apps/sr_cube_openxr_ext_vk/build/*.dll
-            test_apps/sr_cube_openxr_ext_vk/build/textures/
+            test_apps/cube_ext_vk/build/cube_ext_vk.exe
+            test_apps/cube_ext_vk/build/*.dll
+            test_apps/cube_ext_vk/build/textures/
 
-  # 3D Gaussian Splatting Vulkan test app (requires Vulkan SDK, uses FetchContent for 3DGS.cpp)
+  # 3D Gaussian Splatting Vulkan demo (requires Vulkan SDK, uses FetchContent for 3DGS.cpp)
   TestApp3DGSVulkan:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
@@ -729,9 +582,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build 3DGS Vulkan test app (sr_3dgs_openxr_ext_vk)
+      - name: Build 3DGS Vulkan demo (gaussian_splatting_vk)
         run: |
-          cd test_apps/sr_3dgs_openxr_ext_vk
+          cd demos/gaussian_splatting_vk
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -744,17 +597,17 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/sr_3dgs_openxr_ext_vk/build/
+            Copy-Item $loaderDll.FullName -Destination demos/gaussian_splatting_vk/build/
           }
 
-      - name: Upload 3DGS Vulkan test app
+      - name: Upload 3DGS Vulkan demo
         uses: actions/upload-artifact@v4
         with:
-          name: SR3DGSOpenXRExtVK
+          name: GaussianSplattingVK
           if-no-files-found: error
           path: |
-            test_apps/sr_3dgs_openxr_ext_vk/build/sr_3dgs_openxr_ext_vk.exe
-            test_apps/sr_3dgs_openxr_ext_vk/build/*.dll
+            demos/gaussian_splatting_vk/build/gaussian_splatting_vk.exe
+            demos/gaussian_splatting_vk/build/*.dll
 
   # Spatial OS demo app (multi-layer war room)
   TestAppSpatialOS:
@@ -791,7 +644,7 @@ jobs:
 
       - name: Build Spatial OS demo (spatial_os)
         run: |
-          cd test_apps/spatial_os
+          cd demos/spatial_os
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -804,7 +657,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/spatial_os/build/
+            Copy-Item $loaderDll.FullName -Destination demos/spatial_os/build/
           }
 
       - name: Upload Spatial OS demo
@@ -813,28 +666,28 @@ jobs:
           name: SpatialOS
           if-no-files-found: error
           path: |
-            test_apps/spatial_os/build/spatial_os.exe
-            test_apps/spatial_os/build/*.dll
-            test_apps/spatial_os/build/textures/
+            demos/spatial_os/build/spatial_os.exe
+            demos/spatial_os/build/*.dll
+            demos/spatial_os/build/textures/
 
   # Bundle all test apps into a single artifact with per-app subfolders
   BundleTestApps:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    needs: [TestAppSessionTarget, TestAppNative, TestAppNativeVulkan, TestAppStandard, TestAppD3D12, TestAppOpenGL, TestAppVulkan, TestApp3DGSVulkan, TestAppSpatialOS]
+    needs: [TestAppSessionTarget, TestAppStandard, TestAppD3D12, TestAppOpenGL, TestAppVulkan, TestApp3DGSVulkan, TestAppSpatialOS]
 
     steps:
-      - name: Download SRCube test app artifacts
+      - name: Download cube test app artifacts
         uses: actions/download-artifact@v4
         with:
           path: TestApps
-          pattern: SRCube*
+          pattern: Cube*
 
-      - name: Download SR3DGS test app artifacts
+      - name: Download 3DGS demo artifacts
         uses: actions/download-artifact@v4
         with:
           path: TestApps
-          pattern: SR3DGS*
+          pattern: GaussianSplatting*
 
       - name: Download SpatialOS artifact
         uses: actions/download-artifact@v4
@@ -850,7 +703,7 @@ jobs:
       - name: Upload bundled test apps
         uses: actions/upload-artifact@v4
         with:
-          name: SRTestApps-${{ github.run_number }}
+          name: TestApps-${{ github.run_number }}
           if-no-files-found: error
           path: TestApps
 
@@ -859,14 +712,12 @@ jobs:
         with:
           failOnError: false
           name: |
-            SRCubeOpenXRExt
-            SRCubeNative
-            SRCubeNativeVK
-            SRCubeOpenXR
-            SRCubeOpenXRExtD3D12
-            SRCubeOpenXRExtGL
-            SRCubeOpenXRExtVK
-            SR3DGSOpenXRExtVK
+            CubeExtD3D11
+            CubeD3D11
+            CubeExtD3D12
+            CubeExtGL
+            CubeExtVK
+            GaussianSplattingVK
             SpatialOS
 
       - name: Install rclone
@@ -886,13 +737,13 @@ jobs:
       - name: Zip test apps
         run: |
           cd TestApps
-          zip -r ../SRTestApps-${{ github.run_number }}.zip .
+          zip -r ../TestApps-${{ github.run_number }}.zip .
           cd ..
-          ls -lh SRTestApps-${{ github.run_number }}.zip
+          ls -lh TestApps-${{ github.run_number }}.zip
 
       - name: Upload test apps zip to OneDrive
         run: |
           destPath="SANDBOX/RUNTIMES + SDK + PLUGINS/OpenXR"
-          echo "Uploading SRTestApps-${{ github.run_number }}.zip to OneDrive: $destPath"
-          rclone copy SRTestApps-${{ github.run_number }}.zip "onedrive:$destPath" --progress
+          echo "Uploading TestApps-${{ github.run_number }}.zip to OneDrive: $destPath"
+          rclone copy TestApps-${{ github.run_number }}.zip "onedrive:$destPath" --progress
           echo "Upload complete!"
