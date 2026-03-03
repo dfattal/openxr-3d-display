@@ -472,12 +472,16 @@ client_loop(volatile struct ipc_client_state *ics)
 			break;
 		}
 
+		IPC_INFO(ics->server, "Client %u: IPC cmd=%u (%s) size=%zu",
+		         ics->client_state.id, (unsigned)cmd, ipc_cmd_to_str(cmd), cmd_size);
+
 		IPC_TRACE_BEGIN(ipc_dispatch);
 		xrt_result_t result = ipc_dispatch(ics, cmd_ptr);
 		IPC_TRACE_END(ipc_dispatch);
 
 		if (result != XRT_SUCCESS) {
-			IPC_ERROR(ics->server, "During packet handling, disconnecting client.");
+			IPC_ERROR(ics->server, "Client %u: cmd=%u (%s) FAILED with %u, disconnecting.",
+			          ics->client_state.id, (unsigned)cmd, ipc_cmd_to_str(cmd), (unsigned)result);
 			break;
 		}
 	}

@@ -93,10 +93,20 @@ static void ToggleFullscreen(HWND hwnd) {
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     // Log WM_CLOSE and WM_DESTROY for debugging session exit
     if (msg == WM_CLOSE || msg == WM_DESTROY || msg == WM_QUIT) {
-        LOG_WARN("WindowProc: msg=0x%04X (%s) wParam=%llu lParam=%lld",
+        DWORD flags = InSendMessageEx(NULL);
+        LOG_WARN("WindowProc: msg=0x%04X (%s) wParam=%llu lParam=%lld tid=%lu "
+            "InSendMessageEx=0x%08lX (posted=%d sent=%d callback=%d)",
             msg,
             msg == WM_CLOSE ? "WM_CLOSE" : msg == WM_DESTROY ? "WM_DESTROY" : "WM_QUIT",
-            (unsigned long long)wParam, (long long)lParam);
+            (unsigned long long)wParam, (long long)lParam,
+            GetCurrentThreadId(), flags,
+            (flags == ISMEX_NOSEND ? 1 : 0),
+            (int)((flags & ISMEX_SEND) != 0),
+            (int)((flags & ISMEX_CALLBACK) != 0));
+    }
+    // Track WM_SYSCOMMAND SC_CLOSE (precedes WM_CLOSE when user clicks X button)
+    if (msg == WM_SYSCOMMAND && (wParam & 0xFFF0) == SC_CLOSE) {
+        LOG_WARN("WindowProc: WM_SYSCOMMAND SC_CLOSE received (user clicked X or Alt+F4)");
     }
 
     {
