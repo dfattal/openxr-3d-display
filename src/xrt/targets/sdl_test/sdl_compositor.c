@@ -143,7 +143,7 @@ select_instances_extensions(struct sdl_compositor *c,
                             struct u_extension_list_builder *optional_builder)
 {
 #ifdef VK_KHR_portability_enumeration
-	u_string_list_append(optional, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+	u_extension_list_builder_append(optional_builder, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
 #ifdef VK_EXT_display_surface_counter
 	u_extension_list_builder_append(optional_builder, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME);
