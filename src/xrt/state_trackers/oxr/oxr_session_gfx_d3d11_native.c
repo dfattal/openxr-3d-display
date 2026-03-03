@@ -25,6 +25,7 @@
 #include "oxr_objects.h"
 #include "oxr_logger.h"
 #include "oxr_handle.h"
+#include "oxr_roles.h"
 
 #ifdef XRT_HAVE_D3D11_NATIVE_COMPOSITOR
 #include "d3d11/comp_d3d11_compositor.h"
@@ -128,7 +129,7 @@ oxr_session_populate_d3d11_native(struct oxr_logger *log,
                                    void *window_handle,
                                    struct oxr_session *sess)
 {
-	struct xrt_device *xdev = get_role_head(sess->sys);
+	struct xrt_device *xdev = get_static_role_head(sess->sys);
 	struct xrt_compositor_native *xcn = NULL;
 
 	// Get D3D11 display processor factory from system compositor info (set by target builder)
