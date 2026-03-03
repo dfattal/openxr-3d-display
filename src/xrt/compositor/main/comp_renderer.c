@@ -1455,6 +1455,7 @@ do_weaving(struct comp_renderer *r,
 		r->dp_init_attempted = true;
 		xrt_dp_factory_vk_fn_t factory =
 		    (xrt_dp_factory_vk_fn_t)r->c->xsysc->info.dp_factory_vk;
+		U_LOG_W("[dp] do_weaving init: xsysc=%p factory=%p", (void *)r->c->xsysc, (void *)factory);
 		if (factory != NULL) {
 			struct vk_bundle *vk = &r->c->base.vk;
 			void *window_handle = r->c->external_window_handle;

@@ -11,11 +11,7 @@
 #include "util/u_debug.h"
 #include "comp_settings.h"
 
-#ifdef XRT_OS_ANDROID
 #define USE_COMPUTE_DEFAULT false
-#else
-#define USE_COMPUTE_DEFAULT true
-#endif
 
 // clang-format off
 DEBUG_GET_ONCE_LOG_OPTION(log, "XRT_COMPOSITOR_LOG", U_LOGGING_INFO)
