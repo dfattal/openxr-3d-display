@@ -704,6 +704,7 @@ if(XRT_HAVE_LEIA_SR)
 		# Vulkan weaver library (conditional)
 		if(LEIA_SR_VULKAN_AVAILABLE)
 			target_link_libraries(drv_leia PRIVATE
+				aux_vk
 				${SR_PATH}/lib/SimulatedRealityVulkanBeta.lib)
 			target_compile_definitions(drv_leia PUBLIC XRT_HAVE_LEIA_SR_VULKAN)
 		endif()
