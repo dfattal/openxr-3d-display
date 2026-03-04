@@ -220,6 +220,12 @@ struct d3d11_service_compositor
 	//! Per-client render resources (window, swap chain, display processor)
 	struct d3d11_client_render_resources render;
 
+	//! Whether render resources have been initialized (deferred to first frame)
+	bool render_initialized;
+
+	//! Stored external window handle for deferred init (from XR_EXT_win32_window_binding)
+	void *deferred_external_hwnd;
+
 	//! Accumulated layers for the current frame
 	struct comp_layer_accum layer_accum;
 
@@ -2422,6 +2428,19 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
+	// Deferred initialization: create render resources on first frame submission.
+	// Probe sessions (e.g., Chrome WebXR) that never submit frames skip this entirely.
+	if (!c->render_initialized) {
+		xrt_result_t res_ret = init_client_render_resources(
+		    sys, c->deferred_external_hwnd, sys->xsysd, &c->render);
+		if (res_ret != XRT_SUCCESS) {
+			U_LOG_E("Deferred render resource init failed");
+			return res_ret;
+		}
+		c->render_initialized = true;
+		U_LOG_W("Render resources initialized on first frame (deferred init)");
+	}
+
 	// Check window validity - detect window close to end session
 	if (!c->window_closed) {
 		bool window_valid = true;
@@ -3229,7 +3248,8 @@ compositor_destroy(struct xrt_compositor *xc)
 	struct d3d11_service_compositor *c = d3d11_service_compositor_from_xrt(xc);
 	struct d3d11_service_system *sys = c->sys;
 
-	U_LOG_W("Destroying D3D11 service compositor for client");
+	U_LOG_W("Destroying D3D11 service compositor for client (render_initialized=%d)",
+	        c->render_initialized);
 
 	// Clear active compositor if it's this one
 	{
@@ -3239,8 +3259,10 @@ compositor_destroy(struct xrt_compositor *xc)
 		}
 	}
 
-	// Clean up per-client render resources (window, swap chain, display processor)
-	fini_client_render_resources(&c->render);
+	// Clean up per-client render resources only if they were initialized
+	if (c->render_initialized) {
+		fini_client_render_resources(&c->render);
+	}
 
 	delete c;
 }
@@ -3374,19 +3396,16 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 	// Initialize layer accumulator
 	std::memset(&c->layer_accum, 0, sizeof(c->layer_accum));
 
-	// Initialize per-client render resources (window, swap chain, display processor)
-	// Get external window handle if app provided one via XR_EXT_win32_window_binding
-	void *external_hwnd = nullptr;
+	// Defer per-client render resources (window, swap chain, display processor)
+	// to first frame submission. This avoids expensive initialization for probe
+	// sessions (e.g., Chrome WebXR capability checks) that create and immediately
+	// destroy sessions without ever submitting a frame.
+	c->render_initialized = false;
+	c->deferred_external_hwnd = nullptr;
 	if (xsi != nullptr) {
-		external_hwnd = xsi->external_window_handle;
+		c->deferred_external_hwnd = xsi->external_window_handle;
 	}
-
-	xrt_result_t res_ret = init_client_render_resources(sys, external_hwnd, sys->xsysd, &c->render);
-	if (res_ret != XRT_SUCCESS) {
-		U_LOG_E("Failed to initialize client render resources");
-		delete c;
-		return res_ret;
-	}
+	std::memset(&c->render, 0, sizeof(c->render));
 
 	// Set up compositor vtable
 	c->base.base.get_swapchain_create_properties = compositor_get_swapchain_create_properties;
