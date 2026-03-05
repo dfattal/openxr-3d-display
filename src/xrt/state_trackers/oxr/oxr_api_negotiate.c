@@ -383,6 +383,16 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 
 #ifdef OXR_HAVE_KHR_metal_enable
 	ENTRY_IF_EXT(xrGetMetalGraphicsRequirementsKHR, KHR_metal_enable);
+	// Unity requests the provisional KHRX2 function name — map to KHR implementation
+	do {
+		if (strcmp(name, "xrGetMetalGraphicsRequirementsKHRX2") == 0) {
+			if (inst->extensions.KHR_metal_enable) {
+				*out_function = (PFN_xrVoidFunction)&oxr_xrGetMetalGraphicsRequirementsKHR;
+				return XR_SUCCESS;
+			}
+			return XR_ERROR_FUNCTION_UNSUPPORTED;
+		}
+	} while (false);
 #endif // OXR_HAVE_KHR_metal_enable
 
 #ifdef OXR_HAVE_HTC_facial_tracking
