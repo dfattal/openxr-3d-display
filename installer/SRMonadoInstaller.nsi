@@ -299,103 +299,110 @@ FunctionEnd
 ; RemoveFromPath - Removes a directory from the system PATH
 ; Handles 64-bit registry, Unicode characters, and case-insensitive matching.
 Function un.RemoveFromPath
-  Exch $0 ; Target path
-  Push $1 ; Original PATH
-  Push $2 ; Rebuilt PATH
-  Push $3 ; Current Segment
-  Push $4 ; Normalized Target
-  Push $5 ; Normalized Segment
-  Push $6 ; Temp
-  Push $7 ; Length
-  Push $9 ; Log Handle
+  Exch $0 ; Target path to remove
+  Push $1 ; Full PATH (Remaining to process)
+  Push $2 ; Rebuilt PATH (Output)
+  Push $3 ; Current Segment character-by-character
+  Push $4 ; Normalized Target (Lowercase, no slash)
+  Push $5 ; Normalized Segment (Lowercase, no slash)
+  Push $6 ; Loop Index / Counter
+  Push $7 ; Temp Char / Segment Length
+  Push $8 ; Log Handle
 
   SetRegView 64
-  StrCpy $9 "$TEMP\RemoveFromPath.log"
-  FileOpen $9 $9 "w"
-  FileWrite $9 "=== RemoveFromPath started ===$\r$\n"
-  FileWrite $9 "Target to remove: $0$\r$\n"
+  StrCpy $8 "$TEMP\RemoveFromPath.log"
+  FileOpen $8 $8 "w"
+  FileWrite $8 "=== RemoveFromPath started ===$\r$\n"
+  FileWrite $8 "Target to remove: '$0'$\r$\n"
 
+  ; 1. Read Registry
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-  FileWrite $9 "Original PATH: $1$\r$\n"
+  FileWrite $8 "FULL REGISTRY PATH: '$1'$\r$\n"
 
-  ; 1. Normalize Target: Remove trailing \ and Lowercase
+  ; 2. Normalize Target
   StrCpy $4 $0
   StrLen $7 $4
   IntOp $7 $7 - 1
   StrCpy $6 $4 1 $7
   StrCmp $6 "\" 0 +2
-    StrCpy $4 $4 $7 
+    StrCpy $4 $4 $7 ; Strip trailing \
   Push $4
   Call un.StrLower
   Pop $4 
+  FileWrite $8 "Normalized Target: '$4'$\r$\n"
 
-  StrCpy $2 "" 
+  StrCpy $2 "" ; Clear rebuild buffer
 
-loop:
+  ; 3. Segment Isolation (Manual Parse)
+loop_segments:
   StrCmp $1 "" done_loop
-  Push $1
-  Push ";"
-  Call un.StrStr
-  Pop $3 
+  StrCpy $6 0 ; Reset segment pointer
+  StrCpy $3 "" ; Reset current segment string
 
-  StrCmp $3 "" no_semicolon
-    StrLen $6 $1
-    StrLen $7 $3
-    IntOp $6 $6 - $7
-    StrCpy $3 $1 $6 
-    IntOp $6 $6 + 1
-    StrCpy $1 $1 "" $6
-    Goto process_segment
-no_semicolon:
-    StrCpy $3 $1 
-    StrCpy $1 ""
+find_semi:
+  StrCpy $7 $1 1 $6 ; Get 1 character at index $6
+  StrCmp $7 "" segment_found ; End of Path
+  StrCmp $7 ";" segment_found ; Found delimiter
+  IntOp $6 $6 + 1
+  Goto find_semi
 
-process_segment:
-  StrCmp $3 "" loop ; Skip empty segments (like ;; )
+segment_found:
+  StrCpy $3 $1 $6 ; Extract segment text
+  ; Remove segment + semicolon from the main PATH string ($1)
+  IntOp $6 $6 + 1
+  StrCpy $1 $1 "" $6 
 
-  ; 2. Normalize Segment: Remove trailing ; OR \ and Lowercase
+  FileWrite $8 "--- Extracting Segment ---$\r$\n"
+  FileWrite $8 "Found: '$3'$\r$\n"
+
+  ; Skip empty segments (handles ;; or trailing ;)
+  StrCmp $3 "" loop_segments
+
+  ; 4. Normalize Segment
   StrCpy $5 $3
   StrLen $7 $5
   IntOp $7 $7 - 1
   StrCpy $6 $5 1 $7
-  
-  ; Strip trailing semicolon (the fix for your log)
-  StrCmp $6 ";" 0 +3
-    StrCpy $5 $5 $7
-    IntOp $7 $7 - 1 ; Update length for next check
-  
-  ; Strip trailing backslash
-  StrCpy $6 $5 1 $7
   StrCmp $6 "\" 0 +2
     StrCpy $5 $5 $7
-
+  
   Push $5
   Call un.StrLower
   Pop $5
+  
+  FileWrite $8 "Comparing '$5' against '$4'$\r$\n"
 
-  ; 3. Compare
+  ; 5. Decision: Match or Keep?
   StrCmp $5 $4 is_match
-    FileWrite $9 "KEEPING: $3$\r$\n"
-    StrCmp $2 "" 0 +3
-      StrCpy $2 "$3" 
-      Goto loop
-    StrCpy $2 "$2;$3" 
-    Goto loop
+    FileWrite $8 "Result: MATCH FOUND - REMOVING.$\r$\n"
+    Goto loop_segments
 
 is_match:
-  FileWrite $9 "MATCH FOUND: Removing $3$\r$\n"
-  Goto loop
+  ; If NOT match, append to our rebuilt path ($2)
+  FileWrite $8 "Result: NO MATCH - KEEPING.$\r$\n"
+  StrCmp $2 "" 0 +3
+    StrCpy $2 "$3" ; First item
+    Goto loop_segments
+  StrCpy $2 "$2;$3" ; Append with separator
+  Goto loop_segments
 
 done_loop:
-  WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
-  FileWrite $9 "Updated PATH: $2$\r$\n"
-  FileWrite $9 "=== RemoveFromPath completed ===$\r$\n"
-  FileClose $9
+  FileWrite $8 "FINAL REBUILT PATH: '$2'$\r$\n"
+
+  ; 6. Safety Check & Write
+  ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+  StrCmp $2 $1 done_write
+    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
+    FileWrite $8 "Registry successfully updated.$\r$\n"
+  
+done_write:
+  FileWrite $8 "=== RemoveFromPath completed ===$\r$\n"
+  FileClose $8
 
   SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
   SetRegView 32
 
-  Pop $9
+  Pop $8
   Pop $7
   Pop $6
   Pop $5
