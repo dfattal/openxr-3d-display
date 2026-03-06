@@ -281,51 +281,55 @@ FunctionEnd
 ; Usage: Push "C:\path\to\remove" 
 ;        Call un.RemoveFromPath
 Function un.RemoveFromPath
-  Exch $0  ; Path to remove
-  Push $1
-  Push $2
-  Push $3
-  Push $4
-  Push $5
-  Push $6
-  Push $7  ; log file handle
+  Exch $0  ; Path to remove (from stack)
+  Push $1  ; Current raw PATH
+  Push $2  ; Rebuilt PATH
+  Push $3  ; Current segment being checked
+  Push $4  ; Lowercase segment
+  Push $5  ; Lowercase target
+  Push $6  ; Temp/Length variable
+  Push $7  ; Log file (optional)
 
-  ; Open uninstall log file
-  StrCpy $7 "$TEMP\SRMonado_uninstall_path.log"
+  SetRegView 64 ; Ensure we are looking at 64-bit System PATH
+
+  ; Open a log file in TEMP
+  StrCpy $7 "$TEMP\RemoveFromPath.log"
   FileOpen $7 $7 "w"
+  FileWrite $7 "Removing path: $0$\r$\n"
 
-  SetRegView 64
-
-  ; Lowercase target
+  ; 1. Prepare lowercase target for comparison
   Push $0
   Call un.StrLower
   Pop $5
+  ; Strip trailing backslash
   StrCpy $6 $5 1 -1
   StrCmp $6 "\" 0 +2
     StrCpy $5 $5 -1
+  FileWrite $7 "Normalized target: $5$\r$\n"
 
-  FileWrite $7 "Target path to remove: $5$\r$\n"
-
-  ; Read system PATH
+  ; 2. Read the actual System Path
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
   FileWrite $7 "Current PATH: $1$\r$\n"
-  StrCpy $2 ""
+  StrCpy $2 "" ; Initialize rebuilt PATH
 
 loop:
-  StrCmp $1 "" write
+  StrCmp $1 "" write ; No more PATH left
 
+  ; 3. Find next semicolon
   Push $1
   Push ";"
   Call un.StrStr
   Pop $3
 
   StrCmp $3 "" last_segment
+
+  ; 4. Extract segment (everything before semicolon)
   StrLen $4 $1
   StrLen $6 $3
   IntOp $4 $4 - $6
-  StrCpy $3 $1 $4
+  StrCpy $3 $1 $4     ; segment original casing
   IntOp $6 $6 + 1
-  StrCpy $1 $1 "" $6
+  StrCpy $1 $1 "" $6  ; move $1 past semicolon
   Goto check_segment
 
 last_segment:
@@ -333,37 +337,41 @@ last_segment:
   StrCpy $1 ""
 
 check_segment:
-  StrCmp $3 "" loop
+  StrCmp $3 "" loop ; skip empty
 
+  ; 5. Normalize for comparison
   Push $3
   Call un.StrLower
   Pop $4
+  ; Strip trailing backslash
   StrCpy $6 $4 1 -1
   StrCmp $6 "\" 0 +2
     StrCpy $4 $4 -1
 
-  FileWrite $7 "Checking PATH segment: $3$ (normalized: $4$)\r$\n"
+  FileWrite $7 "Checking segment: $3$ (normalized: $4$)\r$\n"
 
-  StrCmp $4 $5 loop
-
-  StrCmp $2 "" 0 +3
-    StrCpy $2 $3
+  ; 6. Compare normalized segment to normalized target
+  StrCmp $4 $5 skip_segment 0 +2
+    FileWrite $7 "Skipping segment (matches target): $3$\r$\n"
     Goto loop
-  StrCpy $2 "$2;$3"
+
+skip_segment:
+  ; 7. Append original-cased segment to rebuilt PATH
+  StrCmp $2 "" 0 +3
+    StrCpy $2 $3      ; First segment
+    Goto loop
+  StrCpy $2 "$2;$3"   ; Append with semicolon
   Goto loop
 
 write:
-  FileWrite $7 "New PATH after removal: $2$\r$\n"
-
-  StrCmp $2 "" done
-    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
-    SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-    FileWrite $7 "PATH successfully updated.$\r$\n"
+  ; Always write PATH back, even if empty
+  FileWrite $7 "Writing updated PATH: $2$\r$\n"
+  WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
+  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
 done:
-  SetRegView 32
   FileClose $7
-
+  SetRegView 32 ; restore registry view
   Pop $7
   Pop $6
   Pop $5
