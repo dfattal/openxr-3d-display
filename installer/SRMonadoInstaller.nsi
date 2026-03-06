@@ -138,26 +138,26 @@ Function StrLower
   Push $2 ; Current Char
   Push $3 ; Result Buffer
   
-  StrCpy $3 "" ; Clear the buffer
-  StrCpy $1 0  ; Reset index
+  StrCpy $3 "" 
+  StrCpy $1 0  
 
 loop:
-  StrCpy $2 $0 1 $1 ; Get one character from input
-  StrCmp $2 "" done ; If empty, we reached the end
+  StrCpy $2 $0 1 $1 
+  StrCmp $2 "" done 
   
-  ; Convert $2 to lowercase using Windows API
-  System::Call "user32::CharLower(t r2)t.r2"
+  ; FIX: Added 'W' to CharLower and used 'w' for the type
+  System::Call "user32::CharLowerW(w r2)w.r2"
   
-  StrCpy $3 "$3$2" ; Append lowercase char to our buffer
-  IntOp $1 $1 + 1  ; Move to next index
+  StrCpy $3 "$3$2" 
+  IntOp $1 $1 + 1  
   Goto loop
 
 done:
-  StrCpy $0 $3     ; Move the full result back to $0
+  StrCpy $0 $3     
   Pop $3
   Pop $2
   Pop $1
-  Exch $0          ; Restore stack
+  Exch $0          
 FunctionEnd
 
 ; Pure NSIS Lowercase function (Uninstaller)
@@ -167,26 +167,26 @@ Function un.StrLower
   Push $2 ; Current Char
   Push $3 ; Result Buffer
   
-  StrCpy $3 "" ; Clear the buffer
-  StrCpy $1 0  ; Reset index
+  StrCpy $3 "" 
+  StrCpy $1 0  
 
 loop:
-  StrCpy $2 $0 1 $1 ; Get one character from input
-  StrCmp $2 "" done ; If empty, we reached the end
+  StrCpy $2 $0 1 $1 
+  StrCmp $2 "" done 
   
-  ; Convert $2 to lowercase using Windows API
-  System::Call "user32::CharLower(t r2)t.r2"
+  ; FIX: Added 'W' to CharLower and used 'w' for the type
+  System::Call "user32::CharLowerW(w r2)w.r2"
   
-  StrCpy $3 "$3$2" ; Append lowercase char to our buffer
-  IntOp $1 $1 + 1  ; Move to next index
+  StrCpy $3 "$3$2" 
+  IntOp $1 $1 + 1  
   Goto loop
 
 done:
-  StrCpy $0 $3     ; Move the full result back to $0
+  StrCpy $0 $3     
   Pop $3
   Pop $2
   Pop $1
-  Exch $0          ; Restore stack
+  Exch $0          
 FunctionEnd
 
 ;--------------------------------
