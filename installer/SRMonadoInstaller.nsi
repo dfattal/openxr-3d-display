@@ -292,99 +292,114 @@ Function un.RemoveFromPath
   Push $8
   Push $9
 
-  DetailPrint "=== RemoveFromPath started ==="
-  DetailPrint "Target to remove: $0"
+  ; Open log file
+  StrCpy $9 "$TEMP\RemoveFromPath.log"
+  FileOpen $9 $9 "a"
 
-  SetRegView 64
+  StrCmp $9 "" +2
+    FileWrite $9 "=== RemoveFromPath started ===$\r$\n"
 
-  Push $0
-  Call un.StrLower
-  Pop $5
-  Push $5
-  Call un.TrimCRLF
-  Pop $5
-  StrLen $6 $5
-  StrCpy $7 $5 1 -1
-  StrCmp $7 "\" 0 +2
-    StrCpy $5 $5 -1
-  DetailPrint "Normalized target: $5"
-
+  ; Backup original PATH
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
   StrCpy $8 $1
-  StrCpy $2 ""
-  DetailPrint "Current PATH: $1"
 
-  StrCpy $9 "$TEMP\SRMonado_uninstall.log"
-  FileOpen $9 $9 "w"
-  StrCmp $9 "" 0 +2
-    DetailPrint "Failed to open temp log file for RemoveFromPath"
+  StrCmp $9 "" +2
+    FileWrite $9 "Original PATH: $1$\r$\n"
+
+  ; Normalize target path (remove trailing \)
+  StrCpy $4 $0
+loop_trim_target:
+  StrLen $5 $4
+  IntCmp $5 0 trim_target_done
+  IntOp $5 $5 - 1
+  StrCpy $6 $4 1 $5
+  StrCmp $6 "\" 0 trim_target_done
+  StrCpy $4 $4 $5
+  Goto loop_trim_target
+trim_target_done:
+
+  StrCpy $2 ""
 
 loop:
-  StrCmp $1 "" write
+  StrCmp $1 "" done_loop
 
   Push $1
   Push ";"
   Call un.StrStr
   Pop $3
 
-  StrCmp $3 "" last_segment
+  StrCmp $3 "" 0 +4
+    StrCpy $3 $1
+    StrCpy $1 ""
+    Goto process_segment
 
   StrLen $6 $1
   StrLen $7 $3
   IntOp $6 $6 - $7
   StrCpy $3 $1 $6
-  IntOp $7 $7 + 1
-  StrCpy $1 $1 "" $7
-  Goto check_segment
+  IntOp $7 $7 - 1
+  StrCpy $1 $3 "" $6
+  StrCpy $1 $1 "" 1
 
-last_segment:
-  StrCpy $3 $1
-  StrCpy $1 ""
+process_segment:
 
-check_segment:
-  StrCmp $3 "" loop
+  ; Normalize segment (remove trailing \)
+  StrCpy $5 $3
+loop_trim_seg:
+  StrLen $6 $5
+  IntCmp $6 0 trim_seg_done
+  IntOp $6 $6 - 1
+  StrCpy $7 $5 1 $6
+  StrCmp $7 "\" 0 trim_seg_done
+  StrCpy $5 $5 $6
+  Goto loop_trim_seg
+trim_seg_done:
 
-  Push $3
-  Call un.StrLower
-  Pop $4
-  Push $4
-  Call un.TrimCRLF
-  Pop $4
-  StrLen $6 $4
-  StrCpy $7 $4 1 -1
-  StrCmp $7 "\" 0 +2
-    StrCpy $4 $4 -1
+  ; Compare with target
+  StrCmp $5 $4 skip_segment
 
-  DetailPrint "Checking segment: $3 (normalized: $4)"
-
-  StrCmp $4 $5 skip_append
-
+  ; Append to rebuilt PATH
   StrCmp $2 "" 0 +3
-    StrCpy $2 $3
-    Goto loop
+    StrCpy $2 "$3"
+    Goto continue_loop
+
   StrCpy $2 "$2;$3"
+  Goto continue_loop
+
+skip_segment:
+  StrCmp $9 "" +2
+    FileWrite $9 "Removed segment: $3$\r$\n"
+
+continue_loop:
   Goto loop
 
-skip_append:
-  DetailPrint "Skipped matching segment: $3"
-  Goto loop
+done_loop:
 
 write:
+  ; If rebuilt PATH equals original, nothing changed
   StrCmp $2 $8 done
+
+  ; SAFETY: prevent wiping PATH
   StrCmp $2 "" 0 write_reg
-    StrCmp $8 "" done
-    DetailPrint "PATH is now empty"
-    Goto write_reg
+    DetailPrint "Safety abort: rebuilt PATH empty, keeping original PATH"
+    StrCmp $9 "" +2
+      FileWrite $9 "Safety abort: rebuilt PATH empty$\r$\n"
+    Goto done
 
 write_reg:
   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
+
+  ; Notify system
   SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+
   StrCmp $9 "" +2
     FileWrite $9 "Updated PATH: $2$\r$\n"
 
 done:
   SetRegView 32
-  StrCmp $9 "" +2
+
+  StrCmp $9 "" +3
+    FileWrite $9 "=== RemoveFromPath completed ===$\r$\n"
     FileClose $9
 
   DetailPrint "=== RemoveFromPath completed ==="
