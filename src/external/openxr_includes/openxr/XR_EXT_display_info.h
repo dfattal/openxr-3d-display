@@ -27,7 +27,6 @@ extern "C" {
 
 // Reuse the type value from the deleted XR_EXT_dynamic_render_resolution
 #define XR_TYPE_DISPLAY_INFO_EXT ((XrStructureType)1000999003)
-#define XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT ((XrReferenceSpaceType)1000999004)
 
 /*!
  * @brief Display information returned by xrGetSystemProperties.

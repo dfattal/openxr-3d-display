@@ -1081,7 +1081,6 @@ struct AppXrSession {
     XrSession session;
     XrSpace localSpace;
     XrSpace viewSpace;
-    XrSpace displaySpace;
     SwapchainInfo swapchain;
     XrViewConfigurationType viewConfigType;
     std::vector<XrViewConfigurationView> configViews;
@@ -1283,17 +1282,6 @@ static bool CreateSpaces(AppXrSession &app)
 
     spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
     XR_CHECK(xrCreateReferenceSpace(app.session, &spaceInfo, &app.viewSpace));
-
-    // DISPLAY reference space (display-anchored, for Kooima)
-    app.displaySpace = XR_NULL_HANDLE;
-    if (app.hasDisplayInfoExt) {
-        spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT;
-        if (XR_SUCCEEDED(xrCreateReferenceSpace(app.session, &spaceInfo, &app.displaySpace))) {
-            LOG_INFO("DISPLAY reference space created");
-        } else {
-            LOG_WARN("Failed to create DISPLAY reference space");
-        }
-    }
 
     LOG_INFO("Reference spaces created");
     return true;
@@ -1521,14 +1509,12 @@ int main(int argc, char **argv)
             continue;
         }
 
-        // Locate views in DISPLAY space (for Kooima) or LOCAL fallback
         std::vector<XrView> views(app.configViews.size(), {XR_TYPE_VIEW});
         XrViewState viewState = {XR_TYPE_VIEW_STATE};
         XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
         locateInfo.viewConfigurationType = app.viewConfigType;
         locateInfo.displayTime = frameState.predictedDisplayTime;
-        locateInfo.space = (app.displaySpace != XR_NULL_HANDLE)
-            ? app.displaySpace : app.localSpace;
+        locateInfo.space = app.localSpace;
 
         uint32_t viewCount = 0;
         xrLocateViews(app.session, &locateInfo, &viewState, (uint32_t)views.size(), &viewCount, views.data());
@@ -1811,8 +1797,6 @@ int main(int argc, char **argv)
 
     if (app.swapchain.swapchain)
         xrDestroySwapchain(app.swapchain.swapchain);
-    if (app.displaySpace)
-        xrDestroySpace(app.displaySpace);
     if (app.localSpace)
         xrDestroySpace(app.localSpace);
     if (app.viewSpace)

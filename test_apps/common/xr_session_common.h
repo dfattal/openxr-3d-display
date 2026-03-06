@@ -54,11 +54,8 @@ struct XrSessionManager {
     XrInstance instance = XR_NULL_HANDLE;
     XrSystemId systemId = XR_NULL_SYSTEM_ID;
     XrSession session = XR_NULL_HANDLE;
-    XrSpace localSpace = XR_NULL_HANDLE;   //!< LOCAL space: logically anchored, may be recentered
+    XrSpace localSpace = XR_NULL_HANDLE;   //!< LOCAL space
     XrSpace viewSpace = XR_NULL_HANDLE;    //!< VIEW space: head-relative, moves with the viewer
-    XrSpace displaySpace = XR_NULL_HANDLE; //!< DISPLAY space (XR_EXT_display_info v2): physically
-                                           //!< anchored to display center, unaffected by recentering.
-                                           //!< XR_NULL_HANDLE if extension not enabled.
 
     // Single swapchain at native display resolution.
     // Stereo: both eyes render SBS with viewport offsets.

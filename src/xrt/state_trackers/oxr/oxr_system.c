@@ -253,12 +253,6 @@ oxr_system_fill_in(
 	}
 #endif
 
-#ifdef OXR_HAVE_EXT_display_info
-	if (sys->inst->extensions.EXT_display_info && sys->xso->semantic.display != NULL) {
-		sys->reference_spaces[sys->reference_space_count++] = XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT;
-	}
-#endif
-
 
 	/*
 	 * Misc

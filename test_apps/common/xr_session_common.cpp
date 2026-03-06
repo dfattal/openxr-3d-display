@@ -117,26 +117,6 @@ bool CreateSpaces(XrSessionManager& xr) {
     XR_CHECK_LOG(xrCreateReferenceSpace(xr.session, &viewSpaceInfo, &xr.viewSpace));
     LOG_INFO("VIEW space created: 0x%p", (void*)xr.viewSpace);
 
-    // Create DISPLAY reference space (XR_EXT_display_info v2).
-    // DISPLAY space is physically anchored to the display center and is NOT affected
-    // by xrRecenterSpace or any recentering of LOCAL space. For tracked 3D displays
-    // the origin is at display center with +X right, +Y up, +Z toward the viewer —
-    // identical to LOCAL at startup, but semantically distinct.
-    // Apps should prefer DISPLAY space for view location and layer submission so that
-    // content stays locked to the physical display regardless of recentering.
-    // Falls back to LOCAL space if the extension is not enabled.
-    XrReferenceSpaceCreateInfo displaySpaceInfo = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-    displaySpaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT;
-    displaySpaceInfo.poseInReferenceSpace.orientation = {0, 0, 0, 1};
-    displaySpaceInfo.poseInReferenceSpace.position = {0, 0, 0};
-    XrResult displayResult = xrCreateReferenceSpace(xr.session, &displaySpaceInfo, &xr.displaySpace);
-    if (XR_SUCCEEDED(displayResult)) {
-        LOG_INFO("DISPLAY space created: 0x%p", (void*)xr.displaySpace);
-    } else {
-        LOG_INFO("DISPLAY space not available (expected if extension disabled)");
-        xr.displaySpace = XR_NULL_HANDLE;
-    }
-
     LOG_INFO("Reference spaces created successfully");
     return true;
 }
@@ -378,9 +358,7 @@ bool LocateViews(
     XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
     locateInfo.viewConfigurationType = xr.viewConfigType;
     locateInfo.displayTime = displayTime;
-    // Use DISPLAY space if available — it is physically anchored to the display
-    // and unaffected by recentering. Fall back to LOCAL space otherwise.
-    locateInfo.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
+    locateInfo.space = xr.localSpace;
 
     XrViewState viewState = {XR_TYPE_VIEW_STATE};
 
@@ -490,8 +468,7 @@ bool ReleaseSwapchainImage(XrSessionManager& xr) {
 
 bool EndFrame(XrSessionManager& xr, XrTime displayTime, const XrCompositionLayerProjectionView* views, uint32_t viewCount) {
     XrCompositionLayerProjection projectionLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-    // Submit layers in DISPLAY space (physically anchored) when available, LOCAL otherwise.
-    projectionLayer.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
+    projectionLayer.space = xr.localSpace;
     projectionLayer.viewCount = viewCount;
     projectionLayer.views = views;
 
@@ -595,9 +572,8 @@ bool EndFrameWithWindowSpaceHud(
     float hudDisparity,
     uint32_t viewCount
 ) {
-    // Projection layer — use DISPLAY space (physically anchored) when available
     XrCompositionLayerProjection projectionLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-    projectionLayer.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
+    projectionLayer.space = xr.localSpace;
     projectionLayer.viewCount = viewCount;
     projectionLayer.views = projViews;
 
@@ -831,9 +807,8 @@ bool EndFrameWithQuadLayer(
     const XrPosef& quadPose,
     float quadWidth, float quadHeight
 ) {
-    // Projection layer — use DISPLAY space (physically anchored) when available
     XrCompositionLayerProjection projectionLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-    projectionLayer.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
+    projectionLayer.space = xr.localSpace;
     projectionLayer.viewCount = 2;
     projectionLayer.views = projViews;
 
@@ -898,12 +873,6 @@ void CleanupOpenXR(XrSessionManager& xr) {
         LOG_INFO("Destroying swapchain...");
         xrDestroySwapchain(xr.swapchain.swapchain);
         xr.swapchain.swapchain = XR_NULL_HANDLE;
-    }
-
-    if (xr.displaySpace != XR_NULL_HANDLE) {
-        LOG_INFO("Destroying DISPLAY space...");
-        xrDestroySpace(xr.displaySpace);
-        xr.displaySpace = XR_NULL_HANDLE;
     }
 
     if (xr.viewSpace != XR_NULL_HANDLE) {

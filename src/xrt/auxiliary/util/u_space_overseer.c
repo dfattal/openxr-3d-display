@@ -148,7 +148,6 @@ type_to_small_string(enum xrt_reference_space_type type)
 	case XRT_SPACE_REFERENCE_TYPE_LOCAL_FLOOR: return "local_floor";
 	case XRT_SPACE_REFERENCE_TYPE_STAGE: return "stage";
 	case XRT_SPACE_REFERENCE_TYPE_UNBOUNDED: return "unbounded";
-	case XRT_SPACE_REFERENCE_TYPE_DISPLAY: return "display";
 	}
 
 	return "invalid";
@@ -163,7 +162,6 @@ get_semantic_space(struct u_space_overseer *uso, enum xrt_reference_space_type t
 	case XRT_SPACE_REFERENCE_TYPE_LOCAL_FLOOR: return u_space(uso->base.semantic.local_floor);
 	case XRT_SPACE_REFERENCE_TYPE_STAGE: return u_space(uso->base.semantic.stage);
 	case XRT_SPACE_REFERENCE_TYPE_UNBOUNDED: return u_space(uso->base.semantic.unbounded);
-	case XRT_SPACE_REFERENCE_TYPE_DISPLAY: return u_space(uso->base.semantic.display);
 	}
 
 	return NULL;
@@ -1040,7 +1038,6 @@ destroy(struct xrt_space_overseer *xso)
 {
 	struct u_space_overseer *uso = u_space_overseer(xso);
 
-	xrt_space_reference(&uso->base.semantic.display, NULL);
 	xrt_space_reference(&uso->base.semantic.unbounded, NULL);
 	xrt_space_reference(&uso->base.semantic.stage, NULL);
 	xrt_space_reference(&uso->base.semantic.local, NULL);
@@ -1168,12 +1165,6 @@ u_space_overseer_legacy_setup(struct u_space_overseer *uso,
 
 	// Set local to the local offset.
 	u_space_overseer_create_offset_space(uso, uso->base.semantic.root, local_offset, &uso->base.semantic.local);
-
-	// Display space: same offset as local (display center at standing height),
-	// but parented to root so it's unaffected by recentering.
-	// Must match the device tracking origin offset (set by u_builder_setup_tracking_origins)
-	// so that poses in tracking space transform correctly to DISPLAY space.
-	u_space_overseer_create_offset_space(uso, uso->base.semantic.root, local_offset, &uso->base.semantic.display);
 
 	// Set local floor to be under local, but at y == 0 from stage.
 	struct xrt_pose local_floor_offset = {

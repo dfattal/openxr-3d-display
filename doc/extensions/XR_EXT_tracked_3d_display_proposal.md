@@ -78,7 +78,7 @@ This proposal introduces four independent but complementary extensions:
 | `XR_EXT_win32_window_binding` | App provides a Win32 HWND for runtime rendering; enables windowed mode, multi-app, app-controlled input, and window-space overlay layers. |
 | `XR_EXT_android_surface_binding` | App provides an Android `ANativeWindow` for runtime rendering; the Android counterpart to the Win32 window binding. |
 | `XR_EXT_cocoa_window_binding` | App provides a Cocoa `NSView*` (with `CAMetalLayer` backing) for runtime rendering on macOS. |
-| `XR_EXT_display_info` | Runtime exposes physical display geometry, nominal viewer position, recommended render scale, display mode switching capability, and a DISPLAY reference space anchored to the physical screen. Provides `xrRequestDisplayModeEXT` for 2D/3D mode control, `xrRequestEyeTrackingModeEXT` for smooth/raw eye tracking selection, and `xrRequestDisplayRenderingModeEXT` for vendor-specific rendering mode switching. |
+| `XR_EXT_display_info` | Runtime exposes physical display geometry, nominal viewer position, recommended render scale, and display mode switching capability. Provides `xrRequestDisplayModeEXT` for 2D/3D mode control, `xrRequestEyeTrackingModeEXT` for smooth/raw eye tracking selection, and `xrRequestDisplayRenderingModeEXT` for vendor-specific rendering mode switching. In RAW mode, `xrLocateViews` returns screen-centered eye positions regardless of the reference space parameter. |
 
 Together they form a minimal, complete interface for tracked 3D display rendering through
 OpenXR across desktop, mobile, and macOS platforms.
@@ -132,16 +132,13 @@ displays. See [OPEN 4](#open-issues) in the Issues section.
         ├── xrRequestDisplayRenderingModeEXT(session, modeIndex)  [optional]
         │       mode 0 = standard, 1+ = vendor-defined
         │
-        ├── xrCreateReferenceSpace(DISPLAY)
-        │       origin = display center, +X right, +Y up, +Z toward viewer
-        │
-        ├── xrLocateViews(space = DISPLAY)
-        │       ◄── per-eye positions in display space (RAW mode)
+        ├── xrLocateViews(space = LOCAL)
+        │       ◄── per-eye positions in screen-centered coordinates (RAW mode)
         │
         ├── App computes Kooima projection from eye positions + display geometry
         │
         ├── xrEndFrame()
-        │       submit XrCompositionLayerProjection (in DISPLAY space)
+        │       submit XrCompositionLayerProjection (in LOCAL space)
         │       submit XrCompositionLayerWindowSpaceEXT (HUD overlay)
         │
         │   ┌── Session STOPPING → runtime auto-requests 2D mode (if supported)
@@ -167,7 +164,7 @@ zero-parallax depth, stereo comfort, and content framing. Stereo rendering is th
 | Mode | Behavior | Camera Model Owned By |
 |---|---|---|
 | **RENDER_READY** | Runtime returns converged, comfortable stereo view poses and FOV angles. The application still builds its own projection matrix from the FOV. | Runtime |
-| **RAW** | Runtime returns raw tracked eye positions in display space; `orientation` is identity; `fov` is advisory. | Application |
+| **RAW** | Runtime returns raw tracked eye positions in screen-centered coordinates; `orientation` is identity; `fov` is advisory. | Application |
 
 **Ownership rules:**
 
@@ -645,13 +642,12 @@ No known IP claims.
 This extension exposes the physical properties of a tracked 3D display to the application:
 the display's physical dimensions, its nominal viewer position, recommended render
 resolution scale factors, and whether the display supports switching between 2D and 3D
-modes. It also introduces a DISPLAY reference space anchored to the physical screen and
-a function to request display mode changes.
+modes, and provides a function to request display mode changes.
 
 With this information the application can:
 - Build its own camera model (Kooima off-axis projection) from raw tracked eye positions.
 - Compute render resolution dynamically as the window/surface resizes.
-- Locate views and submit layers in display-anchored coordinates.
+- Locate views and submit layers using LOCAL space (RAW mode returns screen-relative positions).
 - Query whether the display supports 2D/3D mode switching and request mode changes.
 
 This extension is **platform-independent**. It works on any platform that supports OpenXR,
@@ -661,7 +657,6 @@ regardless of the graphics API or windowing system in use.
 
 ```c
 #define XR_TYPE_DISPLAY_INFO_EXT              ((XrStructureType)1000999003)
-#define XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT   ((XrReferenceSpaceType)1000999004)
 #define XR_DISPLAY_MODE_2D_EXT                0
 #define XR_DISPLAY_MODE_3D_EXT                1
 ```
@@ -705,35 +700,6 @@ typedef struct XrDisplayInfoEXT {
   structure chained to `XrSystemProperties`.
 - All returned values are static display properties that do not change during the runtime's
   lifetime.
-
-### New Reference Space Type: XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT
-
-A reference space rigidly anchored to the physical display.
-
-**Definition:**
-- **Origin**: center of the physical display plane.
-- **+X axis**: rightward along the display surface.
-- **+Y axis**: upward along the display surface.
-- **+Z axis**: toward the viewer (outward from the screen, following the right-hand rule).
-
-**Semantics:**
-- The DISPLAY space is **physically anchored** to the hardware. It is **not affected** by
-  `xrRecenterSpace()` or any recentering of LOCAL/STAGE spaces.
-- View positions returned by `xrLocateViews()` in DISPLAY space represent the viewer's
-  tracked eye positions relative to the physical screen center.
-- Layers submitted in DISPLAY space remain locked to the physical display regardless of
-  any space recentering.
-
-**Creation:**
-```c
-XrReferenceSpaceCreateInfo displaySpaceInfo = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-displaySpaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT;
-displaySpaceInfo.poseInReferenceSpace.orientation = {0, 0, 0, 1};  // identity
-displaySpaceInfo.poseInReferenceSpace.position = {0, 0, 0};
-
-XrSpace displaySpace;
-xrCreateReferenceSpace(session, &displaySpaceInfo, &displaySpace);
-```
 
 ### New Enums
 
@@ -854,7 +820,6 @@ The runtime translates `xrRequestDisplayModeEXT` into the appropriate vendor SDK
 
 This abstraction also operates through:
 - `XrDisplayInfoEXT` chaining to `xrGetSystemProperties`.
-- `XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT` via `xrCreateReferenceSpace`.
 - `xrRequestDisplayModeEXT` for explicit display mode control.
 
 ### Example Code: Querying Display Mode Support and Requesting 2D
@@ -991,13 +956,16 @@ renderHeight = (uint32_t)(windowHeight * recommendedViewScaleY)
 
 When `XR_EXT_display_info` is enabled, `xrLocateViews()` returns views in **RAW mode**:
 
-- `XrView.pose.position` — the physical eye center in DISPLAY space coordinates.
+- `XrView.pose.position` — the physical eye center in screen-centered coordinates
+  (origin at display center, +X right, +Y up, +Z toward viewer).
 - `XrView.pose.orientation` — identity quaternion `{0, 0, 0, 1}`.
 - `XrView.fov` — advisory only. The application should compute its own FOV from the eye
   position and display geometry.
 
-The runtime applies **no convergence adjustment or camera policy** to RAW views. The
-application is fully responsible for its camera model.
+The runtime returns screen-relative eye positions **regardless of the reference space
+parameter** passed to `xrLocateViews`. Applications should pass LOCAL space. The runtime
+applies **no convergence adjustment or camera policy** to RAW views. The application is
+fully responsible for its camera model.
 
 **Kooima projection from RAW views:**
 
@@ -1012,7 +980,7 @@ top    = nearZ * (+halfHeight - eyeY) / eyeZ
 ```
 
 Where `halfWidth = displaySizeMeters.width / 2`, `halfHeight = displaySizeMeters.height / 2`,
-and `(eyeX, eyeY, eyeZ)` is the eye position in DISPLAY space from `XrView.pose.position`.
+and `(eyeX, eyeY, eyeZ)` is the eye position from `XrView.pose.position` (screen-centered).
 
 ### RENDER_READY Mode
 
@@ -1050,19 +1018,22 @@ XrVector3f nominalPos = displayInfo.nominalViewerPositionInDisplaySpace;
 XrBool32 canSwitch = displayInfo.supportsDisplayModeSwitch;   // XR_TRUE or XR_FALSE
 ```
 
-### Example Code: Creating DISPLAY Reference Space
+### Example Code: Locating Views in RAW Mode
 
 ```cpp
-XrReferenceSpaceCreateInfo displaySpaceInfo = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-displaySpaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT;
-displaySpaceInfo.poseInReferenceSpace.orientation = {0, 0, 0, 1};
-displaySpaceInfo.poseInReferenceSpace.position = {0, 0, 0};
+// In RAW mode (XR_EXT_display_info enabled), xrLocateViews returns
+// screen-centered eye positions regardless of the space parameter.
+// Use LOCAL space for both view location and layer submission.
+XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
+locateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+locateInfo.displayTime = predictedDisplayTime;
+locateInfo.space = localSpace;
 
-XrSpace displaySpace;
-XrResult result = xrCreateReferenceSpace(session, &displaySpaceInfo, &displaySpace);
-if (XR_SUCCEEDED(result)) {
-    // DISPLAY space ready — use for xrLocateViews and layer submission
-}
+XrViewState viewState = {XR_TYPE_VIEW_STATE};
+uint32_t viewCount = 2;
+XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+xrLocateViews(session, &locateInfo, &viewState, 2, &viewCount, views);
+// views[i].pose.position = screen-relative eye position (identity orientation)
 ```
 
 ### Example Code: Kooima Asymmetric Frustum Projection
@@ -1088,7 +1059,7 @@ Matrix4x4 ComputeKooimaProjection(
     float screenWidthM, float screenHeightM,
     float nearZ, float farZ)
 {
-    // Screen half-extents (display is centered at origin in DISPLAY space)
+    // Screen half-extents (display is centered at origin in screen-centered coords)
     float halfW = screenWidthM / 2.0f;
     float halfH = screenHeightM / 2.0f;
 
@@ -1161,7 +1132,7 @@ if (frameState.shouldRender) {
     XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
     locateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
     locateInfo.displayTime = frameState.predictedDisplayTime;
-    locateInfo.space = displaySpace;  // DISPLAY reference space
+    locateInfo.space = localSpace;
 
     XrViewState viewState = {XR_TYPE_VIEW_STATE};
     uint32_t viewCount = 2;
@@ -1223,7 +1194,7 @@ if (frameState.shouldRender) {
 
     // --- Submit projection layer + HUD layer ---
     XrCompositionLayerProjection projLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-    projLayer.space = displaySpace;  // Submit in DISPLAY space
+    projLayer.space = localSpace;
     projLayer.viewCount = 2;
     projLayer.views = projViews;
 
@@ -1379,15 +1350,18 @@ performance scaling.
 
 ---
 
-**RESOLVED 2: XrSpace vs. explicit struct for the display coordinate frame.**
+**RESOLVED 2: Display coordinate frame — no dedicated reference space needed.**
 
 *Problem*: How should the display's coordinate frame be exposed? Options: (a) a new
-reference space type, or (b) an explicit transform struct returned alongside display info.
+reference space type, or (b) implicit via RAW mode behavior.
 
-*Resolution*: **XrSpace (new reference space type)**. Using `XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT`
-integrates naturally with `xrLocateViews(space=DISPLAY)` and layer submission in DISPLAY
-space. It reuses existing OpenXR infrastructure rather than introducing parallel mechanisms.
-The display space is physically anchored and not affected by `xrRecenterSpace()`.
+*Resolution*: **No new reference space**. In RAW mode (`XR_EXT_display_info` enabled),
+`xrLocateViews` returns eye positions in screen-centered coordinates regardless of the
+reference space parameter. The display coordinate frame (origin at display center, +X right,
++Y up, +Z toward viewer) is implicit in the returned positions. Applications pass LOCAL
+space for both `xrLocateViews` and layer submission. This avoids adding a new reference
+space type and the associated mapping/validation code, while providing the same data to
+applications.
 
 ---
 
@@ -1543,10 +1517,10 @@ future revision if windowed 3D display use cases emerge.
 
 **OPEN 3: Interaction with XR_EXT_local_floor and other space extensions.**
 
-DISPLAY space is semantically distinct from LOCAL, STAGE, and LOCAL_FLOOR. For tracked 3D
-displays, DISPLAY space is the primary coordinate frame. Future work should clarify how
-DISPLAY space interacts with spatial anchor extensions and mixed-reality scenarios where
-tracked displays coexist with HMDs.
+For tracked 3D displays, LOCAL space serves as the primary coordinate frame. In RAW mode,
+eye positions are returned in screen-centered coordinates regardless of the space parameter.
+Future work should clarify how this interacts with spatial anchor extensions and
+mixed-reality scenarios where tracked displays coexist with HMDs.
 
 ---
 
@@ -1785,6 +1759,7 @@ the property) silently ignore the call — graceful degradation.
 | 5 | 2026-02-20 | David Fattal | Added `displayPixelWidth` / `displayPixelHeight` to `XrDisplayInfoEXT`. |
 | 6 | 2026-02-27 | David Fattal | Eye tracking mode control: `XrEyeTrackingModeEXT` enum, `XrEyeTrackingModeCapabilitiesEXT` (chained to `XrSystemProperties`), `XrViewEyeTrackingStateEXT` (chained to `XrViewState`), and `xrRequestEyeTrackingModeEXT` function. Allows apps to choose between smooth (SDK-filtered) and raw eye tracking, with explicit `isTracking` flag. |
 | 7 | 2026-03-04 | David Fattal | Vendor-specific display rendering mode control: `xrRequestDisplayRenderingModeEXT(session, modeIndex)` for switching between vendor-defined rendering variations (e.g., SBS stereo, anaglyph, lenticular). Mode 0 = standard (always available), mode 1+ = vendor-defined. Dispatches through `xrt_device_set_property`; no-op if driver doesn't support it. |
+| 8 | 2026-03-06 | David Fattal | Removed `XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT`. In RAW mode, `xrLocateViews` returns screen-centered eye positions regardless of the reference space parameter — a dedicated DISPLAY space is unnecessary. Applications use LOCAL space for both view location and layer submission. |
 
 ---
 
@@ -1822,7 +1797,7 @@ integration:
 | **RAW mode** | View mode where the runtime returns raw tracked eye positions and identity orientation, leaving camera model construction to the application. |
 | **RENDER_READY mode** | View mode where the runtime returns view poses and FOV angles with convergence and comfort adjustments applied. The application still builds its own projection matrix from the FOV angles. |
 | **Window-space coordinates** | Fractional coordinates in `[0, 1]` relative to the target window/surface dimensions. Used by `XrCompositionLayerWindowSpaceEXT`. |
-| **DISPLAY space** | A reference space anchored to the physical display center, with +X right, +Y up, +Z toward the viewer. Not affected by recentering. |
+| **Screen-centered coordinates** | The coordinate frame used by RAW mode eye positions: origin at the physical display center, +X right, +Y up, +Z toward the viewer. Implicit in the returned `XrView.pose.position` — no dedicated reference space needed. |
 | **Nominal viewer position** | A static, design-time expectation of the viewer's position relative to the display. Not tracked; defines the apex of the canonical display pyramid. |
 | **Disparity** | Horizontal shift between left and right eye images, measured as a fraction of window width. Controls perceived depth of window-space layers. |
 | **Display mode** | The operational mode of a tracked 3D display: 2D (standard flat panel) or 3D (light field interlacing active). Controlled via `xrRequestDisplayModeEXT`. |

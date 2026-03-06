@@ -567,7 +567,6 @@ struct AppXrSession {
     XrSystemId systemId = XR_NULL_SYSTEM_ID;
     XrSession session = XR_NULL_HANDLE;
     XrSpace localSpace = XR_NULL_HANDLE;
-    XrSpace displaySpace = XR_NULL_HANDLE;
     XrViewConfigurationType viewConfigType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
     bool sessionRunning = false;
     bool exitRequested = false;
@@ -824,12 +823,6 @@ static bool CreateSpaces(AppXrSession& xr) {
     ci.poseInReferenceSpace = {{0,0,0,1},{0,0,0}};
     XR_CHECK(xrCreateReferenceSpace(xr.session, &ci, &xr.localSpace));
 
-    // Try DISPLAY space
-    if (xr.hasDisplayInfoExt) {
-        ci.referenceSpaceType = (XrReferenceSpaceType)1000250000; // XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT
-        XrResult r = xrCreateReferenceSpace(xr.session, &ci, &xr.displaySpace);
-        if (XR_FAILED(r)) xr.displaySpace = XR_NULL_HANDLE;
-    }
     return true;
 }
 
@@ -917,7 +910,7 @@ static void ReleaseSwapchainImage(AppXrSession& xr) {
 static void EndFrame(AppXrSession& xr, XrTime displayTime,
     XrCompositionLayerProjectionView* projViews, uint32_t viewCount) {
     XrCompositionLayerProjection layer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-    layer.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
+    layer.space = xr.localSpace;
     layer.viewCount = viewCount;
     layer.views = projViews;
     const XrCompositionLayerBaseHeader* layers[] = {(const XrCompositionLayerBaseHeader*)&layer};
@@ -930,7 +923,6 @@ static void EndFrame(AppXrSession& xr, XrTime displayTime,
 
 static void CleanupOpenXR(AppXrSession& xr) {
     if (xr.swapchain.swapchain) xrDestroySwapchain(xr.swapchain.swapchain);
-    if (xr.displaySpace) xrDestroySpace(xr.displaySpace);
     if (xr.localSpace) xrDestroySpace(xr.localSpace);
     if (xr.session) xrDestroySession(xr.session);
     if (xr.instance) xrDestroyInstance(xr.instance);
@@ -1142,7 +1134,7 @@ int main() {
                     XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
                     locateInfo.viewConfigurationType = xr.viewConfigType;
                     locateInfo.displayTime = frameState.predictedDisplayTime;
-                    locateInfo.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
+                    locateInfo.space = xr.localSpace;
 
                     XrViewState viewState = {XR_TYPE_VIEW_STATE};
                     XrViewEyeTrackingStateEXT eyeTrackingState = {};
