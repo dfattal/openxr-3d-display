@@ -146,10 +146,10 @@ Function AddToPath
     StrCmp $1 "" 0 +2
     ReadEnvStr $1 PATH
 
-    ; Normalize trailing backslash
+    ; Normalize trailing slash
     StrCpy $2 $0 "" -1
     StrCmp $2 "\" 0 +2
-        StrCpy $0 $0 -1
+    StrCpy $0 $0 -1
 
     ; Check if path already exists
     Push $1
@@ -160,9 +160,10 @@ Function AddToPath
 
     ; Append to PATH
     StrCmp $1 "" 0 +2
-        StrCpy $1 "$0"
+    StrCpy $1 "$0"
     StrCmp $1 "$0" 0 +2
-        Goto write
+    Goto write
+
     StrCpy $1 "$1;$0"
 
 write:
@@ -208,17 +209,17 @@ Function un.RemoveFromPath
     Push $3
     Push $4
     Push $5
-    Push $6 ; flag to indicate success
+    Push $6  ; flag to indicate success
 
     ; Read current system PATH
     ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
     StrCpy $2 ""  ; New PATH
     StrCpy $6 0   ; Flag: path removed?
 
-    ; Normalize trailing backslash of target
+    ; Normalize trailing slash of target
     StrCpy $3 $0 "" -1
     StrCmp $3 "\" 0 +2
-        StrCpy $0 $0 -1
+    StrCpy $0 $0 -1
 
 loop:
     StrCmp $1 "" done
@@ -243,10 +244,10 @@ last:
     StrCpy $1 ""
 
 check:
-    ; normalize trailing backslash
+    ; normalize trailing slash
     StrCpy $3 $4 "" -1
     StrCmp $3 "\" 0 +2
-        StrCpy $4 $4 -1
+    StrCpy $4 $4 -1
 
     ; Compare to target
     StrCmp $4 $0 skip
@@ -255,6 +256,7 @@ check:
     StrCmp $2 "" 0 +3
         StrCpy $2 $4
         Goto loop
+
     StrCpy $2 "$2;$4"
     Goto loop
 
@@ -266,8 +268,8 @@ done:
 
     ; Show result dialog
     StrCmp $6 1 success
-        MessageBox MB_OK|MB_ICONWARNING "SRMonado path '$0' was not found in the system PATH or could not be removed."
-        Goto finish
+    MessageBox MB_OK|MB_ICONWARNING "SRMonado path '$0' was not found in the system PATH or could not be removed."
+    Goto finish
 
 success:
     MessageBox MB_OK|MB_ICONINFORMATION "SRMonado path '$0' was successfully removed from the system PATH."
