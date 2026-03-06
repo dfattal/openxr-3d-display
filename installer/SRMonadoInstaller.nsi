@@ -133,46 +133,60 @@ FunctionEnd
 
 ; Pure NSIS Lowercase function (Installer)
 Function StrLower
-  Exch $0 ; Result/Input string
+  Exch $0 ; Input string
   Push $1 ; Index
-  Push $2 ; Char
-  Push $3 ; Char (Int)
-  StrCpy $1 0
+  Push $2 ; Current Char
+  Push $3 ; Result Buffer
+  
+  StrCpy $3 "" ; Clear the buffer
+  StrCpy $1 0  ; Reset index
+
 loop:
-  StrCpy $2 $0 1 $1
-  StrCmp $2 "" done
+  StrCpy $2 $0 1 $1 ; Get one character from input
+  StrCmp $2 "" done ; If empty, we reached the end
+  
+  ; Convert $2 to lowercase using Windows API
   System::Call "user32::CharLower(t r2)t.r2"
-  StrCpy $0 $0 1 $1
-  StrCpy $0 "$0$2"
-  IntOp $1 $1 + 1
+  
+  StrCpy $3 "$3$2" ; Append lowercase char to our buffer
+  IntOp $1 $1 + 1  ; Move to next index
   Goto loop
+
 done:
+  StrCpy $0 $3     ; Move the full result back to $0
   Pop $3
   Pop $2
   Pop $1
-  Exch $0
+  Exch $0          ; Restore stack
 FunctionEnd
 
 ; Pure NSIS Lowercase function (Uninstaller)
 Function un.StrLower
-  Exch $0
-  Push $1
-  Push $2
-  Push $3
-  StrCpy $1 0
+  Exch $0 ; Input string
+  Push $1 ; Index
+  Push $2 ; Current Char
+  Push $3 ; Result Buffer
+  
+  StrCpy $3 "" ; Clear the buffer
+  StrCpy $1 0  ; Reset index
+
 loop:
-  StrCpy $2 $0 1 $1
-  StrCmp $2 "" done
+  StrCpy $2 $0 1 $1 ; Get one character from input
+  StrCmp $2 "" done ; If empty, we reached the end
+  
+  ; Convert $2 to lowercase using Windows API
   System::Call "user32::CharLower(t r2)t.r2"
-  StrCpy $0 $0 1 $1
-  StrCpy $0 "$0$2"
-  IntOp $1 $1 + 1
+  
+  StrCpy $3 "$3$2" ; Append lowercase char to our buffer
+  IntOp $1 $1 + 1  ; Move to next index
   Goto loop
+
 done:
+  StrCpy $0 $3     ; Move the full result back to $0
   Pop $3
   Pop $2
   Pop $1
-  Exch $0
+  Exch $0          ; Restore stack
 FunctionEnd
 
 ;--------------------------------
