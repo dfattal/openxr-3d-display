@@ -14,10 +14,10 @@ This branch implements **issue #23** — transforming the Monado fork into a lig
 - [ ] #26 — Clean up CMake build system (remove 30+ unused toggles, dead find modules)
 - [ ] #32 — Move stereo math (`display3d_view.c`, `camera3d_view.c`) into `auxiliary/math/`
 
-**Phase 2: Add native compositors**
-- [ ] #27 — Native D3D12 compositor
-- [ ] #28 — Native Vulkan compositor (direct submit, not server)
-- [ ] #29 — Native OpenGL compositor
+**Phase 2: Add native compositors** (each includes dp_factory + sim_display impl)
+- [ ] #27 — Native D3D12 compositor (+ dp_factory_d3d12 slot & sim_display_dp_factory_d3d12)
+- [ ] #28 — Native Vulkan compositor (direct submit, not server) (+ sim_display_dp_factory_metal — slot exists, no impl yet)
+- [ ] #29 — Native OpenGL compositor (+ dp_factory_gl slot & sim_display_dp_factory_gl)
 
 **Phase 3: Complete test app coverage**
 - [ ] #30 — Non-ext test apps (cube_d3d12, cube_vk, cube_gl)
