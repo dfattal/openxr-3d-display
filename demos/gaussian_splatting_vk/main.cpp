@@ -440,7 +440,7 @@ static void RenderThreadFunc(
                         XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
                         locateInfo.viewConfigurationType = xr->viewConfigType;
                         locateInfo.displayTime = frameState.predictedDisplayTime;
-                        locateInfo.space = (xr->displaySpace != XR_NULL_HANDLE) ? xr->displaySpace : xr->localSpace;
+                        locateInfo.space = xr->localSpace;
 
                         XrViewState viewState = {XR_TYPE_VIEW_STATE};
                         uint32_t viewCount = 2;

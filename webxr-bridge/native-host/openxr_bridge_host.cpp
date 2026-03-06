@@ -139,7 +139,6 @@ struct AppState {
     XrSession session = XR_NULL_HANDLE;
     XrSpace localSpace = XR_NULL_HANDLE;
     XrSpace viewSpace = XR_NULL_HANDLE;
-    XrSpace displaySpace = XR_NULL_HANDLE; // XR_EXT_display_info: display-anchored space
     XrSwapchain swapchain = XR_NULL_HANDLE;
     XrSessionState sessionState = XR_SESSION_STATE_UNKNOWN;
     XrViewConfigurationType viewConfigType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -257,7 +256,7 @@ static bool InitializeOpenXR(AppState& app) {
     if (hasDisplayInfo) {
         enabledExtensions.push_back(XR_EXT_DISPLAY_INFO_EXTENSION_NAME);
         app.hasDisplayInfo = true;
-        LOG_INFO("XR_EXT_display_info: available, enabling (DISPLAY space for Kooima)");
+        LOG_INFO("XR_EXT_display_info: available, enabling");
     }
 
 #ifdef __APPLE__
@@ -703,24 +702,7 @@ static bool CreateSpaces(AppState& app) {
     viewSpaceInfo.poseInReferenceSpace.position = {0, 0, 0};
     XR_CHECK(xrCreateReferenceSpace(app.session, &viewSpaceInfo, &app.viewSpace));
 
-    // DISPLAY space (XR_EXT_display_info): physically anchored to the display.
-    // Views located in this space give display-relative eye positions needed
-    // for correct Kooima projection (matching the ext test apps exactly).
-    if (app.hasDisplayInfo) {
-        XrReferenceSpaceCreateInfo displaySpaceInfo = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-        displaySpaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT;
-        displaySpaceInfo.poseInReferenceSpace.orientation = {0, 0, 0, 1};
-        displaySpaceInfo.poseInReferenceSpace.position = {0, 0, 0};
-        XrResult dispResult = xrCreateReferenceSpace(app.session, &displaySpaceInfo, &app.displaySpace);
-        if (XR_SUCCEEDED(dispResult)) {
-            LOG_INFO("DISPLAY space created (display-relative eye positions for Kooima)");
-        } else {
-            LOG_WARN("DISPLAY space creation failed (%d), falling back to LOCAL", (int)dispResult);
-            app.displaySpace = XR_NULL_HANDLE;
-        }
-    }
-
-    LOG_INFO("Reference spaces created (LOCAL + VIEW%s)", app.displaySpace ? " + DISPLAY" : "");
+    LOG_INFO("Reference spaces created (LOCAL + VIEW)");
     return true;
 }
 
@@ -1316,9 +1298,6 @@ static void Cleanup(AppState& app) {
     if (app.swapchain != XR_NULL_HANDLE) {
         xrDestroySwapchain(app.swapchain);
     }
-    if (app.displaySpace != XR_NULL_HANDLE) {
-        xrDestroySpace(app.displaySpace);
-    }
     if (app.viewSpace != XR_NULL_HANDLE) {
         xrDestroySpace(app.viewSpace);
     }
@@ -1464,67 +1443,40 @@ int main() {
         result = xrBeginFrame(app.session, &beginInfo);
         if (XR_FAILED(result)) continue;
 
-        // Locate views in LOCAL space (needed for xrEndFrame submission)
+        // Locate views in LOCAL space — in RAW mode the runtime returns
+        // screen-relative eye positions regardless of the space parameter.
         XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
         locateInfo.viewConfigurationType = app.viewConfigType;
         locateInfo.displayTime = frameState.predictedDisplayTime;
         locateInfo.space = app.localSpace;
 
         XrViewState viewState = {XR_TYPE_VIEW_STATE};
+
+        // Chain eye tracking state (v6)
+        XrViewEyeTrackingStateEXT eyeTrackingState = {};
+        eyeTrackingState.type = (XrStructureType)XR_TYPE_VIEW_EYE_TRACKING_STATE_EXT;
+        viewState.next = &eyeTrackingState;
+
         uint32_t viewCount = 2;
         XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
         xrLocateViews(app.session, &locateInfo, &viewState, 2, &viewCount, views);
 
-        // Locate views in DISPLAY space for display-relative eye positions.
-        // These are needed for correct Kooima projection in the browser
-        // (matching ext app: rawEyePos from display-space xrLocateViews).
-        XrView displayViews[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
-        if (app.displaySpace != XR_NULL_HANDLE) {
-            XrViewLocateInfo dispLocateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
-            dispLocateInfo.viewConfigurationType = app.viewConfigType;
-            dispLocateInfo.displayTime = frameState.predictedDisplayTime;
-            dispLocateInfo.space = app.displaySpace;
+        app.isEyeTracking = (eyeTrackingState.isTracking == XR_TRUE);
+        app.activeEyeTrackingMode = (uint32_t)eyeTrackingState.activeMode;
 
-            XrViewState dispViewState = {XR_TYPE_VIEW_STATE};
-
-            // Chain eye tracking state (v6)
-            XrViewEyeTrackingStateEXT eyeTrackingState = {};
-            eyeTrackingState.type = (XrStructureType)XR_TYPE_VIEW_EYE_TRACKING_STATE_EXT;
-            dispViewState.next = &eyeTrackingState;
-
-            uint32_t dispViewCount = 2;
-            xrLocateViews(app.session, &dispLocateInfo, &dispViewState,
-                          2, &dispViewCount, displayViews);
-
-            app.isEyeTracking = (eyeTrackingState.isTracking == XR_TRUE);
-            app.activeEyeTrackingMode = (uint32_t)eyeTrackingState.activeMode;
-        } else {
-            // Fallback: use local-space views (Kooima will be approximate)
-            displayViews[0] = views[0];
-            displayViews[1] = views[1];
-        }
+        // Alias for code that previously used separate display-space views
+        XrView (&displayViews)[2] = views;
 
         // One-time init logging: display pose, eye positions, FOV, dimensions
         if (!loggedInitInfo) {
             loggedInitInfo = true;
 
-            // Virtual display pose in LOCAL space
-            if (app.displaySpace != XR_NULL_HANDLE) {
-                XrSpaceLocation dispLoc = {XR_TYPE_SPACE_LOCATION};
-                if (XR_SUCCEEDED(xrLocateSpace(app.displaySpace, app.localSpace,
-                        frameState.predictedDisplayTime, &dispLoc))) {
-                    auto& dp = dispLoc.pose.position;
-                    auto& dq = dispLoc.pose.orientation;
-                    LOG_INFO("=== Virtual Display Init ===");
-                    LOG_INFO("  Display pose (LOCAL): pos=(%.4f, %.4f, %.4f) ori=(%.4f, %.4f, %.4f, %.4f)",
-                             dp.x, dp.y, dp.z, dq.x, dq.y, dq.z, dq.w);
-                }
-            }
+            LOG_INFO("=== Virtual Display Init ===");
 
-            // Raw eye positions in DISPLAY space (display-relative, for Kooima)
+            // Raw eye positions (screen-relative, for Kooima)
             auto& ld = displayViews[0].pose.position;
             auto& rd = displayViews[1].pose.position;
-            LOG_INFO("  Eyes (DISPLAY space): L=(%.5f, %.5f, %.5f) R=(%.5f, %.5f, %.5f)",
+            LOG_INFO("  Eyes (screen-rel): L=(%.5f, %.5f, %.5f) R=(%.5f, %.5f, %.5f)",
                      ld.x, ld.y, ld.z, rd.x, rd.y, rd.z);
 
             // Eye positions in LOCAL space (world coordinates)
@@ -1656,9 +1608,7 @@ int main() {
                 int bufSize = (int)(sizeof(g_poseBuf) - LWS_PRE);
                 int len = 0;
 
-                // Head pose (LOCAL space) + display-relative eye positions + FOV
-                // eyes: from DISPLAY-space xrLocateViews (matches ext app rawEyePos)
-                // fov: from LOCAL-space views (Kooima FOV computed at driver level)
+                // Head pose (LOCAL space) + screen-relative eye positions + FOV
                 auto& lep = displayViews[0].pose.position;
                 auto& rep = displayViews[1].pose.position;
                 len += snprintf(buf + len, bufSize - len,
@@ -1745,19 +1695,7 @@ int main() {
             float fy = -2.0f * (qy * qz - qw * qx);
             float fz = 2.0f * (qx * qx + qy * qy) - 1.0f;
 
-            // Virtual display pose (display space in local space)
-            float dispX = 0, dispY = 0, dispZ = 0;
-            if (app.displaySpace != XR_NULL_HANDLE) {
-                XrSpaceLocation dispLoc = {XR_TYPE_SPACE_LOCATION};
-                if (XR_SUCCEEDED(xrLocateSpace(app.displaySpace, app.localSpace,
-                        frameState.predictedDisplayTime, &dispLoc))) {
-                    dispX = dispLoc.pose.position.x;
-                    dispY = dispLoc.pose.position.y;
-                    dispZ = dispLoc.pose.position.z;
-                }
-            }
-
-            // Eye positions from display-space views
+            // Eye positions (screen-relative)
             auto& lep = displayViews[0].pose.position;
             auto& rep = displayViews[1].pose.position;
 
@@ -1774,7 +1712,6 @@ int main() {
                 "Nominal: (%.3f, %.3f, %.3f)\n"
                 "Eye L: (%.3f, %.3f, %.3f)\n"
                 "Eye R: (%.3f, %.3f, %.3f)\n"
-                "Virtual Display: (%.2f, %.2f, %.2f)\n"
                 "Forward: (%.2f, %.2f, %.2f)\n"
                 "Camera: (%.2f, %.2f, %.2f)\n"
                 "\n"
@@ -1791,7 +1728,6 @@ int main() {
                 app.nominalViewerX, app.nominalViewerY, app.nominalViewerZ,
                 lep.x, lep.y, lep.z,
                 rep.x, rep.y, rep.z,
-                dispX, dispY, dispZ,
                 fx, fy, fz,
                 viewLoc.pose.position.x, viewLoc.pose.position.y,
                 viewLoc.pose.position.z);

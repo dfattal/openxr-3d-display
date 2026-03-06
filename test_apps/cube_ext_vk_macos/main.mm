@@ -1841,8 +1841,6 @@ struct AppXrSession {
     XrSession session = XR_NULL_HANDLE;
     XrSpace localSpace = XR_NULL_HANDLE;
     XrSpace viewSpace = XR_NULL_HANDLE;
-    XrSpace displaySpace = XR_NULL_HANDLE;
-
     SwapchainInfo swapchain;
 
     uint32_t displayPixelWidth = 0;
@@ -2241,19 +2239,6 @@ static bool CreateSpaces(AppXrSession& xr) {
     viewSpaceInfo.poseInReferenceSpace.position = {0, 0, 0};
     XR_CHECK(xrCreateReferenceSpace(xr.session, &viewSpaceInfo, &xr.viewSpace));
 
-    // DISPLAY space: physically anchored, unaffected by recentering
-    XrReferenceSpaceCreateInfo displaySpaceInfo = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-    displaySpaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT;
-    displaySpaceInfo.poseInReferenceSpace.orientation = {0, 0, 0, 1};
-    displaySpaceInfo.poseInReferenceSpace.position = {0, 0, 0};
-    XrResult dispResult = xrCreateReferenceSpace(xr.session, &displaySpaceInfo, &xr.displaySpace);
-    if (XR_SUCCEEDED(dispResult)) {
-        LOG_INFO("DISPLAY space created");
-    } else {
-        LOG_INFO("DISPLAY space not available, using LOCAL as fallback");
-        xr.displaySpace = XR_NULL_HANDLE;
-    }
-
     LOG_INFO("Reference spaces created");
     return true;
 }
@@ -2376,8 +2361,7 @@ static bool ReleaseSwapchainImage(AppXrSession& xr) {
 static bool EndFrame(AppXrSession& xr, XrTime displayTime,
     const XrCompositionLayerProjectionView* views, uint32_t viewCount = 2) {
     XrCompositionLayerProjection projectionLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-    // Use DISPLAY space when available (physically anchored)
-    projectionLayer.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
+    projectionLayer.space = xr.localSpace;
     projectionLayer.viewCount = viewCount;
     projectionLayer.views = views;
 
@@ -2397,7 +2381,6 @@ static void CleanupOpenXR(AppXrSession& xr) {
     if (xr.swapchain.swapchain != XR_NULL_HANDLE) {
         xrDestroySwapchain(xr.swapchain.swapchain);
     }
-    if (xr.displaySpace != XR_NULL_HANDLE) xrDestroySpace(xr.displaySpace);
     if (xr.viewSpace != XR_NULL_HANDLE) xrDestroySpace(xr.viewSpace);
     if (xr.localSpace != XR_NULL_HANDLE) xrDestroySpace(xr.localSpace);
     if (xr.session != XR_NULL_HANDLE) xrDestroySession(xr.session);
@@ -2642,12 +2625,10 @@ int main() {
                 bool rendered = false;
 
                 if (frameState.shouldRender) {
-                    // Locate views in DISPLAY space (physically anchored) or LOCAL fallback
                     XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
                     locateInfo.viewConfigurationType = xr.viewConfigType;
                     locateInfo.displayTime = frameState.predictedDisplayTime;
-                    locateInfo.space = (xr.displaySpace != XR_NULL_HANDLE)
-                        ? xr.displaySpace : xr.localSpace;
+                    locateInfo.space = xr.localSpace;
 
                     XrViewState viewState = {XR_TYPE_VIEW_STATE};
 

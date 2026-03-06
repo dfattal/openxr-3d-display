@@ -240,7 +240,7 @@ bool EndFrameMultiLayer(
 ) {
     // Projection layer for center 3D scene
     XrCompositionLayerProjection projectionLayer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-    projectionLayer.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
+    projectionLayer.space = xr.localSpace;
     projectionLayer.viewCount = viewCount;
     projectionLayer.views = projViews;
 

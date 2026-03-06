@@ -34,10 +34,6 @@ Queries physical display properties by chaining `XrDisplayInfoEXT` into `xrGetSy
 
 Runtime-side 2D/3D mode switching. The V key calls `xrRequestDisplayModeEXT(session, XR_DISPLAY_MODE_3D_EXT | XR_DISPLAY_MODE_2D_EXT)` to toggle the display processor between stereo interlacing and mono passthrough.
 
-### DISPLAY Reference Space
-
-All apps create `XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT` for view location and layer submission. DISPLAY space is physically anchored to the display center and unaffected by `xrRecenterSpace` or LOCAL recentering. Falls back to LOCAL space if the extension is unavailable.
-
 ## Controls
 
 | Action | Windows (all 4 apps) | macOS |
@@ -144,14 +140,14 @@ xrLocateViews (DISPLAY space)
    projectionViews[eye].fov from Kooima-computed FOV
 ```
 
-### Step 1: xrLocateViews in DISPLAY space
+### Step 1: xrLocateViews in LOCAL space
 
 ```c
-locateInfo.space = (xr.displaySpace != XR_NULL_HANDLE) ? xr.displaySpace : xr.localSpace;
+locateInfo.space = xr.localSpace;
 xrLocateViews(session, &locateInfo, &viewState, 2, &viewCount, views);
 ```
 
-Raw eye positions from the eye tracker, anchored to the physical display center. Falls back to LOCAL space if DISPLAY is unavailable.
+In RAW mode (XR_EXT_display_info enabled), returns screen-relative eye positions from the eye tracker.
 
 ### Step 2: Save raw positions
 

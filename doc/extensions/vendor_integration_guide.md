@@ -65,7 +65,7 @@ SDK types.
 │                                                                     │
 │  Types used:  OpenXR API types only                                 │
 │  - XrView, XrFovf, XrPosef, XrDisplayInfoEXT                       │
-│  - XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT                              │
+│  - LOCAL space (RAW mode returns screen-centered eye positions)     │
 │  - XrWin32WindowBindingCreateInfoEXT / XrCocoaWindowBindingCreateInfoEXT │
 │                                                                     │
 │  The app never sees runtime or vendor internals.                    │
@@ -186,9 +186,10 @@ The runtime auto-switches to 3D on `xrBeginSession` and back to 2D on
 `xrEndSession`.  The vendor provides a `request_display_mode(bool enable_3d)`
 function on their SDK wrapper.
 
-**DISPLAY reference space** (`XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT`):
-A physically-anchored reference space with origin at the display center.
-Eye tracking data from the vendor SDK is expressed in this space.
+**RAW mode eye positions**: In RAW mode (`XR_EXT_display_info` enabled),
+`xrLocateViews` returns eye positions in screen-centered coordinates (origin at
+display center, +X right, +Y up, +Z toward viewer). Applications use LOCAL space
+for both view location and layer submission.
 
 ### 3.2 `XR_EXT_win32_window_binding` (Windows)
 
@@ -250,7 +251,7 @@ When the app enables `XR_EXT_display_info` and creates a session with an
 external window (`XR_EXT_win32_window_binding` / `XR_EXT_cocoa_window_binding`),
 `xrLocateViews()` returns views in **RAW mode**:
 
-- `XrView.pose.position` — the physical eye center in DISPLAY space, directly
+- `XrView.pose.position` — the physical eye center in screen-centered coordinates, directly
   from the vendor's eye tracker (e.g. `{-0.032, 0.0, 0.6}` for left eye)
 - `XrView.pose.orientation` — identity quaternion `{0, 0, 0, 1}`
 - `XrView.fov` — advisory only; the app **ignores** these angles and computes
@@ -309,7 +310,7 @@ views[i].pose.orientation = (XrQuaternionf){
 |---|---|---|
 | **Target apps** | Extension-aware 3D display apps | Legacy OpenXR / WebXR apps |
 | **Trigger** | `has_external_window = true` | `has_external_window = false` |
-| **XrView.pose** | Raw eye position in DISPLAY space | Eye transformed to world space by qwerty controller |
+| **XrView.pose** | Raw eye position in screen-centered coords | Eye transformed to world space by qwerty controller |
 | **XrView.fov** | Advisory (app ignores, computes own Kooima) | Runtime-computed Kooima FOV (app uses directly) |
 | **Scene navigation** | App controls its own camera | Qwerty WASD/mouse via runtime |
 | **Orientation** | Identity | Display orientation from qwerty controller |
@@ -647,9 +648,9 @@ struct xrt_window_metrics
 // Inside struct xrt_system_compositor_info:
 float display_width_m;            // Physical display width (meters)
 float display_height_m;           // Physical display height (meters)
-float nominal_viewer_x_m;         // Nominal viewer X (display space, meters)
-float nominal_viewer_y_m;         // Nominal viewer Y (display space, meters)
-float nominal_viewer_z_m;         // Nominal viewer Z (display space, meters)
+float nominal_viewer_x_m;         // Nominal viewer X (screen-centered, meters)
+float nominal_viewer_y_m;         // Nominal viewer Y (screen-centered, meters)
+float nominal_viewer_z_m;         // Nominal viewer Z (screen-centered, meters)
 float recommended_view_scale_x;   // Recommended render scale X
 float recommended_view_scale_y;   // Recommended render scale Y
 bool  supports_display_mode_switch; // 2D/3D mode switching
@@ -714,7 +715,7 @@ data is converted to vendor-neutral `xrt_eye_pair`.
  │  │  │  (has_external_window)  │  │  (!has_external_window) │││
  │  │  │                         │  │                         │││
  │  │  │  pose = raw eye in      │  │  pose = qwerty_transform│││
- │  │  │         DISPLAY space   │  │         × eye position  │││
+ │  │  │         screen coords   │  │         × eye position  │││
  │  │  │  ori  = identity        │  │  ori  = qwerty orient.  │││
  │  │  │  fov  = advisory only   │  │  fov  = Kooima FOV     │││
  │  │  └────────────┬────────────┘  └──────────────┬──────────┘││
@@ -761,7 +762,7 @@ top    = nearZ * (+halfHeight - eyeY) / eyeZ
 ```
 
 Where `halfWidth = displaySizeMeters.width / 2`, `halfHeight = displaySizeMeters.height / 2`,
-and `(eyeX, eyeY, eyeZ)` is the eye position in DISPLAY space.
+and `(eyeX, eyeY, eyeZ)` is the eye position in screen-centered coordinates.
 
 The runtime's internal implementation (used for RENDER_READY mode) is in
 `oxr_session.c:compute_kooima_fov()`.  Note the **vendor-neutral type**
@@ -1761,7 +1762,7 @@ consumes them without knowing which vendor produced them.
 // From xrt_compositor.h — populated by vendor device at init time
 float display_width_m;            // Physical display width (meters)
 float display_height_m;           // Physical display height (meters)
-float nominal_viewer_x_m;         // Default viewer X (meters, display space)
+float nominal_viewer_x_m;         // Default viewer X (meters, screen-centered)
 float nominal_viewer_y_m;         // Default viewer Y
 float nominal_viewer_z_m;         // Default viewer Z (distance from display)
 ```
