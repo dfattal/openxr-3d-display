@@ -264,11 +264,16 @@ lastpart:
 	StrCpy $1 ""
 check:
 	${If} $4 != $0
-	${AndIfNot} ${un.StrStr} $4 "SRMonado" $3
-		${If} $2 == ""
-			StrCpy $2 $4
-		${Else}
-			StrCpy $2 "$2;$4"
+		Push $4
+		Push "SRMonado"
+		Call un.StrStr
+		Pop $3
+		${If} $3 == ""
+			${If} $2 == ""
+				StrCpy $2 $4
+			${Else}
+				StrCpy $2 "$2;$4"
+			${EndIf}
 		${EndIf}
 	${EndIf}
 	Goto loop
