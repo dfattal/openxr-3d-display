@@ -139,60 +139,30 @@ Function AddToPath
     Exch $0 ; path to add
     Push $1
     Push $2
-    Push $3
 
-    ; Read current system PATH
+    ; 1. Read existing PATH
     ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-    StrCmp $1 "" 0 +2
-    ReadEnvStr $1 PATH
-
-    ; Normalize trailing slash
-    StrCpy $2 $0 "" -1
-    StrCmp $2 "\" 0 +2
-    StrCpy $0 $0 -1
-
-    ; Check if path already exists
+    
+    ; 2. Check if already exists (avoids duplicates)
     Push $1
     Push $0
     Call StrStr
     Pop $2
-    StrCmp $2 "" 0 already
+    StrCmp $2 "" 0 done ; If found, skip to end
 
-    ; Append to PATH
-    StrCmp $1 "" 0 +2
-    StrCpy $1 "$0"
-    StrCmp $1 "$0" 0 +2
-    Goto write
-
-    StrCpy $1 "$1;$0"
+    ; 3. Append logic
+    StrCmp $1 "" 0 +3
+        StrCpy $1 "$0"    ; Path was empty, just set it
+        Goto write
+    StrCpy $1 "$1;$0"     ; Path had data, append with semicolon
 
 write:
     WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$1"
 
-    ; Broadcast environment change
+    ; 4. Notify Windows of the change
     SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
-    ; Verify PATH update
-    ReadRegStr $3 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-    Push $3
-    Push $0
-    Call StrStr
-    Pop $2
-    StrCmp $2 "" fail success
-
-success:
-    ;MessageBox MB_OK|MB_ICONINFORMATION "SRMonado was successfully added to the system PATH."
-    Goto done
-
-fail:
-    ;MessageBox MB_OK|MB_ICONWARNING "SRMonado could not be added to the system PATH automatically.\r\n\r\nPlease add manually:\r\n$0"
-    Goto done
-
-already:
-    DetailPrint "$0 already present in PATH"
-
 done:
-    Pop $3
     Pop $2
     Pop $1
     Pop $0
