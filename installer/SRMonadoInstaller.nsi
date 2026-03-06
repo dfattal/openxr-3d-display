@@ -39,7 +39,6 @@ ShowUninstDetails show
 !include "FileFunc.nsh"
 !include "x64.nsh"
 !include "TextFunc.nsh"
-!insertmacro StrLower
 !include "WinMessages.nsh"
 
 ; Windows constants for PATH modification
@@ -132,8 +131,50 @@ Function DumpLog
 		Pop $5
 FunctionEnd
 
-;--------------------------------
-; AddToPath - Installer Function
+; Pure NSIS Lowercase function (Installer)
+Function StrLower
+  Exch $0 ; Result/Input string
+  Push $1 ; Index
+  Push $2 ; Char
+  Push $3 ; Char (Int)
+  StrCpy $1 0
+loop:
+  StrCpy $2 $0 1 $1
+  StrCmp $2 "" done
+  System::Call "user32::CharLower(t r2)t.r2"
+  StrCpy $0 $0 1 $1
+  StrCpy $0 "$0$2"
+  IntOp $1 $1 + 1
+  Goto loop
+done:
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0
+FunctionEnd
+
+; Pure NSIS Lowercase function (Uninstaller)
+Function un.StrLower
+  Exch $0
+  Push $1
+  Push $2
+  Push $3
+  StrCpy $1 0
+loop:
+  StrCpy $2 $0 1 $1
+  StrCmp $2 "" done
+  System::Call "user32::CharLower(t r2)t.r2"
+  StrCpy $0 $0 1 $1
+  StrCpy $0 "$0$2"
+  IntOp $1 $1 + 1
+  Goto loop
+done:
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0
+FunctionEnd
+
 Function AddToPath
   Exch $0  ; Path to add
   Push $1
@@ -150,9 +191,14 @@ Function AddToPath
 
   ; Lowercase versions for comparison
   StrCpy $2 $0
-  StrCpy $3 $1
-  ${StrLower} $2 $2
-  ${StrLower} $3 $3
+  StrCpy $3 $0
+  Push $2
+  Call StrLower
+  Pop $2
+
+  Push $3
+  Call StrLower
+  Pop $3
 
   ; Check if already in PATH
   Push $3
@@ -169,7 +215,7 @@ Function AddToPath
 
 write:
   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$1"
-  System::Call 'user32::SendMessageTimeoutW(i ${HWND_BROADCAST}, i ${WM_SETTINGCHANGE}, i 0, w "Environment", i 0, i 5000, *i .r0)'
+  System::Call 'user32::SendMessageTimeoutW(i 0xFFFF, i 0x001A, i 0, w "Environment", i 0, i 5000, *i .r0)'
 
 done:
   Pop $3
@@ -178,8 +224,6 @@ done:
   Pop $0
 FunctionEnd
 
-;--------------------------------
-; RemoveFromPath - Uninstaller Function
 Function un.RemoveFromPath
   Exch $0  ; Path to remove
   Push $1
@@ -196,7 +240,9 @@ Function un.RemoveFromPath
 
   ; Lowercase target for comparison
   StrCpy $5 $0
-  ${StrLower} $5 $5
+  Push $5
+  Call un.StrLower
+  Pop $5
 
   ; Read current PATH
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
@@ -229,7 +275,9 @@ check:
 
   ; Lowercase copy for comparison
   StrCpy $4 $3
-  ${StrLower} $4 $4
+  Push $4
+  Call un.StrLower
+  Pop $4
 
   ; Skip if matches target
   StrCmp $4 $5 loop
@@ -243,7 +291,7 @@ check:
 
 write:
   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
-  System::Call 'user32::SendMessageTimeoutW(i ${HWND_BROADCAST}, i ${WM_SETTINGCHANGE}, i 0, w "Environment", i 0, i 5000, *i .r0)'
+  System::Call 'user32::SendMessageTimeoutW(i 0xFFFF, i 0x001A, i 0, w "Environment", i 0, i 5000, *i .r0)'
 
 done:
   Pop $6
