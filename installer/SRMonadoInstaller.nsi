@@ -294,6 +294,8 @@ FunctionEnd
 ; Handles multiple occurrences, trailing backslashes, and case variations
 ; Usage: Push "C:\path\to\remove" 
 ;        Call un.RemoveFromPath
+; RemoveFromPath - Removes a directory from the system PATH
+; Handles 64-bit registry, Unicode characters, and case-insensitive matching.
 Function un.RemoveFromPath
   Exch $0 ; Target path to remove (e.g., C:\Program Files\LeiaSR\SRMonado)
   Push $1 ; Original PATH from Registry
@@ -308,15 +310,19 @@ Function un.RemoveFromPath
   ; 1. Force 64-bit Registry View to see the real System PATH
   SetRegView 64
 
-  ; 2. Open Log in Unicode mode (/u) to prevent mangled characters in log
+  ; 2. Open Log (Standard 'w' mode for NSIS compatibility)
   StrCpy $9 "$TEMP\RemoveFromPath.log"
-  FileOpen $9 $9 "w /u" 
-  FileWrite $9 "=== RemoveFromPath started ===$\r$\n"
-  FileWrite $9 "Target to remove: $0$\r$\n"
+  FileOpen $9 $9 "w" 
+  
+  StrCmp $9 "" +3
+    FileWrite $9 "=== RemoveFromPath started ===$\r$\n"
+    FileWrite $9 "Target to remove: $0$\r$\n"
 
   ; 3. Read the actual Registry PATH
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-  FileWrite $9 "Original PATH: $1$\r$\n"
+  
+  StrCmp $9 "" +2
+    FileWrite $9 "Original PATH: $1$\r$\n"
 
   ; 4. Normalize Target (Remove trailing backslash and Lowercase)
   StrCpy $4 $0
@@ -340,7 +346,7 @@ loop:
   Push $1
   Push ";"
   Call un.StrStr
-  Pop $3 ; $3 is now ";remainder"
+  Pop $3 ; $3 is now ";remainder" (if found)
 
   StrCmp $3 "" no_semicolon
     ; Extract segment before the semicolon
@@ -355,7 +361,7 @@ loop:
     Goto process_segment
 
 no_semicolon:
-    StrCpy $3 $1 ; Last segment
+    StrCpy $3 $1 ; This is the last or only segment
     StrCpy $1 ""
 
 process_segment:
@@ -376,7 +382,7 @@ process_segment:
 
   ; 6. Compare normalized segment with normalized target
   StrCmp $5 $4 is_match
-    ; NOT A MATCH: Keep this segment in our new PATH
+    ; NOT A MATCH: Keep this segment in our new PATH buffer ($2)
     StrCmp $2 "" 0 +3
       StrCpy $2 "$3" ; First entry, no leading semicolon
       Goto loop
@@ -384,20 +390,25 @@ process_segment:
     Goto loop
 
 is_match:
-  FileWrite $9 "MATCH FOUND: Removing $3$\r$\n"
+  StrCmp $9 "" +2
+    FileWrite $9 "MATCH FOUND: Removing $3$\r$\n"
   Goto loop
 
 done_loop:
   ; 7. Write back to Registry if changed
+  ; Re-read original to ensure no race conditions, then compare
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-  StrCmp $2 $1 +3
+  StrCmp $2 $1 done_write
     WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
-    FileWrite $9 "Updated PATH: $2$\r$\n"
+    StrCmp $9 "" +2
+      FileWrite $9 "Updated PATH: $2$\r$\n"
 
-  FileWrite $9 "=== RemoveFromPath completed ===$\r$\n"
-  FileClose $9
+done_write:
+  StrCmp $9 "" +3
+    FileWrite $9 "=== RemoveFromPath completed ===$\r$\n"
+    FileClose $9
 
-  ; 8. Broadcast change to Windows
+  ; 8. Broadcast change to Windows (so Command Prompts etc. see the update)
   SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
   ; Restore default registry view
