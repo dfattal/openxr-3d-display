@@ -1370,6 +1370,12 @@ metal_compositor_destroy(struct xrt_compositor *xc)
 
 	U_LOG_I("Destroying Metal compositor");
 
+	// Wrap teardown in @autoreleasepool so autoreleased Metal objects
+	// (drawables, command buffers, textures) are drained immediately
+	// while backing resources still exist — prevents crash when the
+	// run loop's pool drains after the compositor is already freed.
+	@autoreleasepool {
+
 	// 1. GPU drain — wait for all in-flight command buffers to finish
 	//    before releasing any resources they may reference.
 	if (c->command_queue != nil) {
@@ -1433,6 +1439,8 @@ metal_compositor_destroy(struct xrt_compositor *xc)
 	// 8. Release remaining objects
 	c->command_queue = nil;
 	c->device = nil;
+
+	} // @autoreleasepool — all autoreleased ObjC objects drained here
 
 	os_mutex_destroy(&c->mutex);
 
