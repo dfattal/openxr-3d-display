@@ -281,23 +281,26 @@ FunctionEnd
 ; Usage: Push "C:\path\to\remove" 
 ;        Call un.RemoveFromPath
 Function un.RemoveFromPath
-  Exch $0  ; Path to remove
-  Push $1  ; Current raw PATH
+  Exch $0  ; Target path to remove
+  Push $1  ; Current PATH
   Push $2  ; Rebuilt PATH
-  Push $3  ; Current segment
+  Push $3  ; Segment
   Push $4  ; Normalized segment
   Push $5  ; Normalized target
   Push $6  ; Temp / Length
   Push $7  ; Extra temp
   Push $8  ; Original PATH backup
-  Push $9  ; Temp log file handle
+  Push $9  ; Temp log file
 
+  ; Temp log path
+  StrCpy $9 "$TEMP\SRMonado_uninstall_path.log"
+  FileOpen $9 $9 "w"
   DetailPrint "=== RemoveFromPath started ==="
-  DetailPrint "Target to remove: $0"
+  FileWrite $9 "Target to remove: $0$\r$\n"
 
   SetRegView 64
 
-  ; 1. Normalize target (lowercase + trim)
+  ; Normalize target (lowercase + trim)
   Push $0
   Call un.StrLower
   Pop $5
@@ -308,13 +311,13 @@ Function un.RemoveFromPath
   StrCpy $7 $5 1 -1
   StrCmp $7 "\" 0 +2
     StrCpy $5 $5 -1
-  DetailPrint "Normalized target: $5"
+  FileWrite $9 "Normalized target: $5$\r$\n"
 
-  ; 2. Read system PATH
+  ; Read system PATH
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-  StrCpy $8 $1 ; Save original PATH
-  StrCpy $2 ""  ; Rebuilt PATH
-  DetailPrint "Current PATH: $1"
+  StrCpy $8 $1  ; Backup original
+  StrCpy $2 ""   ; Rebuilt PATH
+  FileWrite $9 "Current PATH: $1$\r$\n"
 
 loop:
   StrCmp $1 "" write
@@ -355,12 +358,12 @@ check_segment:
   StrCmp $7 "\" 0 +2
     StrCpy $4 $4 -1
 
-  DetailPrint "Checking segment: $3 (normalized: $4)"
+  FileWrite $9 "Checking segment: $3 (normalized: $4)$\r$\n"
 
-  ; Compare
+  ; Compare to target
   StrCmp $4 $5 skip_append
 
-  ; Append to rebuilt PATH
+  ; Append segment to rebuilt PATH
   StrCmp $2 "" 0 +3
     StrCpy $2 $3
     Goto loop
@@ -368,27 +371,27 @@ check_segment:
   Goto loop
 
 skip_append:
-  DetailPrint "Skipped matching segment: $3"
+  FileWrite $9 "Skipped matching segment: $3$\r$\n"
   Goto loop
 
 write:
-  StrCmp $2 $8 done
-    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
-    SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-    DetailPrint "Updated PATH: $2"
+  ; Safety check: don't write empty PATH
+  StrCmp $2 "" write_skip
+
+  WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
+  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+  FileWrite $9 "Updated PATH: $2$\r$\n"
+  Goto done
+
+write_skip:
+  FileWrite $9 "Rebuilt PATH is empty, skipping write and restoring original PATH$\r$\n"
+  WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$8"
 
 done:
-  ; Save PATH change log to temp file
-  StrCpy $0 "$TEMP\SRMonado_RemoveFromPath.log"
-  FileOpen $9 $0 "w"
-  StrCmp $9 "" skip_log
-    FileWrite $9 "Original PATH: $8$\r$\n"
-    FileWrite $9 "Target removed: $5$\r$\n"
-    FileWrite $9 "New PATH: $2$\r$\n"
-    FileClose $9
-  skip_log:
-
   SetRegView 32
+  FileWrite $9 "=== RemoveFromPath completed ===$\r$\n"
+  FileClose $9
+
   Pop $9
   Pop $8
   Pop $7
@@ -399,7 +402,6 @@ done:
   Pop $2
   Pop $1
   Pop $0
-  DetailPrint "=== RemoveFromPath completed ==="
 FunctionEnd
 
 ; ---------------------------------------------------------
