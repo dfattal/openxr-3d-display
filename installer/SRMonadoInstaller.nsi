@@ -307,17 +307,19 @@ Function un.RemoveFromPath
   Push $5 ; Normalized Segment 
   Push $6 ; Loop Index 
   Push $7 ; Temp Char 
-  Push $8 ; Log Handle
+  Push $8 ; Log Handle (Unused but kept for stack balance)
 
   SetRegView 64
-  StrCpy $8 "$TEMP\RemoveFromPath.log"
-  FileOpen $8 $8 "w"
-  FileWrite $8 "=== RemoveFromPath started ===$\r$\n"
-  FileWrite $8 "Target to remove: '$0'$\r$\n"
+  
+  ; Logging disabled for production
+  ; StrCpy $8 "$TEMP\RemoveFromPath.log"
+  ; FileOpen $8 $8 "w"
+  ; FileWrite $8 "=== RemoveFromPath started ===$\r$\n"
+  ; FileWrite $8 "Target to remove: '$0'$\r$\n"
 
   ; 1. Read Registry
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-  FileWrite $8 "FULL REGISTRY PATH: '$1'$\r$\n"
+  ; FileWrite $8 "FULL REGISTRY PATH: '$1'$\r$\n"
 
   ; 2. Normalize Target
   StrCpy $4 $0
@@ -330,11 +332,11 @@ Function un.RemoveFromPath
   Push $4
   Call un.StrLower
   Pop $4 
-  FileWrite $8 "Normalized Target: '$4'$\r$\n"
+  ; FileWrite $8 "Normalized Target: '$4'$\r$\n"
 
   ; SAFETY GUARD: Do not proceed if target is empty!
-  StrCmp $4 "" 0 +3
-    FileWrite $8 "ERROR: Normalized target is empty. Aborting to save PATH.$\r$\n"
+  StrCmp $4 "" 0 +2
+    ; FileWrite $8 "ERROR: Normalized target is empty. Aborting to save PATH.$\r$\n"
     Goto done_cleanup
 
   StrCpy $2 "" 
@@ -380,23 +382,27 @@ segment_found:
     Goto loop_segments
 
 is_match:
-  FileWrite $8 "MATCHED AND REMOVED: '$3'$\r$\n"
+  ; FileWrite $8 "MATCHED AND REMOVED: '$3'$\r$\n"
   Goto loop_segments ; Go back to loop!
 
 done_loop:
-  FileWrite $8 "FINAL REBUILT PATH: '$2'$\r$\n"
+  ; FileWrite $8 "FINAL REBUILT PATH: '$2'$\r$\n"
 
-  ; 4. Safety Check & Write
+  ; 4. Final Safety Check & Write
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+  
+  ; Final sanity check: don't write an empty path if the original wasn't empty
+  StrCmp $2 "" done_write 
+  
   StrCmp $2 $1 done_write
     WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
-    FileWrite $8 "Registry successfully updated.$\r$\n"
+    ; FileWrite $8 "Registry successfully updated.$\r$\n"
   
 done_write:
-  FileWrite $8 "=== RemoveFromPath completed ===$\r$\n"
+  ; FileWrite $8 "=== RemoveFromPath completed ===$\r$\n"
 
 done_cleanup:
-  FileClose $8
+  ; FileClose $8
   SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
   SetRegView 32
 
