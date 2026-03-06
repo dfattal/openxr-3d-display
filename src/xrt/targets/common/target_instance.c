@@ -285,6 +285,11 @@ out:
 					xsysc->info.dp_factory_d3d11 = (void *)sim_display_dp_factory_d3d11;
 				}
 #endif
+#ifdef __APPLE__
+				if (xsysc->info.dp_factory_metal == NULL) {
+					xsysc->info.dp_factory_metal = (void *)sim_display_dp_factory_metal;
+				}
+#endif
 			}
 		}
 
