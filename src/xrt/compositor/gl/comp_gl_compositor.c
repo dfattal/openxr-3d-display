@@ -37,15 +37,13 @@
 #include <string.h>
 #include <assert.h>
 
-// Platform-specific GL headers
+// GL function loading via GLAD (cross-platform)
 #ifdef XRT_OS_WINDOWS
-#include <windows.h>
-#include <GL/gl.h>
-#include <GL/glext.h>
-#include <GL/wglext.h>
+#include "ogl/ogl_api.h"
+#include "ogl/wgl_api.h"
 #elif defined(XRT_OS_ANDROID)
-#include <EGL/egl.h>
-#include <GLES3/gl3.h>
+#include "ogl/ogl_api.h"
+#include "ogl/egl_api.h"
 #elif defined(__APPLE__)
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
@@ -738,6 +736,18 @@ gl_compositor_set_formats(struct comp_gl_compositor *c)
  */
 
 #ifdef XRT_OS_WINDOWS
+
+//! GLAD loader: try wglGetProcAddress first, fall back to GetProcAddress on opengl32.dll.
+static GLADapiproc
+gl_get_proc_addr(void *userptr, const char *name)
+{
+	GLADapiproc ret = (GLADapiproc)wglGetProcAddress(name);
+	if (ret == NULL) {
+		ret = (GLADapiproc)GetProcAddress((HMODULE)userptr, name);
+	}
+	return ret;
+}
+
 static const wchar_t GL_WINDOW_CLASS[] = L"MonadoGLCompositor";
 
 static LRESULT CALLBACK
@@ -813,6 +823,27 @@ gl_create_window_and_context(struct comp_gl_compositor *c,
 	}
 
 	wglMakeCurrent(c->hdc, c->hglrc);
+
+	// Load GL and WGL function pointers via GLAD
+	HMODULE opengl_dll = LoadLibraryW(L"opengl32.dll");
+	if (opengl_dll == NULL) {
+		U_LOG_E("Failed to load opengl32.dll");
+		return false;
+	}
+
+	int wgl_result = gladLoadWGLUserPtr(c->hdc, gl_get_proc_addr, opengl_dll);
+	int gl_result = gladLoadGLUserPtr(gl_get_proc_addr, opengl_dll);
+
+	if (wgl_result == 0 || gl_result == 0) {
+		U_LOG_E("Failed to load GLAD functions: WGL=%d, GL=%d", wgl_result, gl_result);
+		FreeLibrary(opengl_dll);
+		return false;
+	}
+
+	U_LOG_W("GLAD loaded: GL %d.%d, renderer: %s",
+	         GLAD_VERSION_MAJOR(gl_result), GLAD_VERSION_MINOR(gl_result),
+	         glGetString ? (const char *)glGetString(GL_RENDERER) : "unknown");
+
 	return true;
 }
 #endif // XRT_OS_WINDOWS
