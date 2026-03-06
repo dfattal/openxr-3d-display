@@ -40,7 +40,6 @@ ShowUninstDetails show
 !include "x64.nsh"
 !include "TextFunc.nsh"
 !include "WinMessages.nsh"
-!include "LogicLib.nsh"
 
 ; Windows constants for PATH modification
 !ifndef HWND_BROADCAST
@@ -263,19 +262,14 @@ lastpart:
 	StrCpy $4 $1
 	StrCpy $1 ""
 check:
-	${If} $4 != $0
-		Push $4
-		Push "SRMonado"
-		Call un.StrStr
-		Pop $3
-		${If} $3 == ""
-			${If} $2 == ""
-				StrCpy $2 $4
-			${Else}
-				StrCpy $2 "$2;$4"
-			${EndIf}
-		${EndIf}
-	${EndIf}
+	StrCmp $4 $0 loop ; Skip this entry if it matches
+	StrCmp $4 "$INSTDIR" loop ; Skip this entry if it matches INSTDIR
+	
+	; Rebuild PATH string with current part
+	StrCmp $2 "" 0 +3
+	StrCpy $2 $4
+	Goto loop
+	StrCpy $2 "$2;$4"
 	Goto loop
 
 done:
