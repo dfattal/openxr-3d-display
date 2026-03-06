@@ -266,9 +266,8 @@ endif()
 
 ###
 # Native OpenGL compositor (bypasses Vulkan entirely)
-# macOS-only for now — Windows needs a GL loader (GLAD) for modern GL functions.
 #
-if(APPLE AND XRT_HAVE_OPENGL)
+if(XRT_HAVE_OPENGL)
 	add_subdirectory(gl)
 endif()
 

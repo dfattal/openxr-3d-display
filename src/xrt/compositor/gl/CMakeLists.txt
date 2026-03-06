@@ -21,12 +21,16 @@ target_link_libraries(
 		aux_util
 		aux_os
 		aux_math
+		aux_ogl
 	)
 
 target_include_directories(comp_gl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 # comp_layer_accum lives in util/ — include path needed
 target_include_directories(comp_gl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../util)
+
+# aux_ogl headers (ogl_api.h, wgl_api.h) are in auxiliary/ogl/
+target_include_directories(comp_gl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../auxiliary)
 
 # Silence macOS deprecation warnings for OpenGL
 if(APPLE)
