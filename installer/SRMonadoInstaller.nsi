@@ -131,41 +131,37 @@ Function DumpLog
 		Pop $5
 FunctionEnd
 
-;--------------------------------
-; AddToPath - Adds a directory to the system PATH with confirmation dialog
-; Usage: Push "C:\path\to\add"
-;        Call AddToPath
 Function AddToPath
   Exch $0  ; Path to add
   Push $1
   Push $2
 
   ; Strip trailing backslash
-  StrCpy $0 $0 "" -1
-  StrCmp $0 "\" 0 +2
+  StrCpy $1 $0 "" -1
+  StrCmp $1 "\" 0 +2
     StrCpy $0 $0 -1
 
-  ; Read current PATH
+  ; Read system PATH (EXPAND_SZ) to preserve % variables
   ReadRegExpandStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
 
-  ; Check if already exists
+  ; Check if path already exists
   Push $1
   Push $0
   Call StrStr
   Pop $2
-  StrCmp $2 "" 0 done  ; If exists, skip
+  StrCmp $2 "" 0 done  ; Already exists? Skip
 
   ; Append path
   StrCmp $1 "" 0 +3
-    StrCpy $1 "$0"      ; empty PATH
+    StrCpy $1 "$0"
     Goto write
-  StrCpy $1 "$1;$0"     ; non-empty PATH, append
+  StrCpy $1 "$1;$0"
 
 write:
   WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$1"
 
-  ; Notify Windows
-  System::Call 'user32::SendMessageTimeoutA(i ${HWND_BROADCAST}, i ${WM_SETTINGCHANGE}, i 0, t "Environment", i 0, i 5000, *i .r0)'
+  ; Notify Windows (Unicode safe)
+  System::Call 'user32::SendMessageTimeoutW(i ${HWND_BROADCAST}, i ${WM_SETTINGCHANGE}, i 0, t "Environment", i 0, i 5000, *i .r0)'
 
 done:
   Pop $2
