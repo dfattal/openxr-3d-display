@@ -295,160 +295,115 @@ FunctionEnd
 ; Usage: Push "C:\path\to\remove" 
 ;        Call un.RemoveFromPath
 Function un.RemoveFromPath
-  Exch $0
-  Push $1
-  Push $2
-  Push $3
-  Push $4
-  Push $5
-  Push $6
-  Push $7
-  Push $8
-  Push $9
+  Exch $0 ; Target path to remove (e.g., C:\Program Files\LeiaSR\SRMonado)
+  Push $1 ; Original PATH from Registry
+  Push $2 ; Rebuilt PATH (Buffer)
+  Push $3 ; Current Segment being checked
+  Push $4 ; Normalized Target (Lowercase, no trailing slash)
+  Push $5 ; Normalized Segment (Lowercase, no trailing slash)
+  Push $6 ; Temp / Loop Index
+  Push $7 ; Character / Length
+  Push $9 ; Log File Handle
 
-  ; Open log
+  ; 1. Force 64-bit Registry View to see the real System PATH
+  SetRegView 64
+
+  ; 2. Open Log in Unicode mode (/u) to prevent mangled characters in log
   StrCpy $9 "$TEMP\RemoveFromPath.log"
-  FileOpen $9 $9 "a"
+  FileOpen $9 $9 "w /u" 
+  FileWrite $9 "=== RemoveFromPath started ===$\r$\n"
+  FileWrite $9 "Target to remove: $0$\r$\n"
 
-  StrCmp $9 "" +2
-    FileWrite $9 "=== RemoveFromPath started ===$\r$\n"
-
-  ; Read PATH
+  ; 3. Read the actual Registry PATH
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+  FileWrite $9 "Original PATH: $1$\r$\n"
 
-  ; Trim CR/LF
-  Push $1
-  Call un.TrimCRLF
-  Pop $1
-
-  StrCpy $8 $1
-
-  StrCmp $9 "" +2
-    FileWrite $9 "Original PATH: $1$\r$\n"
-
-  ; Normalize target (remove trailing \)
+  ; 4. Normalize Target (Remove trailing backslash and Lowercase)
   StrCpy $4 $0
-trim_target:
-  StrLen $5 $4
-  IntCmp $5 0 trim_target_done
-  IntOp $5 $5 - 1
-  StrCpy $6 $4 1 $5
-  StrCmp $6 "\" 0 trim_target_done
-  StrCpy $4 $4 $5
-  Goto trim_target
-trim_target_done:
+  StrLen $7 $4
+  IntOp $7 $7 - 1
+  StrCpy $6 $4 1 $7
+  StrCmp $6 "\" 0 +2
+    StrCpy $4 $4 $7 ; Strip trailing \
 
-  ; Lowercase target
   Push $4
   Call un.StrLower
-  Pop $4
+  Pop $4 ; $4 is now normalized target
 
-  StrCpy $2 ""
+  StrCpy $2 "" ; Clear our rebuild buffer
 
+  ; 5. Loop through PATH segments separated by semicolons
 loop:
   StrCmp $1 "" done_loop
-
-  ; Find next semicolon
+  
+  ; Find the first semicolon
   Push $1
   Push ";"
   Call un.StrStr
-  Pop $3
+  Pop $3 ; $3 is now ";remainder"
 
   StrCmp $3 "" no_semicolon
-
-  ; Extract segment before semicolon
-  StrLen $6 $1
-  StrLen $7 $3
-  IntOp $6 $6 - $7
-  StrCpy $3 $1 $6
-
-  ; Move remainder forward
-  IntOp $6 $6 + 1
-  StrCpy $1 $1 "" $6
-  Goto process_segment
+    ; Extract segment before the semicolon
+    StrLen $6 $1
+    StrLen $7 $3
+    IntOp $6 $6 - $7
+    StrCpy $3 $1 $6 ; $3 = "C:\Some\Path"
+    
+    ; Update $1 to be the remainder after the semicolon
+    IntOp $6 $6 + 1
+    StrCpy $1 $1 "" $6
+    Goto process_segment
 
 no_semicolon:
-  StrCpy $3 $1
-  StrCpy $1 ""
+    StrCpy $3 $1 ; Last segment
+    StrCpy $1 ""
 
 process_segment:
-
-  ; Trim CR/LF from segment
-  Push $3
-  Call un.TrimCRLF
-  Pop $3
-
-  ; Normalize segment (remove trailing \)
+  ; Normalize current segment ($3) for comparison
   StrCpy $5 $3
-trim_seg:
-  StrLen $6 $5
-  IntCmp $6 0 trim_seg_done
-  IntOp $6 $6 - 1
-  StrCpy $7 $5 1 $6
-  StrCmp $7 "\" 0 trim_seg_done
-  StrCpy $5 $5 $6
-  Goto trim_seg
-trim_seg_done:
+  
+  ; Trim trailing \ from segment
+  StrLen $7 $5
+  IntOp $7 $7 - 1
+  StrCpy $6 $5 1 $7
+  StrCmp $6 "\" 0 +2
+    StrCpy $5 $5 $7
 
-  ; Lowercase segment
+  ; Lowercase the segment copy
   Push $5
   Call un.StrLower
   Pop $5
 
-  ; Compare with target
-  StrCmp $5 $4 remove_segment
-
-  ; Keep segment
-  StrCmp $2 "" 0 +3
-    StrCpy $2 "$3"
+  ; 6. Compare normalized segment with normalized target
+  StrCmp $5 $4 is_match
+    ; NOT A MATCH: Keep this segment in our new PATH
+    StrCmp $2 "" 0 +3
+      StrCpy $2 "$3" ; First entry, no leading semicolon
+      Goto loop
+    StrCpy $2 "$2;$3" ; Append with semicolon
     Goto loop
 
-  StrCpy $2 "$2;$3"
-  Goto loop
-
-remove_segment:
-  StrCmp $9 "" +2
-    FileWrite $9 "Removed segment: $3$\r$\n"
+is_match:
+  FileWrite $9 "MATCH FOUND: Removing $3$\r$\n"
   Goto loop
 
 done_loop:
-
-  ; If unchanged, exit
-  StrCmp $2 $8 done
-
-  ; Check if original had multiple entries
-  Push $8
-  Push ";"
-  Call un.StrStr
-  Pop $6
-
-  ; Prevent wiping multi-entry PATH
-  StrCmp $2 "" 0 write_reg
-  StrCmp $6 "" write_reg
-
-  DetailPrint "Safety abort: rebuilt PATH empty"
-  StrCmp $9 "" +2
-    FileWrite $9 "Safety abort triggered$\r$\n"
-  Goto done
-
-write_reg:
-  WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
-
-  ; Notify system
-  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-
-  StrCmp $9 "" +2
+  ; 7. Write back to Registry if changed
+  ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+  StrCmp $2 $1 +3
+    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
     FileWrite $9 "Updated PATH: $2$\r$\n"
 
-done:
-  StrCmp $9 "" +3
-    FileWrite $9 "=== RemoveFromPath completed ===$\r$\n"
-    FileClose $9
+  FileWrite $9 "=== RemoveFromPath completed ===$\r$\n"
+  FileClose $9
 
-  DetailPrint "RemoveFromPath completed"
+  ; 8. Broadcast change to Windows
+  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+
+  ; Restore default registry view
+  SetRegView 32
 
   Pop $9
-  Pop $8
   Pop $7
   Pop $6
   Pop $5
