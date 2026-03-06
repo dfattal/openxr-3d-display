@@ -196,7 +196,8 @@ endif()
 # macOS visible frame helper (NSScreen query)
 if(APPLE)
 	list(APPEND SIM_DISPLAY_SOURCES
-		sim_display/sim_display_macos.m)
+		sim_display/sim_display_macos.m
+		sim_display/sim_display_processor_metal.m)
 endif()
 
 add_library(drv_sim_display STATIC ${SIM_DISPLAY_SOURCES})
@@ -212,7 +213,7 @@ if(WIN32)
 endif()
 
 if(APPLE)
-	target_link_libraries(drv_sim_display PRIVATE "-framework CoreGraphics" "-framework AppKit")
+	target_link_libraries(drv_sim_display PRIVATE "-framework CoreGraphics" "-framework AppKit" "-framework Metal")
 endif()
 
 list(APPEND ENABLED_DRIVERS drv_sim_display)
