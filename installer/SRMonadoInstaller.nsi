@@ -131,6 +131,50 @@ Function DumpLog
 		Pop $5
 FunctionEnd
 
+; Pure NSIS Lowercase function (Installer)
+Function StrLower
+  Exch $0 ; Result/Input string
+  Push $1 ; Index
+  Push $2 ; Char
+  Push $3 ; Char (Int)
+  StrCpy $1 0
+loop:
+  StrCpy $2 $0 1 $1
+  StrCmp $2 "" done
+  System::Call "user32::CharLower(t r2)t.r2"
+  StrCpy $0 $0 1 $1
+  StrCpy $0 "$0$2"
+  IntOp $1 $1 + 1
+  Goto loop
+done:
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0
+FunctionEnd
+
+; Pure NSIS Lowercase function (Uninstaller)
+Function un.StrLower
+  Exch $0
+  Push $1
+  Push $2
+  Push $3
+  StrCpy $1 0
+loop:
+  StrCpy $2 $0 1 $1
+  StrCmp $2 "" done
+  System::Call "user32::CharLower(t r2)t.r2"
+  StrCpy $0 $0 1 $1
+  StrCpy $0 "$0$2"
+  IntOp $1 $1 + 1
+  Goto loop
+done:
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0
+FunctionEnd
+
 ;--------------------------------
 ; PATH manipulation functions
 ; Based on NSIS Wiki and SR Platform installer
