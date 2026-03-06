@@ -296,122 +296,103 @@ FunctionEnd
 ;        Call un.RemoveFromPath
 ; RemoveFromPath - Removes a directory from the system PATH
 ; Handles 64-bit registry, Unicode characters, and case-insensitive matching.
+; RemoveFromPath - Removes a directory from the system PATH
+; Handles 64-bit registry, Unicode characters, and case-insensitive matching.
 Function un.RemoveFromPath
-  Exch $0 ; Target path to remove (e.g., C:\Program Files\LeiaSR\SRMonado)
-  Push $1 ; Original PATH from Registry
-  Push $2 ; Rebuilt PATH (Buffer)
-  Push $3 ; Current Segment being checked
-  Push $4 ; Normalized Target (Lowercase, no trailing slash)
-  Push $5 ; Normalized Segment (Lowercase, no trailing slash)
-  Push $6 ; Temp / Loop Index
-  Push $7 ; Character / Length
-  Push $9 ; Log File Handle
+  Exch $0 ; Target path
+  Push $1 ; Original PATH
+  Push $2 ; Rebuilt PATH
+  Push $3 ; Current Segment
+  Push $4 ; Normalized Target
+  Push $5 ; Normalized Segment
+  Push $6 ; Temp
+  Push $7 ; Length
+  Push $9 ; Log Handle
 
-  ; 1. Force 64-bit Registry View to see the real System PATH
   SetRegView 64
-
-  ; 2. Open Log (Standard 'w' mode for NSIS compatibility)
   StrCpy $9 "$TEMP\RemoveFromPath.log"
-  FileOpen $9 $9 "w" 
-  
-  StrCmp $9 "" +3
-    FileWrite $9 "=== RemoveFromPath started ===$\r$\n"
-    FileWrite $9 "Target to remove: $0$\r$\n"
+  FileOpen $9 $9 "w"
+  FileWrite $9 "=== RemoveFromPath started ===$\r$\n"
+  FileWrite $9 "Target to remove: $0$\r$\n"
 
-  ; 3. Read the actual Registry PATH
   ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-  
-  StrCmp $9 "" +2
-    FileWrite $9 "Original PATH: $1$\r$\n"
+  FileWrite $9 "Original PATH: $1$\r$\n"
 
-  ; 4. Normalize Target (Remove trailing backslash and Lowercase)
+  ; 1. Normalize Target: Remove trailing \ and Lowercase
   StrCpy $4 $0
   StrLen $7 $4
   IntOp $7 $7 - 1
   StrCpy $6 $4 1 $7
   StrCmp $6 "\" 0 +2
-    StrCpy $4 $4 $7 ; Strip trailing \
-
+    StrCpy $4 $4 $7 
   Push $4
   Call un.StrLower
-  Pop $4 ; $4 is now normalized target
+  Pop $4 
 
-  StrCpy $2 "" ; Clear our rebuild buffer
+  StrCpy $2 "" 
 
-  ; 5. Loop through PATH segments separated by semicolons
 loop:
   StrCmp $1 "" done_loop
-  
-  ; Find the first semicolon
   Push $1
   Push ";"
   Call un.StrStr
-  Pop $3 ; $3 is now ";remainder" (if found)
+  Pop $3 
 
   StrCmp $3 "" no_semicolon
-    ; Extract segment before the semicolon
     StrLen $6 $1
     StrLen $7 $3
     IntOp $6 $6 - $7
-    StrCpy $3 $1 $6 ; $3 = "C:\Some\Path"
-    
-    ; Update $1 to be the remainder after the semicolon
+    StrCpy $3 $1 $6 
     IntOp $6 $6 + 1
     StrCpy $1 $1 "" $6
     Goto process_segment
-
 no_semicolon:
-    StrCpy $3 $1 ; This is the last or only segment
+    StrCpy $3 $1 
     StrCpy $1 ""
 
 process_segment:
-  ; Normalize current segment ($3) for comparison
+  StrCmp $3 "" loop ; Skip empty segments (like ;; )
+
+  ; 2. Normalize Segment: Remove trailing ; OR \ and Lowercase
   StrCpy $5 $3
-  
-  ; Trim trailing \ from segment
   StrLen $7 $5
   IntOp $7 $7 - 1
+  StrCpy $6 $5 1 $7
+  
+  ; Strip trailing semicolon (the fix for your log)
+  StrCmp $6 ";" 0 +3
+    StrCpy $5 $5 $7
+    IntOp $7 $7 - 1 ; Update length for next check
+  
+  ; Strip trailing backslash
   StrCpy $6 $5 1 $7
   StrCmp $6 "\" 0 +2
     StrCpy $5 $5 $7
 
-  ; Lowercase the segment copy
   Push $5
   Call un.StrLower
   Pop $5
 
-  ; 6. Compare normalized segment with normalized target
+  ; 3. Compare
   StrCmp $5 $4 is_match
-    ; NOT A MATCH: Keep this segment in our new PATH buffer ($2)
+    FileWrite $9 "KEEPING: $3$\r$\n"
     StrCmp $2 "" 0 +3
-      StrCpy $2 "$3" ; First entry, no leading semicolon
+      StrCpy $2 "$3" 
       Goto loop
-    StrCpy $2 "$2;$3" ; Append with semicolon
+    StrCpy $2 "$2;$3" 
     Goto loop
 
 is_match:
-  StrCmp $9 "" +2
-    FileWrite $9 "MATCH FOUND: Removing $3$\r$\n"
+  FileWrite $9 "MATCH FOUND: Removing $3$\r$\n"
   Goto loop
 
 done_loop:
-  ; 7. Write back to Registry if changed
-  ; Re-read original to ensure no race conditions, then compare
-  ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-  StrCmp $2 $1 done_write
-    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
-    StrCmp $9 "" +2
-      FileWrite $9 "Updated PATH: $2$\r$\n"
+  WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$2"
+  FileWrite $9 "Updated PATH: $2$\r$\n"
+  FileWrite $9 "=== RemoveFromPath completed ===$\r$\n"
+  FileClose $9
 
-done_write:
-  StrCmp $9 "" +3
-    FileWrite $9 "=== RemoveFromPath completed ===$\r$\n"
-    FileClose $9
-
-  ; 8. Broadcast change to Windows (so Command Prompts etc. see the update)
   SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-
-  ; Restore default registry view
   SetRegView 32
 
   Pop $9
