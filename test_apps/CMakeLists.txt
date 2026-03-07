@@ -9,7 +9,9 @@
 #   cube_ext_d3d11         - OpenXR with XR_EXT_win32_window_binding (app creates window, D3D11)
 #   cube_ext_d3d12         - D3D12 port of cube_ext_d3d11
 #   cube_ext_gl            - OpenGL port of cube_ext_d3d11
+#   cube_d3d12             - OpenXR standard mode (runtime creates window, D3D12)
 #   cube_ext_vk            - Vulkan port of cube_ext_d3d11 (requires Vulkan SDK)
+#   cube_shared_d3d12      - Shared texture mode (D3D12 rendering, D3D11 window blit)
 
 cmake_minimum_required(VERSION 3.21)
 project(test_apps LANGUAGES CXX)
@@ -28,6 +30,8 @@ if(OpenXR_FOUND OR DEFINED OpenXR_ROOT)
     add_subdirectory(cube_ext_gl)
     add_subdirectory(cube_ext_vk)
     add_subdirectory(cube_shared_d3d11)
+    add_subdirectory(cube_d3d12)
+    add_subdirectory(cube_shared_d3d12)
 else()
     message(STATUS "OpenXR not found, skipping OpenXR test apps")
     message(STATUS "To build them, set OpenXR_ROOT or install OpenXR SDK")

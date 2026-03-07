@@ -118,6 +118,7 @@ sim_dp_d3d12(struct xrt_display_processor_d3d12 *xdp)
 static void
 sim_dp_d3d12_process_stereo(struct xrt_display_processor_d3d12 *xdp,
                              void *d3d12_command_list,
+                             void *stereo_texture_resource,
                              uint64_t stereo_srv_gpu_handle,
                              uint64_t target_rtv_cpu_handle,
                              uint32_t view_width,
@@ -126,6 +127,7 @@ sim_dp_d3d12_process_stereo(struct xrt_display_processor_d3d12 *xdp,
                              uint32_t target_width,
                              uint32_t target_height)
 {
+	(void)stereo_texture_resource;
 	struct sim_display_processor_d3d12_impl *sdp = sim_dp_d3d12(xdp);
 	ID3D12GraphicsCommandList *cmd_list = static_cast<ID3D12GraphicsCommandList *>(d3d12_command_list);
 
