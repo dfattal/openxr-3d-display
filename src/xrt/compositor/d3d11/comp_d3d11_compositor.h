@@ -45,6 +45,7 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
                              void *hwnd,
                              void *d3d11_device,
                              void *dp_factory_d3d11,
+                             void *shared_texture_handle,
                              struct xrt_compositor_native **out_xc);
 
 /*!
