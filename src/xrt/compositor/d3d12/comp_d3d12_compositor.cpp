@@ -930,8 +930,9 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 	}
 
 	// Create output target (skip for shared texture offscreen mode)
+	xrt_result_t xret;
 	if (!c->has_shared_texture) {
-		xrt_result_t xret = comp_d3d12_target_create(c, c->hwnd,
+		xret = comp_d3d12_target_create(c, c->hwnd,
 		                                              c->settings.preferred.width,
 		                                              c->settings.preferred.height,
 		                                              &c->target);
