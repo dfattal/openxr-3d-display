@@ -68,6 +68,10 @@
 #include "d3d11/comp_d3d11_compositor.h"
 #endif
 
+#ifdef XRT_HAVE_D3D12_NATIVE_COMPOSITOR
+#include "d3d12/comp_d3d12_compositor.h"
+#endif
+
 #ifdef XRT_HAVE_METAL_NATIVE_COMPOSITOR
 #include "metal/comp_metal_compositor.h"
 #ifdef XRT_HAVE_OPENGL
@@ -156,6 +160,29 @@ oxr_session_get_predicted_eye_positions(struct oxr_session *sess, struct xrt_eye
 	}
 #endif
 
+#ifdef XRT_HAVE_D3D12_NATIVE_COMPOSITOR
+	// D3D12 native compositor path
+	if (sess->is_d3d12_native_compositor) {
+		struct xrt_vec3 left_eye, right_eye;
+		bool got_positions =
+		    comp_d3d12_compositor_get_predicted_eye_positions(&sess->xcn->base, &left_eye, &right_eye);
+
+		if (got_positions) {
+			out_eye_pair->left = (struct xrt_eye_position){left_eye.x, left_eye.y, left_eye.z};
+			out_eye_pair->right = (struct xrt_eye_position){right_eye.x, right_eye.y, right_eye.z};
+			out_eye_pair->timestamp_ns = os_monotonic_get_ns();
+			out_eye_pair->valid = true;
+			float dx = right_eye.x - left_eye.x;
+			float dy = right_eye.y - left_eye.y;
+			float dz = right_eye.z - left_eye.z;
+			float dist_sq = dx * dx + dy * dy + dz * dz;
+			out_eye_pair->is_tracking = (dist_sq > 1e-6f);
+			return true;
+		}
+		return false;
+	}
+#endif
+
 #ifdef XRT_HAVE_METAL_NATIVE_COMPOSITOR
 	// Metal native compositor path
 	if (sess->is_metal_native_compositor) {
@@ -210,6 +237,13 @@ oxr_session_get_display_dimensions(struct oxr_session *sess, float *out_width_m,
 	}
 #endif
 
+#ifdef XRT_HAVE_D3D12_NATIVE_COMPOSITOR
+	// D3D12 native compositor path
+	if (sess->xcn != NULL && sess->is_d3d12_native_compositor) {
+		return comp_d3d12_compositor_get_display_dimensions(&sess->xcn->base, out_width_m, out_height_m);
+	}
+#endif
+
 #ifdef XRT_HAVE_METAL_NATIVE_COMPOSITOR
 	if (sess->xcn != NULL && sess->is_metal_native_compositor) {
 		return comp_metal_compositor_get_display_dimensions(&sess->xcn->base, out_width_m, out_height_m);
@@ -246,6 +280,12 @@ oxr_session_get_window_metrics(struct oxr_session *sess,
 	}
 #endif
 
+#ifdef XRT_HAVE_D3D12_NATIVE_COMPOSITOR
+	if (sess->is_d3d12_native_compositor) {
+		return comp_d3d12_compositor_get_window_metrics(&sess->xcn->base, out_metrics);
+	}
+#endif
+
 #ifdef XRT_HAVE_METAL_NATIVE_COMPOSITOR
 	if (sess->is_metal_native_compositor) {
 		return comp_metal_compositor_get_window_metrics(&sess->xcn->base, out_metrics);
@@ -275,6 +315,16 @@ oxr_session_request_display_mode(struct oxr_logger *log, struct oxr_session *ses
 #ifdef XRT_HAVE_D3D11_NATIVE_COMPOSITOR
 	if (sess->is_d3d11_native_compositor) {
 		success = comp_d3d11_compositor_request_display_mode(&sess->xcn->base, enable_3d);
+		if (success) {
+			sess->display_mode_3d = enable_3d;
+		}
+		return XR_SUCCESS;
+	}
+#endif
+
+#ifdef XRT_HAVE_D3D12_NATIVE_COMPOSITOR
+	if (sess->is_d3d12_native_compositor) {
+		success = comp_d3d12_compositor_request_display_mode(&sess->xcn->base, enable_3d);
 		if (success) {
 			sess->display_mode_3d = enable_3d;
 		}
@@ -1012,9 +1062,9 @@ oxr_session_locate_views(struct oxr_logger *log,
 	bool got_eye_positions = oxr_session_get_predicted_eye_positions(sess, &eye_pair);
 
 	if (should_log) {
-		U_LOG_I("Eye tracking: got_positions=%d, valid=%d, is_d3d11=%d, is_metal=%d",
+		U_LOG_I("Eye tracking: got_positions=%d, valid=%d, is_d3d11=%d, is_d3d12=%d, is_metal=%d",
 		        got_eye_positions, eye_pair.valid, sess->is_d3d11_native_compositor,
-		        sess->is_metal_native_compositor);
+		        sess->is_d3d12_native_compositor, sess->is_metal_native_compositor);
 		if (got_eye_positions) {
 			U_LOG_I("  left=(%.3f,%.3f,%.3f) right=(%.3f,%.3f,%.3f)",
 			        eye_pair.left.x, eye_pair.left.y, eye_pair.left.z,
@@ -1987,7 +2037,8 @@ oxr_session_create_impl(struct oxr_logger *log,
 				return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create xrt_session! '%i'", xret);
 			}
 			// Use D3D11 native compositor - no Vulkan involvement
-			return oxr_session_populate_d3d11_native(log, sys, d3d11, xsi->external_window_handle, *out_session);
+			return oxr_session_populate_d3d11_native(log, sys, d3d11, xsi->external_window_handle,
+			                                          xsi->shared_texture_handle, *out_session);
 		}
 #else
 		U_LOG_IFL_I(U_LOGGING_INFO, "D3D11 native compositor NOT compiled in (XRT_HAVE_D3D11_NATIVE_COMPOSITOR not defined)");
@@ -2019,6 +2070,26 @@ oxr_session_create_impl(struct oxr_logger *log,
 
 
 		OXR_SESSION_ALLOCATE_AND_INIT(log, sys, OXR_SESSION_GRAPHICS_EXT_D3D12, *out_session);
+
+		U_LOG_IFL_I(U_LOGGING_INFO, "D3D12 session creation - checking compositor options...");
+
+#ifdef XRT_HAVE_D3D12_NATIVE_COMPOSITOR
+		// Check if D3D12 native compositor should be used (bypasses Vulkan)
+		if (oxr_d3d12_native_compositor_supported(sys, xsi->external_window_handle)) {
+			xrt_result_t xret = xrt_system_create_session(sys->xsys, xsi, &(*out_session)->xs, NULL);
+			if (xret == XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED) {
+				return oxr_error(log, XR_ERROR_LIMIT_REACHED, "Per instance multi-session not supported.");
+			}
+			if (xret != XRT_SUCCESS) {
+				return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create xrt_session! '%i'", xret);
+			}
+			return oxr_session_populate_d3d12_native(log, sys, d3d12, xsi->external_window_handle, *out_session);
+		}
+#else
+		U_LOG_IFL_I(U_LOGGING_INFO, "D3D12 native compositor NOT compiled in");
+#endif
+		// Fall back to Vulkan-backed D3D12 compositor
+		U_LOG_IFL_I(U_LOGGING_INFO, "Using IPC D3D12 client compositor (server-side rendering)");
 		OXR_CREATE_XRT_SESSION_AND_NATIVE_COMPOSITOR(log, xsi, *out_session);
 		return oxr_session_populate_d3d12(log, sys, d3d12, *out_session);
 	}

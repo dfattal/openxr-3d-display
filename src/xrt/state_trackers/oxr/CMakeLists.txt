@@ -91,6 +91,13 @@ endif()
 if(XRT_HAVE_D3D12)
 	target_sources(st_oxr PRIVATE oxr_session_gfx_d3d12.c oxr_swapchain_d3d12.c oxr_d3d12.cpp)
 	target_link_libraries(st_oxr PRIVATE aux_d3d)
+
+	# D3D12 native compositor support (bypasses Vulkan)
+	if(WIN32 AND TARGET comp_d3d12)
+		target_sources(st_oxr PRIVATE oxr_session_gfx_d3d12_native.c oxr_swapchain_d3d12_native.c)
+		target_link_libraries(st_oxr PRIVATE comp_d3d12)
+		target_compile_definitions(st_oxr PRIVATE XRT_HAVE_D3D12_NATIVE_COMPOSITOR)
+	endif()
 endif()
 
 if(ANDROID)

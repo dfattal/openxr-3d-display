@@ -21,6 +21,7 @@ extern "C" {
 struct xrt_device;
 struct xrt_display_processor;
 struct xrt_display_processor_d3d11;
+struct xrt_display_processor_d3d12;
 struct xrt_display_processor_metal;
 struct vk_bundle;
 
@@ -173,6 +174,45 @@ sim_display_dp_factory_d3d11(void *d3d11_device,
                               void *d3d11_context,
                               void *window_handle,
                               struct xrt_display_processor_d3d11 **out_xdp);
+
+/*!
+ * Create a simulation D3D12 display processor.
+ *
+ * For SBS mode, shaders are still compiled but act as a pass-through.
+ * For anaglyph and blend modes, HLSL shaders perform stereo compositing.
+ *
+ * @param mode          Output mode (SBS, anaglyph, or blend).
+ * @param d3d12_device  D3D12 device for PSO creation.
+ * @param[out] out_xdp  Receives the created display processor.
+ * @return XRT_SUCCESS on success.
+ * @ingroup drv_sim_display
+ */
+xrt_result_t
+sim_display_processor_d3d12_create(enum sim_display_output_mode mode,
+                                   void *d3d12_device,
+                                   struct xrt_display_processor_d3d12 **out_xdp);
+
+/*!
+ * Factory function for creating a sim_display D3D12 display processor.
+ *
+ * Matches the @ref xrt_dp_factory_d3d12_fn_t signature.
+ * Reads SIM_DISPLAY_OUTPUT env var internally to determine the initial mode.
+ *
+ * Set this as dp_factory_d3d12 in xrt_system_compositor_info from
+ * target_instance.c when sim_display is the active driver.
+ *
+ * @param d3d12_device        D3D12 device (ID3D12Device*).
+ * @param d3d12_command_queue D3D12 command queue (unused by sim_display, may be NULL).
+ * @param window_handle       Unused by sim_display (may be NULL).
+ * @param[out] out_xdp        Receives the created display processor.
+ * @return XRT_SUCCESS on success.
+ * @ingroup drv_sim_display
+ */
+xrt_result_t
+sim_display_dp_factory_d3d12(void *d3d12_device,
+                              void *d3d12_command_queue,
+                              void *window_handle,
+                              struct xrt_display_processor_d3d12 **out_xdp);
 
 /*!
  * Set an external device as the pose source for a sim_display HMD.

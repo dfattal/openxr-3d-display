@@ -2488,6 +2488,10 @@ struct xrt_system_compositor_info
 	//! Signature: xrt_dp_factory_d3d11_fn_t (see xrt_display_processor_d3d11.h).
 	void *dp_factory_d3d11;
 
+	//! D3D12 display processor factory (NULL = no D3D12 display processing).
+	//! Signature: xrt_dp_factory_d3d12_fn_t (see xrt_display_processor_d3d12.h).
+	void *dp_factory_d3d12;
+
 	//! Metal display processor factory (NULL = no Metal display processing).
 	//! Signature: xrt_dp_factory_metal_fn_t (see xrt_display_processor_metal.h).
 	void *dp_factory_metal;

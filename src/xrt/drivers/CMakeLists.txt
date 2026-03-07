@@ -193,6 +193,12 @@ if(WIN32)
 		sim_display/sim_display_processor_d3d11.cpp)
 endif()
 
+# D3D12 display processor (HLSL shaders compiled at runtime into PSOs)
+if(WIN32 AND XRT_HAVE_D3D12)
+	list(APPEND SIM_DISPLAY_SOURCES
+		sim_display/sim_display_processor_d3d12.cpp)
+endif()
+
 # macOS visible frame helper (NSScreen query)
 if(APPLE)
 	list(APPEND SIM_DISPLAY_SOURCES
@@ -210,6 +216,9 @@ endif()
 
 if(WIN32)
 	target_link_libraries(drv_sim_display PRIVATE d3d11 d3dcompiler)
+	if(XRT_HAVE_D3D12)
+		target_link_libraries(drv_sim_display PRIVATE d3d12)
+	endif()
 endif()
 
 if(APPLE)
