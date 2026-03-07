@@ -15,6 +15,8 @@
  *
  * Both paths share IPD/parallax factor processing.
  *
+ * See also: doc/extensions/stereo3d_math.md for full pipeline derivation.
+ *
  * @author David Fattal
  * @ingroup aux_math
  */
