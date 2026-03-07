@@ -193,7 +193,7 @@ jobs:
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
 
   # D3D11 test app with XR_EXT_win32_window_binding (app creates window)
-  TestAppSessionTarget:
+  TestAppCubeExtD3D11:
     if: true  # <-- Change to 'false' to disable test app build
     runs-on: windows-2022
     needs: Runtime  # Wait for runtime build to get artifacts
@@ -294,7 +294,7 @@ jobs:
             test_apps/cube_ext_d3d11/build/textures/
 
   # D3D11 test app WITHOUT window binding extension - Standard OpenXR app
-  TestAppStandard:
+  TestAppCubeD3D11:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
     needs: Runtime
@@ -355,7 +355,7 @@ jobs:
             test_apps/cube_d3d11/build/textures/
 
   # D3D12 test app with XR_EXT_win32_window_binding
-  TestAppD3D12:
+  TestAppCubeExtD3D12:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
     needs: Runtime
@@ -416,7 +416,7 @@ jobs:
             test_apps/cube_ext_d3d12/build/textures/
 
   # OpenGL test app with XR_EXT_win32_window_binding
-  TestAppOpenGL:
+  TestAppCubeExtGL:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
     needs: Runtime
@@ -477,7 +477,7 @@ jobs:
             test_apps/cube_ext_gl/build/textures/
 
   # Vulkan test app with XR_EXT_win32_window_binding (requires Vulkan SDK)
-  TestAppVulkan:
+  TestAppCubeExtVK:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
     needs: Runtime
@@ -544,7 +544,7 @@ jobs:
             test_apps/cube_ext_vk/build/textures/
 
   # 3D Gaussian Splatting Vulkan demo (requires Vulkan SDK, uses FetchContent for 3DGS.cpp)
-  TestApp3DGSVulkan:
+  TestAppGaussianSplattingVK:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
     needs: Runtime
@@ -671,7 +671,7 @@ jobs:
             demos/spatial_os/build/textures/
 
   # D3D11 shared texture test app (offscreen mode)
-  TestAppSharedD3D11:
+  TestAppCubeSharedD3D11:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
     needs: Runtime
@@ -725,7 +725,7 @@ jobs:
             test_apps/cube_shared_d3d11/build/textures/
 
   # OpenGL shared texture test app (offscreen mode via WGL_NV_DX_interop2)
-  TestAppSharedGL:
+  TestAppCubeSharedGL:
     if: true  # <-- Change to 'false' to disable
     runs-on: windows-2022
     needs: Runtime
@@ -783,7 +783,7 @@ jobs:
   BundleTestApps:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    needs: [TestAppSessionTarget, TestAppStandard, TestAppD3D12, TestAppOpenGL, TestAppVulkan, TestApp3DGSVulkan, TestAppSpatialOS, TestAppSharedD3D11, TestAppSharedGL]
+    needs: [TestAppCubeExtD3D11, TestAppCubeD3D11, TestAppCubeExtD3D12, TestAppCubeExtGL, TestAppCubeExtVK, TestAppGaussianSplattingVK, TestAppSpatialOS, TestAppCubeSharedD3D11, TestAppCubeSharedGL]
 
     steps:
       - name: Download cube test app artifacts
