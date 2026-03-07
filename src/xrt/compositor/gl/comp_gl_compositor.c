@@ -78,7 +78,9 @@ typedef BOOL(WINAPI *PFN_wglDXUnlockObjectsNV)(HANDLE hDevice, GLint count, HAND
  */
 
 #define GL_SWAPCHAIN_MAX_IMAGES 8
+#ifndef GL_MAX_LAYERS
 #define GL_MAX_LAYERS 16
+#endif
 
 // Default window dimensions
 #define GL_DEFAULT_WIDTH 2560
