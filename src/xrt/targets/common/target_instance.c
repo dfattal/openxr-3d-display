@@ -285,6 +285,11 @@ out:
 					xsysc->info.dp_factory_d3d11 = (void *)sim_display_dp_factory_d3d11;
 				}
 #endif
+#if defined(XRT_OS_WINDOWS) && defined(XRT_HAVE_D3D12)
+				if (xsysc->info.dp_factory_d3d12 == NULL) {
+					xsysc->info.dp_factory_d3d12 = (void *)sim_display_dp_factory_d3d12;
+				}
+#endif
 #ifdef __APPLE__
 				if (xsysc->info.dp_factory_metal == NULL) {
 					xsysc->info.dp_factory_metal = (void *)sim_display_dp_factory_metal;

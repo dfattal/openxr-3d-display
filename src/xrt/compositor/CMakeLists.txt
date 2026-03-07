@@ -266,6 +266,13 @@ if(WIN32 AND XRT_HAVE_D3D11)
 endif()
 
 ###
+# Native D3D12 compositor (bypasses Vulkan entirely)
+#
+if(WIN32 AND XRT_HAVE_D3D12)
+	add_subdirectory(d3d12)
+endif()
+
+###
 # Native Metal compositor (bypasses Vulkan entirely)
 #
 if(APPLE AND XRT_HAVE_METAL)

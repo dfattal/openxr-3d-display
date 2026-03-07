@@ -1451,6 +1451,30 @@ oxr_session_populate_d3d11_native(struct oxr_logger *log,
                                    struct oxr_system *sys,
                                    XrGraphicsBindingD3D11KHR const *next,
                                    void *window_handle,
+                                   void *shared_texture_handle,
+                                   struct oxr_session *sess);
+#endif
+
+#endif
+
+#ifdef XR_USE_GRAPHICS_API_D3D12
+
+/*!
+ * Check if D3D12 native compositor should be used.
+ */
+bool
+oxr_d3d12_native_compositor_supported(struct oxr_system *sys, void *window_handle);
+
+#ifdef XRT_HAVE_D3D12_NATIVE_COMPOSITOR
+/*!
+ * Populate the session with the D3D12 native compositor.
+ * This bypasses Vulkan entirely for D3D12 apps.
+ */
+XrResult
+oxr_session_populate_d3d12_native(struct oxr_logger *log,
+                                   struct oxr_system *sys,
+                                   XrGraphicsBindingD3D12KHR const *next,
+                                   void *window_handle,
                                    struct oxr_session *sess);
 #endif
 
@@ -1921,6 +1945,9 @@ struct oxr_session
 
 	//! True if using Metal native compositor (not multi_compositor).
 	bool is_metal_native_compositor;
+
+	//! True if using D3D12 native compositor (not multi_compositor).
+	bool is_d3d12_native_compositor;
 
 	//! True if using GL native compositor (not multi_compositor).
 	bool is_gl_native_compositor;
