@@ -92,6 +92,20 @@ if(XRT_HAVE_LEIA_SR)
 		endif()
 	endif()
 
+	# Check for D3D12 weaver support on Windows
+	set(LEIA_SR_D3D12_AVAILABLE FALSE)
+	if(WIN32 AND XRT_HAVE_D3D12)
+		if(EXISTS "${SR_PATH}/lib/SimulatedRealityDirectX.lib")
+			message(STATUS "Found SimulatedRealityDirectX.lib - enabling D3D12 weaver")
+			list(APPEND LEIA_SOURCES
+				leia/leia_sr_d3d12.cpp leia/leia_sr_d3d12.h
+				leia/leia_display_processor_d3d12.cpp leia/leia_display_processor_d3d12.h)
+			set(LEIA_SR_D3D12_AVAILABLE TRUE)
+		else()
+			message(STATUS "SimulatedRealityDirectX.lib not found - D3D12 weaver disabled")
+		endif()
+	endif()
+
 	# Only create the driver if at least one weaver is available
 	if(LEIA_SOURCES)
 		add_library(drv_leia STATIC ${LEIA_SOURCES})
@@ -123,6 +137,17 @@ if(XRT_HAVE_LEIA_SR)
 			target_compile_definitions(drv_leia PUBLIC XRT_HAVE_LEIA_SR_D3D11)
 		endif()
 
+		# D3D12 weaver library (conditional)
+		if(LEIA_SR_D3D12_AVAILABLE)
+			# SimulatedRealityDirectX.lib covers both D3D11 and D3D12 weavers
+			if(NOT LEIA_SR_D3D11_AVAILABLE)
+				target_link_libraries(drv_leia PRIVATE
+					${SR_PATH}/lib/SimulatedRealityDirectX.lib)
+			endif()
+			target_link_libraries(drv_leia PRIVATE d3d12)
+			target_compile_definitions(drv_leia PUBLIC XRT_HAVE_LEIA_SR_D3D12)
+		endif()
+
 		# Eye tracking is handled by the weaver's getPredictedEyePositions() - no separate library needed
 
 		# CNSDK support (Android interlacing) — added to drv_leia when both SDKs available
@@ -135,6 +160,7 @@ if(XRT_HAVE_LEIA_SR)
 		# Export availability for other CMake components (targets/common needs this)
 		set(LEIA_SR_VULKAN_AVAILABLE ${LEIA_SR_VULKAN_AVAILABLE} CACHE INTERNAL "LeiaSR Vulkan weaver available")
 		set(LEIA_SR_D3D11_AVAILABLE ${LEIA_SR_D3D11_AVAILABLE} CACHE INTERNAL "LeiaSR D3D11 weaver available")
+		set(LEIA_SR_D3D12_AVAILABLE ${LEIA_SR_D3D12_AVAILABLE} CACHE INTERNAL "LeiaSR D3D12 weaver available")
 
 		list(APPEND ENABLED_DRIVERS drv_leia)
 	else()

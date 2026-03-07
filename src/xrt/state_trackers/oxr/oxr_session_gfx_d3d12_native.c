@@ -91,6 +91,7 @@ oxr_session_populate_d3d12_native(struct oxr_logger *log,
                                    struct oxr_system *sys,
                                    XrGraphicsBindingD3D12KHR const *next,
                                    void *window_handle,
+                                   void *shared_texture_handle,
                                    struct oxr_session *sess)
 {
 	struct xrt_device *xdev = get_role_head(sess->sys);
@@ -104,7 +105,8 @@ oxr_session_populate_d3d12_native(struct oxr_logger *log,
 
 	// Create the D3D12 native compositor
 	xrt_result_t xret = comp_d3d12_compositor_create(
-	    xdev, window_handle, (void *)next->device, (void *)next->queue,
+	    xdev, window_handle, shared_texture_handle,
+	    (void *)next->device, (void *)next->queue,
 	    dp_factory_d3d12, &xcn);
 	if (xret != XRT_SUCCESS) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
@@ -124,7 +126,18 @@ oxr_session_populate_d3d12_native(struct oxr_logger *log,
 	sess->compositor_visible = true;
 	sess->compositor_focused = true;
 
-	U_LOG_IFL_I(U_LOGGING_INFO, "Using D3D12 native compositor (bypassing Vulkan)");
+	// Set ext_app_mode for shared texture / window binding apps
+	sess->has_external_window =
+	    (window_handle != NULL || shared_texture_handle != NULL);
+	if (sess->has_external_window) {
+		struct xrt_device *head = get_role_head(sess->sys);
+		if (head != NULL) {
+			xrt_device_set_property(head, XRT_DEVICE_PROPERTY_EXT_APP_MODE, 1);
+		}
+	}
+
+	U_LOG_IFL_I(U_LOGGING_INFO, "Using D3D12 native compositor (bypassing Vulkan)%s",
+	            shared_texture_handle ? " — shared texture mode" : "");
 
 	return XR_SUCCESS;
 }

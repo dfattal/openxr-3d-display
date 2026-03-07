@@ -37,6 +37,9 @@
 #include "leia/leia_sr_d3d11.h"
 #include "leia/leia_display_processor.h"
 #include "leia/leia_display_processor_d3d11.h"
+#ifdef XRT_HAVE_LEIA_SR_D3D12
+#include "leia/leia_display_processor_d3d12.h"
+#endif
 #endif
 
 // sim_display display info for XR_EXT_display_info fallback
@@ -239,6 +242,9 @@ out:
 		// Set Leia display processor factories for vendor-agnostic compositor use.
 		xsysc->info.dp_factory_vk = (void *)leia_dp_factory_vk;
 		xsysc->info.dp_factory_d3d11 = (void *)leia_dp_factory_d3d11;
+#ifdef XRT_HAVE_LEIA_SR_D3D12
+		xsysc->info.dp_factory_d3d12 = (void *)leia_dp_factory_d3d12;
+#endif
 #endif
 
 		// sim_display fallback: populate display info and factory if not already set by SR SDK

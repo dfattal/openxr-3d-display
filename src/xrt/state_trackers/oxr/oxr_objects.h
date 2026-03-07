@@ -1276,6 +1276,7 @@ oxr_session_populate_gl_native(struct oxr_logger *log,
                                 struct oxr_system *sys,
                                 void *gl_context,
                                 void *gl_display,
+                                void *shared_texture_handle,
                                 struct oxr_session *sess);
 #endif
 
@@ -1288,6 +1289,7 @@ oxr_session_populate_gl_macos(struct oxr_logger *log,
                                struct oxr_system *sys,
                                const void *next,
                                void *window_handle,
+                               void *shared_iosurface,
                                struct oxr_session *sess);
 #endif
 
@@ -1476,6 +1478,7 @@ oxr_session_populate_d3d12_native(struct oxr_logger *log,
                                    struct oxr_system *sys,
                                    XrGraphicsBindingD3D12KHR const *next,
                                    void *window_handle,
+                                   void *shared_texture_handle,
                                    struct oxr_session *sess);
 #endif
 

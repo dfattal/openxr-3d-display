@@ -54,6 +54,7 @@ struct xrt_display_processor_d3d12
 	 *
 	 * @param      xdp                   Pointer to self.
 	 * @param      d3d12_command_list     Command list (ID3D12GraphicsCommandList*).
+	 * @param      stereo_texture_resource Stereo texture resource (ID3D12Resource*), may be NULL.
 	 * @param      stereo_srv_gpu_handle  SBS stereo texture SRV (D3D12_GPU_DESCRIPTOR_HANDLE as uint64_t).
 	 * @param      target_rtv_cpu_handle  Output render target RTV (D3D12_CPU_DESCRIPTOR_HANDLE as uint64_t).
 	 * @param      view_width            Width of one eye view (half of SBS texture width).
@@ -64,6 +65,7 @@ struct xrt_display_processor_d3d12
 	 */
 	void (*process_stereo)(struct xrt_display_processor_d3d12 *xdp,
 	                       void *d3d12_command_list,
+	                       void *stereo_texture_resource,
 	                       uint64_t stereo_srv_gpu_handle,
 	                       uint64_t target_rtv_cpu_handle,
 	                       uint32_t view_width,
@@ -129,6 +131,7 @@ struct xrt_display_processor_d3d12
 static inline void
 xrt_display_processor_d3d12_process_stereo(struct xrt_display_processor_d3d12 *xdp,
                                            void *d3d12_command_list,
+                                           void *stereo_texture_resource,
                                            uint64_t stereo_srv_gpu_handle,
                                            uint64_t target_rtv_cpu_handle,
                                            uint32_t view_width,
@@ -137,8 +140,8 @@ xrt_display_processor_d3d12_process_stereo(struct xrt_display_processor_d3d12 *x
                                            uint32_t target_width,
                                            uint32_t target_height)
 {
-	xdp->process_stereo(xdp, d3d12_command_list, stereo_srv_gpu_handle, target_rtv_cpu_handle, view_width,
-	                    view_height, format, target_width, target_height);
+	xdp->process_stereo(xdp, d3d12_command_list, stereo_texture_resource, stereo_srv_gpu_handle,
+	                    target_rtv_cpu_handle, view_width, view_height, format, target_width, target_height);
 }
 
 /*!

@@ -30,6 +30,7 @@ extern "C" {
  *
  * @param xdev The device we are displaying to.
  * @param hwnd The window handle from XR_EXT_win32_window_binding (or NULL for fullscreen).
+ * @param shared_texture_handle Shared texture handle from XR_EXT_win32_window_binding (or NULL).
  * @param d3d12_device The D3D12 device from the application's graphics binding (ID3D12Device*).
  * @param d3d12_command_queue The D3D12 command queue from the graphics binding (ID3D12CommandQueue*).
  * @param dp_factory_d3d12 Display processor factory (xrt_dp_factory_d3d12_fn_t), or NULL.
@@ -42,6 +43,7 @@ extern "C" {
 xrt_result_t
 comp_d3d12_compositor_create(struct xrt_device *xdev,
                              void *hwnd,
+                             void *shared_texture_handle,
                              void *d3d12_device,
                              void *d3d12_command_queue,
                              void *dp_factory_d3d12,

@@ -113,6 +113,12 @@ struct comp_d3d12_compositor
 	//! True if we created the window ourselves.
 	bool owns_window;
 
+	//! Shared texture resource (opened from app-provided handle).
+	ID3D12Resource *shared_texture;
+
+	//! True if shared texture mode is active (offscreen rendering).
+	bool has_shared_texture;
+
 	//! D3D12 display processor.
 	struct xrt_display_processor_d3d12 *display_processor;
 
@@ -302,8 +308,8 @@ d3d12_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
-	// Check for window resize
-	if (c->hwnd != nullptr) {
+	// Check for window resize (skip in shared texture mode — no window or target)
+	if (c->hwnd != nullptr && c->target != nullptr) {
 		RECT rect;
 		if (GetClientRect(c->hwnd, &rect)) {
 			uint32_t new_width = static_cast<uint32_t>(rect.right - rect.left);
@@ -536,6 +542,55 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		return xret;
 	}
 
+	// Shared texture mode: copy stereo output to shared texture and skip window present
+	if (c->has_shared_texture && c->shared_texture != nullptr) {
+		ID3D12Resource *stereo_resource = static_cast<ID3D12Resource *>(
+		    comp_d3d12_renderer_get_stereo_resource(c->renderer));
+
+		if (stereo_resource != nullptr) {
+			// Barrier: shared texture to COPY_DEST, stereo to COPY_SOURCE
+			D3D12_RESOURCE_BARRIER barriers[2] = {};
+			barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barriers[0].Transition.pResource = c->shared_texture;
+			barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+			barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+			barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+			barriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barriers[1].Transition.pResource = stereo_resource;
+			barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+			barriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+			c->cmd_list->ResourceBarrier(2, barriers);
+
+			c->cmd_list->CopyResource(c->shared_texture, stereo_resource);
+
+			// Barrier: back to original states
+			barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+			barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+			barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+			barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+
+			c->cmd_list->ResourceBarrier(2, barriers);
+		}
+
+		// Close and execute command list
+		c->cmd_list->Close();
+		ID3D12CommandList *lists[] = {c->cmd_list};
+		c->command_queue->ExecuteCommandLists(1, lists);
+
+		// Signal fence and wait for frame completion
+		c->fence_value++;
+		c->command_queue->Signal(c->fence, c->fence_value);
+		if (c->fence->GetCompletedValue() < c->fence_value) {
+			c->fence->SetEventOnCompletion(c->fence_value, c->fence_event);
+			WaitForSingleObject(c->fence_event, INFINITE);
+		}
+
+		return XRT_SUCCESS;
+	}
+
 	// Get current back buffer index
 	uint32_t bb_index = comp_d3d12_target_get_current_index(c->target);
 	ID3D12Resource *back_buffer = static_cast<ID3D12Resource *>(
@@ -570,8 +625,10 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		uint32_t view_width, view_height;
 		comp_d3d12_renderer_get_view_dimensions(c->renderer, &view_width, &view_height);
 
+		void *stereo_resource = comp_d3d12_renderer_get_stereo_resource(c->renderer);
+
 		xrt_display_processor_d3d12_process_stereo(
-		    c->display_processor, c->cmd_list, stereo_srv, target_rtv,
+		    c->display_processor, c->cmd_list, stereo_resource, stereo_srv, target_rtv,
 		    view_width, view_height, DXGI_FORMAT_R8G8B8A8_UNORM, tgt_width, tgt_height);
 
 		// Barrier: back buffer RENDER_TARGET -> PRESENT
@@ -679,6 +736,11 @@ d3d12_compositor_destroy(struct xrt_compositor *xc)
 		c->dp_srv_heap->Release();
 	}
 
+	if (c->shared_texture != nullptr) {
+		c->shared_texture->Release();
+		c->shared_texture = nullptr;
+	}
+
 	if (c->renderer != nullptr) {
 		comp_d3d12_renderer_destroy(&c->renderer);
 	}
@@ -724,6 +786,7 @@ d3d12_compositor_destroy(struct xrt_compositor *xc)
 extern "C" xrt_result_t
 comp_d3d12_compositor_create(struct xrt_device *xdev,
                              void *hwnd,
+                             void *shared_texture_handle,
                              void *d3d12_device,
                              void *d3d12_command_queue,
                              void *dp_factory_d3d12,
@@ -752,6 +815,10 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 	if (hwnd != nullptr) {
 		c->hwnd = static_cast<HWND>(hwnd);
 		U_LOG_I("Using app-provided window handle: %p", hwnd);
+	} else if (shared_texture_handle != nullptr) {
+		// Offscreen shared texture mode — no window needed
+		c->hwnd = nullptr;
+		U_LOG_I("Shared texture mode (offscreen) — no window");
 	} else {
 		uint32_t win_w = xdev->hmd->screens[0].w_pixels;
 		uint32_t win_h = xdev->hmd->screens[0].h_pixels;
@@ -814,6 +881,28 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 	c->fence_value = 0;
 	c->fence_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
+	// Open shared texture if handle provided
+	c->shared_texture = nullptr;
+	c->has_shared_texture = false;
+	if (shared_texture_handle != nullptr) {
+		HANDLE st_handle = static_cast<HANDLE>(shared_texture_handle);
+		hr = c->device->OpenSharedHandle(
+		    st_handle, __uuidof(ID3D12Resource),
+		    reinterpret_cast<void **>(&c->shared_texture));
+		if (FAILED(hr)) {
+			U_LOG_E("Failed to open shared texture handle: 0x%08x", hr);
+			d3d12_compositor_destroy(&c->base.base);
+			return XRT_ERROR_D3D;
+		}
+		c->has_shared_texture = true;
+
+		// Query shared texture dimensions
+		D3D12_RESOURCE_DESC st_desc = c->shared_texture->GetDesc();
+		U_LOG_W("Opened shared texture handle: %p -> resource %p (%llux%llu)",
+		        shared_texture_handle, (void *)c->shared_texture,
+		        (unsigned long long)st_desc.Width, (unsigned long long)st_desc.Height);
+	}
+
 	// Initialize settings
 	memset(&c->settings, 0, sizeof(c->settings));
 	c->settings.preferred.width = xdev->hmd->screens[0].w_pixels;
@@ -827,8 +916,12 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 		c->settings.nominal_frame_interval_ns = (1000 * 1000 * 1000) / 60;
 	}
 
-	// Get actual window size
-	if (c->hwnd != nullptr) {
+	// Get actual dimensions — from window or shared texture
+	if (c->has_shared_texture && c->shared_texture != nullptr) {
+		D3D12_RESOURCE_DESC st_desc = c->shared_texture->GetDesc();
+		c->settings.preferred.width = static_cast<uint32_t>(st_desc.Width);
+		c->settings.preferred.height = static_cast<uint32_t>(st_desc.Height);
+	} else if (c->hwnd != nullptr) {
 		RECT rect;
 		if (GetClientRect(c->hwnd, &rect)) {
 			c->settings.preferred.width = rect.right - rect.left;
@@ -836,15 +929,20 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 		}
 	}
 
-	// Create output target
-	xrt_result_t xret = comp_d3d12_target_create(c, c->hwnd,
-	                                              c->settings.preferred.width,
-	                                              c->settings.preferred.height,
-	                                              &c->target);
-	if (xret != XRT_SUCCESS) {
-		U_LOG_E("Failed to create D3D12 target");
-		d3d12_compositor_destroy(&c->base.base);
-		return xret;
+	// Create output target (skip for shared texture offscreen mode)
+	if (!c->has_shared_texture) {
+		xrt_result_t xret = comp_d3d12_target_create(c, c->hwnd,
+		                                              c->settings.preferred.width,
+		                                              c->settings.preferred.height,
+		                                              &c->target);
+		if (xret != XRT_SUCCESS) {
+			U_LOG_E("Failed to create D3D12 target");
+			d3d12_compositor_destroy(&c->base.base);
+			return xret;
+		}
+	} else {
+		c->target = nullptr;
+		U_LOG_I("Skipping DXGI swapchain (shared texture offscreen mode)");
 	}
 
 	// Query display refresh rate

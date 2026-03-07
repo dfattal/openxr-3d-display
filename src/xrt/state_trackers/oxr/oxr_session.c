@@ -1898,9 +1898,19 @@ oxr_session_create_impl(struct oxr_logger *log,
 			if (xret != XRT_SUCCESS) {
 				return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create xrt_session! '%i'", xret);
 			}
+
+			// Extract shared texture handle from win32 window binding if present
+			void *shared_texture_handle = NULL;
+			const XrWin32WindowBindingCreateInfoEXT *win32_binding = OXR_GET_INPUT_FROM_CHAIN(
+			    createInfo, XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT, XrWin32WindowBindingCreateInfoEXT);
+			if (win32_binding != NULL && win32_binding->sharedTextureHandle != NULL) {
+				shared_texture_handle = (void *)win32_binding->sharedTextureHandle;
+			}
+
 			// Use GL native compositor — no Vulkan involvement
 			return oxr_session_populate_gl_native(log, sys, (void *)opengl_win32->hGLRC,
-			                                       (void *)opengl_win32->hDC, *out_session);
+			                                       (void *)opengl_win32->hDC,
+			                                       shared_texture_handle, *out_session);
 		}
 #endif
 		// Fall back to Vulkan-backed GL compositor
@@ -1924,14 +1934,20 @@ oxr_session_create_impl(struct oxr_logger *log,
 			if (xret != XRT_SUCCESS) {
 				return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create xrt_session! '%i'", xret);
 			}
-			// Extract external window handle from cocoa_window_binding if present
+			// Extract external window handle and shared IOSurface from cocoa_window_binding if present
 			void *window_handle = NULL;
+			void *shared_iosurface = NULL;
 			const XrCocoaWindowBindingCreateInfoEXT *cocoa_binding = OXR_GET_INPUT_FROM_CHAIN(
 			    createInfo, XR_TYPE_COCOA_WINDOW_BINDING_CREATE_INFO_EXT, XrCocoaWindowBindingCreateInfoEXT);
-			if (cocoa_binding != NULL && cocoa_binding->viewHandle != NULL) {
-				window_handle = (void *)cocoa_binding->viewHandle;
+			if (cocoa_binding != NULL) {
+				if (cocoa_binding->viewHandle != NULL) {
+					window_handle = (void *)cocoa_binding->viewHandle;
+				}
+				if (cocoa_binding->sharedIOSurface != NULL) {
+					shared_iosurface = (void *)cocoa_binding->sharedIOSurface;
+				}
 			}
-			XrResult ret = oxr_session_populate_gl_macos(log, sys, opengl_macos, window_handle, *out_session);
+			XrResult ret = oxr_session_populate_gl_macos(log, sys, opengl_macos, window_handle, shared_iosurface, *out_session);
 			if (ret == XR_SUCCESS && window_handle != NULL) {
 				(*out_session)->has_external_window = true;
 				struct xrt_device *head = GET_XDEV_BY_ROLE((*out_session)->sys, head);
@@ -2098,7 +2114,8 @@ oxr_session_create_impl(struct oxr_logger *log,
 			if (xret != XRT_SUCCESS) {
 				return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create xrt_session! '%i'", xret);
 			}
-			return oxr_session_populate_d3d12_native(log, sys, d3d12, xsi->external_window_handle, *out_session);
+			return oxr_session_populate_d3d12_native(log, sys, d3d12, xsi->external_window_handle,
+			                                         xsi->shared_texture_handle, *out_session);
 		}
 #else
 		U_LOG_IFL_I(U_LOGGING_INFO, "D3D12 native compositor NOT compiled in");
