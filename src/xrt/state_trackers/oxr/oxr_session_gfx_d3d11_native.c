@@ -126,6 +126,7 @@ oxr_session_populate_d3d11_native(struct oxr_logger *log,
                                    struct oxr_system *sys,
                                    XrGraphicsBindingD3D11KHR const *next,
                                    void *window_handle,
+                                   void *shared_texture_handle,
                                    struct oxr_session *sess)
 {
 	struct xrt_device *xdev = get_role_head(sess->sys);
@@ -139,7 +140,7 @@ oxr_session_populate_d3d11_native(struct oxr_logger *log,
 
 	// Create the D3D11 native compositor
 	xrt_result_t xret = comp_d3d11_compositor_create(
-	    xdev, window_handle, (void *)next->device, dp_factory_d3d11, &xcn);
+	    xdev, window_handle, (void *)next->device, dp_factory_d3d11, shared_texture_handle, &xcn);
 	if (xret != XRT_SUCCESS) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
 		                 "Failed to create D3D11 native compositor: %d", xret);
@@ -162,7 +163,18 @@ oxr_session_populate_d3d11_native(struct oxr_logger *log,
 	sess->compositor_visible = true;
 	sess->compositor_focused = true;
 
-	U_LOG_IFL_I(U_LOGGING_INFO,"Using D3D11 native compositor (bypassing Vulkan)");
+	// Track external window / shared texture mode
+	sess->has_external_window =
+	    (window_handle != NULL || shared_texture_handle != NULL);
+	if (sess->has_external_window) {
+		struct xrt_device *head = GET_XDEV_BY_ROLE(sess->sys, head);
+		if (head != NULL) {
+			xrt_device_set_property(head, XRT_DEVICE_PROPERTY_EXT_APP_MODE, 1);
+		}
+	}
+
+	U_LOG_IFL_I(U_LOGGING_INFO,"Using D3D11 native compositor (bypassing Vulkan)%s",
+	            shared_texture_handle ? " — shared texture mode" : "");
 
 	return XR_SUCCESS;
 }

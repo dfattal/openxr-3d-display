@@ -109,6 +109,15 @@ struct comp_d3d11_compositor
 	//! True if we created the window ourselves.
 	bool owns_window;
 
+	//! Shared texture opened from app's shared HANDLE (may be NULL).
+	ID3D11Texture2D *shared_texture;
+
+	//! Render target view for shared texture (may be NULL).
+	ID3D11RenderTargetView *shared_rtv;
+
+	//! True if shared texture mode is active.
+	bool has_shared_texture;
+
 	//! Generic D3D11 display processor (vendor-agnostic weaving).
 	struct xrt_display_processor_d3d11 *display_processor;
 
@@ -830,7 +839,46 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	}
 #endif
 
-	// Acquire target image
+	bool weaving_done = false;
+
+	// Offscreen shared-texture-only path: no DXGI target
+	if (c->target == nullptr) {
+		// Weave/blit directly into the shared texture
+		if (!is_mono && c->display_processor != NULL) {
+			void *stereo_srv = comp_d3d11_renderer_get_stereo_srv(c->renderer);
+			uint32_t view_width, view_height;
+			comp_d3d11_renderer_get_view_dimensions(c->renderer, &view_width, &view_height);
+
+			D3D11_TEXTURE2D_DESC st_desc;
+			c->shared_texture->GetDesc(&st_desc);
+
+			xrt_display_processor_d3d11_process_stereo(
+			    c->display_processor, c->context, stereo_srv, view_width, view_height,
+			    DXGI_FORMAT_R8G8B8A8_UNORM, st_desc.Width, st_desc.Height);
+			weaving_done = true;
+		}
+
+		if (!weaving_done) {
+			// Fallback: blit stereo texture directly to shared texture
+			if (is_mono) {
+				D3D11_TEXTURE2D_DESC st_desc;
+				c->shared_texture->GetDesc(&st_desc);
+				comp_d3d11_renderer_blit_stretch(c->renderer, c->shared_texture,
+				                                 st_desc.Width, st_desc.Height);
+			} else {
+				ID3D11Texture2D *stereo_texture = static_cast<ID3D11Texture2D *>(
+				    comp_d3d11_renderer_get_stereo_texture(c->renderer));
+				if (stereo_texture != nullptr) {
+					c->context->CopyResource(c->shared_texture, stereo_texture);
+				}
+			}
+		}
+
+		c->context->Flush();
+		return XRT_SUCCESS;
+	}
+
+	// Normal path: acquire DXGI target image
 	uint32_t target_index;
 	xret = comp_d3d11_target_acquire(c->target, &target_index);
 	if (xret != XRT_SUCCESS) {
@@ -838,15 +886,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		return xret;
 	}
 
-	bool weaving_done = false;
-
 	// Use generic display processor for weaving (vendor-agnostic path)
-	// TODO: Same crop-blit fix as Vulkan comp_multi (ensure_session_dp_crop_images).
-	// If the app renders to a sub-region of the swapchain (imageRect.extent < swapchain),
-	// the SRV here covers the full texture but view_width/view_height reflect the sub-region.
-	// The display processor samples UVs 0..1 on the full SRV, reading uninitialized texels.
-	// Fix: crop-copy into a correctly-sized intermediate D3D11 texture before passing to
-	// the display processor, matching the Vulkan dp_crop_images approach.
 	if (!is_mono && c->display_processor != NULL) {
 		static bool dp_logged = false;
 		if (!dp_logged) {
@@ -870,29 +910,20 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 
 	// Fallback: if display processing is not available, blit the stereo texture directly to the target
 	if (!weaving_done) {
-		// Log once at startup that we're using fallback path
 		static bool fallback_warned = false;
 		if (!fallback_warned) {
 			U_LOG_W("Display processing not available, using fallback blit (mono=%d)", is_mono);
 			fallback_warned = true;
 		}
 
-		// Get target back buffer directly (not from OMGetRenderTargets, which
-		// returns the renderer's stereo RTV after comp_d3d11_renderer_draw)
 		ID3D11Texture2D *back_buffer = static_cast<ID3D11Texture2D *>(
 		    comp_d3d11_target_get_back_buffer(c->target));
 
 		if (back_buffer != nullptr) {
 			if (is_mono) {
-				// MONO: GPU stretch blit from stereo texture to back buffer.
-				// The stereo texture may be shorter than the window (when a
-				// display processor is present, texture_height = view_height).
-				// A pixel-copy would only fill the top portion; the stretch
-				// blit renders a fullscreen quad that scales to fill the window.
 				comp_d3d11_renderer_blit_stretch(c->renderer, back_buffer,
 				                                 tgt_width, tgt_height);
 			} else {
-				// STEREO fallback: pixel-copy from stereo texture to back buffer
 				ID3D11Texture2D *stereo_texture = static_cast<ID3D11Texture2D *>(
 				    comp_d3d11_renderer_get_stereo_texture(c->renderer));
 				if (stereo_texture != nullptr) {
@@ -916,19 +947,35 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 					}
 				}
 			}
-			// No Release needed: back_buffer is a borrowed pointer from the target
 		}
 	}
 
 	// HUD overlay (post-processing, always readable)
 	d3d11_render_hud_overlay(c, is_mono, weaving_done, &left_eye, &right_eye);
 
-	// Present with VSync. sync_interval=1 ensures DWM composites the frame
-	// at the same vsync boundary the display processor targeted, keeping the
-	// interlacing pattern aligned with the display's phase-snapped position.
-	// Present(0) was tried during drag but broke 3D: without vsync sync,
-	// DWM composites the frame at a window position that differs from where
-	// the display processor computed the interlacing, destroying the 3D effect.
+	// Copy composited output into shared texture if active (dual output: window + shared)
+	if (c->has_shared_texture && c->shared_texture != nullptr) {
+		ID3D11Texture2D *back_buffer = static_cast<ID3D11Texture2D *>(
+		    comp_d3d11_target_get_back_buffer(c->target));
+		if (back_buffer != nullptr) {
+			D3D11_TEXTURE2D_DESC src_desc, dst_desc;
+			back_buffer->GetDesc(&src_desc);
+			c->shared_texture->GetDesc(&dst_desc);
+
+			if (src_desc.Width == dst_desc.Width && src_desc.Height == dst_desc.Height) {
+				c->context->CopyResource(c->shared_texture, back_buffer);
+			} else {
+				UINT copy_width = (src_desc.Width < dst_desc.Width) ? src_desc.Width : dst_desc.Width;
+				UINT copy_height = (src_desc.Height < dst_desc.Height) ? src_desc.Height : dst_desc.Height;
+				D3D11_BOX src_box = {0, 0, 0, copy_width, copy_height, 1};
+				c->context->CopySubresourceRegion(c->shared_texture, 0, 0, 0, 0,
+				                                   back_buffer, 0, &src_box);
+			}
+			c->context->Flush();
+		}
+	}
+
+	// Present with VSync
 	xret = comp_d3d11_target_present(c->target, 1);
 
 	// Signal WM_PAINT that the frame is done (unblocks modal drag loop)
@@ -969,6 +1016,16 @@ d3d11_compositor_destroy(struct xrt_compositor *xc)
 		u_debug_gui_stop(&c->debug_gui);
 	}
 #endif
+
+	// Destroy shared texture resources
+	if (c->shared_rtv != nullptr) {
+		c->shared_rtv->Release();
+		c->shared_rtv = nullptr;
+	}
+	if (c->shared_texture != nullptr) {
+		c->shared_texture->Release();
+		c->shared_texture = nullptr;
+	}
 
 	// Destroy HUD
 	if (c->hud_texture != nullptr) {
@@ -1021,6 +1078,7 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
                              void *hwnd,
                              void *d3d11_device,
                              void *dp_factory_d3d11,
+                             void *shared_texture_handle,
                              struct xrt_compositor_native **out_xc)
 {
 	if (d3d11_device == nullptr) {
@@ -1038,11 +1096,15 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 	c->own_window = nullptr;
 	c->owns_window = false;
 
-	// Handle window: use provided HWND or create our own
+	// Handle window: use provided HWND, create our own, or go offscreen (shared texture)
 	if (hwnd != nullptr) {
 		// App provided window via XR_EXT_win32_window_binding
 		c->hwnd = static_cast<HWND>(hwnd);
 		U_LOG_I("Using app-provided window handle: %p", hwnd);
+	} else if (shared_texture_handle != nullptr) {
+		// Offscreen mode: shared texture without a window
+		c->hwnd = nullptr;
+		U_LOG_I("Offscreen mode — no window (shared texture handle: %p)", shared_texture_handle);
 	} else {
 		// No window provided - create our own at native display resolution
 		uint32_t win_w = xdev->hmd->screens[0].w_pixels;
@@ -1136,15 +1198,54 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 		}
 	}
 
-	// Create output target
-	xrt_result_t xret = comp_d3d11_target_create(c, c->hwnd,
-	                                              c->settings.preferred.width,
-	                                              c->settings.preferred.height,
-	                                              &c->target);
-	if (xret != XRT_SUCCESS) {
-		U_LOG_E("Failed to create D3D11 target");
-		d3d11_compositor_destroy(&c->base.base);
-		return xret;
+	// Open shared texture from app's HANDLE if provided
+	c->shared_texture = nullptr;
+	c->shared_rtv = nullptr;
+	c->has_shared_texture = false;
+	if (shared_texture_handle != nullptr) {
+		HANDLE h = static_cast<HANDLE>(shared_texture_handle);
+		hr = c->device->OpenSharedResource(h, __uuidof(ID3D11Texture2D),
+		                                    reinterpret_cast<void **>(&c->shared_texture));
+		if (FAILED(hr) || c->shared_texture == nullptr) {
+			U_LOG_E("Failed to open shared texture handle %p: 0x%08x", shared_texture_handle, hr);
+			d3d11_compositor_destroy(&c->base.base);
+			return XRT_ERROR_DEVICE_CREATION_FAILED;
+		}
+
+		D3D11_TEXTURE2D_DESC st_desc;
+		c->shared_texture->GetDesc(&st_desc);
+		U_LOG_W("Opened shared texture: %ux%u format=%u", st_desc.Width, st_desc.Height, st_desc.Format);
+
+		// Use shared texture dimensions for settings when no window
+		if (c->hwnd == nullptr) {
+			c->settings.preferred.width = st_desc.Width;
+			c->settings.preferred.height = st_desc.Height;
+		}
+
+		// Create RTV on shared texture
+		hr = c->device->CreateRenderTargetView(c->shared_texture, nullptr, &c->shared_rtv);
+		if (FAILED(hr)) {
+			U_LOG_E("Failed to create RTV on shared texture: 0x%08x", hr);
+			d3d11_compositor_destroy(&c->base.base);
+			return XRT_ERROR_DEVICE_CREATION_FAILED;
+		}
+		c->has_shared_texture = true;
+	}
+
+	// Create output target (DXGI swapchain) — skip if offscreen (no HWND)
+	if (c->hwnd != nullptr) {
+		xrt_result_t xret = comp_d3d11_target_create(c, c->hwnd,
+		                                              c->settings.preferred.width,
+		                                              c->settings.preferred.height,
+		                                              &c->target);
+		if (xret != XRT_SUCCESS) {
+			U_LOG_E("Failed to create D3D11 target");
+			d3d11_compositor_destroy(&c->base.base);
+			return xret;
+		}
+	} else {
+		c->target = nullptr;
+		U_LOG_I("No DXGI target — offscreen shared texture mode");
 	}
 
 	// Query display refresh rate from DXGI output
