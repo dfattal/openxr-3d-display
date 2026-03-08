@@ -2,36 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Branch Mission: Lightweight Runtime (Issue #23)
+## Project Status
 
-This branch implements **issue #23** — transforming the Monado fork into a lightweight standalone OpenXR runtime purpose-built for 3D displays. Target: ~150-200 files (vs 500+ today) where every file is relevant.
+DisplayXR is a lightweight standalone OpenXR runtime purpose-built for 3D displays. The foundation work (issue #23) is complete — stripped from 500+ files to ~150, with native compositors for every major graphics API.
 
-### Sub-issues (execution order)
+### Milestone Progress
 
-**Phase 1: Strip down**
-- [ ] #24 — Remove 34 unused VR drivers (keep leia, sim_display, qwerty)
-- [ ] #25 — Remove Vulkan server compositor (`compositor/main/`, `render/`, `shaders/`) and tracking infrastructure
-- [ ] #26 — Clean up CMake build system (remove 30+ unused toggles, dead find modules)
-- [ ] #32 — Move stereo math (`display3d_view.c`, `camera3d_view.c`) into `auxiliary/math/`
+See the [milestone tracker](https://github.com/dfattal/openxr-3d-display/milestones) for full status.
 
-**Phase 2: Add native compositors** (each includes dp_factory + sim_display impl)
-- [ ] #27 — Native D3D12 compositor (+ dp_factory_d3d12 slot & sim_display_dp_factory_d3d12)
-- [ ] #28 — Native Vulkan compositor (direct submit, not server) (+ sim_display_dp_factory_metal — slot exists, no impl yet)
-- [ ] #29 — Native OpenGL compositor (+ dp_factory_gl slot & sim_display_dp_factory_gl)
+- **M1: Foundation** — Done. Stripped 34 VR drivers, removed Vulkan server compositor, cleaned CMake, extracted stereo math.
+- **M2: Native Compositors** — Done. D3D11, D3D12, Metal, OpenGL, Vulkan all shipping.
+- **M3: Test Coverage** — #30, #31, #33 open.
+- **M4: Display Extensions** — Next major focus. Lock down extension API surface (#3, #5, #8, #38).
+- **M5: Interface Standardization** — #45, #46, #47 open.
+- **M6: Spatial Shell** — #43, #44 open.
 
-**Phase 3: Complete test app coverage**
-- [ ] #30 — Non-ext test apps (cube_d3d12, cube_vk, cube_gl)
-- [ ] #31 — Shared texture test apps (cube_shared_d3d11, cube_shared_d3d12, cube_shared_vk, cube_shared_vk_macos, cube_shared_gl)
-
-**Phase 4: Conformance**
-- [ ] #33 — OpenXR conformance testing (Khronos CTS)
-
-### Architecture Goal
+### Architecture
 
 ```
 App (any graphics API)
         |
-   OpenXR State Tracker (from Monado)
+   OpenXR State Tracker
         |
    Core xrt interfaces
         |
@@ -39,27 +30,38 @@ App (any graphics API)
    |    |     |        |        |
  D3D11 D3D12 Vulkan  Metal   OpenGL   <-- native compositors
    |    |     |        |        |
-   Weaver (LeiaSR / CNSDK / sim_display)
+   Display Processor (LeiaSR / sim_display)
         |
    Display
 ```
 
 Each graphics API gets a native compositor — no interop, no Vulkan intermediary.
 
-### Two App Classes
+### Four App Classes
 
-1. **3D Display-aware apps** — use window binding + display info extensions, Kooima projection
-2. **Standard OpenXR/WebXR apps** — runtime provides window, qwerty simulates controllers, eye tracking drives perspective
+| Class | Suffix | Description | Compositor path |
+|-------|--------|-------------|----------------|
+| **Window-handle** | `_ext` | App provides its own window via `XR_EXT_*_window_binding` | Native compositor directly in-process |
+| **Shared-texture** | `_shared` | App provides textures, runtime composites into its own window | Native compositor directly in-process |
+| **Runtime-managed** | `_rt` | Runtime creates window and rendering targets (standard OpenXR/WebXR) | Native compositor directly in-process |
+| **IPC/Service** | `_ipc` | App runs out-of-process via client compositor → IPC → server multi-compositor | Client compositor → IPC transport → multi-compositor → native compositor in server |
 
-### Key Risks to Watch
+Test app naming: `cube_ext_metal_macos`, `cube_shared_gl_macos`, `cube_rt_vk_macos` (runtime-managed), `cube_ipc_d3d11` (service mode).
+
+The first three classes all use a native compositor in-process. The `_ipc` class is fundamentally different: the app links a **client compositor** that serializes compositor calls over IPC to a **server process** running the multi-compositor (`compositor/multi/`), which fans out to native compositors. This is the multi-app path and the foundation for the spatial shell (#43, #44).
+
+**Key code paths by class:**
+- `_ext` / `_shared` / `_rt` → `compositor/{d3d11,d3d12,metal,gl,vk_native}/` (in-process)
+- `_ipc` → `compositor/client/` → `ipc/` → `compositor/multi/` → native compositor (out-of-process)
+
+### Key Architectural Notes
 - Compositor vtable has 56 methods — use `comp_base` helper for boilerplate
-- IPC/service mode (39 files, 12K LOC) must be preserved for WebXR + multi-app
-- Keep `compositor/multi/` (multi-client), `compositor/client/`, `compositor/null/`, `compositor/util/`
-- `display3d_view.c` / `camera3d_view.c` are load-bearing — extract before removing dependencies
+- IPC/service mode (`ipc/`, `compositor/client/`, `compositor/multi/`) must be preserved for `_ipc` apps, WebXR, and multi-app spatial shell
+- `compositor/null/` — headless compositor for testing
 
 ## Project Overview
 
-This is a fork of **Monado**, an open source OpenXR runtime for VR/AR devices. This fork integrates **Leia SR SDK** for eye tracked 3D Display support. The project implements the OpenXR API standard from Khronos and runs on Linux, Android, and Windows.
+This is a fork of **Monado**, an open source OpenXR runtime for VR/AR devices. This fork integrates **Leia SR SDK** for eye tracked 3D Display support. The project implements the OpenXR API standard from Khronos and runs on Windows, macOS, and Android.
 
 ## Build Commands
 
@@ -102,22 +104,21 @@ scripts/format-project.sh   # Format all
 ### Source Tree Structure (`src/xrt/`)
 - **include/xrt/** — Core interface headers (`xrt_device.h`, `xrt_compositor.h`, `xrt_instance.h`, etc.)
 - **auxiliary/** — Shared utilities: math (`m_*`), utilities (`u_*`), OS abstraction (`os_*`), Vulkan helpers (`vk_*`)
-- **compositor/** — Display compositors
-  - `d3d11/` — Native D3D11 compositor (Windows)
+- **compositor/** — Native compositors
+  - `d3d11/` — D3D11 compositor (Windows)
   - `d3d11_service/` — D3D11 service compositor
-  - `metal/` — Native Metal compositor (macOS)
+  - `d3d12/` — D3D12 compositor (Windows)
+  - `metal/` — Metal compositor (macOS)
+  - `gl/` — OpenGL compositor (Windows + macOS)
+  - `vk_native/` — Vulkan compositor (Windows + macOS)
   - `multi/` — Multi-client compositor (IPC/multi-app)
   - `client/` — Client compositor bindings
   - `null/` — Null compositor (testing)
   - `util/` — Compositor utilities
-  - `main/` — Vulkan server compositor (TO BE REMOVED in #25)
-  - `render/` — Vulkan render helpers (TO BE REMOVED in #25)
-  - `shaders/` — Vulkan shaders (TO BE REMOVED in #25)
 - **drivers/** — Hardware drivers
   - `leia/` — LeiaSR SDK driver (Vulkan + D3D11 weavers)
   - `sim_display/` — Simulation display driver
   - `qwerty/` — Keyboard/mouse simulated controllers
-  - 34 unused VR drivers (TO BE REMOVED in #24)
 - **state_trackers/oxr/** — OpenXR API implementation
 - **ipc/** — Inter-process communication for service mode
 - **targets/** — Build targets (runtime library, displayxr-cli, displayxr-service)
@@ -131,18 +132,17 @@ C interfaces with vtable-style polymorphism:
 
 ### LeiaSR SDK Integration
 - `XRT_HAVE_LEIA_SR` CMake option (auto-enabled if SDK found)
-- Vulkan weaver: `compositor/main/comp_renderer.c` via `leiasr/leiasr.cpp`
-- D3D11 weaver: `compositor/d3d11/` via `leiasr/leiasr_d3d11.cpp`
+- D3D11 weaver: `compositor/d3d11/` via `drivers/leia/leiasr_d3d11.cpp`
 - Eye tracking via SR SDK's LookaroundFilter
 - Display dimensions from SR::Display for Kooima asymmetric frustum projection
 
 ### Native Compositors
 Each bypasses Vulkan entirely for its graphics API:
-- **D3D11** (`compositor/d3d11/`) — Direct D3D11 pipeline, LeiaSR D3D11 weaver, `XR_EXT_win32_window_binding`
-- **Metal** (`compositor/metal/`) — Direct Metal pipeline, sim_display weaver, `XR_EXT_cocoa_window_binding`
-- **D3D12** — Planned (#27)
-- **Vulkan** — Planned (#28), direct submit (not the Monado server compositor)
-- **OpenGL** — Planned (#29)
+- **D3D11** (`compositor/d3d11/`) — Shipping. LeiaSR D3D11 weaver, `XR_EXT_win32_window_binding`
+- **D3D12** (`compositor/d3d12/`) — Shipping. `XR_EXT_win32_window_binding`
+- **Metal** (`compositor/metal/`) — Shipping. sim_display weaver, `XR_EXT_cocoa_window_binding`
+- **OpenGL** (`compositor/gl/`) — Shipping. Windows + macOS
+- **Vulkan** (`compositor/vk_native/`) — Shipping. Windows + macOS (MoltenVK)
 
 ### Custom OpenXR Extensions
 - `XR_EXT_win32_window_binding` — App passes HWND to runtime
@@ -193,14 +193,15 @@ Copy binaries to `_package/DisplayXR-macOS/bin/`. Run scripts exec from `$DIR/bi
 
 | Test App | Build Output | Package Binary | Run Script |
 |----------|-------------|---------------|------------|
-| cube_vk_macos | `test_apps/cube_vk_macos/build/cube_vk_macos` | `_package/.../bin/cube_vk_macos` | `run_cube_vk.sh` |
+| cube_rt_vk_macos | `test_apps/cube_rt_vk_macos/build/cube_rt_vk_macos` | `_package/.../bin/cube_rt_vk_macos` | `run_cube_rt_vk.sh` |
 | cube_ext_vk_macos | `test_apps/cube_ext_vk_macos/build/cube_ext_vk_macos` | `_package/.../bin/cube_ext_vk_macos` | `run_cube_ext_vk.sh` |
-| cube_gl_macos | `test_apps/cube_gl_macos/build/cube_gl_macos` | `_package/.../bin/cube_gl_macos` | `run_cube_gl.sh` |
+| cube_rt_gl_macos | `test_apps/cube_rt_gl_macos/build/cube_rt_gl_macos` | `_package/.../bin/cube_rt_gl_macos` | `run_cube_rt_gl.sh` |
 | cube_ext_metal_macos | `test_apps/cube_ext_metal_macos/build/cube_ext_metal_macos` | `_package/.../bin/cube_ext_metal_macos` | `run_cube_ext_metal.sh` |
+| cube_rt_metal_macos | `test_apps/cube_rt_metal_macos/build/cube_rt_metal_macos` | `_package/.../bin/cube_rt_metal_macos` | `run_cube_rt_metal.sh` |
 | cube_shared_metal_macos | `test_apps/cube_shared_metal_macos/build/cube_shared_metal_macos` | `_package/.../bin/cube_shared_metal_macos` | `run_cube_shared_metal.sh` |
 | cube_shared_gl_macos | `test_apps/cube_shared_gl_macos/build/cube_shared_gl_macos` | `_package/.../bin/cube_shared_gl_macos` | `run_cube_shared_gl.sh` |
 | cube_shared_vk_macos | `test_apps/cube_shared_vk_macos/build/cube_shared_vk_macos` | `_package/.../bin/cube_shared_vk_macos` | `run_cube_shared_vk.sh` |
-| gaussian_splatting_vk_macos | `demos/gaussian_splatting_vk_macos/build/gaussian_splatting_vk_macos` | `_package/.../bin/gaussian_splatting_vk_macos` | `run_gaussian_splatting.sh` |
+| gaussian_splatting_ext_vk_macos | `demos/gaussian_splatting_ext_vk_macos/build/gaussian_splatting_ext_vk_macos` | `_package/.../bin/gaussian_splatting_ext_vk_macos` | `run_gaussian_splatting_ext_vk.sh` |
 
 ## Debug Logs
 - Use U_LOG_W (WARN) only for one-off init, error, and lifecycle events

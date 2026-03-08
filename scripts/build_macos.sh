@@ -12,7 +12,7 @@
 #   XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json \
 #   DYLD_LIBRARY_PATH=/tmp/openxr-install/lib \
 #   SIM_DISPLAY_ENABLE=1 SIM_DISPLAY_OUTPUT=anaglyph \
-#   ./test_apps/cube_vk_macos/build/cube_vk_macos
+#   ./test_apps/cube_rt_vk_macos/build/cube_rt_vk_macos
 
 set -e
 
@@ -45,6 +45,7 @@ cmake -B "$BUILD_DIR" -S "$ROOT" -G Ninja \
   -DXRT_FEATURE_WINDOW_PEEK=OFF \
   -DXRT_HAVE_SDL2=OFF \
   -DXRT_HAVE_OPENCV=OFF \
+  -DXRT_HAVE_LIBUSB=OFF \
   -DXRT_BUILD_DRIVER_EUROC=OFF \
   ${MACOS_SDK:+-DCMAKE_OSX_SYSROOT="$MACOS_SDK"}
 cmake --build "$BUILD_DIR"
@@ -67,12 +68,12 @@ else
 fi
 
 # Step 3: Build test app
-echo "=== Building cube_vk_macos ==="
-cmake -B "$ROOT/test_apps/cube_vk_macos/build" \
-  -S "$ROOT/test_apps/cube_vk_macos" -G Ninja \
+echo "=== Building cube_rt_vk_macos ==="
+cmake -B "$ROOT/test_apps/cube_rt_vk_macos/build" \
+  -S "$ROOT/test_apps/cube_rt_vk_macos" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_PREFIX_PATH="$OPENXR_DIR"
-cmake --build "$ROOT/test_apps/cube_vk_macos/build"
+cmake --build "$ROOT/test_apps/cube_rt_vk_macos/build"
 
 # Step 3b: Build external window test app
 echo "=== Building cube_ext_vk_macos ==="
@@ -82,13 +83,13 @@ cmake -B "$ROOT/test_apps/cube_ext_vk_macos/build" \
   -DCMAKE_PREFIX_PATH="$OPENXR_DIR"
 cmake --build "$ROOT/test_apps/cube_ext_vk_macos/build"
 
-# Step 3c: Build Metal cube test app
-echo "=== Building cube_metal_macos ==="
-cmake -B "$ROOT/test_apps/cube_metal_macos/build" \
-  -S "$ROOT/test_apps/cube_metal_macos" -G Ninja \
+# Step 3c: Build Metal runtime-managed cube test app
+echo "=== Building cube_rt_metal_macos ==="
+cmake -B "$ROOT/test_apps/cube_rt_metal_macos/build" \
+  -S "$ROOT/test_apps/cube_rt_metal_macos" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_PREFIX_PATH="$OPENXR_DIR"
-cmake --build "$ROOT/test_apps/cube_metal_macos/build"
+cmake --build "$ROOT/test_apps/cube_rt_metal_macos/build"
 
 # Step 3e: Build Metal external window cube test app
 echo "=== Building cube_ext_metal_macos ==="
@@ -98,13 +99,13 @@ cmake -B "$ROOT/test_apps/cube_ext_metal_macos/build" \
   -DCMAKE_PREFIX_PATH="$OPENXR_DIR"
 cmake --build "$ROOT/test_apps/cube_ext_metal_macos/build"
 
-# Step 3f1: Build OpenGL non-ext cube test app
-echo "=== Building cube_gl_macos ==="
-cmake -B "$ROOT/test_apps/cube_gl_macos/build" \
-  -S "$ROOT/test_apps/cube_gl_macos" -G Ninja \
+# Step 3f1: Build OpenGL runtime-managed cube test app
+echo "=== Building cube_rt_gl_macos ==="
+cmake -B "$ROOT/test_apps/cube_rt_gl_macos/build" \
+  -S "$ROOT/test_apps/cube_rt_gl_macos" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_PREFIX_PATH="$OPENXR_DIR"
-cmake --build "$ROOT/test_apps/cube_gl_macos/build"
+cmake --build "$ROOT/test_apps/cube_rt_gl_macos/build"
 
 # Step 3f2: Build OpenGL external window cube test app
 echo "=== Building cube_ext_gl_macos ==="
@@ -139,12 +140,12 @@ cmake -B "$ROOT/test_apps/cube_shared_vk_macos/build" \
 cmake --build "$ROOT/test_apps/cube_shared_vk_macos/build"
 
 # Step 3f: Build 3DGS demo app
-echo "=== Building gaussian_splatting_vk_macos ==="
-cmake -B "$ROOT/demos/gaussian_splatting_vk_macos/build" \
-  -S "$ROOT/demos/gaussian_splatting_vk_macos" -G Ninja \
+echo "=== Building gaussian_splatting_ext_vk_macos ==="
+cmake -B "$ROOT/demos/gaussian_splatting_ext_vk_macos/build" \
+  -S "$ROOT/demos/gaussian_splatting_ext_vk_macos" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_PREFIX_PATH="$OPENXR_DIR"
-cmake --build "$ROOT/demos/gaussian_splatting_vk_macos/build"
+cmake --build "$ROOT/demos/gaussian_splatting_ext_vk_macos/build"
 
 # Step 3d: Build WebXR bridge host
 echo "=== Building openxr_bridge_host ==="
@@ -159,7 +160,7 @@ echo "=== Packaging artifacts ==="
 PKG_DIR="$ROOT/_package/DisplayXR-macOS"
 # Clean managed directories only (preserve user-added files like run_bridge_host.sh)
 rm -rf "$PKG_DIR/lib" "$PKG_DIR/bin" "$PKG_DIR/share" 2>/dev/null || true
-rm -f "$PKG_DIR/openxr_displayxr.json" "$PKG_DIR/run_cube_vk.sh" "$PKG_DIR/run_cube_ext_vk.sh" "$PKG_DIR/run_cube_metal.sh" "$PKG_DIR/run_cube_ext_metal.sh" "$PKG_DIR/run_cube_gl.sh" "$PKG_DIR/run_cube_ext_gl.sh" "$PKG_DIR/run_cube_shared_metal.sh" "$PKG_DIR/run_cube_shared_gl.sh" "$PKG_DIR/run_cube_shared_vk.sh" "$PKG_DIR/run_cube_metal_ext.sh" "$PKG_DIR/run_gaussian_splatting.sh" "$PKG_DIR/run_sim_cube.sh" "$PKG_DIR/run_sim_cube_ext.sh" "$PKG_DIR/run_sim_3dgs_ext.sh" 2>/dev/null || true
+rm -f "$PKG_DIR/openxr_displayxr.json" "$PKG_DIR/run_cube_rt_vk.sh" "$PKG_DIR/run_cube_ext_vk.sh" "$PKG_DIR/run_cube_rt_metal.sh" "$PKG_DIR/run_cube_ext_metal.sh" "$PKG_DIR/run_cube_rt_gl.sh" "$PKG_DIR/run_cube_ext_gl.sh" "$PKG_DIR/run_cube_shared_metal.sh" "$PKG_DIR/run_cube_shared_gl.sh" "$PKG_DIR/run_cube_shared_vk.sh" "$PKG_DIR/run_cube_metal_ext.sh" "$PKG_DIR/run_gaussian_splatting_ext_vk.sh" "$PKG_DIR/run_sim_cube.sh" "$PKG_DIR/run_sim_cube_ext.sh" "$PKG_DIR/run_sim_3dgs_ext.sh" 2>/dev/null || true
 mkdir -p "$PKG_DIR/lib"
 mkdir -p "$PKG_DIR/share/vulkan/icd.d"
 mkdir -p "$PKG_DIR/bin"
@@ -170,16 +171,16 @@ RUNTIME_BASENAME=$(basename "$RUNTIME_LIB")
 cp "$RUNTIME_LIB" "$PKG_DIR/lib/"
 
 # Copy test app binaries
-cp "$ROOT/test_apps/cube_vk_macos/build/cube_vk_macos" "$PKG_DIR/bin/"
+cp "$ROOT/test_apps/cube_rt_vk_macos/build/cube_rt_vk_macos" "$PKG_DIR/bin/"
 cp "$ROOT/test_apps/cube_ext_vk_macos/build/cube_ext_vk_macos" "$PKG_DIR/bin/"
-cp "$ROOT/test_apps/cube_metal_macos/build/cube_metal_macos" "$PKG_DIR/bin/" 2>/dev/null || true
+cp "$ROOT/test_apps/cube_rt_metal_macos/build/cube_rt_metal_macos" "$PKG_DIR/bin/" 2>/dev/null || true
 cp "$ROOT/test_apps/cube_ext_metal_macos/build/cube_ext_metal_macos" "$PKG_DIR/bin/" 2>/dev/null || true
-cp "$ROOT/test_apps/cube_gl_macos/build/cube_gl_macos" "$PKG_DIR/bin/" 2>/dev/null || true
+cp "$ROOT/test_apps/cube_rt_gl_macos/build/cube_rt_gl_macos" "$PKG_DIR/bin/" 2>/dev/null || true
 cp "$ROOT/test_apps/cube_ext_gl_macos/build/cube_ext_gl_macos" "$PKG_DIR/bin/" 2>/dev/null || true
 cp "$ROOT/test_apps/cube_shared_metal_macos/build/cube_shared_metal_macos" "$PKG_DIR/bin/" 2>/dev/null || true
 cp "$ROOT/test_apps/cube_shared_gl_macos/build/cube_shared_gl_macos" "$PKG_DIR/bin/" 2>/dev/null || true
 cp "$ROOT/test_apps/cube_shared_vk_macos/build/cube_shared_vk_macos" "$PKG_DIR/bin/" 2>/dev/null || true
-cp "$ROOT/demos/gaussian_splatting_vk_macos/build/gaussian_splatting_vk_macos" "$PKG_DIR/bin/" 2>/dev/null || true
+cp "$ROOT/demos/gaussian_splatting_ext_vk_macos/build/gaussian_splatting_ext_vk_macos" "$PKG_DIR/bin/" 2>/dev/null || true
 
 # Copy texture files for ext app
 mkdir -p "$PKG_DIR/bin/textures"
@@ -205,16 +206,16 @@ done
 
 # Fix rpaths
 install_name_tool -add_rpath @loader_path "$PKG_DIR/lib/$RUNTIME_BASENAME" 2>/dev/null || true
-install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_vk_macos" 2>/dev/null || true
+install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_rt_vk_macos" 2>/dev/null || true
 install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_ext_vk_macos" 2>/dev/null || true
-install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_metal_macos" 2>/dev/null || true
+install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_rt_metal_macos" 2>/dev/null || true
 install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_ext_metal_macos" 2>/dev/null || true
-install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_gl_macos" 2>/dev/null || true
+install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_rt_gl_macos" 2>/dev/null || true
 install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_ext_gl_macos" 2>/dev/null || true
 install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_shared_metal_macos" 2>/dev/null || true
 install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_shared_gl_macos" 2>/dev/null || true
 install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_shared_vk_macos" 2>/dev/null || true
-install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/gaussian_splatting_vk_macos" 2>/dev/null || true
+install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/gaussian_splatting_ext_vk_macos" 2>/dev/null || true
 install_name_tool -add_rpath @loader_path "$PKG_DIR"/lib/libopenxr_loader*.dylib 2>/dev/null || true
 
 # Create MoltenVK ICD manifest
@@ -241,7 +242,7 @@ cat > "$PKG_DIR/openxr_displayxr.json" <<EOF
 EOF
 
 # Create run script
-cat > "$PKG_DIR/run_cube_vk.sh" <<'SCRIPT'
+cat > "$PKG_DIR/run_cube_rt_vk.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
 export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
@@ -250,10 +251,10 @@ export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
 export VK_DRIVER_FILES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
 export SIM_DISPLAY_ENABLE=1
 export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
-echo "Starting cube_vk_macos with $SIM_DISPLAY_OUTPUT output..."
-exec "$DIR/bin/cube_vk_macos" "$@"
+echo "Starting cube_rt_vk_macos with $SIM_DISPLAY_OUTPUT output..."
+exec "$DIR/bin/cube_rt_vk_macos" "$@"
 SCRIPT
-chmod +x "$PKG_DIR/run_cube_vk.sh"
+chmod +x "$PKG_DIR/run_cube_rt_vk.sh"
 
 # Create run script for external window test app
 cat > "$PKG_DIR/run_cube_ext_vk.sh" <<'SCRIPT'
@@ -270,18 +271,18 @@ exec "$DIR/bin/cube_ext_vk_macos" "$@"
 SCRIPT
 chmod +x "$PKG_DIR/run_cube_ext_vk.sh"
 
-# Create run script for Metal cube test app (simpler — no Vulkan env vars needed)
-cat > "$PKG_DIR/run_cube_metal.sh" <<'SCRIPT'
+# Create run script for Metal runtime-managed cube test app (no Vulkan env vars needed)
+cat > "$PKG_DIR/run_cube_rt_metal.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
 export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export SIM_DISPLAY_ENABLE=1
 export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
-echo "Starting cube_metal_macos (Metal, no Vulkan) with $SIM_DISPLAY_OUTPUT output..."
-exec "$DIR/bin/cube_metal_macos" "$@"
+echo "Starting cube_rt_metal_macos (Metal, runtime-managed) with $SIM_DISPLAY_OUTPUT output..."
+exec "$DIR/bin/cube_rt_metal_macos" "$@"
 SCRIPT
-chmod +x "$PKG_DIR/run_cube_metal.sh"
+chmod +x "$PKG_DIR/run_cube_rt_metal.sh"
 
 # Create run script for Metal external window cube test app (no Vulkan env vars needed)
 cat > "$PKG_DIR/run_cube_ext_metal.sh" <<'SCRIPT'
@@ -296,18 +297,18 @@ exec "$DIR/bin/cube_ext_metal_macos" "$@"
 SCRIPT
 chmod +x "$PKG_DIR/run_cube_ext_metal.sh"
 
-# Create run script for OpenGL non-ext cube test app (no Vulkan env vars needed)
-cat > "$PKG_DIR/run_cube_gl.sh" <<'SCRIPT'
+# Create run script for OpenGL runtime-managed cube test app (no Vulkan env vars needed)
+cat > "$PKG_DIR/run_cube_rt_gl.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
 export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export SIM_DISPLAY_ENABLE=1
 export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
-echo "Starting cube_gl_macos (OpenGL, non-ext) with $SIM_DISPLAY_OUTPUT output..."
-exec "$DIR/bin/cube_gl_macos" "$@"
+echo "Starting cube_rt_gl_macos (OpenGL, runtime-managed) with $SIM_DISPLAY_OUTPUT output..."
+exec "$DIR/bin/cube_rt_gl_macos" "$@"
 SCRIPT
-chmod +x "$PKG_DIR/run_cube_gl.sh"
+chmod +x "$PKG_DIR/run_cube_rt_gl.sh"
 
 # Create run script for OpenGL external window cube test app (no Vulkan env vars needed)
 cat > "$PKG_DIR/run_cube_ext_gl.sh" <<'SCRIPT'
@@ -364,7 +365,7 @@ SCRIPT
 chmod +x "$PKG_DIR/run_cube_shared_vk.sh"
 
 # Create run script for 3DGS demo app
-cat > "$PKG_DIR/run_gaussian_splatting.sh" <<'SCRIPT'
+cat > "$PKG_DIR/run_gaussian_splatting_ext_vk.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
 export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
@@ -373,16 +374,16 @@ export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
 export VK_DRIVER_FILES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
 export SIM_DISPLAY_ENABLE=1
 export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
-echo "Starting gaussian_splatting_vk_macos (3D Gaussian Splatting) with $SIM_DISPLAY_OUTPUT output..."
-exec "$DIR/bin/gaussian_splatting_vk_macos" "$@"
+echo "Starting gaussian_splatting_ext_vk_macos (3D Gaussian Splatting) with $SIM_DISPLAY_OUTPUT output..."
+exec "$DIR/bin/gaussian_splatting_ext_vk_macos" "$@"
 SCRIPT
-chmod +x "$PKG_DIR/run_gaussian_splatting.sh"
+chmod +x "$PKG_DIR/run_gaussian_splatting_ext_vk.sh"
 
 # Step 5: Build .app bundles and .pkg installer (commented out for dev -- uncomment when ready)
 # NOTE: if _package has root-owned files from a previous sudo run, clean up first:
 #   sudo rm -rf /Users/david.fattal/Documents/GitHub/CNSDK-OpenXR/_package
 # echo "=== Building .app bundles ==="
-# "$ROOT/installer/macos/create_app_bundle.sh" "$PKG_DIR" "$ROOT/_package/CubeVKMacOS.app" cube_vk_macos
+# "$ROOT/installer/macos/create_app_bundle.sh" "$PKG_DIR" "$ROOT/_package/CubeVKMacOS.app" cube_rt_vk_macos
 # "$ROOT/installer/macos/create_app_bundle.sh" "$PKG_DIR" "$ROOT/_package/CubeExtVKMacOS.app" cube_ext_vk_macos
 #
 # echo "=== Building .pkg installer ==="
@@ -395,16 +396,16 @@ echo "Artifacts in _package/:"
 ls -lh "$ROOT/_package/" 2>/dev/null
 echo ""
 echo "Run directly:"
-echo "  $PKG_DIR/run_cube_vk.sh"
+echo "  $PKG_DIR/run_cube_rt_vk.sh"
 echo "  $PKG_DIR/run_cube_ext_vk.sh"
-echo "  $PKG_DIR/run_cube_metal.sh"
+echo "  $PKG_DIR/run_cube_rt_metal.sh"
 echo "  $PKG_DIR/run_cube_ext_metal.sh"
-echo "  $PKG_DIR/run_cube_gl.sh"
+echo "  $PKG_DIR/run_cube_rt_gl.sh"
 echo "  $PKG_DIR/run_cube_ext_gl.sh"
 echo "  $PKG_DIR/run_cube_shared_metal.sh"
 echo "  $PKG_DIR/run_cube_shared_gl.sh"
 echo "  $PKG_DIR/run_cube_shared_vk.sh"
-echo "  $PKG_DIR/run_gaussian_splatting.sh"
+echo "  $PKG_DIR/run_gaussian_splatting_ext_vk.sh"
 echo ""
 echo "Or run manually:"
 echo "  XR_RUNTIME_JSON=$BUILD_DIR/openxr_displayxr-dev.json \\"
@@ -412,4 +413,4 @@ echo "  DYLD_LIBRARY_PATH=$OPENXR_DIR/lib \\"
 echo "  VK_ICD_FILENAMES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json \\"
 echo "  VK_DRIVER_FILES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json \\"
 echo "  SIM_DISPLAY_ENABLE=1 SIM_DISPLAY_OUTPUT=anaglyph \\"
-echo "  $ROOT/test_apps/cube_vk_macos/build/cube_vk_macos"
+echo "  $ROOT/test_apps/cube_rt_vk_macos/build/cube_rt_vk_macos"

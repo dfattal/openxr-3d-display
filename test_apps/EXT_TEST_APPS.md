@@ -4,10 +4,10 @@ Five test applications that demonstrate the **external window binding** and **di
 
 | App | Graphics API | Platform | Directory |
 |-----|-------------|----------|-----------|
-| `cube_ext_d3d11` | D3D11 | Windows | `test_apps/cube_ext_d3d11/` |
-| `cube_ext_vk` | Vulkan | Windows | `test_apps/cube_ext_vk/` |
-| `cube_ext_gl` | OpenGL | Windows | `test_apps/cube_ext_gl/` |
-| `cube_ext_d3d12` | D3D12 | Windows | `test_apps/cube_ext_d3d12/` |
+| `cube_ext_d3d11_win` | D3D11 | Windows | `test_apps/cube_ext_d3d11_win/` |
+| `cube_ext_vk_win` | Vulkan | Windows | `test_apps/cube_ext_vk_win/` |
+| `cube_ext_gl_win` | OpenGL | Windows | `test_apps/cube_ext_gl_win/` |
+| `cube_ext_d3d12_win` | D3D12 | Windows | `test_apps/cube_ext_d3d12_win/` |
 | `cube_ext_vk_macos` | Vulkan | macOS | `test_apps/cube_ext_vk_macos/` |
 
 ## OpenXR Extensions Demonstrated
