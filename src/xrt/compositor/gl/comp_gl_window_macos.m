@@ -19,6 +19,7 @@
 #import <Cocoa/Cocoa.h>
 #import <OpenGL/OpenGL.h>
 #import <OpenGL/gl3.h>
+#import <IOSurface/IOSurface.h>
 
 #include "comp_gl_window_macos.h"
 
@@ -284,29 +285,98 @@ comp_gl_window_macos_create_offscreen(void *app_cgl_ctx,
 	win->view = nil;
 	win->owns_window = false;
 
-	// Create offscreen GL context via CGL (no window/view needed)
-	NSOpenGLPixelFormat *pf = create_pixel_format();
-	if (pf == nil) {
-		U_LOG_E("Failed to create NSOpenGLPixelFormat for offscreen context");
+	// Create offscreen GL context via CGL directly (no NSView needed).
+	// Must use matching pixel format for context sharing to work.
+	CGLContextObj share = (CGLContextObj)app_cgl_ctx;
+	CGLPixelFormatObj pf = NULL;
+	CGLError err;
+
+	if (share != NULL) {
+		// Get the pixel format from the app's context for compatibility
+		pf = CGLGetPixelFormat(share);
+	}
+
+	if (pf == NULL) {
+		// Fallback: create our own pixel format
+		CGLPixelFormatAttribute attrs[] = {
+		    kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core,
+		    kCGLPFAColorSize, (CGLPixelFormatAttribute)24,
+		    kCGLPFAAlphaSize, (CGLPixelFormatAttribute)8,
+		    kCGLPFAAccelerated,
+		    (CGLPixelFormatAttribute)0,
+		};
+		GLint npix = 0;
+		err = CGLChoosePixelFormat(attrs, &pf, &npix);
+		if (err != kCGLNoError || pf == NULL) {
+			U_LOG_E("CGLChoosePixelFormat failed: %d", err);
+			free(win);
+			return XRT_ERROR_DEVICE_CREATION_FAILED;
+		}
+	}
+
+	CGLContextObj cgl_ctx = NULL;
+	err = CGLCreateContext(pf, share, &cgl_ctx);
+
+	if (err != kCGLNoError || cgl_ctx == NULL) {
+		U_LOG_E("CGLCreateContext failed: %d", err);
 		free(win);
 		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
-	// Share with app context if provided
-	NSOpenGLContext *share_ctx = nil;
-	if (app_cgl_ctx != NULL) {
-		share_ctx = [[NSOpenGLContext alloc] initWithCGLContextObj:(CGLContextObj)app_cgl_ctx];
-	}
-
-	win->gl_context = [[NSOpenGLContext alloc] initWithFormat:pf shareContext:share_ctx];
+	// Wrap in NSOpenGLContext for consistency with other code paths
+	win->gl_context = [[NSOpenGLContext alloc] initWithCGLContextObj:cgl_ctx];
 	if (win->gl_context == nil) {
-		U_LOG_E("Failed to create offscreen NSOpenGLContext");
+		U_LOG_E("Failed to wrap CGLContext in NSOpenGLContext");
+		CGLDestroyContext(cgl_ctx);
 		free(win);
 		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
 	U_LOG_W("Created offscreen GL context for shared texture mode");
 	*out_win = win;
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+comp_gl_window_macos_map_iosurface(struct comp_gl_window_macos *win,
+                                    void *iosurface_handle,
+                                    uint32_t *out_gl_texture,
+                                    uint32_t *out_width,
+                                    uint32_t *out_height)
+{
+	if (win == NULL || win->gl_context == nil || iosurface_handle == NULL) {
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
+	}
+
+	IOSurfaceRef surface = (IOSurfaceRef)iosurface_handle;
+	uint32_t w = (uint32_t)IOSurfaceGetWidth(surface);
+	uint32_t h = (uint32_t)IOSurfaceGetHeight(surface);
+
+	GLuint tex = 0;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_RECTANGLE, tex);
+
+	CGLContextObj cgl = [win->gl_context CGLContextObj];
+	CGLError err = CGLTexImageIOSurface2D(
+	    cgl, GL_TEXTURE_RECTANGLE, GL_RGBA8,
+	    (GLsizei)w, (GLsizei)h,
+	    GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV,
+	    surface, 0);
+	if (err != kCGLNoError) {
+		U_LOG_E("CGLTexImageIOSurface2D failed: %d", err);
+		glDeleteTextures(1, &tex);
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
+	}
+
+	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_RECTANGLE, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+
+	*out_gl_texture = tex;
+	*out_width = w;
+	*out_height = h;
+
+	U_LOG_W("IOSurface mapped to GL texture %u: %ux%u", tex, w, h);
 	return XRT_SUCCESS;
 }
 

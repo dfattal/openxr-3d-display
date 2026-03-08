@@ -101,6 +101,24 @@ void
 comp_gl_window_macos_swap_buffers(struct comp_gl_window_macos *win);
 
 /*!
+ * Map an IOSurface to a GL_TEXTURE_RECTANGLE in the compositor's context.
+ *
+ * @param win                The window/context handle.
+ * @param iosurface_handle   IOSurfaceRef as void*.
+ * @param out_gl_texture     Receives the GL texture name.
+ * @param out_width          Receives the IOSurface width.
+ * @param out_height         Receives the IOSurface height.
+ *
+ * @return XRT_SUCCESS on success.
+ */
+xrt_result_t
+comp_gl_window_macos_map_iosurface(struct comp_gl_window_macos *win,
+                                    void *iosurface_handle,
+                                    uint32_t *out_gl_texture,
+                                    uint32_t *out_width,
+                                    uint32_t *out_height);
+
+/*!
  * Get the current backing pixel dimensions.
  *
  * @param win        The window handle.

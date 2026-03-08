@@ -26,81 +26,11 @@
 #include "oxr_logger.h"
 #include "oxr_handle.h"
 
-#if defined(XRT_HAVE_GL_NATIVE_COMPOSITOR) && defined(XRT_HAVE_METAL_NATIVE_COMPOSITOR)
+#if defined(XRT_HAVE_GL_NATIVE_COMPOSITOR)
 
-// GL native compositor for windowed mode, Metal fallback for shared IOSurface
+// Fully native GL compositor — handles both windowed and shared IOSurface modes
 #include "gl/comp_gl_compositor.h"
-#include "metal/comp_metal_compositor.h"
 #include "openxr/XR_EXT_macos_gl_binding.h"
-
-static int64_t
-metal_format_to_vk(int64_t metal_fmt)
-{
-	switch (metal_fmt) {
-	case 70:  return 37;  // MTLPixelFormatRGBA8Unorm     -> VK_FORMAT_R8G8B8A8_UNORM
-	case 71:  return 43;  // MTLPixelFormatRGBA8Unorm_sRGB -> VK_FORMAT_R8G8B8A8_SRGB
-	case 80:  return 44;  // MTLPixelFormatBGRA8Unorm     -> VK_FORMAT_B8G8R8A8_UNORM
-	case 81:  return 50;  // MTLPixelFormatBGRA8Unorm_sRGB -> VK_FORMAT_B8G8R8A8_SRGB
-	case 115: return 97;  // MTLPixelFormatRGBA16Float    -> VK_FORMAT_R16G16B16A16_SFLOAT
-	case 252: return 126; // MTLPixelFormatDepth32Float   -> VK_FORMAT_D32_SFLOAT
-	default:  return metal_fmt;
-	}
-}
-
-static XrResult
-populate_gl_macos_via_metal(struct oxr_logger *log,
-                             struct oxr_system *sys,
-                             const XrGraphicsBindingOpenGLMacOSEXT *next,
-                             void *window_handle,
-                             void *shared_iosurface,
-                             struct oxr_session *sess)
-{
-	struct xrt_device *xdev = get_role_head(sess->sys);
-	struct xrt_compositor_native *xcn = NULL;
-
-	void *dp_factory_metal = NULL;
-	if (sys->xsysc != NULL) {
-		dp_factory_metal = sys->xsysc->info.dp_factory_metal;
-	}
-
-	bool offscreen = (window_handle == NULL && shared_iosurface != NULL);
-
-	xrt_result_t xret = comp_metal_compositor_create(
-	    xdev, window_handle, NULL, dp_factory_metal,
-	    offscreen, shared_iosurface, &xcn);
-	if (xret != XRT_SUCCESS) {
-		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 "Failed to create Metal native compositor for GL app: %d", xret);
-	}
-
-	comp_metal_compositor_set_source_gl(&xcn->base);
-	comp_metal_compositor_set_system_devices(&xcn->base, sess->sys->xsysd);
-	if (sys->xsysc != NULL) {
-		comp_metal_compositor_set_sys_info(&xcn->base, &sys->xsysc->info);
-	}
-
-	for (uint32_t i = 0; i < xcn->base.info.format_count; i++) {
-		xcn->base.info.formats[i] = metal_format_to_vk(xcn->base.info.formats[i]);
-	}
-
-	struct xrt_compositor_gl *xcgl = xrt_gfx_provider_create_gl_macos(xcn, next->cglContext);
-	if (xcgl == NULL) {
-		xrt_comp_native_destroy(&xcn);
-		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
-		                 "Failed to create GL client compositor wrapping Metal native");
-	}
-
-	sess->xcn = xcn;
-	sess->compositor = &xcgl->base;
-	sess->create_swapchain = oxr_swapchain_gl_create;
-
-	xcgl->base.info.initial_visible = xcn->base.info.initial_visible;
-	xcgl->base.info.initial_focused = xcn->base.info.initial_focused;
-
-	U_LOG_W("Using Metal native compositor for OpenGL shared texture (GL -> Metal via IOSurface)");
-
-	return XR_SUCCESS;
-}
 
 XrResult
 oxr_session_populate_gl_macos(struct oxr_logger *log,
@@ -112,24 +42,17 @@ oxr_session_populate_gl_macos(struct oxr_logger *log,
 {
 	const XrGraphicsBindingOpenGLMacOSEXT *next = (const XrGraphicsBindingOpenGLMacOSEXT *)next_ptr;
 
-	// Shared IOSurface mode: fall back to Metal compositor routing
-	// (GL native compositor doesn't yet support headless IOSurface rendering)
-	if (shared_iosurface != NULL && window_handle == NULL) {
-		return populate_gl_macos_via_metal(log, sys, next, window_handle,
-		                                    shared_iosurface, sess);
-	}
-
-	// Windowed mode: use GL native compositor directly
+	// Both windowed and shared IOSurface modes use the GL native compositor
 	struct xrt_device *xdev = get_role_head(sess->sys);
 	struct xrt_compositor_native *xcn = NULL;
 
 	xrt_result_t xret = comp_gl_compositor_create(
 	    xdev,
-	    window_handle,        // NSView from cocoa_window_binding (or NULL for self-owned window)
+	    window_handle,        // NSView from cocoa_window_binding (or NULL for shared texture)
 	    next->cglContext,     // App's CGLContextObj for texture sharing
 	    NULL,                 // gl_display (not used on macOS)
 	    NULL,                 // dp_factory_gl (TODO: when GL display processors exist)
-	    NULL,                 // shared_texture_handle (not used in windowed mode)
+	    shared_iosurface,     // IOSurfaceRef for shared texture mode (or NULL for windowed)
 	    &xcn);
 	if (xret != XRT_SUCCESS) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED,
@@ -149,7 +72,11 @@ oxr_session_populate_gl_macos(struct oxr_logger *log,
 	sess->compositor_visible = true;
 	sess->compositor_focused = true;
 
-	U_LOG_W("Using GL native compositor on macOS (direct NSOpenGLView, no Metal routing)");
+	if (shared_iosurface != NULL) {
+		U_LOG_W("Using GL native compositor on macOS (shared IOSurface, no Metal routing)");
+	} else {
+		U_LOG_W("Using GL native compositor on macOS (direct NSOpenGLView, no Metal routing)");
+	}
 
 	return XR_SUCCESS;
 }

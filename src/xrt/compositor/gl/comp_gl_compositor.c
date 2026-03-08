@@ -125,10 +125,12 @@ gl_swapchain(struct xrt_swapchain *xsc)
 static const char *VS_FULLSCREEN_QUAD =
     "#version 330 core\n"
     "out vec2 v_uv;\n"
+    "uniform float u_flip_y;\n" // 0.0 = normal, 1.0 = flip Y (for IOSurface)
     "void main() {\n"
     "    float x = float((gl_VertexID & 1) << 2);\n"
     "    float y = float((gl_VertexID & 2) << 1);\n"
-    "    v_uv = vec2(x * 0.5, y * 0.5);\n"
+    "    float uv_y = y * 0.5;\n"
+    "    v_uv = vec2(x * 0.5, mix(uv_y, 1.0 - uv_y, u_flip_y));\n"
     "    gl_Position = vec4(x - 1.0, y - 1.0, 0.0, 1.0);\n"
     "}\n";
 
@@ -230,6 +232,10 @@ struct comp_gl_compositor
 #elif defined(__APPLE__)
 	struct comp_gl_window_macos *macos_window;  //!< macOS window helper
 	bool owns_window;
+	bool has_shared_iosurface;
+	GLuint iosurface_gl_texture;    //!< GL texture backed by shared IOSurface
+	uint32_t iosurface_width;
+	uint32_t iosurface_height;
 #endif
 
 	// --- Shared texture (D3D11 interop via WGL_NV_DX_interop2, Windows only) ---
@@ -631,8 +637,9 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 		return XRT_SUCCESS;
 	}
 
-	// Ensure compositor context is current
+	// Save previous GL context and switch to compositor's
 #ifdef __APPLE__
+	CGLContextObj prev_cgl_ctx = CGLGetCurrentContext();
 	comp_gl_window_macos_make_current(c->macos_window);
 #endif
 
@@ -751,6 +758,40 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 		}
 	} else
 #endif
+#ifdef __APPLE__
+	if (c->has_shared_iosurface) {
+		// Shared IOSurface mode: blit SBS stereo texture into the IOSurface
+		glBindFramebuffer(GL_FRAMEBUFFER, c->fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+		                        GL_TEXTURE_RECTANGLE, c->iosurface_gl_texture, 0);
+
+		glViewport(0, 0, c->iosurface_width, c->iosurface_height);
+
+		GLuint output_program;
+		switch (c->output_mode) {
+		case GL_OUTPUT_ANAGLYPH: output_program = c->program_anaglyph; break;
+		case GL_OUTPUT_BLEND:    output_program = c->program_blend; break;
+		default:                 output_program = c->program_sbs; break;
+		}
+
+		glUseProgram(output_program);
+		// Flip Y so IOSurface content matches Metal's top-down convention
+		GLint loc_flip = glGetUniformLocation(output_program, "u_flip_y");
+		glUniform1f(loc_flip, 1.0f);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, c->stereo_texture);
+		GLint loc_out_tex = glGetUniformLocation(output_program, "u_texture");
+		glUniform1i(loc_out_tex, 0);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
+
+		glFlush();
+
+		// Restore FBO
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+		                        GL_TEXTURE_RECTANGLE, 0, 0);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	} else
+#endif
 	{
 		// Normal window mode: present to screen
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -797,6 +838,14 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 	if (prev_blend) glEnable(GL_BLEND);
 	if (prev_cull_face) glEnable(GL_CULL_FACE);
 	if (prev_scissor_test) glEnable(GL_SCISSOR_TEST);
+
+	// Restore previous GL context (critical for shared texture mode where
+	// app has its own context and needs it back after compositor work)
+#ifdef __APPLE__
+	if (prev_cgl_ctx != NULL) {
+		CGLSetCurrentContext(prev_cgl_ctx);
+	}
+#endif
 
 	return XRT_SUCCESS;
 }
@@ -852,6 +901,9 @@ gl_compositor_destroy(struct xrt_compositor *xc)
 		DestroyWindow(c->hwnd);
 	}
 #elif defined(__APPLE__)
+	if (c->iosurface_gl_texture) {
+		glDeleteTextures(1, &c->iosurface_gl_texture);
+	}
 	if (c->macos_window != NULL) {
 		comp_gl_window_macos_destroy(&c->macos_window);
 	}
@@ -1090,6 +1142,11 @@ comp_gl_compositor_create(struct xrt_device *xdev,
 		height = xdev->hmd->screens[0].h_pixels;
 	}
 
+	// Save caller's GL context so we can restore after init (macOS)
+#ifdef __APPLE__
+	CGLContextObj caller_cgl_ctx = CGLGetCurrentContext();
+#endif
+
 	// Platform-specific context/window setup
 #ifdef XRT_OS_WINDOWS
 	if (!gl_create_window_and_context(c, window_handle, gl_context)) {
@@ -1176,7 +1233,31 @@ comp_gl_compositor_create(struct xrt_device *xdev,
 	}
 #elif defined(__APPLE__)
 	// macOS: create window/context via NSOpenGLView helper
-	if (window_handle != NULL) {
+	if (shared_texture_handle != NULL) {
+		// Shared IOSurface mode: offscreen GL context, render into IOSurface
+		xrt_result_t xret = comp_gl_window_macos_create_offscreen(
+		    gl_context, &c->macos_window);
+		if (xret != XRT_SUCCESS) {
+			free(c);
+			return XRT_ERROR_OPENGL;
+		}
+		c->owns_window = false;
+		comp_gl_window_macos_make_current(c->macos_window);
+
+		// Map the IOSurface to a GL texture
+		GLuint io_tex = 0;
+		uint32_t io_w = 0, io_h = 0;
+		xret = comp_gl_window_macos_map_iosurface(
+		    c->macos_window, shared_texture_handle, &io_tex, &io_w, &io_h);
+		if (xret != XRT_SUCCESS) {
+			free(c);
+			return XRT_ERROR_OPENGL;
+		}
+		c->iosurface_gl_texture = io_tex;
+		c->iosurface_width = io_w;
+		c->iosurface_height = io_h;
+		c->has_shared_iosurface = true;
+	} else if (window_handle != NULL) {
 		// App provided an NSView — set up external
 		xrt_result_t xret = comp_gl_window_macos_setup_external(
 		    window_handle, gl_context, &c->macos_window);
@@ -1185,6 +1266,7 @@ comp_gl_compositor_create(struct xrt_device *xdev,
 			return XRT_ERROR_OPENGL;
 		}
 		c->owns_window = false;
+		comp_gl_window_macos_make_current(c->macos_window);
 	} else {
 		// Create our own window
 		xrt_result_t xret = comp_gl_window_macos_create(
@@ -1194,10 +1276,8 @@ comp_gl_compositor_create(struct xrt_device *xdev,
 			return XRT_ERROR_OPENGL;
 		}
 		c->owns_window = true;
+		comp_gl_window_macos_make_current(c->macos_window);
 	}
-	// Make compositor context current for resource init
-	comp_gl_window_macos_make_current(c->macos_window);
-	(void)shared_texture_handle;
 	(void)gl_display;
 #else
 	(void)shared_texture_handle;
@@ -1235,6 +1315,13 @@ comp_gl_compositor_create(struct xrt_device *xdev,
 	xc->info.initial_focused = true;
 
 	*out_xcn = &c->base;
+
+	// Restore caller's GL context (don't leave compositor's context current)
+#ifdef __APPLE__
+	if (caller_cgl_ctx != NULL) {
+		CGLSetCurrentContext(caller_cgl_ctx);
+	}
+#endif
 
 	U_LOG_W("Native OpenGL compositor created: %ux%u", width, height);
 
