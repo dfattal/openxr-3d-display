@@ -652,7 +652,16 @@ static void RenderScene(GLRenderer &r, GLuint targetTex, uint32_t targetW, uint3
 
     // Bind FBO with swapchain texture as color attachment
     glBindFramebuffer(GL_FRAMEBUFFER, r.fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE, targetTex, 0);
+    // Swapchain textures are GL_TEXTURE_2D when using GL native compositor,
+    // GL_TEXTURE_RECTANGLE when using Metal compositor (IOSurface-backed).
+    GLint prev_tex2d = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex2d);
+    glBindTexture(GL_TEXTURE_2D, targetTex);
+    GLint tex_width = 0;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tex_width);
+    glBindTexture(GL_TEXTURE_2D, prev_tex2d);
+    GLenum texTarget = (tex_width > 0) ? GL_TEXTURE_2D : GL_TEXTURE_RECTANGLE;
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texTarget, targetTex, 0);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, r.depthRBO);
 
     GLenum fbStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
