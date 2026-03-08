@@ -234,9 +234,9 @@ jobs:
           Write-Host "OpenXR SDK contents:"
           Get-ChildItem -Recurse openxr_sdk | Select-Object FullName
 
-      - name: Build D3D11 test app (cube_ext_d3d11)
+      - name: Build D3D11 test app (cube_ext_d3d11_win)
         run: |
-          cd test_apps/cube_ext_d3d11
+          cd test_apps/cube_ext_d3d11_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -251,7 +251,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_d3d11/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_d3d11_win/build/
             Write-Host "Copied $($loaderDll.FullName) to test app build"
           } else {
             Write-Host "Warning: openxr_loader.dll not found"
@@ -265,8 +265,8 @@ jobs:
       - name: Verify binary architectures
         run: |
           Write-Host "=== Checking binary architectures ==="
-          $exe = "test_apps/cube_ext_d3d11/build/cube_ext_d3d11.exe"
-          $dll = "test_apps/cube_ext_d3d11/build/openxr_loader.dll"
+          $exe = "test_apps/cube_ext_d3d11_win/build/cube_ext_d3d11_win.exe"
+          $dll = "test_apps/cube_ext_d3d11_win/build/openxr_loader.dll"
 
           Write-Host "`nEXE architecture:"
           dumpbin /headers $exe | Select-String -Pattern "machine \(|File Type:"
@@ -281,7 +281,7 @@ jobs:
           dumpbin /dependents $dll
 
           Write-Host "`nAll DLLs in build directory:"
-          Get-ChildItem test_apps/cube_ext_d3d11/build/*.dll | ForEach-Object { Write-Host "  $($_.Name)" }
+          Get-ChildItem test_apps/cube_ext_d3d11_win/build/*.dll | ForEach-Object { Write-Host "  $($_.Name)" }
 
       - name: Upload test app
         uses: actions/upload-artifact@v4
@@ -289,9 +289,9 @@ jobs:
           name: CubeExtD3D11
           if-no-files-found: error
           path: |
-            test_apps/cube_ext_d3d11/build/cube_ext_d3d11.exe
-            test_apps/cube_ext_d3d11/build/*.dll
-            test_apps/cube_ext_d3d11/build/textures/
+            test_apps/cube_ext_d3d11_win/build/cube_ext_d3d11_win.exe
+            test_apps/cube_ext_d3d11_win/build/*.dll
+            test_apps/cube_ext_d3d11_win/build/textures/
 
   # D3D11 test app WITHOUT window binding extension - Standard OpenXR app
   TestAppCubeD3D11:
@@ -326,9 +326,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build D3D11 test app (cube_d3d11)
+      - name: Build D3D11 test app (cube_rt_d3d11_win)
         run: |
-          cd test_apps/cube_d3d11
+          cd test_apps/cube_rt_d3d11_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -341,7 +341,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/cube_d3d11/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_rt_d3d11_win/build/
           }
 
       - name: Upload D3D11 test app (standard OpenXR)
@@ -350,9 +350,9 @@ jobs:
           name: CubeD3D11
           if-no-files-found: error
           path: |
-            test_apps/cube_d3d11/build/cube_d3d11.exe
-            test_apps/cube_d3d11/build/*.dll
-            test_apps/cube_d3d11/build/textures/
+            test_apps/cube_rt_d3d11_win/build/cube_rt_d3d11_win.exe
+            test_apps/cube_rt_d3d11_win/build/*.dll
+            test_apps/cube_rt_d3d11_win/build/textures/
 
   # D3D12 test app with XR_EXT_win32_window_binding
   TestAppCubeExtD3D12:
@@ -387,9 +387,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build D3D12 test app (cube_ext_d3d12)
+      - name: Build D3D12 test app (cube_ext_d3d12_win)
         run: |
-          cd test_apps/cube_ext_d3d12
+          cd test_apps/cube_ext_d3d12_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -402,7 +402,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_d3d12/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_d3d12_win/build/
           }
 
       - name: Upload D3D12 test app
@@ -411,9 +411,9 @@ jobs:
           name: CubeExtD3D12
           if-no-files-found: error
           path: |
-            test_apps/cube_ext_d3d12/build/cube_ext_d3d12.exe
-            test_apps/cube_ext_d3d12/build/*.dll
-            test_apps/cube_ext_d3d12/build/textures/
+            test_apps/cube_ext_d3d12_win/build/cube_ext_d3d12_win.exe
+            test_apps/cube_ext_d3d12_win/build/*.dll
+            test_apps/cube_ext_d3d12_win/build/textures/
 
   # OpenGL test app with XR_EXT_win32_window_binding
   TestAppCubeExtGL:
@@ -448,9 +448,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build OpenGL test app (cube_ext_gl)
+      - name: Build OpenGL test app (cube_ext_gl_win)
         run: |
-          cd test_apps/cube_ext_gl
+          cd test_apps/cube_ext_gl_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -463,7 +463,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_gl/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_gl_win/build/
           }
 
       - name: Upload OpenGL test app
@@ -472,9 +472,9 @@ jobs:
           name: CubeExtGL
           if-no-files-found: error
           path: |
-            test_apps/cube_ext_gl/build/cube_ext_gl.exe
-            test_apps/cube_ext_gl/build/*.dll
-            test_apps/cube_ext_gl/build/textures/
+            test_apps/cube_ext_gl_win/build/cube_ext_gl_win.exe
+            test_apps/cube_ext_gl_win/build/*.dll
+            test_apps/cube_ext_gl_win/build/textures/
 
   # Vulkan test app with XR_EXT_win32_window_binding (requires Vulkan SDK)
   TestAppCubeExtVK:
@@ -515,9 +515,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build Vulkan test app (cube_ext_vk)
+      - name: Build Vulkan test app (cube_ext_vk_win)
         run: |
-          cd test_apps/cube_ext_vk
+          cd test_apps/cube_ext_vk_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -530,7 +530,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_vk/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_ext_vk_win/build/
           }
 
       - name: Upload Vulkan test app
@@ -539,9 +539,9 @@ jobs:
           name: CubeExtVK
           if-no-files-found: error
           path: |
-            test_apps/cube_ext_vk/build/cube_ext_vk.exe
-            test_apps/cube_ext_vk/build/*.dll
-            test_apps/cube_ext_vk/build/textures/
+            test_apps/cube_ext_vk_win/build/cube_ext_vk_win.exe
+            test_apps/cube_ext_vk_win/build/*.dll
+            test_apps/cube_ext_vk_win/build/textures/
 
   # 3D Gaussian Splatting Vulkan demo (requires Vulkan SDK, uses FetchContent for 3DGS.cpp)
   TestAppGaussianSplattingVK:
@@ -582,9 +582,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build 3DGS Vulkan demo (gaussian_splatting_vk)
+      - name: Build 3DGS Vulkan demo (gaussian_splatting_ext_vk_win)
         run: |
-          cd demos/gaussian_splatting_vk
+          cd demos/gaussian_splatting_ext_vk_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -597,7 +597,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination demos/gaussian_splatting_vk/build/
+            Copy-Item $loaderDll.FullName -Destination demos/gaussian_splatting_ext_vk_win/build/
           }
 
       - name: Upload 3DGS Vulkan demo
@@ -606,8 +606,8 @@ jobs:
           name: GaussianSplattingVK
           if-no-files-found: error
           path: |
-            demos/gaussian_splatting_vk/build/gaussian_splatting_vk.exe
-            demos/gaussian_splatting_vk/build/*.dll
+            demos/gaussian_splatting_ext_vk_win/build/gaussian_splatting_ext_vk_win.exe
+            demos/gaussian_splatting_ext_vk_win/build/*.dll
 
   # Spatial OS demo app (multi-layer war room)
   TestAppSpatialOS:
@@ -642,9 +642,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build Spatial OS demo (spatial_os)
+      - name: Build Spatial OS demo (spatial_os_rt_d3d11_win)
         run: |
-          cd demos/spatial_os
+          cd demos/spatial_os_rt_d3d11_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -657,7 +657,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination demos/spatial_os/build/
+            Copy-Item $loaderDll.FullName -Destination demos/spatial_os_rt_d3d11_win/build/
           }
 
       - name: Upload Spatial OS demo
@@ -666,9 +666,9 @@ jobs:
           name: SpatialOS
           if-no-files-found: error
           path: |
-            demos/spatial_os/build/spatial_os.exe
-            demos/spatial_os/build/*.dll
-            demos/spatial_os/build/textures/
+            demos/spatial_os_rt_d3d11_win/build/spatial_os_rt_d3d11_win.exe
+            demos/spatial_os_rt_d3d11_win/build/*.dll
+            demos/spatial_os_rt_d3d11_win/build/textures/
 
   # D3D11 shared texture test app (offscreen mode)
   TestAppCubeSharedD3D11:
@@ -696,9 +696,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build shared D3D11 test app (cube_shared_d3d11)
+      - name: Build shared D3D11 test app (cube_shared_d3d11_win)
         run: |
-          cd test_apps/cube_shared_d3d11
+          cd test_apps/cube_shared_d3d11_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -711,7 +711,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/cube_shared_d3d11/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_shared_d3d11_win/build/
           }
 
       - name: Upload shared D3D11 test app
@@ -720,9 +720,9 @@ jobs:
           name: CubeSharedD3D11
           if-no-files-found: error
           path: |
-            test_apps/cube_shared_d3d11/build/cube_shared_d3d11.exe
-            test_apps/cube_shared_d3d11/build/*.dll
-            test_apps/cube_shared_d3d11/build/textures/
+            test_apps/cube_shared_d3d11_win/build/cube_shared_d3d11_win.exe
+            test_apps/cube_shared_d3d11_win/build/*.dll
+            test_apps/cube_shared_d3d11_win/build/textures/
 
   # OpenGL shared texture test app (offscreen mode via WGL_NV_DX_interop2)
   TestAppCubeSharedGL:
@@ -751,9 +751,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build shared GL test app (cube_shared_gl)
+      - name: Build shared GL test app (cube_shared_gl_win)
         run: |
-          cd test_apps/cube_shared_gl
+          cd test_apps/cube_shared_gl_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -766,7 +766,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/cube_shared_gl/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_shared_gl_win/build/
           }
 
       - name: Upload shared GL test app
@@ -775,9 +775,9 @@ jobs:
           name: CubeSharedGL
           if-no-files-found: error
           path: |
-            test_apps/cube_shared_gl/build/cube_shared_gl.exe
-            test_apps/cube_shared_gl/build/*.dll
-            test_apps/cube_shared_gl/build/textures/
+            test_apps/cube_shared_gl_win/build/cube_shared_gl_win.exe
+            test_apps/cube_shared_gl_win/build/*.dll
+            test_apps/cube_shared_gl_win/build/textures/
 
   # Vulkan shared texture test app (offscreen mode via VK_KHR_external_memory_win32)
   TestAppCubeSharedVK:
@@ -812,9 +812,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build shared VK test app (cube_shared_vk)
+      - name: Build shared VK test app (cube_shared_vk_win)
         run: |
-          cd test_apps/cube_shared_vk
+          cd test_apps/cube_shared_vk_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -827,7 +827,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/cube_shared_vk/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_shared_vk_win/build/
           }
 
       - name: Upload shared VK test app
@@ -836,9 +836,9 @@ jobs:
           name: CubeSharedVK
           if-no-files-found: error
           path: |
-            test_apps/cube_shared_vk/build/cube_shared_vk.exe
-            test_apps/cube_shared_vk/build/*.dll
-            test_apps/cube_shared_vk/build/textures/
+            test_apps/cube_shared_vk_win/build/cube_shared_vk_win.exe
+            test_apps/cube_shared_vk_win/build/*.dll
+            test_apps/cube_shared_vk_win/build/textures/
 
   # Vulkan non-ext test app (runtime creates window, no window binding extension)
   TestAppCubeVK:
@@ -879,9 +879,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build Vulkan test app (cube_vk)
+      - name: Build Vulkan test app (cube_rt_vk_win)
         run: |
-          cd test_apps/cube_vk
+          cd test_apps/cube_rt_vk_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -894,7 +894,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/cube_vk/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_rt_vk_win/build/
           }
 
       - name: Upload Vulkan test app
@@ -903,9 +903,9 @@ jobs:
           name: CubeVK
           if-no-files-found: error
           path: |
-            test_apps/cube_vk/build/cube_vk.exe
-            test_apps/cube_vk/build/*.dll
-            test_apps/cube_vk/build/textures/
+            test_apps/cube_rt_vk_win/build/cube_rt_vk_win.exe
+            test_apps/cube_rt_vk_win/build/*.dll
+            test_apps/cube_rt_vk_win/build/textures/
 
   # OpenGL non-ext test app (runtime creates window, no window binding extension)
   TestAppCubeGL:
@@ -934,9 +934,9 @@ jobs:
           Invoke-WebRequest -Uri $openxrUrl -OutFile openxr_loader.zip
           Expand-Archive -Path openxr_loader.zip -DestinationPath openxr_sdk -Force
 
-      - name: Build OpenGL test app (cube_gl)
+      - name: Build OpenGL test app (cube_rt_gl_win)
         run: |
-          cd test_apps/cube_gl
+          cd test_apps/cube_rt_gl_win
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DOpenXR_ROOT="${{ github.workspace }}/openxr_sdk"
@@ -949,7 +949,7 @@ jobs:
             $loaderDll = Get-ChildItem -Path openxr_sdk -Recurse -Filter "openxr_loader.dll" | Select-Object -First 1
           }
           if ($loaderDll) {
-            Copy-Item $loaderDll.FullName -Destination test_apps/cube_gl/build/
+            Copy-Item $loaderDll.FullName -Destination test_apps/cube_rt_gl_win/build/
           }
 
       - name: Upload OpenGL test app
@@ -958,9 +958,9 @@ jobs:
           name: CubeGL
           if-no-files-found: error
           path: |
-            test_apps/cube_gl/build/cube_gl.exe
-            test_apps/cube_gl/build/*.dll
-            test_apps/cube_gl/build/textures/
+            test_apps/cube_rt_gl_win/build/cube_rt_gl_win.exe
+            test_apps/cube_rt_gl_win/build/*.dll
+            test_apps/cube_rt_gl_win/build/textures/
 
   # Bundle all test apps into a single artifact with per-app subfolders
   BundleTestApps:

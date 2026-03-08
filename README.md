@@ -1,26 +1,47 @@
-# OpenXR Runtime for Tracked 3D Displays
+# DisplayXR Runtime
 
-An open-source [OpenXR](https://www.khronos.org/openxr/) runtime that brings standardized XR support to glasses-free 3D displays — autostereoscopic monitors and laptops that deliver head-tracked stereoscopic 3D without worn hardware.
+An open-source [OpenXR](https://www.khronos.org/openxr/) runtime for glasses-free 3D displays — autostereoscopic monitors and laptops that deliver head-tracked stereoscopic 3D without worn hardware.
 
-## The Problem
+Built on [Monado](https://monado.freedesktop.org/) by Collabora, DisplayXR strips away headset-centric infrastructure (34 VR drivers, Vulkan server compositor, tracking subsystems) and replaces it with a lightweight runtime purpose-built for 3D displays: ~150 files, 3 drivers, native compositors for every graphics API.
 
-OpenXR assumes a head-mounted display. The runtime owns the screen, creates rendering targets, and locks views to the user's head. None of this maps to a tracked 3D display, where:
+## Design Principles
 
-- The display is a **shared desktop monitor**, not a private headset — apps need to render into their own windows
-- The display has **fixed physical geometry** — apps may need raw screen dimensions for custom camera models (e.g., Kooima off-axis projection)
-- Views are **eye-tracked, not head-locked** — the runtime must expose viewer eye positions relative to a fixed screen
+### Native compositors — no Vulkan intermediary
 
-Without a standard API, every display vendor ships a proprietary SDK, fragmenting the ecosystem and forcing developers to write separate codepaths for each vendor.
+Every graphics API gets its own compositor that talks directly to the display pipeline. D3D11 apps render through a D3D11 compositor; Metal apps through Metal; and so on. No format conversion, no interop overhead, no GPU compatibility surprises.
 
-## Proposed Extensions
+### Lightweight and focused
 
-This project implements four OpenXR extensions to close that gap:
+Only what 3D displays need: 3 drivers (leia, sim_display, qwerty), native compositors, and the OpenXR state tracker. Every file in the tree is relevant.
+
+### Four app classes
+
+| Class | Suffix | Description |
+|-------|--------|-------------|
+| **Window-handle** | `_ext` | App provides its own window via `XR_EXT_*_window_binding`. Runtime composites into it. |
+| **Shared-texture** | `_shared` | App provides textures. Runtime composites into its own window. |
+| **Runtime-managed** | `_rt` | Runtime creates the window and rendering targets (standard OpenXR/WebXR path). |
+| **IPC/Service** | `_ipc` | App runs out-of-process via client compositor → IPC → server multi-compositor. Foundation for multi-app spatial shell. |
+
+Test app naming follows the pattern `cube_{class}_{api}_{platform}`: `cube_ext_metal_macos`, `cube_shared_gl_macos`, `cube_rt_vk_macos` (runtime-managed), `cube_ipc_d3d11` (service mode).
+
+## Compositor Status
+
+| API | Windows | macOS |
+|-----|---------|-------|
+| D3D11 | Shipping | — |
+| D3D12 | Shipping | — |
+| Metal | — | Shipping |
+| OpenGL | Shipping | Shipping |
+| Vulkan | Shipping | Shipping |
+
+## OpenXR Extensions
 
 | Extension | Purpose |
 |-----------|---------|
 | `XR_EXT_win32_window_binding` | App provides its own Win32 HWND for OpenXR rendering (windowed mode, multi-app) |
-| `XR_EXT_android_surface_binding` | Same concept for Android — app provides a Surface for rendering |
-| `XR_EXT_cocoa_window_binding` | Same concept for macOS — app provides a Cocoa NSView for rendering |
+| `XR_EXT_cocoa_window_binding` | App provides a Cocoa NSView for rendering (macOS) |
+| `XR_EXT_android_surface_binding` | App provides an Android Surface for rendering |
 | `XR_EXT_display_info` | Exposes physical display geometry, canonical viewing pyramid, nominal viewer position, and recommended render resolution scaling |
 
 See the [full extension proposal](doc/extensions/XR_EXT_tracked_3d_display_proposal.md) for the formal specification.
@@ -53,8 +74,6 @@ brew install cmake ninja eigen vulkan-sdk
 ./scripts/build_macos.sh
 ```
 
-> **Note:** The Vulkan compositor won't function at runtime on macOS due to MoltenVK lacking `VK_KHR_external_memory_fd`. This is expected — use the sim_display driver for testing.
-
 ### Running Without Installing
 
 ```bash
@@ -69,18 +88,78 @@ You don't need a 3D display to develop against this runtime. The **sim_display**
 
 ```bash
 # After building, run the test cube app
-XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json ./build/test_apps/cube_vk_macos/cube_vk_macos
+XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json ./build/test_apps/cube_rt_vk_macos/cube_rt_vk_macos
 ```
 
 Use WASD + mouse to move the simulated eye position and observe perspective-correct stereo rendering.
+
+## Architecture
+
+```
+App (any graphics API)
+        |
+   OpenXR State Tracker
+        |
+   Core xrt interfaces
+        |
+   +----+-----+--------+--------+
+   |    |     |        |        |
+ D3D11 D3D12 Vulkan  Metal   OpenGL   <-- native compositors
+   |    |     |        |        |
+   Display Processor (LeiaSR / sim_display)
+        |
+   Display
+```
+
+### Source tree (`src/xrt/`)
+
+- **compositor/** — Native compositors
+  - `d3d11/` — D3D11 compositor (Windows)
+  - `d3d11_service/` — D3D11 service compositor
+  - `d3d12/` — D3D12 compositor (Windows)
+  - `metal/` — Metal compositor (macOS)
+  - `gl/` — OpenGL compositor (Windows + macOS)
+  - `vk_native/` — Vulkan compositor (Windows + macOS)
+  - `multi/` — Multi-client compositor (IPC/multi-app)
+  - `client/` — Client compositor bindings
+  - `null/` — Null compositor (testing)
+  - `util/` — Compositor utilities
+- **drivers/** — Hardware drivers
+  - `leia/` — LeiaSR SDK driver (Vulkan + D3D11 weavers)
+  - `sim_display/` — Simulation display driver
+  - `qwerty/` — Keyboard/mouse simulated controllers
+- **state_trackers/oxr/** — OpenXR API implementation
+- **ipc/** — Inter-process communication for service mode
+- **auxiliary/** — Shared utilities: math, OS abstraction, Vulkan/D3D helpers
+- **targets/** — Build targets (runtime library, displayxr-cli, displayxr-service)
+
+## Future Direction
+
+- **Multi-compositor spatial shell** — platform-native window manager for 3D displays ([#43](https://github.com/dfattal/openxr-3d-display/issues/43), [#44](https://github.com/dfattal/openxr-3d-display/issues/44))
+- **Display extensions** — rendering mode enumeration ([#8](https://github.com/dfattal/openxr-3d-display/issues/8)), multiview support ([#5](https://github.com/dfattal/openxr-3d-display/issues/5)), display mode events ([#3](https://github.com/dfattal/openxr-3d-display/issues/3))
+- **Interface standardization** — unified display processor interface ([#45](https://github.com/dfattal/openxr-3d-display/issues/45)), display spatial model ([#46](https://github.com/dfattal/openxr-3d-display/issues/46))
+
+See the [milestone tracker](https://github.com/dfattal/openxr-3d-display/milestones) for the full roadmap.
+
+## Unity Plugin
+
+The **DisplayXR** Unity plugin lives in a separate repository:
+[**dfattal/unity-3d-display**](https://github.com/dfattal/unity-3d-display)
+
+Install via Unity Package Manager with the git URL:
+```
+https://github.com/dfattal/unity-3d-display.git
+```
+
+The plugin intercepts Unity's OpenXR pipeline to provide Kooima asymmetric frustum projection for stereo rendering on 3D displays. It has no source dependency on this runtime — install the runtime separately and point `XR_RUNTIME_JSON` to it.
 
 ## Branch Structure
 
 | Branch | Purpose |
 |--------|---------|
 | `main` | Active development — submit PRs here |
+| `legacy-monado-ci` | Full Monado codebase (34 VR drivers, Vulkan server compositor) — archived reference |
 | `upstream-monado` | Tracks upstream [Monado](https://gitlab.freedesktop.org/monado/monado) (locked, read-only) |
-| `cnsdk` | Historical reference — early integration with Leia CNSDK (archived) |
 
 ## Contributing
 
@@ -102,45 +181,9 @@ If you're a display vendor looking to integrate your hardware with this runtime,
 
 - [Extension Proposal](doc/extensions/XR_EXT_tracked_3d_display_proposal.md) — formal specification of the four proposed extensions
 - [Project Structure](doc/extensions/project_structure.md) — architecture and source tree reference
+- [Stereo 3D Math](doc/extensions/stereo3d_math.md) — Kooima projection and stereo math reference
 - [Vendor Integration Guide](doc/extensions/vendor_integration_guide.md) — how to add support for a new display vendor
 - [Vendor Abstraction Refactor](doc/extensions/vendor_abstraction_refactor.md) — architecture for multi-vendor support
-
-## Roadmap
-
-Active work items tracked as [GitHub Issues](https://github.com/dfattal/openxr-3d-display/issues):
-
-| # | Item | Status |
-|---|------|--------|
-| [#1](https://github.com/dfattal/openxr-3d-display/issues/1) | Genericize IPC server view pose computation | refactor |
-| [#2](https://github.com/dfattal/openxr-3d-display/issues/2) | Remove legacy CNSDK interlacing path | cleanup |
-| [#3](https://github.com/dfattal/openxr-3d-display/issues/3) | Event system: display mode + eye tracking state changes | extension |
-| [#4](https://github.com/dfattal/openxr-3d-display/issues/4) | Vendor rendering mode API | design needed |
-| [#5](https://github.com/dfattal/openxr-3d-display/issues/5) | Multiview support (raise XRT_MAX_VIEWS + register view config) | extension |
-| [#6](https://github.com/dfattal/openxr-3d-display/issues/6) | D3D12 native compositor | future |
-| [#7](https://github.com/dfattal/openxr-3d-display/issues/7) | Rename `XR_EXT_macos_window_binding` → `XR_EXT_cocoa_window_binding`; add to docs | done |
-
-## Architecture
-
-This is a fork of [Monado](https://monado.freedesktop.org/), the open-source OpenXR runtime by Collabora. Key additions:
-
-- **LeiaSR driver** (`src/xrt/drivers/leiasr/`) — Vulkan and D3D11 weavers for light field interlacing
-- **D3D11 native compositor** (`src/xrt/compositor/d3d11/`) — bypasses Vulkan for Intel GPU compatibility
-- **Simulation driver** (`src/xrt/drivers/sim_display/`) — virtual tracked 3D display for development
-- **Window binding extensions** — `XR_EXT_win32_window_binding` and `XR_EXT_cocoa_window_binding` in the OpenXR state tracker
-
-See the [project structure guide](doc/extensions/project_structure.md) for a detailed source tree walkthrough.
-
-## Unity Plugin
-
-The **DisplayXR** Unity plugin lives in a separate repository:
-[**dfattal/unity-3d-display**](https://github.com/dfattal/unity-3d-display)
-
-Install via Unity Package Manager with the git URL:
-```
-https://github.com/dfattal/unity-3d-display.git
-```
-
-The plugin intercepts Unity's OpenXR pipeline to provide Kooima asymmetric frustum projection for stereo rendering on 3D displays. It has no source dependency on this runtime — install the runtime separately and point `XR_RUNTIME_JSON` to it.
 
 ## License
 
