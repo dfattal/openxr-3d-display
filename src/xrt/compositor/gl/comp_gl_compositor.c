@@ -25,6 +25,7 @@
 #include "util/u_logging.h"
 #include "util/u_misc.h"
 #include "util/u_time.h"
+#include "util/u_hud.h"
 #include "os/os_time.h"
 #include "os/os_threading.h"
 #include "math/m_api.h"
@@ -37,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <math.h>
 
 // GL function loading via GLAD (cross-platform)
 #ifdef XRT_OS_WINDOWS
@@ -262,6 +264,8 @@ struct comp_gl_compositor
 	// --- State ---
 	enum gl_output_mode output_mode;
 	uint64_t last_frame_ns;
+	float hud_timer;            //!< HUD update throttle timer (seconds)
+	float smoothed_frame_time_ms; //!< Smoothed frame time for HUD FPS display
 	struct xrt_device *xdev;
 	struct xrt_system_devices *xsysd;
 	bool sys_info_set;
@@ -620,6 +624,155 @@ gl_compositor_layer_quad(struct xrt_compositor *xc,
 
 /*
  *
+ * HUD overlay update (macOS only, throttled)
+ *
+ */
+
+#ifdef __APPLE__
+static void
+gl_compositor_update_hud(struct comp_gl_compositor *c, float dt)
+{
+	if (c->macos_window == NULL) {
+		return;
+	}
+
+	bool visible = u_hud_is_visible();
+	if (!visible) {
+		comp_gl_window_macos_hide_hud(c->macos_window);
+		return;
+	}
+
+	// Throttle updates to every 0.5s
+	c->hud_timer += dt;
+	if (c->hud_timer < 0.5f) {
+		return;
+	}
+	c->hud_timer = 0.0f;
+
+	// Smooth frame time (exponential moving average)
+	float alpha = 0.1f;
+	c->smoothed_frame_time_ms = c->smoothed_frame_time_ms * (1.0f - alpha) + (dt * 1000.0f) * alpha;
+	float fps = (c->smoothed_frame_time_ms > 0.0f) ? 1000.0f / c->smoothed_frame_time_ms : 0.0f;
+
+	// Device name
+	const char *dev_name = (c->xdev != NULL) ? c->xdev->str : "Unknown";
+
+	// Output mode
+	int32_t output_mode = 0;
+	if (c->xdev != NULL) {
+		xrt_device_get_property(c->xdev, XRT_DEVICE_PROPERTY_OUTPUT_MODE, &output_mode);
+	}
+	const char *mode_names[] = {"SBS", "Anaglyph", "Blend"};
+	const char *mode_name = (output_mode >= 0 && output_mode <= 2) ? mode_names[output_mode] : "?";
+
+	// Display info from system compositor
+	float disp_w_mm = 0, disp_h_mm = 0;
+	float nom_y = 0, nom_z = 0;
+	float ipd_mm = 60.0f;
+	if (c->sys_info_set) {
+		disp_w_mm = c->sys_info.display_width_m * 1000.0f;
+		disp_h_mm = c->sys_info.display_height_m * 1000.0f;
+		nom_y = c->sys_info.nominal_viewer_y_m * 1000.0f;
+		nom_z = c->sys_info.nominal_viewer_z_m * 1000.0f;
+	}
+
+	float half_ipd = ipd_mm / 2.0f;
+
+	// Qwerty stereo state
+	const char *stereo_line1 = "";
+	const char *stereo_line2 = "";
+	char stereo_buf1[128] = {0};
+	char stereo_buf2[128] = {0};
+	char pos_buf[128] = {0};
+	char fwd_buf[128] = {0};
+
+#ifdef XRT_BUILD_DRIVER_QWERTY
+	struct qwerty_stereo_state ss = {0};
+	bool have_ss = qwerty_get_stereo_state(
+	    c->xsysd->xdevs, c->xsysd->xdev_count, &ss);
+
+	if (have_ss) {
+		const char *mode_label = ss.camera_mode ? "Camera [P]" : "Display [P]";
+		if (ss.camera_mode) {
+			snprintf(stereo_buf1, sizeof(stereo_buf1),
+			         "%s  IPD/Prlx:%.3f", mode_label, ss.cam_ipd_factor);
+			snprintf(stereo_buf2, sizeof(stereo_buf2),
+			         "Conv:%.2f dp  vFOV:%.1f",
+			         ss.cam_convergence,
+			         atanf(ss.cam_half_tan_vfov) * 2.0f * 57.2958f);
+		} else {
+			snprintf(stereo_buf1, sizeof(stereo_buf1),
+			         "%s  IPD/Prlx:%.3f [Sh+Wh]", mode_label, ss.disp_ipd_factor);
+			snprintf(stereo_buf2, sizeof(stereo_buf2),
+			         "Conv:%.2f dp [Wh]  vFOV:%.1f  Persp*:%.2f",
+			         0.0f, 0.0f, 0.0f);
+		}
+		stereo_line1 = stereo_buf1;
+		stereo_line2 = stereo_buf2;
+	}
+
+	// Get virtual display/camera position from qwerty HMD
+	{
+		struct xrt_device *qwerty_hmd = NULL;
+		for (uint32_t i = 0; i < c->xsysd->xdev_count; i++) {
+			if (c->xsysd->xdevs[i] != NULL &&
+			    strstr(c->xsysd->xdevs[i]->str, "Qwerty HMD") != NULL) {
+				qwerty_hmd = c->xsysd->xdevs[i];
+				break;
+			}
+		}
+		if (qwerty_hmd != NULL) {
+			struct xrt_space_relation rel = {0};
+			xrt_device_get_tracked_pose(qwerty_hmd, XRT_INPUT_GENERIC_HEAD_POSE,
+			                            0, &rel);
+			snprintf(pos_buf, sizeof(pos_buf), "Pos  %.2f, %.2f, %.2f m",
+			         rel.pose.position.x, rel.pose.position.y, rel.pose.position.z);
+			struct xrt_vec3 forward = {0, 0, -1};
+			struct xrt_vec3 fwd_world;
+			math_quat_rotate_vec3(&rel.pose.orientation, &forward, &fwd_world);
+			snprintf(fwd_buf, sizeof(fwd_buf), "Fwd  %.2f, %.2f, %.2f",
+			         fwd_world.x, fwd_world.y, fwd_world.z);
+		}
+	}
+#endif
+
+	// Build HUD text
+	char hud_text[1024];
+	snprintf(hud_text, sizeof(hud_text),
+	    "%s\n"
+	    "FPS  %.0f   (%.1f ms)\n"
+	    "Render  %u x %u\n"
+	    "Window  %u x %u\n"
+	    "\n"
+	    "Display  %.0f x %.0f mm\n"
+	    "L Eye  %.0f, %.0f, %.0f mm\n"
+	    "R Eye  %.0f, %.0f, %.0f mm\n"
+	    "\n"
+	    "%s\n"
+	    "%s\n"
+	    "%s\n"
+	    "%s\n"
+	    "\n"
+	    "Output: %s  (1/2/3)\n"
+	    "TAB=HUD  V=2D/3D  P=Cam/Disp  ESC=Quit",
+	    dev_name,
+	    fps, c->smoothed_frame_time_ms,
+	    c->view_width, c->view_height,
+	    c->view_width * 2, c->view_height,
+	    disp_w_mm, disp_h_mm,
+	    -half_ipd, nom_y, nom_z,
+	    half_ipd, nom_y, nom_z,
+	    pos_buf, fwd_buf,
+	    stereo_line1, stereo_line2,
+	    mode_name);
+
+	comp_gl_window_macos_update_hud(c->macos_window, hud_text);
+}
+#endif
+
+
+/*
+ *
  * Layer commit — render SBS and present
  *
  */
@@ -631,7 +784,15 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 
 	// Frame timing
 	uint64_t now_ns = os_monotonic_get_ns();
+	float dt = (c->last_frame_ns > 0) ? (float)(now_ns - c->last_frame_ns) / 1e9f : 0.016f;
 	c->last_frame_ns = now_ns;
+
+	// Update HUD overlay (macOS runtime-owned window only)
+#ifdef __APPLE__
+	if (c->owns_window) {
+		gl_compositor_update_hud(c, dt);
+	}
+#endif
 
 	if (c->layer_accum.layer_count == 0) {
 		return XRT_SUCCESS;
