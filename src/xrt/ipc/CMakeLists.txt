@@ -82,9 +82,9 @@ target_include_directories(
 	ipc_client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
 	)
 if(WIN32)
-	# Enable auto-launch of monado-service when service mode is enabled
+	# Enable auto-launch of displayxr-service when service mode is enabled
 	if(XRT_FEATURE_SERVICE AND NOT DEFINED XRT_SERVICE_EXECUTABLE)
-		set(XRT_SERVICE_EXECUTABLE "monado-service")
+		set(XRT_SERVICE_EXECUTABLE "displayxr-service")
 	endif()
 	if(XRT_SERVICE_EXECUTABLE)
 		target_compile_definitions(

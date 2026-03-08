@@ -51,7 +51,7 @@ ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
 
 #elif defined(XRT_OS_UNIX)
 
-#define MONADO_SHMEM_NAME "/monado_shm"
+#define MONADO_SHMEM_NAME "/displayxr_shm"
 // Impl for non-Android Unix.
 xrt_result_t
 ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map)

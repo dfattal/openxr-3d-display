@@ -299,7 +299,7 @@ oxr_instance_create(struct oxr_logger *log,
 
 #ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
 	struct u_debug_gui_create_info udgci = {
-	    .window_title = "Monado! ✨⚡🔥",
+	    .window_title = "DisplayXR Debug",
 	    .open = U_DEBUG_GUI_OPEN_AUTO,
 	};
 

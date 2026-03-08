@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  SR Cube OpenXR - Standard OpenXR mode (Monado creates window)
+ * @brief  SR Cube OpenXR - Standard OpenXR mode (DisplayXR creates window)
  *
  * This application demonstrates OpenXR without the XR_EXT_win32_window_binding extension.
- * Monado will create its own window for rendering.
+ * DisplayXR will create its own window for rendering.
  *
- * Input is handled by Monado's qwerty driver:
+ * Input is handled by DisplayXR's qwerty driver:
  * - WASD: Move camera
  * - Mouse drag: Look around
  * - ESC: Close window and exit
@@ -74,17 +74,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     LOG_INFO("=== SR Cube OpenXR Application ===");
-    LOG_INFO("OpenXR standard mode (Monado creates window)");
-    LOG_INFO("Input handled by Monado's qwerty driver");
+    LOG_INFO("OpenXR standard mode (DisplayXR creates window)");
+    LOG_INFO("Input handled by DisplayXR's qwerty driver");
 
-    // Add SRMonado to DLL search path
+    // Add DisplayXR to DLL search path
     {
         HKEY hKey;
         char installPath[MAX_PATH] = {0};
         DWORD pathSize = sizeof(installPath);
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\LeiaSR\\SRMonado", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\DisplayXR\\Runtime", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             if (RegQueryValueExA(hKey, "InstallPath", nullptr, nullptr, (LPBYTE)installPath, &pathSize) == ERROR_SUCCESS) {
-                LOG_INFO("Adding SRMonado install path to DLL search: %s", installPath);
+                LOG_INFO("Adding DisplayXR install path to DLL search: %s", installPath);
                 SetDllDirectoryA(installPath);
             }
             RegCloseKey(hKey);
@@ -121,7 +121,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // Create OpenXR session (Monado creates window)
+    // Create OpenXR session (DisplayXR creates window)
     LOG_INFO("Creating OpenXR session...");
     if (!CreateSession(xr, renderer.device.Get())) {
         LOG_ERROR("OpenXR session creation failed");
@@ -183,12 +183,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     LOG_INFO("");
     LOG_INFO("=== Entering main loop ===");
-    LOG_INFO("Rendering in Monado's window (input via qwerty driver)");
+    LOG_INFO("Rendering in DisplayXR's window (input via qwerty driver)");
     LOG_INFO("Controls: WASD=Move, QE=Up/Down, Mouse=Look, ESC=Quit");
     LOG_INFO("");
 
     // Main loop - no window, just process OpenXR frames
-    // Exit when OpenXR session ends (user closes Monado window or presses ESC)
+    // Exit when OpenXR session ends (user closes DisplayXR window or presses ESC)
     while (g_running && !xr.exitRequested) {
         // Update performance stats
         UpdatePerformanceStats(perfStats);
@@ -209,7 +209,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                     XMMATRIX leftViewMatrix, leftProjMatrix;
                     XMMATRIX rightViewMatrix, rightProjMatrix;
 
-                    // Camera movement is handled by Monado's qwerty driver
+                    // Camera movement is handled by DisplayXR's qwerty driver
                     // Pass zeros for player transform - XR poses already include qwerty input
                     if (LocateViews(xr, frameState.predictedDisplayTime,
                         leftViewMatrix, leftProjMatrix,

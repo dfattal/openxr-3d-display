@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <installer-gui-script minSpecVersion="2">
-    <title>SRMonado OpenXR Runtime</title>
-    <organization>com.leiainc</organization>
+    <title>DisplayXR OpenXR Runtime</title>
+    <organization>com.displayxr</organization>
     <os-version min="13.0" />
     <license file="LICENSE" />
     <welcome file="welcome.html" />
@@ -12,19 +12,19 @@
     </choices-outline>
 
     <choice id="runtime" visible="true" start_selected="true" enabled="false"
-        title="SRMonado Runtime"
-        description="OpenXR runtime with Vulkan compositor and MoltenVK (required). Installs to /Library/Application Support/SRMonado/ and registers as the active OpenXR runtime.">
-        <pkg-ref id="com.leiainc.srmonado.runtime" />
+        title="DisplayXR Runtime"
+        description="OpenXR runtime with Vulkan compositor and MoltenVK (required). Installs to /Library/Application Support/DisplayXR/ and registers as the active OpenXR runtime.">
+        <pkg-ref id="com.displayxr.displayxr.runtime" />
     </choice>
 
     <choice id="testapp" visible="true" start_selected="true"
         title="SimCube OpenXR Test App"
         description="Double-clickable test application that renders a spinning cube using OpenXR with sim_display output.">
-        <pkg-ref id="com.leiainc.srmonado.testapp" />
+        <pkg-ref id="com.displayxr.displayxr.testapp" />
     </choice>
 
-    <pkg-ref id="com.leiainc.srmonado.runtime" version="1.0"
+    <pkg-ref id="com.displayxr.displayxr.runtime" version="1.0"
         onConclusion="none">runtime.pkg</pkg-ref>
-    <pkg-ref id="com.leiainc.srmonado.testapp" version="1.0"
+    <pkg-ref id="com.displayxr.displayxr.testapp" version="1.0"
         onConclusion="none">testapp.pkg</pkg-ref>
 </installer-gui-script>

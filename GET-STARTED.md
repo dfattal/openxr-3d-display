@@ -1,23 +1,23 @@
 # GET-STARTED.md
 
-A quick-start guide for using the SRMonado OpenXR runtime on Leia SR devices.
+A quick-start guide for using the DisplayXR OpenXR runtime on Leia SR devices.
 
 ## Installation
 
-Run the installer (`SRMonadoSetup-X.X.X.exe`). It will:
+Run the installer (`DisplayXRSetup-X.X.X.exe`). It will:
 
-1. Install files to `C:\Program Files\LeiaSR\SRMonado\`
-2. Set registry keys to register SRMonado as the active OpenXR runtime:
+1. Install files to `C:\Program Files\DisplayXR\Runtime\`
+2. Set registry keys to register DisplayXR as the active OpenXR runtime:
    ```
    HKEY_LOCAL_MACHINE\Software\Khronos\OpenXR\1\ActiveRuntime
-     = "C:\Program Files\LeiaSR\SRMonado\SRMonado_win64.json"
+     = "C:\Program Files\DisplayXR\Runtime\DisplayXR_win64.json"
    ```
 
 ## Common Questions
 
 ### Do I need to run a service?
 
-**No.** SRMonado is built in **in-process mode**. The runtime library (`SRMonadoClient.dll`) loads directly into your application's process. There's no separate service to start or manage.
+**No.** DisplayXR is built in **in-process mode**. The runtime library (`DisplayXRClient.dll`) loads directly into your application's process. There's no separate service to start or manage.
 
 #### What is in-process mode?
 
@@ -28,7 +28,7 @@ Run the installer (`SRMonadoSetup-X.X.X.exe`). It will:
 │  │  Your app code                    │  │
 │  │         │                         │  │
 │  │         ▼                         │  │
-│  │  SRMonadoClient.dll               │  │
+│  │  DisplayXRClient.dll               │  │
 │  │  ├── OpenXR state tracker         │  │
 │  │  ├── Compositor                   │  │
 │  │  ├── SR Weaver                    │  │
@@ -40,7 +40,7 @@ Everything runs in ONE process. No service needed.
 
 #### Why no service mode?
 
-SRMonado is built from Monado's codebase, which was designed for **VR headsets** where a service helps manage shared hardware. But for Leia SR, service mode isn't needed:
+DisplayXR is built from Monado's codebase, which was designed for **VR headsets** where a service helps manage shared hardware. But for Leia SR, service mode isn't needed:
 
 | VR Headset Need | Leia SR Reality |
 |-----------------|-----------------|
@@ -67,15 +67,15 @@ For Leia SR, tracking state is already shared via **Leia's SR Tracker Service** 
 └─────────────────────────────────┘
 ```
 
-**Bottom line:** SRMonado is built without service mode - just install and use.
+**Bottom line:** DisplayXR is built without service mode - just install and use.
 
-### Do I need to add SRMonado to PATH?
+### Do I need to add DisplayXR to PATH?
 
 **No.** The OpenXR loader finds the runtime through the registry, not PATH. As long as:
 - The installer ran successfully
-- `ActiveRuntime` registry key points to `SRMonado_win64.json`
+- `ActiveRuntime` registry key points to `DisplayXR_win64.json`
 
-...any OpenXR application will automatically use SRMonado.
+...any OpenXR application will automatically use DisplayXR.
 
 ### How do I verify the runtime is registered?
 
@@ -86,12 +86,12 @@ reg query "HKLM\Software\Khronos\OpenXR\1" /v ActiveRuntime
 
 Should output:
 ```
-ActiveRuntime    REG_SZ    C:\Program Files\LeiaSR\SRMonado\SRMonado_win64.json
+ActiveRuntime    REG_SZ    C:\Program Files\DisplayXR\Runtime\DisplayXR_win64.json
 ```
 
 ## Compositor: Vulkan vs D3D11
 
-SRMonado has two compositor implementations:
+DisplayXR has two compositor implementations:
 
 | Compositor | Default? | Requirements | SR Weaver |
 |------------|----------|--------------|-----------|
@@ -136,10 +136,10 @@ Blender.exe starts
 Blender calls xrCreateInstance()
     │
     ▼
-OpenXR Loader reads registry → finds SRMonado
+OpenXR Loader reads registry → finds DisplayXR
     │
     ▼
-SRMonadoClient.dll loads into Blender's process (in-process mode)
+DisplayXRClient.dll loads into Blender's process (in-process mode)
     │
     ▼
 Runtime creates its own window for 3D output
@@ -164,7 +164,7 @@ The `XR_EXT_win32_window_binding` extension allows your app to provide its own w
 
 ### Does the extension register automatically?
 
-**Yes.** The extension is built into SRMonado. When you create an OpenXR instance, you can query for it:
+**Yes.** The extension is built into DisplayXR. When you create an OpenXR instance, you can query for it:
 
 ```c
 // Check if extension is available
@@ -255,7 +255,7 @@ $env:OXR_ENABLE_D3D11_NATIVE_COMPOSITOR = "1"
 
 Or from the install directory after running the installer:
 ```bash
-"C:\Program Files\LeiaSR\SRMonado\session_target_test.exe"
+"C:\Program Files\DisplayXR\Runtime\session_target_test.exe"
 ```
 
 ### What you'll see
@@ -282,7 +282,7 @@ Or from the install directory after running the installer:
 1. Check registry is set correctly (see above)
 2. Try setting `XR_RUNTIME_JSON` environment variable explicitly:
    ```powershell
-   $env:XR_RUNTIME_JSON = "C:\Program Files\LeiaSR\SRMonado\SRMonado_win64.json"
+   $env:XR_RUNTIME_JSON = "C:\Program Files\DisplayXR\Runtime\DisplayXR_win64.json"
    ./your_app.exe
    ```
 
@@ -316,7 +316,7 @@ Ensure you're requesting `"XR_EXT_win32_window_binding"` in `enabledExtensionNam
                    │ xrCreateSession(HWND)
                    ▼
 ┌─────────────────────────────────────────────┐
-│           SRMonadoClient.dll                │
+│           DisplayXRClient.dll                │
 │  ┌─────────────────────────────────────┐   │
 │  │  OpenXR state tracker               │   │
 │  │  Compositor (Vulkan or D3D11)       │   │
@@ -339,7 +339,7 @@ Ensure you're requesting `"XR_EXT_win32_window_binding"` in `enabledExtensionNam
 
 ## D3D11 Service Compositor (WebXR/Chrome Support)
 
-For applications that require service mode (separate runtime process), such as Chrome WebXR, SRMonado includes a D3D11 service compositor. This is enabled automatically when the Monado service is running.
+For applications that require service mode (separate runtime process), such as Chrome WebXR, DisplayXR includes a D3D11 service compositor. This is enabled automatically when the displayxr-service is running.
 
 ### Architecture: Server-Created Swapchains
 
@@ -347,7 +347,7 @@ The service compositor uses a "server-creates-swapchain" model:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Monado Service Process                    │
+│                    DisplayXR Service Process                    │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  D3D11 Service Compositor                            │    │
 │  │  ├── Creates D3D11 device on specific GPU (LUID)    │    │
@@ -384,7 +384,7 @@ The service compositor uses a "server-creates-swapchain" model:
 
 SRHydra (Leia's other OpenXR runtime) uses a similar architecture:
 
-| Aspect | SRMonado | SRHydra |
+| Aspect | DisplayXR | SRHydra |
 |--------|----------|---------|
 | Architecture | Client-Server (Monado IPC) | Client-Server (WyvernEngine IPC) |
 | Swapchain Model | Server-created | Server-created |

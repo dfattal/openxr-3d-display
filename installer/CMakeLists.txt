@@ -1,7 +1,7 @@
 # Copyright 2024, Leia Inc.
 # SPDX-License-Identifier: BSL-1.0
 
-# SRMonado NSIS Installer CMake integration
+# DisplayXR NSIS Installer CMake integration
 
 if(NOT WIN32)
 	message(FATAL_ERROR "Installer can only be built on Windows")
@@ -24,10 +24,10 @@ endif()
 message(STATUS "Found NSIS: ${NSIS_EXECUTABLE}")
 
 # Version information
-set(SRMONADO_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
-set(SRMONADO_VERSION_MINOR ${PROJECT_VERSION_MINOR})
-set(SRMONADO_VERSION_PATCH ${PROJECT_VERSION_PATCH})
-set(SRMONADO_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
+set(DISPLAYXR_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(DISPLAYXR_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(DISPLAYXR_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+set(DISPLAYXR_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
 
 # Build number (from CI or default to 0)
 if(NOT DEFINED BUILD_NUM)
@@ -42,22 +42,22 @@ configure_file(
 )
 
 # Paths to build artifacts (use install prefix, not build dir)
-set(SRMONADO_BIN_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
+set(DISPLAYXR_BIN_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
 
 # Create installer target
 add_custom_target(installer
 	COMMAND "${NSIS_EXECUTABLE}"
-		"/DVERSION=${SRMONADO_VERSION}"
-		"/DVERSION_MAJOR=${SRMONADO_VERSION_MAJOR}"
-		"/DVERSION_MINOR=${SRMONADO_VERSION_MINOR}"
-		"/DVERSION_PATCH=${SRMONADO_VERSION_PATCH}"
+		"/DVERSION=${DISPLAYXR_VERSION}"
+		"/DVERSION_MAJOR=${DISPLAYXR_VERSION_MAJOR}"
+		"/DVERSION_MINOR=${DISPLAYXR_VERSION_MINOR}"
+		"/DVERSION_PATCH=${DISPLAYXR_VERSION_PATCH}"
 		"/DBUILD_NUM=${BUILD_NUM}"
-		"/DBIN_DIR=${SRMONADO_BIN_DIR}"
+		"/DBIN_DIR=${DISPLAYXR_BIN_DIR}"
 		"/DSOURCE_DIR=${CMAKE_SOURCE_DIR}"
 		"/DOUTPUT_DIR=${CMAKE_INSTALL_PREFIX}"
-		"${CMAKE_CURRENT_SOURCE_DIR}/SRMonadoInstaller.nsi"
+		"${CMAKE_CURRENT_SOURCE_DIR}/DisplayXRInstaller.nsi"
 	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-	COMMENT "Building SRMonado installer..."
+	COMMENT "Building DisplayXR installer..."
 	VERBATIM
 )
 
@@ -65,9 +65,9 @@ add_custom_target(installer
 if(TARGET ${RUNTIME_TARGET})
 	add_dependencies(installer ${RUNTIME_TARGET})
 endif()
-if(TARGET monado-service)
-	add_dependencies(installer monado-service)
+if(TARGET displayxr-service)
+	add_dependencies(installer displayxr-service)
 endif()
-if(TARGET LeiaXRSwitcher)
-	add_dependencies(installer LeiaXRSwitcher)
+if(TARGET DisplayXRSwitcher)
+	add_dependencies(installer DisplayXRSwitcher)
 endif()

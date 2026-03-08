@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  SR Cube OpenXR - Standard OpenXR mode with Vulkan (Monado creates window)
+ * @brief  SR Cube OpenXR - Standard OpenXR mode with Vulkan (DisplayXR creates window)
  *
  * No windowing code — the runtime's compositor creates its own window.
  * No input handling — static camera with continuous cube rotation.
- * Input is handled by Monado's qwerty driver.
+ * Input is handled by DisplayXR's qwerty driver.
  */
 
 #define WIN32_LEAN_AND_MEAN
@@ -1402,17 +1402,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     LOG_INFO("=== SR Cube OpenXR Vulkan Application ===");
-    LOG_INFO("OpenXR standard mode (Monado creates window)");
-    LOG_INFO("Input handled by Monado's qwerty driver");
+    LOG_INFO("OpenXR standard mode (DisplayXR creates window)");
+    LOG_INFO("Input handled by DisplayXR's qwerty driver");
 
-    // Add SRMonado to DLL search path
+    // Add DisplayXR to DLL search path
     {
         HKEY hKey;
         char installPath[MAX_PATH] = {0};
         DWORD pathSize = sizeof(installPath);
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\LeiaSR\\SRMonado", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\DisplayXR\\Runtime", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             if (RegQueryValueExA(hKey, "InstallPath", nullptr, nullptr, (LPBYTE)installPath, &pathSize) == ERROR_SUCCESS) {
-                LOG_INFO("Adding SRMonado install path to DLL search: %s", installPath);
+                LOG_INFO("Adding DisplayXR install path to DLL search: %s", installPath);
                 SetDllDirectoryA(installPath);
             }
             RegCloseKey(hKey);
@@ -1486,7 +1486,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // Create OpenXR session (Monado creates window)
+    // Create OpenXR session (DisplayXR creates window)
     if (!CreateSession(xr, vkInstance, physDevice, vkDevice, queueFamilyIndex, 0)) {
         LOG_ERROR("OpenXR session creation failed");
         vkDestroyDevice(vkDevice, nullptr);
@@ -1555,7 +1555,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     LOG_INFO("");
     LOG_INFO("=== Entering main loop ===");
-    LOG_INFO("Rendering in Monado's window (input via qwerty driver)");
+    LOG_INFO("Rendering in DisplayXR's window (input via qwerty driver)");
     LOG_INFO("Controls: WASD=Move, QE=Up/Down, Mouse=Look, ESC=Quit");
     LOG_INFO("");
 

@@ -950,7 +950,7 @@ gl_get_proc_addr(void *userptr, const char *name)
 	return ret;
 }
 
-static const wchar_t GL_WINDOW_CLASS[] = L"MonadoGLCompositor";
+static const wchar_t GL_WINDOW_CLASS[] = L"DisplayXRGLCompositor";
 
 static LRESULT CALLBACK
 gl_window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)

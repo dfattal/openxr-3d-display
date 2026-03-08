@@ -62,7 +62,7 @@ main(int argc, char *argv[])
 	struct ipc_server_main_info ismi = {
 	    .udgci =
 	        {
-	            .window_title = "Monado! ✨⚡🔥",
+	            .window_title = "DisplayXR Service",
 	            .open = U_DEBUG_GUI_OPEN_AUTO,
 	        },
 	};

@@ -269,7 +269,7 @@ oxr_xrPollEvent(XrInstance instance, XrEventDataBuffer *eventData)
 {
 	OXR_TRACE_MARKER();
 
-	U_LOG_D("[SRMonado] oxr_xrPollEvent: API ENTRY");
+	U_LOG_D("[DisplayXR] oxr_xrPollEvent: API ENTRY");
 
 	// Guard against calls after xrDestroyInstance — Unity's loader
 	// continues polling events after destroying the instance.
@@ -288,15 +288,15 @@ oxr_xrPollEvent(XrInstance instance, XrEventDataBuffer *eventData)
 	if (res == XR_SUCCESS) {
 		if (eventData->type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
 			XrEventDataSessionStateChanged *state_change = (XrEventDataSessionStateChanged *)eventData;
-			U_LOG_D("[SRMonado] oxr_xrPollEvent: SESSION_STATE_CHANGED state=%d",
+			U_LOG_D("[DisplayXR] oxr_xrPollEvent: SESSION_STATE_CHANGED state=%d",
 			        (int)state_change->state);
 		} else {
-			U_LOG_D("[SRMonado] oxr_xrPollEvent: event type=%d", (int)eventData->type);
+			U_LOG_D("[DisplayXR] oxr_xrPollEvent: event type=%d", (int)eventData->type);
 		}
 	} else if (res == XR_EVENT_UNAVAILABLE) {
-		U_LOG_D("[SRMonado] oxr_xrPollEvent: no event available");
+		U_LOG_D("[DisplayXR] oxr_xrPollEvent: no event available");
 	} else {
-		U_LOG_D("[SRMonado] oxr_xrPollEvent: ERROR result=%d", (int)res);
+		U_LOG_D("[DisplayXR] oxr_xrPollEvent: ERROR result=%d", (int)res);
 	}
 
 	return res;

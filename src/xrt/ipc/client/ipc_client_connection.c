@@ -170,7 +170,7 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 					err = GetLastError();
 					IPC_ERROR(ipc_c,
 					          "All service launch methods failed (CreateProcessA and ShellExecuteEx). "
-					          "Please start monado-service.exe manually or install it as a startup task. "
+					          "Please start displayxr-service.exe manually or install it as a startup task. "
 					          "Last error: %d %s",
 					          err, ipc_winerror(err));
 					return INVALID_HANDLE_VALUE;
@@ -208,7 +208,7 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 	// Use a fixed global pipe name for Windows.
 	// This is required for AppContainer apps (like Chrome WebXR) which have virtualized
 	// temp directories - using temp path would cause client and server to use different pipe names.
-	const char *pipe_name = "\\\\.\\pipe\\monado\\monado_comp_ipc";
+	const char *pipe_name = "\\\\.\\pipe\\displayxr\\displayxr_comp_ipc";
 
 	HANDLE pipe_inst = ipc_connect_pipe(ipc_c, pipe_name);
 	if (pipe_inst == INVALID_HANDLE_VALUE) {
@@ -329,7 +329,7 @@ ipc_client_check_git_tag(struct ipc_connection *ipc_c)
 		return XRT_SUCCESS;
 	}
 
-	IPC_ERROR(ipc_c, "Monado client library version %s does not match service version %s", u_git_tag,
+	IPC_ERROR(ipc_c, "DisplayXR client library version %s does not match service version %s", u_git_tag,
 	          ipc_c->ism->u_git_tag);
 
 	if (!debug_get_bool_option_ipc_ignore_version()) {
@@ -399,14 +399,14 @@ ipc_client_connection_init(struct ipc_connection *ipc_c,
 	if (!ipc_client_socket_connect(ipc_c)) {
 #endif
 		IPC_ERROR(ipc_c,
-		          "Failed to connect to monado service process\n\n"
+		          "Failed to connect to DisplayXR service process\n\n"
 		          "###\n"
 		          "#\n"
 		          "# Please make sure that the service process is running\n"
 		          "#\n"
-		          "# It is called \"monado-service\"\n"
+		          "# It is called \"displayxr-service\"\n"
 		          "# In build trees, it is located "
-		          "\"build-dir/src/xrt/targets/service/monado-service\"\n"
+		          "\"build-dir/src/xrt/targets/service/displayxr-service\"\n"
 		          "#\n"
 		          "###");
 		os_mutex_destroy(&ipc_c->mutex);

@@ -1,5 +1,5 @@
-; SRMonado Windows Installer Script
-; Copyright 2024, Leia Inc.
+; DisplayXR Windows Installer Script
+; Copyright 2024-2026, DisplayXR
 ; SPDX-License-Identifier: BSL-1.0
 
 ;--------------------------------
@@ -26,10 +26,10 @@
 ;--------------------------------
 ; General Attributes
 
-Name "SRMonado ${VERSION}"
-OutFile "${OUTPUT_DIR}\SRMonadoSetup-${VERSION}.${BUILD_NUM}.exe"
-InstallDir "$PROGRAMFILES64\LeiaSR\SRMonado"
-InstallDirRegKey HKLM "Software\LeiaSR\SRMonado" "InstallPath"
+Name "DisplayXR ${VERSION}"
+OutFile "${OUTPUT_DIR}\DisplayXRSetup-${VERSION}.${BUILD_NUM}.exe"
+InstallDir "$PROGRAMFILES64\DisplayXR\Runtime"
+InstallDirRegKey HKLM "Software\DisplayXR\Runtime" "InstallPath"
 RequestExecutionLevel admin
 ShowInstDetails show
 ShowUninstDetails show
@@ -53,8 +53,8 @@ ShowUninstDetails show
 ; Interface Settings
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "${SOURCE_DIR}\doc\monado.ico"
-!define MUI_UNICON "${SOURCE_DIR}\doc\monado.ico"
+!define MUI_ICON "${SOURCE_DIR}\doc\displayxr.ico"
+!define MUI_UNICON "${SOURCE_DIR}\doc\displayxr.ico"
 
 ;--------------------------------
 ; Pages
@@ -558,39 +558,38 @@ FunctionEnd
 ;--------------------------------
 ; Installer Sections
 
-Section "SRMonado Runtime" SecRuntime
+Section "DisplayXR Runtime" SecRuntime
 	SectionIn RO  ; Required section
 
 	SetOutPath "$INSTDIR"
 
 	; Install runtime files
-	File "${BIN_DIR}\SRMonadoClient.dll"
+	File "${BIN_DIR}\DisplayXRClient.dll"
 
 	; Install service (needed for Chrome WebXR and other sandboxed apps)
-	File /nonfatal "${BIN_DIR}\monado-service.exe"
+	File /nonfatal "${BIN_DIR}\displayxr-service.exe"
 
 	; Install manifest
-	File "${OUTPUT_DIR}\SRMonado_win64.json"
+	File "${OUTPUT_DIR}\DisplayXR_win64.json"
 
 	; Install switcher if available
-	File /nonfatal "${BIN_DIR}\LeiaXRSwitcher.exe"
+	File /nonfatal "${BIN_DIR}\DisplayXRSwitcher.exe"
 
 	; Install runtime DLL dependencies
 	File /nonfatal "${BIN_DIR}\*.dll"
 
 	; Create AppData directories
-	CreateDirectory "$APPDATA\LeiaSR"
-	CreateDirectory "$APPDATA\LeiaSR\SRMonado"
+	CreateDirectory "$APPDATA\DisplayXR"
 
 	; Write registry keys
-	WriteRegStr HKLM "Software\LeiaSR\SRMonado" "InstallPath" "$INSTDIR"
-	WriteRegStr HKLM "Software\LeiaSR\SRMonado" "Version" "${VERSION}"
+	WriteRegStr HKLM "Software\DisplayXR\Runtime" "InstallPath" "$INSTDIR"
+	WriteRegStr HKLM "Software\DisplayXR\Runtime" "Version" "${VERSION}"
 
 	; Set as active OpenXR runtime
-	WriteRegStr HKLM "Software\Khronos\OpenXR\1" "ActiveRuntime" "$INSTDIR\SRMonado_win64.json"
+	WriteRegStr HKLM "Software\Khronos\OpenXR\1" "ActiveRuntime" "$INSTDIR\DisplayXR_win64.json"
 
 	; Add install directory to system PATH
-	; This is needed so OpenXR apps can find SRMonadoClient.dll's dependencies
+	; This is needed so OpenXR apps can find DisplayXRClient.dll's dependencies
 	; (vulkan-1.dll, SDL2.dll, etc.) when loading the runtime
 	Push $INSTDIR
 	Call AddToPath
@@ -607,33 +606,33 @@ Section "SRMonado Runtime" SecRuntime
 	WriteUninstaller "$INSTDIR\Uninstall.exe"
 
 	; Add to Add/Remove Programs
-	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
-		"DisplayName" "SRMonado OpenXR Runtime"
-	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
+	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
+		"DisplayName" "DisplayXR OpenXR Runtime"
+	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
 		"UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
-	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
+	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
 		"QuietUninstallString" "$\"$INSTDIR\Uninstall.exe$\" /S"
-	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
+	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
 		"InstallLocation" "$INSTDIR"
-	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
-		"DisplayIcon" "$INSTDIR\SRMonadoClient.dll"
-	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
-		"Publisher" "Leia Inc."
-	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
+	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
+		"DisplayIcon" "$INSTDIR\DisplayXRClient.dll"
+	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
+		"Publisher" "DisplayXR"
+	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
 		"DisplayVersion" "${VERSION}"
-	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
+	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
 		"VersionMajor" ${VERSION_MAJOR}
-	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
+	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
 		"VersionMinor" ${VERSION_MINOR}
-	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
+	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
 		"NoModify" 1
-	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
+	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
 		"NoRepair" 1
 
 	; Calculate installed size
 	${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
 	IntFmt $0 "0x%08X" $0
-	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado" \
+	WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR" \
 		"EstimatedSize" "$0"
 
 	; Save installation log to install directory
@@ -644,13 +643,13 @@ Section "SRMonado Runtime" SecRuntime
 SectionEnd
 
 Section "Start Menu Shortcuts" SecShortcuts
-	CreateDirectory "$SMPROGRAMS\LeiaSR"
+	CreateDirectory "$SMPROGRAMS\DisplayXR"
 
 	; Add switcher shortcut if installed
-	IfFileExists "$INSTDIR\LeiaXRSwitcher.exe" 0 +2
-		CreateShortCut "$SMPROGRAMS\LeiaSR\LeiaXR Runtime Switcher.lnk" "$INSTDIR\LeiaXRSwitcher.exe"
+	IfFileExists "$INSTDIR\DisplayXRSwitcher.exe" 0 +2
+		CreateShortCut "$SMPROGRAMS\DisplayXR\DisplayXR Runtime Switcher.lnk" "$INSTDIR\DisplayXRSwitcher.exe"
 
-	CreateShortCut "$SMPROGRAMS\LeiaSR\Uninstall SRMonado.lnk" "$INSTDIR\Uninstall.exe"
+	CreateShortCut "$SMPROGRAMS\DisplayXR\Uninstall DisplayXR.lnk" "$INSTDIR\Uninstall.exe"
 SectionEnd
 
 ;--------------------------------
@@ -658,17 +657,17 @@ SectionEnd
 
 Section "Uninstall"
 	; Remove files
-	Delete "$INSTDIR\SRMonadoClient.dll"
-	Delete "$INSTDIR\monado-service.exe"
-	Delete "$INSTDIR\LeiaXRSwitcher.exe"
-	Delete "$INSTDIR\SRMonado_win64.json"
+	Delete "$INSTDIR\DisplayXRClient.dll"
+	Delete "$INSTDIR\displayxr-service.exe"
+	Delete "$INSTDIR\DisplayXRSwitcher.exe"
+	Delete "$INSTDIR\DisplayXR_win64.json"
 	Delete "$INSTDIR\install.log"
 
 	; Remove any remaining DLLs
 	Delete "$INSTDIR\*.dll"
 
 	; Save uninstall log to temp before removing directory
-	StrCpy $0 "$TEMP\SRMonado_uninstall.log"
+	StrCpy $0 "$TEMP\DisplayXR_uninstall.log"
 	Push $0
 	Call un.DumpLog
 
@@ -677,27 +676,26 @@ Section "Uninstall"
 
 	; Remove install directory (if empty)
 	RMDir "$INSTDIR"
-	RMDir "$PROGRAMFILES64\LeiaSR"
+	RMDir "$PROGRAMFILES64\DisplayXR"
 
 	; Remove AppData directory
-	RMDir "$APPDATA\LeiaSR\SRMonado"
-	; Don't remove LeiaSR folder as it may be shared with SRHydra
+	RMDir "$APPDATA\DisplayXR"
 
 	; Remove Start Menu shortcuts
-	Delete "$SMPROGRAMS\LeiaSR\LeiaXR Runtime Switcher.lnk"
-	Delete "$SMPROGRAMS\LeiaSR\Uninstall SRMonado.lnk"
-	RMDir "$SMPROGRAMS\LeiaSR"
+	Delete "$SMPROGRAMS\DisplayXR\DisplayXR Runtime Switcher.lnk"
+	Delete "$SMPROGRAMS\DisplayXR\Uninstall DisplayXR.lnk"
+	RMDir "$SMPROGRAMS\DisplayXR"
 
-	; Remove SRMonado registry keys
-	DeleteRegKey HKLM "Software\LeiaSR\SRMonado"
-	DeleteRegKey /ifempty HKLM "Software\LeiaSR"
+	; Remove DisplayXR registry keys
+	DeleteRegKey HKLM "Software\DisplayXR\Runtime"
+	DeleteRegKey /ifempty HKLM "Software\DisplayXR"
 
 	; Remove from Add/Remove Programs
-	DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\SRMonado"
+	DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR"
 
 	; Only remove ActiveRuntime if it points to our manifest
 	ReadRegStr $0 HKLM "Software\Khronos\OpenXR\1" "ActiveRuntime"
-	StrCmp $0 "$INSTDIR\SRMonado_win64.json" 0 +2
+	StrCmp $0 "$INSTDIR\DisplayXR_win64.json" 0 +2
 		DeleteRegValue HKLM "Software\Khronos\OpenXR\1" "ActiveRuntime"
 
 	; Remove install directory from system PATH
@@ -717,7 +715,7 @@ SectionEnd
 ; Section Descriptions
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-	!insertmacro MUI_DESCRIPTION_TEXT ${SecRuntime} "SRMonado OpenXR runtime files (required)"
+	!insertmacro MUI_DESCRIPTION_TEXT ${SecRuntime} "DisplayXR OpenXR runtime files (required)"
 	!insertmacro MUI_DESCRIPTION_TEXT ${SecShortcuts} "Create Start Menu shortcuts"
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
@@ -727,7 +725,7 @@ SectionEnd
 Function .onInit
 	; Check for 64-bit Windows
 	${IfNot} ${RunningX64}
-		MessageBox MB_ICONSTOP "SRMonado requires 64-bit Windows."
+		MessageBox MB_ICONSTOP "DisplayXR requires 64-bit Windows."
 		Abort
 	${EndIf}
 FunctionEnd
@@ -736,9 +734,9 @@ FunctionEnd
 ; Version Information
 
 VIProductVersion "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}.0"
-VIAddVersionKey "ProductName" "SRMonado"
-VIAddVersionKey "CompanyName" "Leia Inc."
-VIAddVersionKey "LegalCopyright" "Copyright (c) 2024 Leia Inc."
-VIAddVersionKey "FileDescription" "SRMonado OpenXR Runtime Installer"
+VIAddVersionKey "ProductName" "DisplayXR"
+VIAddVersionKey "CompanyName" "DisplayXR"
+VIAddVersionKey "LegalCopyright" "Copyright (c) 2024-2026 DisplayXR"
+VIAddVersionKey "FileDescription" "DisplayXR OpenXR Runtime Installer"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"

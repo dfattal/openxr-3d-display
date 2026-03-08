@@ -1,9 +1,9 @@
 # Copyright 2024, Leia Inc.
 # SPDX-License-Identifier: BSL-1.0
 
-# LeiaXR Runtime Switcher - Switch between SRMonado and SRHydra
+# DisplayXR Runtime Switcher - Switch between DisplayXR and SRHydra
 
-set(SWITCHER_TARGET LeiaXRSwitcher)
+set(SWITCHER_TARGET DisplayXRSwitcher)
 
 add_executable(${SWITCHER_TARGET} WIN32
 	switcher_main.cpp

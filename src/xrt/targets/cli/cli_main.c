@@ -23,11 +23,11 @@ cli_print_help(int argc, const char **argv)
 		P("Unknown command '%s'\n\n", argv[1]);
 	}
 
-	P("Monado-CLI 0.0.1\n");
+	P("DisplayXR-CLI 0.0.1\n");
 	P("Usage: %s command [options] [file]\n", argv[0]);
 	P("\n");
 	P("Commands:\n");
-	P("  info       - Print information about Monado and the system, for bug reporting.\n");
+	P("  info       - Print information about DisplayXR and the system, for bug reporting.\n");
 	P("  test       - List found devices, for prober testing.\n");
 	P("  probe      - Just probe and then exit.\n");
 	P("  calibrate  - Calibrate a camera and save config (not implemented yet).\n");

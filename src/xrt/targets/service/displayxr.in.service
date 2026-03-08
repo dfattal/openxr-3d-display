@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2020, Collabora, Ltd.
 
 [Unit]
-Description=Monado XR runtime service module @extra_desc@
+Description=DisplayXR runtime service module @extra_desc@
 Requires=%N.socket
 ConditionUser=!root
 Conflicts=@conflicts@.service

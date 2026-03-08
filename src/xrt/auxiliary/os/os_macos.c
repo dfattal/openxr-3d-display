@@ -7,8 +7,8 @@
  * @ingroup aux_os
  *
  * This file provides the macOS window-closed atomic flag and its accessors.
- * It lives in aux_os so all targets (libopenxr_monado, monado-service,
- * monado-cli) can link it — st_oxr writes it, comp_multi reads it.
+ * It lives in aux_os so all targets (libopenxr_displayxr, displayxr-service,
+ * displayxr-cli) can link it — st_oxr writes it, comp_multi reads it.
  */
 
 #include "xrt/xrt_config_os.h"

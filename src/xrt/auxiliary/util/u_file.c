@@ -77,7 +77,7 @@ u_file_get_config_dir(char *out_path, size_t out_path_size)
 	const char *xdg_home = getenv("XDG_CONFIG_HOME");
 	const char *home = getenv("HOME");
 	if (xdg_home != NULL) {
-		return snprintf(out_path, out_path_size, "%s/monado", xdg_home);
+		return snprintf(out_path, out_path_size, "%s/displayxr", xdg_home);
 	}
 	if (home != NULL) {
 		return snprintf(out_path, out_path_size, "%s/.config/monado", home);
@@ -160,7 +160,7 @@ u_file_open_file_in_config_dir_subpath(const char *subpath, const char *filename
 int
 u_file_get_hand_tracking_models_dir(char *out_path, size_t out_path_size)
 {
-	const char *suffix = "/monado/hand-tracking-models";
+	const char *suffix = "/displayxr/hand-tracking-models";
 	const char *xdg_data_home = getenv("XDG_DATA_HOME");
 	const char *home = getenv("HOME");
 	int ret = 0;

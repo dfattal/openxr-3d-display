@@ -16,9 +16,9 @@ set(XR_API_MAJOR "1")
 
 add_library(${RUNTIME_TARGET} MODULE target.c libopenxr.def)
 
-# On Windows, output the runtime as SRMonadoClient.dll for the installer
+# On Windows, output the runtime as DisplayXRClient.dll for the installer
 if(WIN32)
-	set_target_properties(${RUNTIME_TARGET} PROPERTIES OUTPUT_NAME "SRMonadoClient")
+	set_target_properties(${RUNTIME_TARGET} PROPERTIES OUTPUT_NAME "DisplayXRClient")
 
 	# Delay-load Vulkan and SR Vulkan DLLs so the runtime can load on systems
 	# where these are absent. The D3D11 native compositor path never calls into
@@ -119,7 +119,7 @@ generate_openxr_runtime_manifest_buildtree(
 # Prepare the installable manifest: will be generated completely at install time,
 # by a script we generate now.
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-	# Windows: install manifest to top level with SRMonado naming
+	# Windows: install manifest to top level with DisplayXR naming
 	# The installer copies everything to a flat directory, so use "." for the
 	# relative path (manifest and DLL will be in the same directory)
 	set(_extra_args RUNTIME_DIR_RELATIVE_TO_MANIFEST .)
@@ -131,7 +131,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 		RUNTIME_TARGET ${RUNTIME_TARGET}
 		DESTINATION .
 		RELATIVE_RUNTIME_DIR ${CMAKE_INSTALL_BINDIR}
-		OUT_FILENAME "SRMonado_win64.json"
+		OUT_FILENAME "DisplayXR_win64.json"
 		)
 	install(
 		TARGETS ${RUNTIME_TARGET}

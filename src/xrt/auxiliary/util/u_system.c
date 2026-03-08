@@ -262,6 +262,6 @@ u_system_fill_properties(struct u_system *usys, const char *name)
 {
 	usys->base.properties.vendor_id = 42;
 	// The magical 247 number, is to silence warnings.
-	snprintf(usys->base.properties.name, XRT_MAX_SYSTEM_NAME_SIZE, "Monado: %.*s", 247, name);
+	snprintf(usys->base.properties.name, XRT_MAX_SYSTEM_NAME_SIZE, "DisplayXR: %.*s", 247, name);
 	usys->base.properties.form_factor = XRT_FORM_FACTOR_HMD;
 }

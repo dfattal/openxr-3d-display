@@ -41,29 +41,29 @@ jobs:
 
       - name: Package runtime
         run: |
-          mkdir -p _package/SRMonado-macOS/lib
-          mkdir -p _package/SRMonado-macOS/share/vulkan/icd.d
+          mkdir -p _package/DisplayXR-macOS/lib
+          mkdir -p _package/DisplayXR-macOS/share/vulkan/icd.d
           # Find and copy runtime module (.so on macOS for MODULE libraries)
-          RUNTIME_LIB=$(find build/src/xrt/targets/openxr -name "libopenxr_monado*" -type f | head -1)
-          cp "$RUNTIME_LIB" _package/SRMonado-macOS/lib/
+          RUNTIME_LIB=$(find build/src/xrt/targets/openxr -name "libopenxr_displayxr*" -type f | head -1)
+          cp "$RUNTIME_LIB" _package/DisplayXR-macOS/lib/
           RUNTIME_BASENAME=$(basename "$RUNTIME_LIB")
           # Bundle Vulkan loader and MoltenVK from SDK (search multiple possible locations)
           for lib in libvulkan.1.dylib libMoltenVK.dylib; do
             if [ -f "$VULKAN_SDK/lib/$lib" ]; then
-              cp "$VULKAN_SDK/lib/$lib" _package/SRMonado-macOS/lib/
+              cp "$VULKAN_SDK/lib/$lib" _package/DisplayXR-macOS/lib/
             elif [ -f "$VULKAN_SDK/../lib/$lib" ]; then
-              cp "$VULKAN_SDK/../lib/$lib" _package/SRMonado-macOS/lib/
+              cp "$VULKAN_SDK/../lib/$lib" _package/DisplayXR-macOS/lib/
             else
               FOUND=$(find "$VULKAN_SDK" -name "$lib" -type f 2>/dev/null | head -1)
               if [ -n "$FOUND" ]; then
-                cp "$FOUND" _package/SRMonado-macOS/lib/
+                cp "$FOUND" _package/DisplayXR-macOS/lib/
               else
                 echo "Warning: $lib not found in SDK, skipping"
               fi
             fi
           done
           # Create MoltenVK ICD manifest pointing to bundled lib
-          cat > _package/SRMonado-macOS/share/vulkan/icd.d/MoltenVK_icd.json <<EOF
+          cat > _package/DisplayXR-macOS/share/vulkan/icd.d/MoltenVK_icd.json <<EOF
           {
             "file_format_version": "1.0.0",
             "ICD": {
@@ -75,13 +75,13 @@ jobs:
           EOF
           # Fix rpaths on the runtime so it finds bundled libvulkan
           install_name_tool -add_rpath @loader_path "$RUNTIME_LIB" 2>/dev/null || true
-          install_name_tool -add_rpath @loader_path _package/SRMonado-macOS/lib/"$RUNTIME_BASENAME" 2>/dev/null || true
+          install_name_tool -add_rpath @loader_path _package/DisplayXR-macOS/lib/"$RUNTIME_BASENAME" 2>/dev/null || true
           # Generate portable manifest with relative library path
-          cat > _package/SRMonado-macOS/openxr_monado.json <<EOF
+          cat > _package/DisplayXR-macOS/openxr_displayxr.json <<EOF
           {
             "file_format_version": "1.0.0",
             "runtime": {
-              "name": "Monado (SRMonado macOS)",
+              "name": "DisplayXR Runtime",
               "library_path": "lib/$RUNTIME_BASENAME"
             }
           }
@@ -165,33 +165,33 @@ jobs:
       - name: Package test apps
         if: env.BUILD_TEST_APP == 'true'
         run: |
-          mkdir -p _package/SRMonado-macOS/bin
-          cp test_apps/cube_vk_macos/build/cube_vk_macos _package/SRMonado-macOS/bin/
-          cp test_apps/cube_ext_vk_macos/build/cube_ext_vk_macos _package/SRMonado-macOS/bin/
-          cp test_apps/cube_metal_macos/build/cube_metal_macos _package/SRMonado-macOS/bin/
-          cp test_apps/cube_ext_metal_macos/build/cube_ext_metal_macos _package/SRMonado-macOS/bin/
-          cp test_apps/cube_shared_metal_macos/build/cube_shared_metal_macos _package/SRMonado-macOS/bin/
-          cp test_apps/cube_gl_macos/build/cube_gl_macos _package/SRMonado-macOS/bin/
-          cp test_apps/cube_shared_vk_macos/build/cube_shared_vk_macos _package/SRMonado-macOS/bin/
+          mkdir -p _package/DisplayXR-macOS/bin
+          cp test_apps/cube_vk_macos/build/cube_vk_macos _package/DisplayXR-macOS/bin/
+          cp test_apps/cube_ext_vk_macos/build/cube_ext_vk_macos _package/DisplayXR-macOS/bin/
+          cp test_apps/cube_metal_macos/build/cube_metal_macos _package/DisplayXR-macOS/bin/
+          cp test_apps/cube_ext_metal_macos/build/cube_ext_metal_macos _package/DisplayXR-macOS/bin/
+          cp test_apps/cube_shared_metal_macos/build/cube_shared_metal_macos _package/DisplayXR-macOS/bin/
+          cp test_apps/cube_gl_macos/build/cube_gl_macos _package/DisplayXR-macOS/bin/
+          cp test_apps/cube_shared_vk_macos/build/cube_shared_vk_macos _package/DisplayXR-macOS/bin/
           # Bundle the OpenXR loader dylib so it works without system install
-          cp /tmp/openxr-install/lib/libopenxr_loader*.dylib _package/SRMonado-macOS/lib/
+          cp /tmp/openxr-install/lib/libopenxr_loader*.dylib _package/DisplayXR-macOS/lib/
           # Fix rpaths so test apps and loader find bundled libvulkan/MoltenVK
-          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/cube_vk_macos 2>/dev/null || true
-          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/cube_ext_vk_macos 2>/dev/null || true
-          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/cube_metal_macos 2>/dev/null || true
-          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/cube_ext_metal_macos 2>/dev/null || true
-          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/cube_shared_metal_macos 2>/dev/null || true
-          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/cube_gl_macos 2>/dev/null || true
-          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/cube_shared_vk_macos 2>/dev/null || true
-          install_name_tool -add_rpath @loader_path _package/SRMonado-macOS/lib/libopenxr_loader*.dylib 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path/../lib _package/DisplayXR-macOS/bin/cube_vk_macos 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path/../lib _package/DisplayXR-macOS/bin/cube_ext_vk_macos 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path/../lib _package/DisplayXR-macOS/bin/cube_metal_macos 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path/../lib _package/DisplayXR-macOS/bin/cube_ext_metal_macos 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path/../lib _package/DisplayXR-macOS/bin/cube_shared_metal_macos 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path/../lib _package/DisplayXR-macOS/bin/cube_gl_macos 2>/dev/null || true
+          install_name_tool -add_rpath @executable_path/../lib _package/DisplayXR-macOS/bin/cube_shared_vk_macos 2>/dev/null || true
+          install_name_tool -add_rpath @loader_path _package/DisplayXR-macOS/lib/libopenxr_loader*.dylib 2>/dev/null || true
           # Copy textures for test apps
-          mkdir -p _package/SRMonado-macOS/bin/textures
-          cp test_apps/common/textures/*.jpg _package/SRMonado-macOS/bin/textures/ 2>/dev/null || true
+          mkdir -p _package/DisplayXR-macOS/bin/textures
+          cp test_apps/common/textures/*.jpg _package/DisplayXR-macOS/bin/textures/ 2>/dev/null || true
           # Create run script for cube_vk_macos
-          cat > _package/SRMonado-macOS/run_cube_vk.sh <<'SCRIPT'
+          cat > _package/DisplayXR-macOS/run_cube_vk.sh <<'SCRIPT'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+          export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
           export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
           export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
           export SIM_DISPLAY_ENABLE=1
@@ -199,60 +199,60 @@ jobs:
           echo "Starting cube_vk_macos with $SIM_DISPLAY_OUTPUT output..."
           exec "$DIR/bin/cube_vk_macos" "$@"
           SCRIPT
-          chmod +x _package/SRMonado-macOS/run_cube_vk.sh
+          chmod +x _package/DisplayXR-macOS/run_cube_vk.sh
           # Create run script for cube_metal_macos (no Vulkan env vars needed)
-          cat > _package/SRMonado-macOS/run_cube_metal.sh <<'SCRIPT'
+          cat > _package/DisplayXR-macOS/run_cube_metal.sh <<'SCRIPT'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+          export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
           export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
           export SIM_DISPLAY_ENABLE=1
           export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
           echo "Starting cube_metal_macos (Metal, no Vulkan) with $SIM_DISPLAY_OUTPUT output..."
           exec "$DIR/bin/cube_metal_macos" "$@"
           SCRIPT
-          chmod +x _package/SRMonado-macOS/run_cube_metal.sh
+          chmod +x _package/DisplayXR-macOS/run_cube_metal.sh
           # Create run script for cube_gl_macos (no Vulkan env vars needed)
-          cat > _package/SRMonado-macOS/run_cube_gl.sh <<'SCRIPT'
+          cat > _package/DisplayXR-macOS/run_cube_gl.sh <<'SCRIPT'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+          export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
           export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
           export SIM_DISPLAY_ENABLE=1
           export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
           echo "Starting cube_gl_macos (OpenGL, non-ext) with $SIM_DISPLAY_OUTPUT output..."
           exec "$DIR/bin/cube_gl_macos" "$@"
           SCRIPT
-          chmod +x _package/SRMonado-macOS/run_cube_gl.sh
+          chmod +x _package/DisplayXR-macOS/run_cube_gl.sh
           # Create run script for cube_ext_metal_macos (no Vulkan env vars needed)
-          cat > _package/SRMonado-macOS/run_cube_ext_metal.sh <<'SCRIPT'
+          cat > _package/DisplayXR-macOS/run_cube_ext_metal.sh <<'SCRIPT'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+          export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
           export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
           export SIM_DISPLAY_ENABLE=1
           export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
           echo "Starting cube_ext_metal_macos (Metal, external window) with $SIM_DISPLAY_OUTPUT output..."
           exec "$DIR/bin/cube_ext_metal_macos" "$@"
           SCRIPT
-          chmod +x _package/SRMonado-macOS/run_cube_ext_metal.sh
+          chmod +x _package/DisplayXR-macOS/run_cube_ext_metal.sh
           # Create run script for cube_shared_metal_macos (IOSurface shared texture)
-          cat > _package/SRMonado-macOS/run_cube_shared_metal.sh <<'SCRIPT'
+          cat > _package/DisplayXR-macOS/run_cube_shared_metal.sh <<'SCRIPT'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+          export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
           export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
           export SIM_DISPLAY_ENABLE=1
           export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
           echo "Starting cube_shared_metal_macos (Metal, IOSurface shared texture) with $SIM_DISPLAY_OUTPUT output..."
           exec "$DIR/bin/cube_shared_metal_macos" "$@"
           SCRIPT
-          chmod +x _package/SRMonado-macOS/run_cube_shared_metal.sh
+          chmod +x _package/DisplayXR-macOS/run_cube_shared_metal.sh
           # Create run script for cube_shared_vk_macos (Vulkan, IOSurface shared texture)
-          cat > _package/SRMonado-macOS/run_cube_shared_vk.sh <<'SCRIPT'
+          cat > _package/DisplayXR-macOS/run_cube_shared_vk.sh <<'SCRIPT'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+          export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
           export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
           export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
           export SIM_DISPLAY_ENABLE=1
@@ -260,7 +260,7 @@ jobs:
           echo "Starting cube_shared_vk_macos (Vulkan, IOSurface shared texture) with $SIM_DISPLAY_OUTPUT output..."
           exec "$DIR/bin/cube_shared_vk_macos" "$@"
           SCRIPT
-          chmod +x _package/SRMonado-macOS/run_cube_shared_vk.sh
+          chmod +x _package/DisplayXR-macOS/run_cube_shared_vk.sh
 
       - name: Build 3DGS demo app (gaussian_splatting_vk_macos)
         if: env.BUILD_TEST_APP == 'true'
@@ -274,13 +274,13 @@ jobs:
       - name: Package 3DGS demo app
         if: env.BUILD_TEST_APP == 'true'
         run: |
-          cp demos/gaussian_splatting_vk_macos/build/gaussian_splatting_vk_macos _package/SRMonado-macOS/bin/
-          install_name_tool -add_rpath @executable_path/../lib _package/SRMonado-macOS/bin/gaussian_splatting_vk_macos 2>/dev/null || true
+          cp demos/gaussian_splatting_vk_macos/build/gaussian_splatting_vk_macos _package/DisplayXR-macOS/bin/
+          install_name_tool -add_rpath @executable_path/../lib _package/DisplayXR-macOS/bin/gaussian_splatting_vk_macos 2>/dev/null || true
           # Create run script
-          cat > _package/SRMonado-macOS/run_gaussian_splatting.sh <<'SCRIPT'
+          cat > _package/DisplayXR-macOS/run_gaussian_splatting.sh <<'SCRIPT'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
-          export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+          export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
           export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
           export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
           export SIM_DISPLAY_ENABLE=1
@@ -288,19 +288,19 @@ jobs:
           echo "Starting gaussian_splatting_vk_macos (3D Gaussian Splatting) with $SIM_DISPLAY_OUTPUT output..."
           exec "$DIR/bin/gaussian_splatting_vk_macos" "$@"
           SCRIPT
-          chmod +x _package/SRMonado-macOS/run_gaussian_splatting.sh
+          chmod +x _package/DisplayXR-macOS/run_gaussian_splatting.sh
 
       - name: Build macOS installer (.pkg)
         run: |
           chmod +x installer/macos/build_installer.sh
           chmod +x installer/macos/create_app_bundle.sh
-          ./installer/macos/build_installer.sh _package/SRMonado-macOS _package/SRMonado-Installer.pkg
+          ./installer/macos/build_installer.sh _package/DisplayXR-macOS _package/DisplayXR-Installer.pkg
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SRMonado-macOS
+          name: DisplayXR-macOS
           if-no-files-found: error
           path: |
-            _package/SRMonado-macOS/
-            _package/SRMonado-Installer.pkg
+            _package/DisplayXR-macOS/
+            _package/DisplayXR-Installer.pkg

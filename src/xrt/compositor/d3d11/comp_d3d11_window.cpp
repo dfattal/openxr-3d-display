@@ -43,12 +43,12 @@
 // Environment variable to start in windowed mode
 DEBUG_GET_ONCE_BOOL_OPTION(start_windowed, "XRT_COMPOSITOR_START_WINDOWED", false)
 
-// Qwerty input is always enabled for non-session-target apps (Monado-owned window)
+// Qwerty input is always enabled for non-session-target apps (DisplayXR-owned window)
 // DEBUG_GET_ONCE_BOOL_OPTION(qwerty_enable, "QWERTY_ENABLE", false)
 
 // Window class name
-static WCHAR szWindowClass[] = L"MonadoD3D11";
-static WCHAR szWindowData[] = L"MonadoD3D11Window";
+static WCHAR szWindowClass[] = L"DisplayXRD3D11";
+static WCHAR szWindowData[] = L"DisplayXRD3D11Window";
 
 // Monitor enumeration data
 static bool g_use_secondary_monitor = true;
@@ -390,7 +390,7 @@ window_thread_func(LPVOID param)
 	U_LOG_W("D3D11 window thread: Creating window at (%d, %d) size %ux%u",
 	        (int)rc.left, (int)rc.top, w->requested_width, w->requested_height);
 
-	HWND hwnd = CreateWindowExW(0, szWindowClass, L"Monado OpenXR \u2014 D3D11 Native Compositor", WS_OVERLAPPEDWINDOW, rc.left, rc.top,
+	HWND hwnd = CreateWindowExW(0, szWindowClass, L"DisplayXR \u2014 D3D11 Native Compositor", WS_OVERLAPPEDWINDOW, rc.left, rc.top,
 	                            rc.right - rc.left, rc.bottom - rc.top, NULL, NULL, w->instance, NULL);
 
 	if (hwnd == NULL) {
@@ -470,7 +470,7 @@ comp_d3d11_window_create(uint32_t width, uint32_t height, struct comp_d3d11_wind
 	w->requested_width = width > 0 ? width : 1920;
 	w->requested_height = height > 0 ? height : 1080;
 	w->xsysd = NULL;
-	w->qwerty_enabled = true;  // Always enabled for Monado-owned windows
+	w->qwerty_enabled = true;  // Always enabled for DisplayXR-owned windows
 
 	U_LOG_W("D3D11 window: QWERTY input ENABLED");
 

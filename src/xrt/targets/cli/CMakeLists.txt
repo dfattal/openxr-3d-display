@@ -24,7 +24,7 @@ if(XRT_HAVE_OPENCV)
 	target_link_libraries(cli PRIVATE aux_tracking)
 endif()
 
-set_target_properties(cli PROPERTIES OUTPUT_NAME monado-cli PREFIX "")
+set_target_properties(cli PROPERTIES OUTPUT_NAME displayxr-cli PREFIX "")
 
 target_link_libraries(
 	cli

@@ -162,12 +162,12 @@ print_linux_end_user_failed_information(enum u_logging_level log_level)
 	PNHS("                 The Monado service has failed to start.                     #");
 	PNHS("                                                                             #");
 	PNHS("If you want to report please upload the logs of the service as a text file.  #");
-	PNHS("You can also capture the output the monado-cli info command to provide more  #");
+	PNHS("You can also capture the output the displayxr-cli info command to provide more #");
 	PNHS("information about your system, that will help diagnosing your problem. The   #");
 	PNHS("below commands is how you best capture the information from the commands.    #");
 	PNHS("                                                                             #");
-	PNHS("    monado-cli info 2>&1 | tee info.txt                                      #");
-	PNHS("    monado-service 2>&1 | tee logs.txt                                       #");
+	PNHS("    displayxr-cli info 2>&1 | tee info.txt                                   #");
+	PNHS("    displayxr-service 2>&1 | tee logs.txt                                    #");
 	PNHS("                                                                             #");
 	PN80H();
 
@@ -477,7 +477,7 @@ init_all(struct ipc_server *s, enum u_logging_level log_level)
 
 	s->process = u_process_create_if_not_running();
 	if (!s->process) {
-		IPC_ERROR(s, "monado-service is already running! Use XRT_LOG=trace for more information.");
+		IPC_ERROR(s, "displayxr-service is already running! Use XRT_LOG=trace for more information.");
 		xret = XRT_ERROR_IPC_SERVICE_ALREADY_RUNNING;
 	}
 	IPC_CHK_WITH_GOTO(s, xret, "u_process_create_if_not_running", error);

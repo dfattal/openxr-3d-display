@@ -47,11 +47,11 @@
 #endif
 
 /*
- * "XRT_NO_STDIN" option disables stdin and prevents monado-service from terminating.
+ * "XRT_NO_STDIN" option disables stdin and prevents displayxr-service from terminating.
  * This could be useful for situations where there is no proper or in a non-interactive shell.
  * Two example scenarios are:
  *    * IDE terminals,
- *    * Some scripting environments where monado-service is spawned in the background
+ *    * Some scripting environments where displayxr-service is spawned in the background
  */
 DEBUG_GET_ONCE_BOOL_OPTION(skip_stdin, "XRT_NO_STDIN", false)
 
@@ -130,7 +130,7 @@ create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
 		U_LOG_E("Or, is the systemd unit monado.socket or monado-dev.socket active?");
 #endif
 		if (errno == EADDRINUSE) {
-			U_LOG_E("If monado-service is not running, delete %s before starting a new instance",
+			U_LOG_E("If displayxr-service is not running, delete %s before starting a new instance",
 			        sock_file);
 		}
 		close(fd);

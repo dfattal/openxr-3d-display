@@ -33,7 +33,7 @@ oxr_xrEnumerateSwapchainFormats(XrSession session,
 {
 	OXR_TRACE_MARKER();
 
-	U_LOG_D("[SRMonado] xrEnumerateSwapchainFormats: API ENTRY cap=%u", formatCapacityInput);
+	U_LOG_D("[DisplayXR] xrEnumerateSwapchainFormats: API ENTRY cap=%u", formatCapacityInput);
 
 	struct oxr_session *sess;
 	struct oxr_logger log;
@@ -42,7 +42,7 @@ oxr_xrEnumerateSwapchainFormats(XrSession session,
 
 	XrResult ret = oxr_session_enumerate_formats(&log, sess, formatCapacityInput, formatCountOutput, formats);
 
-	U_LOG_D("[SRMonado] xrEnumerateSwapchainFormats: ret=%d count=%u", (int)ret,
+	U_LOG_D("[DisplayXR] xrEnumerateSwapchainFormats: ret=%d count=%u", (int)ret,
 	        formatCountOutput ? *formatCountOutput : 0);
 
 	return ret;
@@ -53,7 +53,7 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 {
 	OXR_TRACE_MARKER();
 
-	U_LOG_D("[SRMonado] xrCreateSwapchain: API ENTRY %ux%u format=0x%" PRIx64 " usage=0x%" PRIx64,
+	U_LOG_D("[DisplayXR] xrCreateSwapchain: API ENTRY %ux%u format=0x%" PRIx64 " usage=0x%" PRIx64,
 	        createInfo ? createInfo->width : 0, createInfo ? createInfo->height : 0,
 	        createInfo ? (int64_t)createInfo->format : 0,
 	        createInfo ? (int64_t)createInfo->usageFlags : 0);
@@ -65,7 +65,7 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrCreateSwapchain");
 	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	if (sess->compositor == NULL) {
-		U_LOG_D("[SRMonado] xrCreateSwapchain: FAILED - headless session");
+		U_LOG_D("[DisplayXR] xrCreateSwapchain: FAILED - headless session");
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Is illegal in headless sessions");
 	}
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO);
@@ -152,13 +152,13 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 
 	ret = sess->create_swapchain(&log, sess, createInfo, &sc);
 	if (ret != XR_SUCCESS) {
-		U_LOG_D("[SRMonado] xrCreateSwapchain: FAILED ret=%d", (int)ret);
+		U_LOG_D("[DisplayXR] xrCreateSwapchain: FAILED ret=%d", (int)ret);
 		return ret;
 	}
 
 	*out_swapchain = oxr_swapchain_to_openxr(sc);
 
-	U_LOG_D("[SRMonado] xrCreateSwapchain: SUCCESS");
+	U_LOG_D("[DisplayXR] xrCreateSwapchain: SUCCESS");
 
 	return oxr_session_success_result(sess);
 }

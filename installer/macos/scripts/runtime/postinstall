@@ -1,7 +1,7 @@
 #!/bin/bash
-# Post-install: register SRMonado as the active OpenXR runtime (system-wide)
-INSTALL_DIR="/Library/Application Support/SRMonado"
-MANIFEST="$INSTALL_DIR/openxr_monado.json"
+# Post-install: register DisplayXR as the active OpenXR runtime (system-wide)
+INSTALL_DIR="/Library/Application Support/DisplayXR"
+MANIFEST="$INSTALL_DIR/openxr_displayxr.json"
 
 # System-wide OpenXR runtime registration (same mechanism as active_runtime.cmake)
 mkdir -p /etc/xdg/openxr/1

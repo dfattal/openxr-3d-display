@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  LeiaXR Runtime Switcher - Registry operations implementation
- * @author Leia Inc.
+ * @brief  DisplayXR Runtime Switcher - Registry operations implementation
+ * @author DisplayXR
  * @ingroup targets_switcher
  */
 
@@ -14,8 +14,8 @@
 // Known runtime locations
 static const wchar_t *SRHYDRA_MANIFEST = L"C:\\Program Files\\LeiaSR\\OpenXR\\SRHydra_win64.json";
 static const wchar_t *SRHYDRA_INSTALL = L"C:\\Program Files\\LeiaSR\\OpenXR";
-static const wchar_t *SRMONADO_MANIFEST = L"C:\\Program Files\\LeiaSR\\SRMonado\\SRMonado_win64.json";
-static const wchar_t *SRMONADO_INSTALL = L"C:\\Program Files\\LeiaSR\\SRMonado";
+static const wchar_t *SRMONADO_MANIFEST = L"C:\\Program Files\\DisplayXR\\Runtime\\DisplayXR_win64.json";
+static const wchar_t *SRMONADO_INSTALL = L"C:\\Program Files\\DisplayXR\\Runtime";
 
 // OpenXR registry key
 static const wchar_t *OPENXR_KEY = L"Software\\Khronos\\OpenXR\\1";
@@ -33,15 +33,15 @@ RuntimeRegistry::refresh()
 
 	// Check for known runtimes
 	add_runtime_if_exists(L"SRHydra", SRHYDRA_MANIFEST, SRHYDRA_INSTALL);
-	add_runtime_if_exists(L"SRMonado", SRMONADO_MANIFEST, SRMONADO_INSTALL);
+	add_runtime_if_exists(L"DisplayXR", SRMONADO_MANIFEST, SRMONADO_INSTALL);
 
-	// Also check for SRMonado in the registry (in case installed elsewhere)
+	// Also check for DisplayXR in the registry (in case installed elsewhere)
 	HKEY key;
-	if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\LeiaSR\\SRMonado", 0, KEY_READ, &key) == ERROR_SUCCESS) {
+	if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\DisplayXR\\Runtime", 0, KEY_READ, &key) == ERROR_SUCCESS) {
 		wchar_t install_path[MAX_PATH];
 		DWORD size = sizeof(install_path);
 		if (RegQueryValueExW(key, L"InstallPath", NULL, NULL, (LPBYTE)install_path, &size) == ERROR_SUCCESS) {
-			std::wstring manifest = std::wstring(install_path) + L"\\SRMonado_win64.json";
+			std::wstring manifest = std::wstring(install_path) + L"\\DisplayXR_win64.json";
 			// Check if not already added
 			bool found = false;
 			for (const auto &rt : m_runtimes) {
@@ -51,7 +51,7 @@ RuntimeRegistry::refresh()
 				}
 			}
 			if (!found) {
-				add_runtime_if_exists(L"SRMonado", manifest, install_path);
+				add_runtime_if_exists(L"DisplayXR", manifest, install_path);
 			}
 		}
 		RegCloseKey(key);

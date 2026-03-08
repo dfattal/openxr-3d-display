@@ -1,15 +1,15 @@
 #!/bin/bash
-# Build the SRMonado runtime and test apps on macOS
+# Build the DisplayXR runtime and test apps on macOS
 #
 # Prerequisites: brew install cmake ninja eigen vulkan-sdk
 #
 # Usage:
 #   ./scripts/build_macos.sh             # In-process mode (default)
-#   ./scripts/build_macos.sh --service   # IPC service mode (monado-service + client)
+#   ./scripts/build_macos.sh --service   # IPC service mode (displayxr-service + client)
 #   ./scripts/build_macos.sh --hybrid    # Hybrid mode (in-process + IPC auto-switching)
 #
 # Then run:
-#   XR_RUNTIME_JSON=./build/openxr_monado-dev.json \
+#   XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json \
 #   DYLD_LIBRARY_PATH=/tmp/openxr-install/lib \
 #   SIM_DISPLAY_ENABLE=1 SIM_DISPLAY_OUTPUT=anaglyph \
 #   ./test_apps/cube_vk_macos/build/cube_vk_macos
@@ -35,7 +35,7 @@ done
 MACOS_SDK="$(xcrun --show-sdk-path 2>/dev/null)"
 
 # Step 1: Build the runtime
-echo "=== Building SRMonado runtime (SERVICE=$SERVICE_MODE, HYBRID=$HYBRID_MODE) ==="
+echo "=== Building DisplayXR runtime (SERVICE=$SERVICE_MODE, HYBRID=$HYBRID_MODE) ==="
 cmake -B "$BUILD_DIR" -S "$ROOT" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DXRT_FEATURE_SERVICE=$SERVICE_MODE \
@@ -156,16 +156,16 @@ cmake --build "$ROOT/webxr-bridge/native-host/build"
 
 # Step 4: Package artifacts (mirrors CI workflow)
 echo "=== Packaging artifacts ==="
-PKG_DIR="$ROOT/_package/SRMonado-macOS"
+PKG_DIR="$ROOT/_package/DisplayXR-macOS"
 # Clean managed directories only (preserve user-added files like run_bridge_host.sh)
 rm -rf "$PKG_DIR/lib" "$PKG_DIR/bin" "$PKG_DIR/share" 2>/dev/null || true
-rm -f "$PKG_DIR/openxr_monado.json" "$PKG_DIR/run_cube_vk.sh" "$PKG_DIR/run_cube_ext_vk.sh" "$PKG_DIR/run_cube_metal.sh" "$PKG_DIR/run_cube_ext_metal.sh" "$PKG_DIR/run_cube_gl.sh" "$PKG_DIR/run_cube_ext_gl.sh" "$PKG_DIR/run_cube_shared_metal.sh" "$PKG_DIR/run_cube_shared_gl.sh" "$PKG_DIR/run_cube_shared_vk.sh" "$PKG_DIR/run_cube_metal_ext.sh" "$PKG_DIR/run_gaussian_splatting.sh" "$PKG_DIR/run_sim_cube.sh" "$PKG_DIR/run_sim_cube_ext.sh" "$PKG_DIR/run_sim_3dgs_ext.sh" 2>/dev/null || true
+rm -f "$PKG_DIR/openxr_displayxr.json" "$PKG_DIR/run_cube_vk.sh" "$PKG_DIR/run_cube_ext_vk.sh" "$PKG_DIR/run_cube_metal.sh" "$PKG_DIR/run_cube_ext_metal.sh" "$PKG_DIR/run_cube_gl.sh" "$PKG_DIR/run_cube_ext_gl.sh" "$PKG_DIR/run_cube_shared_metal.sh" "$PKG_DIR/run_cube_shared_gl.sh" "$PKG_DIR/run_cube_shared_vk.sh" "$PKG_DIR/run_cube_metal_ext.sh" "$PKG_DIR/run_gaussian_splatting.sh" "$PKG_DIR/run_sim_cube.sh" "$PKG_DIR/run_sim_cube_ext.sh" "$PKG_DIR/run_sim_3dgs_ext.sh" 2>/dev/null || true
 mkdir -p "$PKG_DIR/lib"
 mkdir -p "$PKG_DIR/share/vulkan/icd.d"
 mkdir -p "$PKG_DIR/bin"
 
 # Find and copy runtime
-RUNTIME_LIB=$(find "$BUILD_DIR/src/xrt/targets/openxr" -name "libopenxr_monado*" -type f | head -1)
+RUNTIME_LIB=$(find "$BUILD_DIR/src/xrt/targets/openxr" -name "libopenxr_displayxr*" -type f | head -1)
 RUNTIME_BASENAME=$(basename "$RUNTIME_LIB")
 cp "$RUNTIME_LIB" "$PKG_DIR/lib/"
 
@@ -230,11 +230,11 @@ cat > "$PKG_DIR/share/vulkan/icd.d/MoltenVK_icd.json" <<EOF
 EOF
 
 # Create runtime manifest
-cat > "$PKG_DIR/openxr_monado.json" <<EOF
+cat > "$PKG_DIR/openxr_displayxr.json" <<EOF
 {
     "file_format_version": "1.0.0",
     "runtime": {
-        "name": "Monado (SRMonado macOS)",
+        "name": "DisplayXR Runtime",
         "library_path": "lib/$RUNTIME_BASENAME"
     }
 }
@@ -244,7 +244,7 @@ EOF
 cat > "$PKG_DIR/run_cube_vk.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
 export VK_DRIVER_FILES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
@@ -259,7 +259,7 @@ chmod +x "$PKG_DIR/run_cube_vk.sh"
 cat > "$PKG_DIR/run_cube_ext_vk.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
 export VK_DRIVER_FILES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
@@ -274,7 +274,7 @@ chmod +x "$PKG_DIR/run_cube_ext_vk.sh"
 cat > "$PKG_DIR/run_cube_metal.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export SIM_DISPLAY_ENABLE=1
 export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
@@ -287,7 +287,7 @@ chmod +x "$PKG_DIR/run_cube_metal.sh"
 cat > "$PKG_DIR/run_cube_ext_metal.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export SIM_DISPLAY_ENABLE=1
 export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
@@ -300,7 +300,7 @@ chmod +x "$PKG_DIR/run_cube_ext_metal.sh"
 cat > "$PKG_DIR/run_cube_gl.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export SIM_DISPLAY_ENABLE=1
 export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
@@ -313,7 +313,7 @@ chmod +x "$PKG_DIR/run_cube_gl.sh"
 cat > "$PKG_DIR/run_cube_ext_gl.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export SIM_DISPLAY_ENABLE=1
 export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
@@ -326,7 +326,7 @@ chmod +x "$PKG_DIR/run_cube_ext_gl.sh"
 cat > "$PKG_DIR/run_cube_shared_metal.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export SIM_DISPLAY_ENABLE=1
 export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
@@ -339,7 +339,7 @@ chmod +x "$PKG_DIR/run_cube_shared_metal.sh"
 cat > "$PKG_DIR/run_cube_shared_gl.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export SIM_DISPLAY_ENABLE=1
 export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
@@ -352,7 +352,7 @@ chmod +x "$PKG_DIR/run_cube_shared_gl.sh"
 cat > "$PKG_DIR/run_cube_shared_vk.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
 export VK_DRIVER_FILES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
@@ -367,7 +367,7 @@ chmod +x "$PKG_DIR/run_cube_shared_vk.sh"
 cat > "$PKG_DIR/run_gaussian_splatting.sh" <<'SCRIPT'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
 export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
 export VK_DRIVER_FILES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
@@ -386,7 +386,7 @@ chmod +x "$PKG_DIR/run_gaussian_splatting.sh"
 # "$ROOT/installer/macos/create_app_bundle.sh" "$PKG_DIR" "$ROOT/_package/CubeExtVKMacOS.app" cube_ext_vk_macos
 #
 # echo "=== Building .pkg installer ==="
-# "$ROOT/installer/macos/build_installer.sh" "$PKG_DIR" "$ROOT/_package/SRMonado-Installer.pkg"
+# "$ROOT/installer/macos/build_installer.sh" "$PKG_DIR" "$ROOT/_package/DisplayXR-Installer.pkg"
 
 echo ""
 echo "=== Build complete! ==="
@@ -407,7 +407,7 @@ echo "  $PKG_DIR/run_cube_shared_vk.sh"
 echo "  $PKG_DIR/run_gaussian_splatting.sh"
 echo ""
 echo "Or run manually:"
-echo "  XR_RUNTIME_JSON=$BUILD_DIR/openxr_monado-dev.json \\"
+echo "  XR_RUNTIME_JSON=$BUILD_DIR/openxr_displayxr-dev.json \\"
 echo "  DYLD_LIBRARY_PATH=$OPENXR_DIR/lib \\"
 echo "  VK_ICD_FILENAMES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json \\"
 echo "  VK_DRIVER_FILES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json \\"

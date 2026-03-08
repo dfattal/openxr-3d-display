@@ -1,11 +1,11 @@
 # Copyright 2020-2021, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
-add_executable(monado-service main.c)
-add_sanitizers(monado-service)
+add_executable(displayxr-service main.c)
+add_sanitizers(displayxr-service)
 
 target_link_libraries(
-	monado-service
+	displayxr-service
 	PRIVATE
 		aux_util
 		aux_util_debug_gui
@@ -18,26 +18,26 @@ target_link_libraries(
 # Delay-load Vulkan and SR Vulkan DLLs so the service can start on systems
 # where these are absent. The D3D11 service compositor path never calls into
 # Vulkan or SR Vulkan weaver functions, so the delay-loaded DLLs are never triggered.
-# This mirrors the same pattern used by the in-process runtime (SRMonadoClient.dll).
+# This mirrors the same pattern used by the in-process runtime (DisplayXRClient.dll).
 if(WIN32)
-	target_link_options(monado-service PRIVATE
+	target_link_options(displayxr-service PRIVATE
 		"/DELAYLOAD:vulkan-1.dll"
 		"/DELAYLOAD:SimulatedRealityVulkanBeta.dll"
 	)
-	target_link_libraries(monado-service PRIVATE delayimp)
+	target_link_libraries(displayxr-service PRIVATE delayimp)
 endif()
 
-install(TARGETS monado-service RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS displayxr-service RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 if(XRT_HAVE_SYSTEMD)
-	set(SERVICE_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/monado.in.service")
-	set(SOCKET_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/monado.in.socket")
+	set(SERVICE_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/displayxr.in.service")
+	set(SOCKET_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/displayxr.in.socket")
 	###
 	# Generate systemd unit files with absolute path to service
 	# intended for development without installing
-	set(UNIT_NAME monado-dev)
-	set(service_path $<TARGET_FILE:monado-service>)
-	set(conflicts monado)
+	set(UNIT_NAME displayxr-dev)
+	set(service_path $<TARGET_FILE:displayxr-service>)
+	set(conflicts displayxr)
 	set(exit_on_disconnect ON)
 	set(extra_desc "in build tree")
 	configure_file(${SOCKET_INPUT} "${CMAKE_CURRENT_BINARY_DIR}/${UNIT_NAME}.socket")
@@ -63,13 +63,13 @@ if(XRT_HAVE_SYSTEMD)
 		COMMAND systemctl --user daemon-reload
 		VERBATIM
 		COMMENT
-			"Linking monado-dev.{socket,service} into your local systemd unit directory."
+			"Linking displayxr-dev.{socket,service} into your local systemd unit directory."
 		)
 endif()
 
 if(XRT_INSTALL_SYSTEMD_UNIT_FILES OR XRT_INSTALL_ABSOLUTE_SYSTEMD_UNIT_FILES)
-	set(UNIT_NAME monado)
-	set(conflicts monado-dev)
+	set(UNIT_NAME displayxr)
+	set(conflicts displayxr-dev)
 	set(exit_on_disconnect OFF)
 
 	# Try to ask where to install it
@@ -111,9 +111,9 @@ if(XRT_INSTALL_SYSTEMD_UNIT_FILES OR XRT_INSTALL_ABSOLUTE_SYSTEMD_UNIT_FILES)
 endif()
 
 if(XRT_HAVE_SDL2)
-	target_link_libraries(monado-service PRIVATE st_gui xrt-external-imgui-sdl2 aux_ogl)
+	target_link_libraries(displayxr-service PRIVATE st_gui xrt-external-imgui-sdl2 aux_ogl)
 
 	if(XRT_BUILD_DRIVER_QWERTY)
-		target_link_libraries(monado-service PRIVATE drv_qwerty_includes)
+		target_link_libraries(displayxr-service PRIVATE drv_qwerty_includes)
 	endif()
 endif()

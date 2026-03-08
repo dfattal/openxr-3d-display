@@ -42,7 +42,7 @@ xrt_result_t
 KeyedMutexCollection::init(const std::vector<wil::com_ptr<ID3D11Texture2D1>> &images) noexcept
 try {
 	char dbg_buf[256];
-	snprintf(dbg_buf, sizeof(dbg_buf), "[SRMonado] KeyedMutexCollection::init: %zu images\n", images.size());
+	snprintf(dbg_buf, sizeof(dbg_buf), "[DisplayXR] KeyedMutexCollection::init: %zu images\n", images.size());
 	OutputDebugStringA(dbg_buf);
 
 	keyed_mutex_collection.clear();
@@ -52,12 +52,12 @@ try {
 		try {
 			keyed_mutex_collection.emplace_back(image.query<IDXGIKeyedMutex>());
 			snprintf(dbg_buf, sizeof(dbg_buf),
-			         "[SRMonado] KeyedMutex[%zu]: acquired from texture %p\n",
+			         "[DisplayXR] KeyedMutex[%zu]: acquired from texture %p\n",
 			         i, (void*)image.get());
 			OutputDebugStringA(dbg_buf);
 		} catch (wil::ResultException const &e) {
 			snprintf(dbg_buf, sizeof(dbg_buf),
-			         "[SRMonado] KeyedMutex[%zu] FAILED: %s\n", i, e.what());
+			         "[DisplayXR] KeyedMutex[%zu] FAILED: %s\n", i, e.what());
 			OutputDebugStringA(dbg_buf);
 			throw;
 		}
@@ -67,7 +67,7 @@ try {
 	keyed_mutex_acquired.resize(keyed_mutex_collection.size());
 
 	snprintf(dbg_buf, sizeof(dbg_buf),
-	         "[SRMonado] KeyedMutexCollection::init SUCCESS: %zu mutexes\n",
+	         "[DisplayXR] KeyedMutexCollection::init SUCCESS: %zu mutexes\n",
 	         keyed_mutex_collection.size());
 	OutputDebugStringA(dbg_buf);
 	return XRT_SUCCESS;

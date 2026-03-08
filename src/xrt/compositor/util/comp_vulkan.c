@@ -214,8 +214,8 @@ create_instance(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_arg
 
 	VkApplicationInfo app_info = {
 	    .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-	    .pApplicationName = "Monado Compositor",
-	    .pEngineName = "Monado",
+	    .pApplicationName = "DisplayXR Compositor",
+	    .pEngineName = "DisplayXR",
 	    .apiVersion = vk_args->required_instance_version,
 	};
 

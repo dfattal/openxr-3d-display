@@ -47,9 +47,9 @@ if(XRT_FEATURE_SERVICE
 	add_subdirectory(sdl_test)
 endif()
 
-# SRMonado Windows components
+# DisplayXR Windows components
 if(WIN32)
-	# LeiaXR runtime switcher
+	# DisplayXR runtime switcher
 	if(XRT_BUILD_SWITCHER)
 		add_subdirectory(switcher)
 	endif()
