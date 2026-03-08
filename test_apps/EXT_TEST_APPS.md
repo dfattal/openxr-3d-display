@@ -268,7 +268,7 @@ Requires `LEIASR_SDKROOT` environment variable for SR SDK support. All four Wind
 Run the test app:
 
 ```bash
-./_package/SRMonado-macOS/run_cube_ext_vk.sh
+./_package/DisplayXR-macOS/run_cube_ext_vk.sh
 ```
 
 ### Environment Variables

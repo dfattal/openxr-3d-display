@@ -48,9 +48,9 @@ bool InitializeLogging(const char* appName) {
         return false;
     }
 
-    // Build log directory path: %LOCALAPPDATA%/LeiaSR/<appName>/
+    // Build log directory path: %LOCALAPPDATA%/DisplayXR/<appName>/
     std::wstring logDir = localAppData;
-    logDir += L"\\LeiaSR";
+    logDir += L"\\DisplayXR";
     CreateDirectoryW(logDir.c_str(), nullptr);
     logDir += L"\\";
     logDir += std::wstring(appName, appName + strlen(appName));

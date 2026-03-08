@@ -6,11 +6,11 @@ set -e
 ARTIFACT_DIR="${1:?Usage: $0 <artifact-dir> [output.app] [binary-name]}"
 APP_BUNDLE="${2:-SimCubeOpenXR.app}"
 BINARY_NAME="${3:-cube_vk_macos}"
-VERSION="${SRMONADO_VERSION:-1.0.0}"
+VERSION="${DISPLAYXR_VERSION:-1.0.0}"
 
 # Derive display name from app bundle filename (e.g. "SimCubeOpenXR" from "SimCubeOpenXR.app")
 BUNDLE_DISPLAY_NAME="$(basename "$APP_BUNDLE" .app)"
-BUNDLE_ID="com.leiainc.$(echo "$BUNDLE_DISPLAY_NAME" | tr '[:upper:]' '[:lower:]')"
+BUNDLE_ID="com.displayxr.$(echo "$BUNDLE_DISPLAY_NAME" | tr '[:upper:]' '[:lower:]')"
 
 if [ ! -f "$ARTIFACT_DIR/bin/$BINARY_NAME" ]; then
     echo "Error: $BINARY_NAME binary not found in $ARTIFACT_DIR/bin/"
@@ -59,7 +59,7 @@ EOF
 cat > "$APP_BUNDLE/Contents/MacOS/$BUNDLE_DISPLAY_NAME" <<LAUNCHER
 #!/bin/bash
 DIR="\$(cd "\$(dirname "\$0")/../Resources" && pwd)"
-export XR_RUNTIME_JSON="\$DIR/openxr_monado.json"
+export XR_RUNTIME_JSON="\$DIR/openxr_displayxr.json"
 export DYLD_LIBRARY_PATH="\$DIR/lib:\${DYLD_LIBRARY_PATH:-}"
 export VK_ICD_FILENAMES="\$DIR/MoltenVK_icd.json"
 export VK_DRIVER_FILES="\$DIR/MoltenVK_icd.json"
@@ -71,18 +71,18 @@ chmod +x "$APP_BUNDLE/Contents/MacOS/$BUNDLE_DISPLAY_NAME"
 
 # --- Resources: binary and libraries ---
 cp "$ARTIFACT_DIR/bin/$BINARY_NAME" "$APP_BUNDLE/Contents/Resources/"
-cp "$ARTIFACT_DIR"/lib/libopenxr_monado* "$APP_BUNDLE/Contents/Resources/lib/"
+cp "$ARTIFACT_DIR"/lib/libopenxr_displayxr* "$APP_BUNDLE/Contents/Resources/lib/"
 cp "$ARTIFACT_DIR"/lib/libopenxr_loader* "$APP_BUNDLE/Contents/Resources/lib/"
 cp "$ARTIFACT_DIR/lib/libvulkan.1.dylib" "$APP_BUNDLE/Contents/Resources/lib/"
 cp "$ARTIFACT_DIR/lib/libMoltenVK.dylib" "$APP_BUNDLE/Contents/Resources/lib/"
 
 # --- Resources: manifests with paths relative to .app bundle ---
-cat > "$APP_BUNDLE/Contents/Resources/openxr_monado.json" <<EOF
+cat > "$APP_BUNDLE/Contents/Resources/openxr_displayxr.json" <<EOF
 {
     "file_format_version": "1.0.0",
     "runtime": {
-        "name": "Monado (SRMonado macOS)",
-        "library_path": "lib/$(basename "$ARTIFACT_DIR"/lib/libopenxr_monado*)"
+        "name": "DisplayXR Runtime",
+        "library_path": "lib/$(basename "$ARTIFACT_DIR"/lib/libopenxr_displayxr*)"
     }
 }
 EOF

@@ -1,6 +1,6 @@
 // Copyright 2025, Leia Inc.
 // SPDX-License-Identifier: BSL-1.0
-// Copied from LeiaSR SDK reference example (parallax_toggle)
+// Copied from DisplayXR SDK reference example (parallax_toggle)
 
 #pragma once
 

@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  LeiaXR Runtime Switcher - Main entry point
+ * @brief  DisplayXR Runtime Switcher - Main entry point
  *
- * A simple utility to switch between SRHydra and SRMonado OpenXR runtimes.
+ * A simple utility to switch between SRHydra and DisplayXR OpenXR runtimes.
  *
- * @author Leia Inc.
+ * @author DisplayXR
  * @ingroup targets_switcher
  */
 
@@ -160,7 +160,7 @@ window_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		update_runtime_list(g_hwnd_list);
 
 		if (g_registry->get_runtimes().empty()) {
-			update_status(L"No LeiaXR runtimes found. Install SRMonado or SRHydra.");
+			update_status(L"No OpenXR runtimes found. Install DisplayXR or SRHydra.");
 		}
 
 		return 0;
@@ -222,7 +222,7 @@ wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR
 	wc.hIcon = LoadIconW(NULL, IDI_APPLICATION);
 	wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
 	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-	wc.lpszClassName = L"LeiaXRSwitcherClass";
+	wc.lpszClassName = L"DisplayXRSwitcherClass";
 
 	if (!RegisterClassExW(&wc)) {
 		MessageBoxW(NULL, L"Failed to register window class.", L"Error", MB_ICONERROR);
@@ -241,7 +241,7 @@ wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR
 
 	// Create window
 	HWND hwnd =
-	    CreateWindowExW(0, L"LeiaXRSwitcherClass", L"LeiaXR Runtime Switcher",
+	    CreateWindowExW(0, L"DisplayXRSwitcherClass", L"DisplayXR Runtime Switcher",
 	                    WS_OVERLAPPEDWINDOW & ~(WS_MAXIMIZEBOX | WS_THICKFRAME), x, y, width, height, NULL, NULL,
 	                    hInstance, NULL);
 

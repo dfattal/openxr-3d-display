@@ -14,7 +14,7 @@
 #include <string>
 
 // Initialize logging - creates log directory and opens log file
-// Log files are stored in %LOCALAPPDATA%/LeiaSR/<appName>/
+// Log files are stored in %LOCALAPPDATA%/DisplayXR/<appName>/
 // Returns true on success
 bool InitializeLogging(const char* appName);
 

@@ -42,7 +42,7 @@ cli_cmd_slambatch(int argc, const char **argv)
 	P("Euroc driver not built, can't reproduce datasets.\n");
 	return EXIT_FAILURE;
 #else
-	// Do not count "monado-cli" and "slambatch" as args
+	// Do not count "displayxr-cli" and "slambatch" as args
 	int nof_args = argc - 2;
 	const char **args = &argv[2];
 

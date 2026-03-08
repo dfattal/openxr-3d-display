@@ -1018,7 +1018,7 @@ int main() {
       uint32_t ic = _dyld_image_count();
       for (uint32_t i = 0; i < ic; i++) {
           const char *name = _dyld_get_image_name(i);
-          if (name && strstr(name, "openxr_monado")) {
+          if (name && strstr(name, "openxr_displayxr")) {
               rtHandle = dlopen(name, RTLD_NOLOAD); break;
           }
       }

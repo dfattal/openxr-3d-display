@@ -16,7 +16,7 @@
  *
  * The window-closed atomic and its accessors (oxr_macos_window_closed,
  * oxr_macos_reset_window_closed, oxr_macos_set_window_closed) live in
- * aux_os/os_macos.c so all targets (monado-service, libopenxr_monado) can link them.
+ * aux_os/os_macos.c so all targets (displayxr-service, libopenxr_displayxr) can link them.
  */
 
 #import <Cocoa/Cocoa.h>

@@ -6,7 +6,7 @@ project(
 	XRT
 	VERSION 25.1.0
 	LANGUAGES C CXX
-	DESCRIPTION "Monado(XRT) by Collabora et al"
+	DESCRIPTION "DisplayXR Runtime (based on Monado/XRT)"
 	)
 
 if(APPLE)
@@ -47,7 +47,7 @@ option(
 if(NOT WIN32 AND NOT ANDROID)
 	option(
 		XRT_OPENXR_INSTALL_ACTIVE_RUNTIME
-		"Make Monado the system-wide default OpenXR runtime on install (requires superuser permissions)"
+		"Make DisplayXR the system-wide default OpenXR runtime on install (requires superuser permissions)"
 		OFF
 		)
 endif()
@@ -216,7 +216,7 @@ option(XRT_MODULE_COMPOSITOR "Enable the compositor at all" ON)
 # Native compositors (D3D11/Metal) handle rendering directly.
 set(XRT_MODULE_COMPOSITOR_MAIN OFF CACHE BOOL "Build main compositor (DISABLED — lightweight runtime)" FORCE)
 option_with_deps(XRT_MODULE_COMPOSITOR_NULL "Build testing null compositor" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
-option(XRT_MODULE_MONADO_CLI "Build monado-cli" ON)
+option(XRT_MODULE_MONADO_CLI "Build displayxr-cli" ON)
 option_with_deps(XRT_MODULE_MONADO_GUI "Build monado-gui" DEPENDS XRT_HAVE_SDL2)
 option(XRT_MODULE_OPENXR_STATE_TRACKER "Build OpenXR State Tracker" ON)
 
@@ -262,11 +262,11 @@ option_with_deps(XRT_INSTALL_ABSOLUTE_SYSTEMD_UNIT_FILES "Use an absolute path t
 
 # Drivers to build
 option_with_deps(XRT_BUILD_DRIVER_QWERTY "Enable Qwerty driver" DEPENDS "XRT_HAVE_SDL2 OR WIN32 OR APPLE")
-set(XRT_IPC_MSG_SOCK_FILENAME monado_comp_ipc CACHE STRING "Service socket filename")
-set(XRT_IPC_SERVICE_PID_FILENAME monado.pid CACHE STRING "Service pidfile filename")
-set(XRT_OXR_RUNTIME_SUFFIX monado CACHE STRING "OpenXR client library suffix")
+set(XRT_IPC_MSG_SOCK_FILENAME displayxr_comp_ipc CACHE STRING "Service socket filename")
+set(XRT_IPC_SERVICE_PID_FILENAME displayxr.pid CACHE STRING "Service pidfile filename")
+set(XRT_OXR_RUNTIME_SUFFIX displayxr CACHE STRING "OpenXR client library suffix")
 
-# SRMonado Windows installer options
+# DisplayXR Windows installer options
 if(WIN32)
 	option(XRT_BUILD_INSTALLER "Build NSIS installer (Windows only)" OFF)
 	option(XRT_BUILD_SWITCHER "Build LeiaXR runtime switcher (Windows only)" ON)
@@ -423,7 +423,7 @@ if(BUILD_TESTING)
 	add_subdirectory(tests)
 endif()
 
-# SRMonado Windows installer
+# DisplayXR Windows installer
 if(WIN32 AND XRT_BUILD_INSTALLER)
 	add_subdirectory(installer)
 endif()

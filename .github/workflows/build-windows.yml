@@ -78,7 +78,7 @@ jobs:
         uses: actions/upload-artifact@v4
         id: artifact-upload-step
         with:
-          name: SRMonado
+          name: DisplayXR
           if-no-files-found: error
           path: _package
 
@@ -86,9 +86,9 @@ jobs:
         uses: actions/upload-artifact@v4
         id: installer-upload-step
         with:
-          name: SRMonado-Installer
+          name: DisplayXR-Installer
           if-no-files-found: error
-          path: _package/SRMonadoSetup-*.exe
+          path: _package/DisplayXRSetup-*.exe
 
       # - name: Create GitHub Release
       #   if: startsWith(github.ref, 'refs/tags/')
@@ -104,7 +104,7 @@ jobs:
       #   run: |
       #     $exePath = Get-ChildItem "Runtime/Installer/*.exe" | Select-Object -First 1
       #     Write-Output "Installer file path: $exePath"
-      #     if ($exePath -and $exePath.Name -match 'SRMonado-(\d+\.\d+\.\d+)\.([^.]+)\.exe') {
+      #     if ($exePath -and $exePath.Name -match 'DisplayXR-(\d+\.\d+\.\d+)\.([^.]+)\.exe') {
       #         $version = $matches[1]
       #         $fileCommit = $matches[2]
       #         Write-Output "Parsed file version: $version"
@@ -123,7 +123,7 @@ jobs:
       #       -F "token=$token" `
       #       -F "file=@$($exePath.FullName)" `
       #       -F "device_type=windows" `
-      #       -F "app_name=SRMonado" `
+      #       -F "app_name=DisplayXR" `
       #       -F "release_version=$version" `
       #       -F "build_version=$commit" `
       #       -F "branch=${{ github.ref_name }}" `
@@ -163,7 +163,7 @@ jobs:
       - name: Upload installer to OneDrive
         shell: powershell
         run: |
-          $installer = Get-ChildItem -Path "_package/SRMonadoSetup-*.exe" | Select-Object -First 1
+          $installer = Get-ChildItem -Path "_package/DisplayXRSetup-*.exe" | Select-Object -First 1
           $destPath = "SANDBOX/RUNTIMES + SDK + PLUGINS/OpenXR"
           Write-Host "Uploading $($installer.Name) to OneDrive: $destPath"
           rclone copy $installer.FullName "onedrive:$destPath" --progress
@@ -211,7 +211,7 @@ jobs:
       - name: Download runtime artifacts
         uses: actions/download-artifact@v4
         with:
-          name: SRMonado
+          name: DisplayXR
           path: runtime
 
       - name: List runtime artifacts
@@ -312,7 +312,7 @@ jobs:
       - name: Download runtime artifacts
         uses: actions/download-artifact@v4
         with:
-          name: SRMonado
+          name: DisplayXR
           path: runtime
 
       - uses: ilammy/msvc-dev-cmd@v1
@@ -373,7 +373,7 @@ jobs:
       - name: Download runtime artifacts
         uses: actions/download-artifact@v4
         with:
-          name: SRMonado
+          name: DisplayXR
           path: runtime
 
       - uses: ilammy/msvc-dev-cmd@v1
@@ -434,7 +434,7 @@ jobs:
       - name: Download runtime artifacts
         uses: actions/download-artifact@v4
         with:
-          name: SRMonado
+          name: DisplayXR
           path: runtime
 
       - uses: ilammy/msvc-dev-cmd@v1
@@ -495,7 +495,7 @@ jobs:
       - name: Download runtime artifacts
         uses: actions/download-artifact@v4
         with:
-          name: SRMonado
+          name: DisplayXR
           path: runtime
 
       - name: Install Vulkan SDK
@@ -562,7 +562,7 @@ jobs:
       - name: Download runtime artifacts
         uses: actions/download-artifact@v4
         with:
-          name: SRMonado
+          name: DisplayXR
           path: runtime
 
       - name: Install Vulkan SDK
@@ -628,7 +628,7 @@ jobs:
       - name: Download runtime artifacts
         uses: actions/download-artifact@v4
         with:
-          name: SRMonado
+          name: DisplayXR
           path: runtime
 
       - uses: ilammy/msvc-dev-cmd@v1
@@ -859,7 +859,7 @@ jobs:
       - name: Download runtime artifacts
         uses: actions/download-artifact@v4
         with:
-          name: SRMonado
+          name: DisplayXR
           path: runtime
 
       - name: Install Vulkan SDK

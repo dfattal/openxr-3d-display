@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  File logging for SRMonado - writes logs to %LOCALAPPDATA%/LeiaSR/SRMonado
+ * @brief  File logging for DisplayXR - writes logs to %LOCALAPPDATA%/DisplayXR
  * @author David Fattal
  * @ingroup aux_util
  */
@@ -14,9 +14,9 @@ extern "C" {
 #endif
 
 /*!
- * Initialize file logging to %LOCALAPPDATA%/LeiaSR/SRMonado.
+ * Initialize file logging to %LOCALAPPDATA%/DisplayXR.
  * Creates a log file with process name, PID, and timestamp:
- * SRMonado_<exe>.<pid>_YYYY-MM-DD_HH-MM-SS.log
+ * DisplayXR_<exe>.<pid>_YYYY-MM-DD_HH-MM-SS.log
  *
  * Safe to call multiple times - only initializes once.
  * Automatically called by u_log on first log message on Windows.

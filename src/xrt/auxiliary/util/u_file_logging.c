@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  File logging implementation for SRMonado.
+ * @brief  File logging implementation for DisplayXR.
  * @author David Fattal
  * @ingroup aux_util
  */
@@ -168,9 +168,9 @@ u_file_logging_init(void)
 		return;
 	}
 
-	// Build log directory path: %LOCALAPPDATA%\LeiaSR\SRMonado
+	// Build log directory path: %LOCALAPPDATA%\DisplayXR
 	char log_dir[MAX_PATH];
-	snprintf(log_dir, sizeof(log_dir), "%s\\LeiaSR\\SRMonado", local_app_data);
+	snprintf(log_dir, sizeof(log_dir), "%s\\DisplayXR", local_app_data);
 
 	// Create directory if it doesn't exist
 	create_directory_recursive(log_dir);
@@ -192,7 +192,7 @@ u_file_logging_init(void)
 
 	// Build log file path with process name, PID, and timestamp
 	char log_path[MAX_PATH];
-	snprintf(log_path, sizeof(log_path), "%s\\SRMonado_%s.%u_%04d-%02d-%02d_%02d-%02d-%02d.log",
+	snprintf(log_path, sizeof(log_path), "%s\\DisplayXR_%s.%u_%04d-%02d-%02d_%02d-%02d-%02d.log",
 	         log_dir, exe_name, (unsigned)pid,
 	         st.wYear, st.wMonth, st.wDay,
 	         st.wHour, st.wMinute, st.wSecond);
@@ -205,7 +205,7 @@ u_file_logging_init(void)
 		char tmp_dir[MAX_PATH];
 		if (GetTempPathA(MAX_PATH, tmp_dir) > 0) {
 			snprintf(log_path, sizeof(log_path),
-			         "%sSRMonado_%s.%u_%04d-%02d-%02d_%02d-%02d-%02d.log",
+			         "%sDisplayXR_%s.%u_%04d-%02d-%02d_%02d-%02d-%02d.log",
 			         tmp_dir, exe_name, (unsigned)pid,
 			         st.wYear, st.wMonth, st.wDay,
 			         st.wHour, st.wMinute, st.wSecond);
@@ -219,7 +219,7 @@ u_file_logging_init(void)
 	// Announce log file location via OutputDebugString for discoverability
 	{
 		char dbg[512];
-		snprintf(dbg, sizeof(dbg), "[SRMonado] Log file: %s\n", log_path);
+		snprintf(dbg, sizeof(dbg), "[DisplayXR] Log file: %s\n", log_path);
 		OutputDebugStringA(dbg);
 	}
 
@@ -227,7 +227,7 @@ u_file_logging_init(void)
 	u_log_set_sink(file_logging_sink, NULL);
 
 	// Write header
-	fprintf(g_log_file, "=== SRMonado Log Started ===\n");
+	fprintf(g_log_file, "=== DisplayXR Log Started ===\n");
 	fprintf(g_log_file, "Log file: %s\n", log_path);
 	fprintf(g_log_file, "Process: %s (PID %u)\n", exe_name, (unsigned)pid);
 	fprintf(g_log_file, "Timestamp: %04d-%02d-%02d %02d:%02d:%02d\n",
@@ -262,7 +262,7 @@ void
 u_file_logging_shutdown(void)
 {
 	if (g_log_file != NULL) {
-		fprintf(g_log_file, "\n=== SRMonado Log Ended ===\n");
+		fprintf(g_log_file, "\n=== DisplayXR Log Ended ===\n");
 		fflush(g_log_file);
 		fclose(g_log_file);
 		g_log_file = NULL;

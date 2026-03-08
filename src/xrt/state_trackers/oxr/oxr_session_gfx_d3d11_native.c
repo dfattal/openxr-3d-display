@@ -54,7 +54,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(enable_d3d11_native_compositor, "OXR_ENABLE_D3D11_NAT
  *
  * NOTE: The D3D11 native compositor only works in in-process mode because it
  * needs direct access to the app's D3D11 device. In IPC mode (when
- * monado-service is running), the Vulkan compositor in the server process
+ * displayxr-service is running), the Vulkan compositor in the server process
  * handles compositing.
  *
  * Default is ENABLED for in-process mode (Leia displays).
@@ -89,7 +89,7 @@ oxr_d3d11_native_compositor_supported(struct oxr_system *sys, void *window_handl
 	}
 
 	// D3D11 native compositor is disabled by default because it only works
-	// in in-process mode. When using IPC/service mode (monado-service),
+	// in in-process mode. When using IPC/service mode (displayxr-service),
 	// the Vulkan compositor in the server process handles compositing.
 	// Enable explicitly for in-process testing.
 	if (!env_enabled) {

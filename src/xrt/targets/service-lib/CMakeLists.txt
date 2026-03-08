@@ -1,10 +1,10 @@
 # Copyright 2020, Collabora, Ltd.
 # SPDX-License-Identifier: BSL-1.0
 
-add_library(monado-service MODULE service_target.cpp)
+add_library(displayxr-service MODULE service_target.cpp)
 
 target_link_libraries(
-	monado-service
+	displayxr-service
 	PRIVATE
 		aux_util
 		st_prober

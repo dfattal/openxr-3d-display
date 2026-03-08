@@ -120,7 +120,7 @@ scripts/format-project.sh   # Format all
   - 34 unused VR drivers (TO BE REMOVED in #24)
 - **state_trackers/oxr/** — OpenXR API implementation
 - **ipc/** — Inter-process communication for service mode
-- **targets/** — Build targets (runtime library, monado-cli, monado-service)
+- **targets/** — Build targets (runtime library, displayxr-cli, displayxr-service)
 
 ### Key Interfaces
 C interfaces with vtable-style polymorphism:
@@ -157,7 +157,7 @@ Each bypasses Vulkan entirely for its graphics API:
 
 ### Running Without Installing
 ```bash
-XR_RUNTIME_JSON=./build/openxr_monado-dev.json ./your_openxr_app
+XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json ./your_openxr_app
 ```
 
 ### Key CMake Options
@@ -173,11 +173,11 @@ XR_RUNTIME_JSON=./build/openxr_monado-dev.json ./your_openxr_app
 ### GitHub Actions Build
 **Windows** (`.github/workflows/build-windows.yml`):
 - `LEIASR_SDKROOT` + `CMAKE_PREFIX_PATH` both needed
-- Artifact: `SRMonado`
+- Artifact: `DisplayXR`
 
 **macOS** (`.github/workflows/build-macos.yml`):
 - Vulkan SDK via MoltenVK, bundles libvulkan + OpenXR loader
-- Artifact: `SRMonado-macOS`
+- Artifact: `DisplayXR-macOS`
 
 ## Claude Code Skills
 
@@ -189,7 +189,7 @@ Ask Gemini to analyze code and produce a read-only report. See `~/.claude/skills
 
 ## macOS Test App Local Builds
 
-Copy binaries to `_package/SRMonado-macOS/bin/`. Run scripts exec from `$DIR/bin/`.
+Copy binaries to `_package/DisplayXR-macOS/bin/`. Run scripts exec from `$DIR/bin/`.
 
 | Test App | Build Output | Package Binary | Run Script |
 |----------|-------------|---------------|------------|

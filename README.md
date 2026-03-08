@@ -58,7 +58,7 @@ brew install cmake ninja eigen vulkan-sdk
 ### Running Without Installing
 
 ```bash
-XR_RUNTIME_JSON=./build/openxr_monado-dev.json ./your_openxr_app
+XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json ./your_openxr_app
 ```
 
 See [CLAUDE.md](CLAUDE.md) for full build details, CMake options, and CI configuration.
@@ -69,7 +69,7 @@ You don't need a 3D display to develop against this runtime. The **sim_display**
 
 ```bash
 # After building, run the test cube app
-XR_RUNTIME_JSON=./build/openxr_monado-dev.json ./build/test_apps/cube_vk_macos/cube_vk_macos
+XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json ./build/test_apps/cube_vk_macos/cube_vk_macos
 ```
 
 Use WASD + mouse to move the simulated eye position and observe perspective-correct stereo rendering.
@@ -132,7 +132,7 @@ See the [project structure guide](doc/extensions/project_structure.md) for a det
 
 ## Unity Plugin
 
-The **Monado 3D Display** Unity plugin lives in a separate repository:
+The **DisplayXR** Unity plugin lives in a separate repository:
 [**dfattal/unity-3d-display**](https://github.com/dfattal/unity-3d-display)
 
 Install via Unity Package Manager with the git URL:

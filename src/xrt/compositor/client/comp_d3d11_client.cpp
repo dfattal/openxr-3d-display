@@ -270,13 +270,13 @@ client_d3d11_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_in
 {
 	struct client_d3d11_swapchain *sc = as_client_d3d11_swapchain(xsc);
 
-	OutputDebugStringA("[SRMonado] xrAcquireSwapchainImage: ENTER\n");
+	OutputDebugStringA("[DisplayXR] xrAcquireSwapchainImage: ENTER\n");
 
 	// Pipe down call into imported swapchain in native compositor.
 	xrt_result_t xret = xrt_swapchain_acquire_image(sc->xsc.get(), out_index);
 
 	char buf[128];
-	snprintf(buf, sizeof(buf), "[SRMonado] xrAcquireSwapchainImage: result=%d, index=%u\n",
+	snprintf(buf, sizeof(buf), "[DisplayXR] xrAcquireSwapchainImage: result=%d, index=%u\n",
 	         (int)xret, out_index ? *out_index : 0xFFFFFFFF);
 	OutputDebugStringA(buf);
 
@@ -289,21 +289,21 @@ client_d3d11_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns,
 	struct client_d3d11_swapchain *sc = as_client_d3d11_swapchain(xsc);
 
 	char buf[256];
-	snprintf(buf, sizeof(buf), "[SRMonado] xrWaitSwapchainImage: ENTER index=%u, timeout=%lld ns\n",
+	snprintf(buf, sizeof(buf), "[DisplayXR] xrWaitSwapchainImage: ENTER index=%u, timeout=%lld ns\n",
 	         index, (long long)timeout_ns);
 	OutputDebugStringA(buf);
 
 	// Pipe down call into imported swapchain in native compositor.
 	xrt_result_t xret = xrt_swapchain_wait_image(sc->xsc.get(), timeout_ns, index);
 
-	snprintf(buf, sizeof(buf), "[SRMonado] xrWaitSwapchainImage: IPC wait result=%d\n", (int)xret);
+	snprintf(buf, sizeof(buf), "[DisplayXR] xrWaitSwapchainImage: IPC wait result=%d\n", (int)xret);
 	OutputDebugStringA(buf);
 
 	if (xret == XRT_SUCCESS) {
 		// OK, we got the image in the native compositor, now need the keyed mutex in d3d11.
-		OutputDebugStringA("[SRMonado] xrWaitSwapchainImage: Acquiring KeyedMutex...\n");
+		OutputDebugStringA("[DisplayXR] xrWaitSwapchainImage: Acquiring KeyedMutex...\n");
 		xret = sc->data->keyed_mutex_collection.waitKeyedMutex(index, timeout_ns);
-		snprintf(buf, sizeof(buf), "[SRMonado] xrWaitSwapchainImage: KeyedMutex acquire result=%d\n", (int)xret);
+		snprintf(buf, sizeof(buf), "[DisplayXR] xrWaitSwapchainImage: KeyedMutex acquire result=%d\n", (int)xret);
 		OutputDebugStringA(buf);
 	}
 
@@ -323,20 +323,20 @@ client_d3d11_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 	struct client_d3d11_swapchain *sc = as_client_d3d11_swapchain(xsc);
 
 	char buf[128];
-	snprintf(buf, sizeof(buf), "[SRMonado] xrReleaseSwapchainImage: ENTER index=%u\n", index);
+	snprintf(buf, sizeof(buf), "[DisplayXR] xrReleaseSwapchainImage: ENTER index=%u\n", index);
 	OutputDebugStringA(buf);
 
 	// Pipe down call into imported swapchain in native compositor.
 	xrt_result_t xret = xrt_swapchain_release_image(sc->xsc.get(), index);
 
-	snprintf(buf, sizeof(buf), "[SRMonado] xrReleaseSwapchainImage: IPC release result=%d\n", (int)xret);
+	snprintf(buf, sizeof(buf), "[DisplayXR] xrReleaseSwapchainImage: IPC release result=%d\n", (int)xret);
 	OutputDebugStringA(buf);
 
 	if (xret == XRT_SUCCESS) {
 		// Release the keyed mutex
-		OutputDebugStringA("[SRMonado] xrReleaseSwapchainImage: Releasing KeyedMutex...\n");
+		OutputDebugStringA("[DisplayXR] xrReleaseSwapchainImage: Releasing KeyedMutex...\n");
 		xret = sc->data->keyed_mutex_collection.releaseKeyedMutex(index);
-		snprintf(buf, sizeof(buf), "[SRMonado] xrReleaseSwapchainImage: KeyedMutex release result=%d\n", (int)xret);
+		snprintf(buf, sizeof(buf), "[DisplayXR] xrReleaseSwapchainImage: KeyedMutex release result=%d\n", (int)xret);
 		OutputDebugStringA(buf);
 	}
 	return xret;
@@ -361,7 +361,7 @@ import_image(ID3D11Device1 &device, HANDLE h)
 	wil::com_ptr<ID3D11Texture2D1> tex;
 
 	if (h == nullptr) {
-		OutputDebugStringA("[SRMonado] import_image: handle is NULL!\n");
+		OutputDebugStringA("[DisplayXR] import_image: handle is NULL!\n");
 		return {};
 	}
 
@@ -370,7 +370,7 @@ import_image(ID3D11Device1 &device, HANDLE h)
 	if (FAILED(hr)) {
 		char buf[512];
 		snprintf(buf, sizeof(buf),
-		         "[SRMonado] OpenSharedResource1 FAILED: handle=%p, HRESULT=0x%08lx\n"
+		         "[DisplayXR] OpenSharedResource1 FAILED: handle=%p, HRESULT=0x%08lx\n"
 		         "  Common causes:\n"
 		         "  - 0x80070057 (E_INVALIDARG): wrong handle type or invalid handle\n"
 		         "  - 0x80070005 (E_ACCESSDENIED): security/permissions issue (AppContainer?)\n"
@@ -382,7 +382,7 @@ import_image(ID3D11Device1 &device, HANDLE h)
 	}
 
 	char buf[128];
-	snprintf(buf, sizeof(buf), "[SRMonado] OpenSharedResource1 SUCCESS: handle=%p -> texture=%p\n",
+	snprintf(buf, sizeof(buf), "[DisplayXR] OpenSharedResource1 SUCCESS: handle=%p -> texture=%p\n",
 	         h, (void*)tex.get());
 	OutputDebugStringA(buf);
 	return tex;
@@ -394,7 +394,7 @@ import_image_dxgi(ID3D11Device1 &device, HANDLE h)
 	wil::com_ptr<ID3D11Texture2D1> tex;
 
 	if (h == nullptr) {
-		OutputDebugStringA("[SRMonado] import_image_dxgi: handle is NULL!\n");
+		OutputDebugStringA("[DisplayXR] import_image_dxgi: handle is NULL!\n");
 		return {};
 	}
 
@@ -403,7 +403,7 @@ import_image_dxgi(ID3D11Device1 &device, HANDLE h)
 	if (FAILED(hr)) {
 		char buf[512];
 		snprintf(buf, sizeof(buf),
-		         "[SRMonado] OpenSharedResource FAILED: handle=%p, HRESULT=0x%08lx\n"
+		         "[DisplayXR] OpenSharedResource FAILED: handle=%p, HRESULT=0x%08lx\n"
 		         "  Common causes:\n"
 		         "  - 0x80070057 (E_INVALIDARG): wrong handle type (expected DXGI, got NT?)\n"
 		         "  - 0x80070005 (E_ACCESSDENIED): security/permissions issue\n"
@@ -414,7 +414,7 @@ import_image_dxgi(ID3D11Device1 &device, HANDLE h)
 	}
 
 	char buf[128];
-	snprintf(buf, sizeof(buf), "[SRMonado] OpenSharedResource SUCCESS: handle=%p -> texture=%p\n",
+	snprintf(buf, sizeof(buf), "[DisplayXR] OpenSharedResource SUCCESS: handle=%p -> texture=%p\n",
 	         h, (void*)tex.get());
 	OutputDebugStringA(buf);
 	return tex;
@@ -510,7 +510,7 @@ try {
 		{
 			char dbg_buf[256];
 			snprintf(dbg_buf, sizeof(dbg_buf),
-			         "[SRMonado] Importing texture [%u]: handle=%p, is_dxgi=%d\n",
+			         "[DisplayXR] Importing texture [%u]: handle=%p, is_dxgi=%d\n",
 			         i, handle, is_dxgi);
 			OutputDebugStringA(dbg_buf);
 		}
@@ -528,7 +528,7 @@ try {
 			// Extract HRESULT and log detailed error
 			char dbg_buf[512];
 			snprintf(dbg_buf, sizeof(dbg_buf),
-			         "[SRMonado] IMPORT FAILED [%u]: handle=%p, is_dxgi=%d, error=%s\n",
+			         "[DisplayXR] IMPORT FAILED [%u]: handle=%p, is_dxgi=%d, error=%s\n",
 			         i, handle, is_dxgi, e.what());
 			OutputDebugStringA(dbg_buf);
 			D3D_ERROR(c, "Failed to import texture [%u]: %s", i, e.what());
@@ -539,7 +539,7 @@ try {
 		if (!image) {
 			char dbg_buf[256];
 			snprintf(dbg_buf, sizeof(dbg_buf),
-			         "[SRMonado] IMPORT RETURNED NULL [%u]: handle=%p, is_dxgi=%d\n",
+			         "[DisplayXR] IMPORT RETURNED NULL [%u]: handle=%p, is_dxgi=%d\n",
 			         i, handle, is_dxgi);
 			OutputDebugStringA(dbg_buf);
 			D3D_ERROR(c, "Failed to import server texture [%u] with handle %p (is_dxgi=%d)", i, handle, is_dxgi);
@@ -548,7 +548,7 @@ try {
 		{
 			char dbg_buf[256];
 			snprintf(dbg_buf, sizeof(dbg_buf),
-			         "[SRMonado] Import SUCCESS [%u]: texture=%p\n", i, (void*)image.get());
+			         "[DisplayXR] Import SUCCESS [%u]: texture=%p\n", i, (void*)image.get());
 			OutputDebugStringA(dbg_buf);
 		}
 
@@ -649,13 +649,13 @@ client_d3d11_compositor_wait_frame(struct xrt_compositor *xc,
 {
 	struct client_d3d11_compositor *c = as_client_d3d11_compositor(xc);
 
-	OutputDebugStringA("[SRMonado] xrWaitFrame: ENTER\n");
+	OutputDebugStringA("[DisplayXR] xrWaitFrame: ENTER\n");
 
 	// Pipe down call into native compositor.
 	xrt_result_t xret = xrt_comp_wait_frame(&c->xcn->base, out_frame_id, predicted_display_time, predicted_display_period);
 
 	char buf[256];
-	snprintf(buf, sizeof(buf), "[SRMonado] xrWaitFrame: result=%d, frame_id=%lld\n",
+	snprintf(buf, sizeof(buf), "[DisplayXR] xrWaitFrame: result=%d, frame_id=%lld\n",
 	         (int)xret, out_frame_id ? (long long)*out_frame_id : -1);
 	OutputDebugStringA(buf);
 
@@ -668,13 +668,13 @@ client_d3d11_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 	struct client_d3d11_compositor *c = as_client_d3d11_compositor(xc);
 
 	char buf[128];
-	snprintf(buf, sizeof(buf), "[SRMonado] xrBeginFrame: ENTER frame_id=%lld\n", (long long)frame_id);
+	snprintf(buf, sizeof(buf), "[DisplayXR] xrBeginFrame: ENTER frame_id=%lld\n", (long long)frame_id);
 	OutputDebugStringA(buf);
 
 	// Pipe down call into native compositor.
 	xrt_result_t xret = xrt_comp_begin_frame(&c->xcn->base, frame_id);
 
-	snprintf(buf, sizeof(buf), "[SRMonado] xrBeginFrame: result=%d\n", (int)xret);
+	snprintf(buf, sizeof(buf), "[DisplayXR] xrBeginFrame: result=%d\n", (int)xret);
 	OutputDebugStringA(buf);
 
 	return xret;
@@ -852,7 +852,7 @@ client_d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_syn
 {
 	struct client_d3d11_compositor *c = as_client_d3d11_compositor(xc);
 
-	OutputDebugStringA("[SRMonado] xrEndFrame (layer_commit): ENTER\n");
+	OutputDebugStringA("[DisplayXR] xrEndFrame (layer_commit): ENTER\n");
 
 	// We make the sync object, not st/oxr which is our user.
 	assert(!xrt_graphics_sync_handle_is_valid(sync_handle));
@@ -861,7 +861,7 @@ client_d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_syn
 	if (c->fence) {
 		c->timeline_semaphore_value++;
 		char buf[128];
-		snprintf(buf, sizeof(buf), "[SRMonado] xrEndFrame: Signaling fence value=%llu\n",
+		snprintf(buf, sizeof(buf), "[DisplayXR] xrEndFrame: Signaling fence value=%llu\n",
 		         (unsigned long long)c->timeline_semaphore_value);
 		OutputDebugStringA(buf);
 
@@ -870,28 +870,28 @@ client_d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_syn
 			char buf[kErrorBufSize];
 			formatMessage(hr, buf);
 			D3D_ERROR(c, "Error signaling fence: %s", buf);
-			OutputDebugStringA("[SRMonado] xrEndFrame: FENCE SIGNAL FAILED!\n");
+			OutputDebugStringA("[DisplayXR] xrEndFrame: FENCE SIGNAL FAILED!\n");
 			return xrt_comp_layer_commit(&c->xcn->base, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
 		}
-		OutputDebugStringA("[SRMonado] xrEndFrame: Fence signaled OK\n");
+		OutputDebugStringA("[DisplayXR] xrEndFrame: Fence signaled OK\n");
 	}
 
 	if (c->timeline_semaphore) {
 		// We got this from the native compositor, so we can pass it back
-		OutputDebugStringA("[SRMonado] xrEndFrame: Using timeline semaphore commit\n");
+		OutputDebugStringA("[DisplayXR] xrEndFrame: Using timeline semaphore commit\n");
 		xret = xrt_comp_layer_commit_with_semaphore( //
 		    &c->xcn->base,                           //
 		    c->timeline_semaphore.get(),             //
 		    c->timeline_semaphore_value);            //
 		char buf[128];
-		snprintf(buf, sizeof(buf), "[SRMonado] xrEndFrame: commit_with_semaphore result=%d\n", (int)xret);
+		snprintf(buf, sizeof(buf), "[DisplayXR] xrEndFrame: commit_with_semaphore result=%d\n", (int)xret);
 		OutputDebugStringA(buf);
 		return xret;
 	}
 
 	if (c->fence) {
 		// Wait on it ourselves, if we have it and didn't tell the native compositor to wait on it.
-		OutputDebugStringA("[SRMonado] xrEndFrame: Waiting on fence locally...\n");
+		OutputDebugStringA("[DisplayXR] xrEndFrame: Waiting on fence locally...\n");
 		xret = xrt::auxiliary::d3d::d3d11::waitOnFenceWithTimeout( //
 		    c->fence,                                              //
 		    c->local_wait_event,                                   //
@@ -1006,10 +1006,10 @@ struct xrt_compositor_d3d11 *
 client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *device)
 try {
 	// Use OutputDebugString for diagnostics - visible in DebugView even in sandboxed processes
-	OutputDebugStringA("[SRMonado] client_d3d11_compositor_create: ENTER\n");
+	OutputDebugStringA("[DisplayXR] client_d3d11_compositor_create: ENTER\n");
 
 	char dbg_buf[256];
-	snprintf(dbg_buf, sizeof(dbg_buf), "[SRMonado] client_d3d11_compositor_create: xcn=%p, device=%p\n", (void*)xcn, (void*)device);
+	snprintf(dbg_buf, sizeof(dbg_buf), "[DisplayXR] client_d3d11_compositor_create: xcn=%p, device=%p\n", (void*)xcn, (void*)device);
 	OutputDebugStringA(dbg_buf);
 	U_LOG_W("client_d3d11_compositor_create: xcn=%p, device=%p", (void*)xcn, (void*)device);
 
@@ -1018,23 +1018,23 @@ try {
 	c->xcn = xcn;
 
 	// Log incoming format info from IPC compositor
-	snprintf(dbg_buf, sizeof(dbg_buf), "[SRMonado] IPC compositor format_count=%u\n", xcn->base.info.format_count);
+	snprintf(dbg_buf, sizeof(dbg_buf), "[DisplayXR] IPC compositor format_count=%u\n", xcn->base.info.format_count);
 	OutputDebugStringA(dbg_buf);
 	U_LOG_W("client_d3d11_compositor_create: IPC compositor format_count=%u", xcn->base.info.format_count);
 	for (uint32_t i = 0; i < xcn->base.info.format_count && i < 8; i++) {
-		snprintf(dbg_buf, sizeof(dbg_buf), "[SRMonado]   format[%u] = %lld (VkFormat)\n", i, (long long)xcn->base.info.formats[i]);
+		snprintf(dbg_buf, sizeof(dbg_buf), "[DisplayXR]   format[%u] = %lld (VkFormat)\n", i, (long long)xcn->base.info.formats[i]);
 		OutputDebugStringA(dbg_buf);
 		U_LOG_W("  format[%u] = 0x%llx (VkFormat)", i, (unsigned long long)xcn->base.info.formats[i]);
 	}
 
 	wil::com_ptr<ID3D11Device> app_dev{device};
 	if (!app_dev.try_query_to(c->app_device.put())) {
-		OutputDebugStringA("[SRMonado] ERROR: Could not query ID3D11Device5 from app device!\n");
+		OutputDebugStringA("[DisplayXR] ERROR: Could not query ID3D11Device5 from app device!\n");
 		U_LOG_E("client_d3d11_compositor_create: Could not query ID3D11Device5 from app device!");
 		U_LOG_E("  This usually means the D3D11 feature level is too low (need 11_1 or higher)");
 		return nullptr;
 	}
-	OutputDebugStringA("[SRMonado] Got ID3D11Device5 from app device\n");
+	OutputDebugStringA("[DisplayXR] Got ID3D11Device5 from app device\n");
 	U_LOG_W("client_d3d11_compositor_create: Got ID3D11Device5 from app device");
 	c->app_device->GetImmediateContext3(c->app_context.put());
 
@@ -1048,7 +1048,7 @@ try {
 		HRESULT hr = adapter->GetDesc(&adapter_desc);
 		if (SUCCEEDED(hr)) {
 			snprintf(dbg_buf, sizeof(dbg_buf),
-			         "[SRMonado] Client D3D11 adapter LUID: %08lx-%08lx (MUST match service LUID)\n",
+			         "[DisplayXR] Client D3D11 adapter LUID: %08lx-%08lx (MUST match service LUID)\n",
 			         adapter_desc.AdapterLuid.HighPart, adapter_desc.AdapterLuid.LowPart);
 			OutputDebugStringA(dbg_buf);
 			U_LOG_W("Client D3D11 adapter LUID: %08lx-%08lx (must match service for texture sharing)",
@@ -1058,11 +1058,11 @@ try {
 			char adapter_name[128];
 			wcstombs(adapter_name, adapter_desc.Description, sizeof(adapter_name) - 1);
 			adapter_name[sizeof(adapter_name) - 1] = '\0';
-			snprintf(dbg_buf, sizeof(dbg_buf), "[SRMonado] Client adapter: %s\n", adapter_name);
+			snprintf(dbg_buf, sizeof(dbg_buf), "[DisplayXR] Client adapter: %s\n", adapter_name);
 			OutputDebugStringA(dbg_buf);
 			U_LOG_W("Client adapter: %s", adapter_name);
 		} else {
-			OutputDebugStringA("[SRMonado] WARNING: Could not get adapter LUID!\n");
+			OutputDebugStringA("[DisplayXR] WARNING: Could not get adapter LUID!\n");
 			U_LOG_W("Could not get adapter LUID - HRESULT=0x%08lx", (unsigned long)hr);
 		}
 	}
@@ -1145,29 +1145,29 @@ try {
 	U_LOG_W("client_d3d11_compositor_create: Final format_count=%u", count);
 
 	if (count == 0) {
-		OutputDebugStringA("[SRMonado] ERROR: No compatible DXGI formats found!\n");
+		OutputDebugStringA("[DisplayXR] ERROR: No compatible DXGI formats found!\n");
 		U_LOG_E("client_d3d11_compositor_create: No compatible DXGI formats found!");
 		U_LOG_E("  IPC compositor reported %u formats but none are usable for D3D11", xcn->base.info.format_count);
 		// Don't return nullptr here - let the caller handle zero formats
 	}
 
-	OutputDebugStringA("[SRMonado] client_d3d11_compositor_create: SUCCESS\n");
+	OutputDebugStringA("[DisplayXR] client_d3d11_compositor_create: SUCCESS\n");
 	U_LOG_W("client_d3d11_compositor_create: SUCCESS - D3D11 client compositor ready");
 	return &(c.release()->base);
 } catch (wil::ResultException const &e) {
 	char dbg_buf[512];
-	snprintf(dbg_buf, sizeof(dbg_buf), "[SRMonado] WIL EXCEPTION: %s\n", e.what());
+	snprintf(dbg_buf, sizeof(dbg_buf), "[DisplayXR] WIL EXCEPTION: %s\n", e.what());
 	OutputDebugStringA(dbg_buf);
 	U_LOG_E("Error creating D3D11 client compositor: %s", e.what());
 	return nullptr;
 } catch (std::exception const &e) {
 	char dbg_buf[512];
-	snprintf(dbg_buf, sizeof(dbg_buf), "[SRMonado] STD EXCEPTION: %s\n", e.what());
+	snprintf(dbg_buf, sizeof(dbg_buf), "[DisplayXR] STD EXCEPTION: %s\n", e.what());
 	OutputDebugStringA(dbg_buf);
 	U_LOG_E("Error creating D3D11 client compositor: %s", e.what());
 	return nullptr;
 } catch (...) {
-	OutputDebugStringA("[SRMonado] UNKNOWN EXCEPTION in client_d3d11_compositor_create!\n");
+	OutputDebugStringA("[DisplayXR] UNKNOWN EXCEPTION in client_d3d11_compositor_create!\n");
 	U_LOG_E("Error creating D3D11 client compositor");
 	return nullptr;
 }

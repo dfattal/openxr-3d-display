@@ -1,18 +1,18 @@
-# SRMonado macOS Installer
+# DisplayXR macOS Installer
 
 ## Install
 
-**Double-click** `SRMonado-Installer.pkg` to launch the macOS installer wizard, or install from the command line:
+**Double-click** `DisplayXR-Installer.pkg` to launch the macOS installer wizard, or install from the command line:
 
 ```bash
-sudo installer -pkg SRMonado-Installer.pkg -target /
+sudo installer -pkg DisplayXR-Installer.pkg -target /
 ```
 
 ### What gets installed
 
 | Component | Location |
 |-----------|----------|
-| SRMonado Runtime | `/Library/Application Support/SRMonado/` |
+| DisplayXR Runtime | `/Library/Application Support/DisplayXR/` |
 | OpenXR runtime registration | `/etc/xdg/openxr/1/active_runtime.json` |
 | SimCube OpenXR Test App | `/Applications/SimCubeOpenXR.app` |
 
@@ -35,7 +35,7 @@ Options: `anaglyph`, `sbs`, `blend`
 ## Uninstall
 
 ```bash
-sudo "/Library/Application Support/SRMonado/uninstall.sh"
+sudo "/Library/Application Support/DisplayXR/uninstall.sh"
 ```
 
 This removes the runtime, test app, OpenXR registration, and installer receipts.
@@ -50,5 +50,5 @@ This removes the runtime, test app, OpenXR registration, and installer receipts.
 #    See .github/workflows/build-macos.yml for the full packaging steps
 
 # 3. Build the .pkg installer
-./installer/macos/build_installer.sh _package/SRMonado-macOS SRMonado-Installer.pkg
+./installer/macos/build_installer.sh _package/DisplayXR-macOS DisplayXR-Installer.pkg
 ```

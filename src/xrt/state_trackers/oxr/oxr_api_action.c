@@ -126,7 +126,7 @@ oxr_xrSyncActions(XrSession session, const XrActionsSyncInfo *syncInfo)
 {
 	OXR_TRACE_MARKER();
 
-	U_LOG_D("[SRMonado] xrSyncActions: API ENTRY count=%u",
+	U_LOG_D("[DisplayXR] xrSyncActions: API ENTRY count=%u",
 	        syncInfo ? syncInfo->countActiveActionSets : 0);
 
 	struct oxr_session *sess;
@@ -184,7 +184,7 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 {
 	OXR_TRACE_MARKER();
 
-	U_LOG_D("[SRMonado] xrAttachSessionActionSets: API ENTRY count=%u",
+	U_LOG_D("[DisplayXR] xrAttachSessionActionSets: API ENTRY count=%u",
 	        bindInfo ? bindInfo->countActionSets : 0);
 
 	struct oxr_session *sess;
@@ -194,14 +194,14 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, bindInfo, XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO);
 
 	if (sess->act_set_attachments != NULL) {
-		U_LOG_D("[SRMonado] xrAttachSessionActionSets: FAILED - already attached");
+		U_LOG_D("[DisplayXR] xrAttachSessionActionSets: FAILED - already attached");
 		return oxr_error(&log, XR_ERROR_ACTIONSETS_ALREADY_ATTACHED,
 		                 "(session) has already had action sets "
 		                 "attached, can only attach action sets once.");
 	}
 
 	if (bindInfo->countActionSets == 0) {
-		U_LOG_D("[SRMonado] xrAttachSessionActionSets: FAILED - zero action sets");
+		U_LOG_D("[DisplayXR] xrAttachSessionActionSets: FAILED - zero action sets");
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
 		                 "(bindInfo->countActionSets == 0) must attach "
 		                 "at least one action set.");
@@ -214,7 +214,7 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 
 	XrResult ret = oxr_session_attach_action_sets(&log, sess, bindInfo);
 
-	U_LOG_D("[SRMonado] xrAttachSessionActionSets: ret=%d", (int)ret);
+	U_LOG_D("[DisplayXR] xrAttachSessionActionSets: ret=%d", (int)ret);
 
 	return ret;
 }

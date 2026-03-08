@@ -42,7 +42,7 @@
 #include <limits.h>
 
 /*
- * "XRT_NO_STDIN" option disables stdin and prevents monado-service from terminating.
+ * "XRT_NO_STDIN" option disables stdin and prevents displayxr-service from terminating.
  * This could be useful for situations where there is no proper or in a non-interactive shell.
  */
 DEBUG_GET_ONCE_BOOL_OPTION(skip_stdin, "XRT_NO_STDIN", false)

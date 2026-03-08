@@ -653,14 +653,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // Add SRMonado to DLL search path
+    // Add DisplayXR to DLL search path
     {
         HKEY hKey;
         char installPath[MAX_PATH] = {0};
         DWORD pathSize = sizeof(installPath);
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\LeiaSR\\SRMonado", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\DisplayXR\\Runtime", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             if (RegQueryValueExA(hKey, "InstallPath", nullptr, nullptr, (LPBYTE)installPath, &pathSize) == ERROR_SUCCESS) {
-                LOG_INFO("Adding SRMonado install path to DLL search: %s", installPath);
+                LOG_INFO("Adding DisplayXR install path to DLL search: %s", installPath);
                 SetDllDirectoryA(installPath);
             }
             RegCloseKey(hKey);

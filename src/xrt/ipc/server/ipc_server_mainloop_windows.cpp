@@ -271,7 +271,7 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml)
 	// Use a fixed global pipe name for Windows.
 	// This is required for AppContainer apps (like Chrome WebXR) which have virtualized
 	// temp directories - using temp path would cause client and server to use different pipe names.
-	const char *pipe_name = "\\\\.\\pipe\\monado\\monado_comp_ipc";
+	const char *pipe_name = "\\\\.\\pipe\\displayxr\\displayxr_comp_ipc";
 
 	ml->pipe_name = _strdup(pipe_name);
 	if (ml->pipe_name == nullptr) {

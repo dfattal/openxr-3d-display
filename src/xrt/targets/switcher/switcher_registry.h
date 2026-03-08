@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  LeiaXR Runtime Switcher - Registry operations header
- * @author Leia Inc.
+ * @brief  DisplayXR Runtime Switcher - Registry operations header
+ * @author DisplayXR
  * @ingroup targets_switcher
  */
 
@@ -18,7 +18,7 @@
  */
 struct RuntimeInfo
 {
-	std::wstring name;          //!< Display name (e.g., "SRMonado", "SRHydra")
+	std::wstring name;          //!< Display name (e.g., "DisplayXR", "SRHydra")
 	std::wstring manifest_path; //!< Full path to the manifest JSON
 	std::wstring install_path;  //!< Installation directory
 	bool is_active;             //!< Currently set as active runtime
