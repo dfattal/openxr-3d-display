@@ -195,6 +195,7 @@ Copy binaries to `_package/SRMonado-macOS/bin/`. Run scripts exec from `$DIR/bin
 |----------|-------------|---------------|------------|
 | cube_vk_macos | `test_apps/cube_vk_macos/build/cube_vk_macos` | `_package/.../bin/cube_vk_macos` | `run_cube_vk.sh` |
 | cube_ext_vk_macos | `test_apps/cube_ext_vk_macos/build/cube_ext_vk_macos` | `_package/.../bin/cube_ext_vk_macos` | `run_cube_ext_vk.sh` |
+| cube_gl_macos | `test_apps/cube_gl_macos/build/cube_gl_macos` | `_package/.../bin/cube_gl_macos` | `run_cube_gl.sh` |
 | cube_ext_metal_macos | `test_apps/cube_ext_metal_macos/build/cube_ext_metal_macos` | `_package/.../bin/cube_ext_metal_macos` | `run_cube_ext_metal.sh` |
 | cube_shared_metal_macos | `test_apps/cube_shared_metal_macos/build/cube_shared_metal_macos` | `_package/.../bin/cube_shared_metal_macos` | `run_cube_shared_metal.sh` |
 | cube_shared_gl_macos | `test_apps/cube_shared_gl_macos/build/cube_shared_gl_macos` | `_package/.../bin/cube_shared_gl_macos` | `run_cube_shared_gl.sh` |
