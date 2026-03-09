@@ -820,7 +820,7 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 #endif // XRT_OS_ANDROID
 
 #ifdef XRT_OS_MACOS
-skip_macos_pump:
+skip_macos_pump:;
 #endif
 
 	bool read_more_events = true;
