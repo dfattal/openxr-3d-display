@@ -226,6 +226,7 @@ struct comp_gl_compositor
 	HDC hdc;
 	HGLRC hglrc;        //!< Compositor's own GL context
 	HGLRC app_hglrc;    //!< App's GL context (shared textures)
+	HDC app_hdc;        //!< App's device context (for restoring after compositor work)
 	bool owns_window;
 #elif defined(XRT_OS_ANDROID)
 	void *egl_display;   //!< EGLDisplay
@@ -801,7 +802,11 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 	}
 
 	// Save previous GL context and switch to compositor's
-#ifdef __APPLE__
+#ifdef XRT_OS_WINDOWS
+	HDC prev_hdc = wglGetCurrentDC();
+	HGLRC prev_hglrc = wglGetCurrentContext();
+	wglMakeCurrent(c->hdc, c->hglrc);
+#elif defined(__APPLE__)
 	CGLContextObj prev_cgl_ctx = CGLGetCurrentContext();
 	comp_gl_window_macos_make_current(c->macos_window);
 #endif
@@ -1004,7 +1009,13 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 
 	// Restore previous GL context (critical for shared texture mode where
 	// app has its own context and needs it back after compositor work)
-#ifdef __APPLE__
+#ifdef XRT_OS_WINDOWS
+	if (prev_hglrc != NULL) {
+		wglMakeCurrent(prev_hdc, prev_hglrc);
+	} else {
+		wglMakeCurrent(NULL, NULL);
+	}
+#elif defined(__APPLE__)
 	if (prev_cgl_ctx != NULL) {
 		CGLSetCurrentContext(prev_cgl_ctx);
 	}
@@ -1024,6 +1035,13 @@ static void
 gl_compositor_destroy(struct xrt_compositor *xc)
 {
 	struct comp_gl_compositor *c = gl_comp(xc);
+
+#ifdef XRT_OS_WINDOWS
+	// Make compositor context current for GL resource cleanup
+	if (c->hglrc) {
+		wglMakeCurrent(c->hdc, c->hglrc);
+	}
+#endif
 
 	if (c->program_blit) glDeleteProgram(c->program_blit);
 	if (c->program_sbs) glDeleteProgram(c->program_sbs);
@@ -1305,8 +1323,11 @@ comp_gl_compositor_create(struct xrt_device *xdev,
 		height = xdev->hmd->screens[0].h_pixels;
 	}
 
-	// Save caller's GL context so we can restore after init (macOS)
-#ifdef __APPLE__
+	// Save caller's GL context so we can restore after init
+#ifdef XRT_OS_WINDOWS
+	HDC caller_hdc = wglGetCurrentDC();
+	HGLRC caller_hglrc = wglGetCurrentContext();
+#elif defined(__APPLE__)
 	CGLContextObj caller_cgl_ctx = CGLGetCurrentContext();
 #endif
 
@@ -1480,7 +1501,15 @@ comp_gl_compositor_create(struct xrt_device *xdev,
 	*out_xcn = &c->base;
 
 	// Restore caller's GL context (don't leave compositor's context current)
-#ifdef __APPLE__
+#ifdef XRT_OS_WINDOWS
+	if (caller_hglrc != NULL) {
+		wglMakeCurrent(caller_hdc, caller_hglrc);
+	} else {
+		wglMakeCurrent(NULL, NULL);
+	}
+	// Store app's context for restore in layer_commit
+	c->app_hdc = (HDC)gl_display;
+#elif defined(__APPLE__)
 	if (caller_cgl_ctx != NULL) {
 		CGLSetCurrentContext(caller_cgl_ctx);
 	}
