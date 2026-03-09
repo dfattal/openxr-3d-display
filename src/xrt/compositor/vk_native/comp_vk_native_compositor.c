@@ -1009,7 +1009,74 @@ vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 		return XRT_SUCCESS;
 	}
 
-	// If we have a target (window), present to it
+	// Display processor owns output — weaver handles its own swapchain + present.
+	// No target needed; just pass stereo views and let weave() do everything.
+	if (c->target == NULL && !is_mono && c->display_processor != NULL) {
+		static bool dp_logged = false;
+		if (!dp_logged) {
+			U_LOG_W("VK weaving via display processor (weaver-owned output)");
+			dp_logged = true;
+		}
+
+		uint64_t left_view, right_view;
+		comp_vk_native_renderer_get_stereo_views(c->renderer, &left_view, &right_view);
+
+		uint32_t view_width, view_height;
+		comp_vk_native_renderer_get_view_dimensions(c->renderer, &view_width, &view_height);
+
+		int32_t view_format = comp_vk_native_renderer_get_format(c->renderer);
+
+		VkCommandPool cmd_pool = c->cmd_pool;
+
+		VkCommandBufferAllocateInfo alloc_info = {
+		    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		    .commandPool = cmd_pool,
+		    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		    .commandBufferCount = 1,
+		};
+
+		VkCommandBuffer cmd;
+		VkResult res = vk->vkAllocateCommandBuffers(vk->device, &alloc_info, &cmd);
+		if (res == VK_SUCCESS) {
+			VkCommandBufferBeginInfo begin_info = {
+			    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+			};
+			vk->vkBeginCommandBuffer(cmd, &begin_info);
+
+			// Pass VK_NULL_HANDLE as framebuffer — the SR weaver
+			// manages its own swapchain and framebuffers internally.
+			xrt_display_processor_process_views(
+			    c->display_processor,
+			    cmd,
+			    (VkImageView)(uintptr_t)left_view,
+			    (VkImageView)(uintptr_t)right_view,
+			    view_width, view_height,
+			    (VkFormat_XDP)view_format,
+			    VK_NULL_HANDLE,
+			    tgt_width, tgt_height,
+			    (VkFormat_XDP)view_format);
+
+			vk->vkEndCommandBuffer(cmd);
+
+			VkSubmitInfo submit_info = {
+			    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+			    .commandBufferCount = 1,
+			    .pCommandBuffers = &cmd,
+			};
+
+			res = vk->vkQueueSubmit(vk->main_queue->queue, 1, &submit_info, VK_NULL_HANDLE);
+			if (res == VK_SUCCESS) {
+				vk->vkQueueWaitIdle(vk->main_queue->queue);
+			}
+
+			vk->vkFreeCommandBuffers(vk->device, cmd_pool, 1, &cmd);
+		}
+
+		return XRT_SUCCESS;
+	}
+
+	// If we have a target (window, no display processor), present to it
 	if (c->target != NULL) {
 		uint32_t target_index;
 		xret = comp_vk_native_target_acquire(c->target, &target_index);
@@ -1018,144 +1085,45 @@ vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 			return xret;
 		}
 
-		bool weaving_done = false;
+		VkCommandPool cmd_pool = (VkCommandPool)(uintptr_t)
+		    comp_vk_native_renderer_get_cmd_pool(c->renderer);
 
-		// Use display processor for weaving
-		if (!is_mono && c->display_processor != NULL) {
-			static bool dp_logged = false;
-			if (!dp_logged) {
-				U_LOG_W("VK weaving via display processor interface");
-				dp_logged = true;
-			}
+		VkCommandBufferAllocateInfo alloc_info = {
+		    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		    .commandPool = cmd_pool,
+		    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		    .commandBufferCount = 1,
+		};
 
-			uint64_t left_view, right_view;
-			comp_vk_native_renderer_get_stereo_views(c->renderer, &left_view, &right_view);
+		VkCommandBuffer cmd;
+		VkResult res = vk->vkAllocateCommandBuffers(vk->device, &alloc_info, &cmd);
+		if (res == VK_SUCCESS) {
+			VkCommandBufferBeginInfo begin_info = {
+			    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+			};
+			vk->vkBeginCommandBuffer(cmd, &begin_info);
 
-			uint32_t view_width, view_height;
-			comp_vk_native_renderer_get_view_dimensions(c->renderer, &view_width, &view_height);
+			uint64_t target_image, target_view;
+			comp_vk_native_target_get_current_image(c->target, &target_image, &target_view);
 
-			int32_t view_format = comp_vk_native_renderer_get_format(c->renderer);
+			comp_vk_native_renderer_blit_to_target(c->renderer, cmd,
+			                                        target_image, tgt_width, tgt_height);
 
-			VkCommandPool cmd_pool = (VkCommandPool)(uintptr_t)
-			    comp_vk_native_renderer_get_cmd_pool(c->renderer);
+			vk->vkEndCommandBuffer(cmd);
 
-			VkCommandBufferAllocateInfo alloc_info = {
-			    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-			    .commandPool = cmd_pool,
-			    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+			VkSubmitInfo submit_info = {
+			    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 			    .commandBufferCount = 1,
+			    .pCommandBuffers = &cmd,
 			};
 
-			VkCommandBuffer cmd;
-			VkResult res = vk->vkAllocateCommandBuffers(vk->device, &alloc_info, &cmd);
+			res = vk->vkQueueSubmit(vk->main_queue->queue, 1, &submit_info, VK_NULL_HANDLE);
 			if (res == VK_SUCCESS) {
-				VkCommandBufferBeginInfo begin_info = {
-				    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-				    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-				};
-				vk->vkBeginCommandBuffer(cmd, &begin_info);
-
-				// Create framebuffer for the display processor's render pass
-				uint64_t target_image, target_view;
-				comp_vk_native_target_get_current_image(c->target, &target_image, &target_view);
-
-				VkRenderPass dp_render_pass = xrt_display_processor_get_render_pass(c->display_processor);
-				VkFramebuffer target_fb = VK_NULL_HANDLE;
-				if (dp_render_pass != VK_NULL_HANDLE && target_view != 0) {
-					VkImageView tv = (VkImageView)(uintptr_t)target_view;
-					VkFramebufferCreateInfo fb_ci = {
-					    .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-					    .renderPass = dp_render_pass,
-					    .attachmentCount = 1,
-					    .pAttachments = &tv,
-					    .width = tgt_width,
-					    .height = tgt_height,
-					    .layers = 1,
-					};
-					vk->vkCreateFramebuffer(vk->device, &fb_ci, NULL, &target_fb);
-				}
-
-				xrt_display_processor_process_views(
-				    c->display_processor,
-				    cmd,
-				    (VkImageView)(uintptr_t)left_view,
-				    (VkImageView)(uintptr_t)right_view,
-				    view_width, view_height,
-				    (VkFormat_XDP)view_format,
-				    target_fb,
-				    tgt_width, tgt_height,
-				    (VkFormat_XDP)view_format);
-
-				vk->vkEndCommandBuffer(cmd);
-
-				VkSubmitInfo submit_info = {
-				    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-				    .commandBufferCount = 1,
-				    .pCommandBuffers = &cmd,
-				};
-
-				res = vk->vkQueueSubmit(vk->main_queue->queue, 1, &submit_info, VK_NULL_HANDLE);
-				if (res == VK_SUCCESS) {
-					vk->vkQueueWaitIdle(vk->main_queue->queue);
-					weaving_done = true;
-				}
-
-				vk->vkFreeCommandBuffers(vk->device, cmd_pool, 1, &cmd);
-
-				if (target_fb != VK_NULL_HANDLE) {
-					vk->vkDestroyFramebuffer(vk->device, target_fb, NULL);
-				}
-			}
-		}
-
-		// Fallback: blit stereo texture to target
-		if (!weaving_done) {
-			static bool fallback_warned = false;
-			if (!fallback_warned) {
-				U_LOG_W("Display processing not available, using fallback blit (mono=%d)", is_mono);
-				fallback_warned = true;
+				vk->vkQueueWaitIdle(vk->main_queue->queue);
 			}
 
-			VkCommandPool cmd_pool = (VkCommandPool)(uintptr_t)
-			    comp_vk_native_renderer_get_cmd_pool(c->renderer);
-
-			VkCommandBufferAllocateInfo alloc_info = {
-			    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-			    .commandPool = cmd_pool,
-			    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-			    .commandBufferCount = 1,
-			};
-
-			VkCommandBuffer cmd;
-			VkResult res = vk->vkAllocateCommandBuffers(vk->device, &alloc_info, &cmd);
-			if (res == VK_SUCCESS) {
-				VkCommandBufferBeginInfo begin_info = {
-				    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-				    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-				};
-				vk->vkBeginCommandBuffer(cmd, &begin_info);
-
-				uint64_t target_image, target_view;
-				comp_vk_native_target_get_current_image(c->target, &target_image, &target_view);
-
-				comp_vk_native_renderer_blit_to_target(c->renderer, cmd,
-				                                        target_image, tgt_width, tgt_height);
-
-				vk->vkEndCommandBuffer(cmd);
-
-				VkSubmitInfo submit_info = {
-				    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-				    .commandBufferCount = 1,
-				    .pCommandBuffers = &cmd,
-				};
-
-				res = vk->vkQueueSubmit(vk->main_queue->queue, 1, &submit_info, VK_NULL_HANDLE);
-				if (res == VK_SUCCESS) {
-					vk->vkQueueWaitIdle(vk->main_queue->queue);
-				}
-
-				vk->vkFreeCommandBuffers(vk->device, cmd_pool, 1, &cmd);
-			}
+			vk->vkFreeCommandBuffers(vk->device, cmd_pool, 1, &cmd);
 		}
 
 		// Present
@@ -1422,41 +1390,11 @@ comp_vk_native_compositor_create(struct xrt_device *xdev,
 	}
 #endif
 
-	// Create output target (VkSwapchainKHR) if we have a window
-	if (hwnd != NULL
-#ifdef XRT_OS_WINDOWS
-	    || c->owns_window
-#endif
-#ifdef XRT_OS_MACOS
-	    || c->owns_window
-#endif
-	) {
-		void *target_hwnd = hwnd;
-#ifdef XRT_OS_WINDOWS
-		if (target_hwnd == NULL) target_hwnd = c->hwnd;
-#endif
-		xrt_result_t xret = comp_vk_native_target_create(c, target_hwnd,
-		                                                  c->settings.preferred.width,
-		                                                  c->settings.preferred.height,
-		                                                  &c->target);
-		if (xret != XRT_SUCCESS) {
-			U_LOG_E("Failed to create VK target");
-			vk_compositor_destroy(&c->base.base);
-			return xret;
-		}
-	} else {
-		c->target = NULL;
-		U_LOG_I("No VK target — offscreen shared texture mode");
-	}
-
 	// Default refresh rate
 	c->display_refresh_rate = 60.0f;
 
-	// Determine view dimensions
-	uint32_t view_width = c->settings.preferred.width / 2;
-	uint32_t view_height = c->settings.preferred.height;
-
-	// Create display processor via factory
+	// Create display processor via factory FIRST — the SR weaver creates
+	// its own VkSwapchain on the HWND, so we must not also create one.
 	if (dp_factory_vk != NULL) {
 		xrt_dp_factory_vk_fn_t factory = (xrt_dp_factory_vk_fn_t)dp_factory_vk;
 
@@ -1492,6 +1430,45 @@ comp_vk_native_compositor_create(struct xrt_device *xdev,
 	} else {
 		U_LOG_W("No VK display processor factory provided");
 	}
+
+	// Create output target (VkSwapchainKHR) only if there is NO display
+	// processor.  The SR weaver creates its own VkSwapchain on the HWND
+	// and handles presentation internally — creating a second swapchain
+	// on the same surface would violate the Vulkan spec.
+	if (c->display_processor == NULL) {
+		if (hwnd != NULL
+#ifdef XRT_OS_WINDOWS
+		    || c->owns_window
+#endif
+#ifdef XRT_OS_MACOS
+		    || c->owns_window
+#endif
+		) {
+			void *target_hwnd = hwnd;
+#ifdef XRT_OS_WINDOWS
+			if (target_hwnd == NULL) target_hwnd = c->hwnd;
+#endif
+			xrt_result_t xret = comp_vk_native_target_create(c, target_hwnd,
+			                                                  c->settings.preferred.width,
+			                                                  c->settings.preferred.height,
+			                                                  &c->target);
+			if (xret != XRT_SUCCESS) {
+				U_LOG_E("Failed to create VK target");
+				vk_compositor_destroy(&c->base.base);
+				return xret;
+			}
+		} else {
+			c->target = NULL;
+			U_LOG_I("No VK target — offscreen shared texture mode");
+		}
+	} else {
+		c->target = NULL;
+		U_LOG_I("Display processor owns output — skipping target creation");
+	}
+
+	// Determine view dimensions
+	uint32_t view_width = c->settings.preferred.width / 2;
+	uint32_t view_height = c->settings.preferred.height;
 
 	// If display processor is available, query display info for view dimensions
 	if (c->display_processor != NULL) {

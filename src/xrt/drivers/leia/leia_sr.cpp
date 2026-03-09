@@ -380,7 +380,11 @@ leiasr_weave(struct leiasr *leiasr,
 	leiasr->weaver->setScissorRect(rect);
 	leiasr->weaver->setCommandBuffer(commandBuffer);
 	leiasr->weaver->setInputViewTexture(leftImageView, rightImageView, imageWidth, imageHeight, imageFormat);
-	leiasr->weaver->setOutputFrameBuffer(framebuffer, framebufferWidth, framebufferHeight, framebufferFormat);
+	// Only override the output framebuffer if one is provided.
+	// VK_NULL_HANDLE means the weaver should use its own internal swapchain.
+	if (framebuffer != VK_NULL_HANDLE) {
+		leiasr->weaver->setOutputFrameBuffer(framebuffer, framebufferWidth, framebufferHeight, framebufferFormat);
+	}
 	leiasr->weaver->weave();
 }
 
