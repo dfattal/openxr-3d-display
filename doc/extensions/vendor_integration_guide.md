@@ -127,11 +127,17 @@ positions through vendor-neutral interfaces.
 
 | # | Component | Description | Required? |
 |---|-----------|-------------|-----------|
-| 1 | **Display Processor** | Vulkan and/or D3D11 implementation of the stereo→display conversion | Yes (at least one) |
+| 1 | **Display Processor** | Unified vtable: stereo→display conversion (weaving) **and** eye tracking, window metrics, display mode control | Yes (at least one API) |
 | 2 | **Device Driver** | `xrt_device` with display specs (resolution, physical size, refresh rate, FOV) | Yes |
-| 3 | **Eye Tracking** | Predicted L/R eye positions in display-local coordinates | Recommended |
-| 4 | **SDK Wrapper** | Opaque C wrapper isolating vendor headers from the codebase | Recommended |
-| 5 | **Target Builder** | Builder .c file + registration in 5 build system files (see §8.1) | Yes |
+| 3 | **SDK Wrapper** | Opaque C wrapper isolating vendor headers from the codebase | Recommended |
+| 4 | **Target Builder** | Builder .c file + registration in 5 build system files (see §8.1) | Yes |
+
+> **Note:** Eye tracking is **not** a separate component.  It is an optional method
+> on the display processor vtable (`get_predicted_eye_positions`).  Even if a
+> vendor's tracker and weaver are separate SDKs internally, they must be unified
+> behind a single `xrt_display_processor` (or `xrt_display_processor_d3d11`)
+> instance so the runtime has one object per session that provides both weaving
+> and eye data.
 
 ---
 
@@ -319,9 +325,15 @@ views[i].pose.orientation = (XrQuaternionf){
 
 ## 4. Component 1: Display Processor
 
-The display processor is the core vendor contribution.  It converts rendered
-stereo views into the display's native format (interlaced light field pattern,
-side-by-side, anaglyph, etc.).
+The display processor is the core vendor contribution.  It is a **unified
+vtable** that provides both stereo→display conversion (weaving/interlacing)
+**and** eye tracking, window metrics, and display mode control.
+
+Even if a vendor has separate tracker and weaver SDKs internally, they must
+present a single `xrt_display_processor` (or `xrt_display_processor_d3d11`)
+to the runtime.  This guarantees that the tracker and weaver are always
+paired correctly — the runtime never needs to figure out which tracker goes
+with which weaver.
 
 ### 4.1 Vulkan Interface
 
@@ -330,6 +342,7 @@ side-by-side, anaglyph, etc.).
 ```c
 struct xrt_display_processor
 {
+    // --- Required: stereo→display conversion ---
     void (*process_views)(struct xrt_display_processor *xdp,
                           VkCommandBuffer cmd_buffer,
                           VkImageView left_view,
@@ -343,22 +356,47 @@ struct xrt_display_processor
                           VkFormat_XDP target_format);
 
     void (*destroy)(struct xrt_display_processor *xdp);
+
+    // --- Optional: eye tracking (recommended) ---
+    bool (*get_predicted_eye_positions)(struct xrt_display_processor *xdp,
+                                        struct xrt_eye_pair *out_eye_pair);
+
+    // --- Optional: window/display queries ---
+    bool (*get_window_metrics)(struct xrt_display_processor *xdp,
+                               struct xrt_window_metrics *out_metrics);
+    bool (*get_display_dimensions)(struct xrt_display_processor *xdp,
+                                   float *out_width_m, float *out_height_m);
+    bool (*get_display_pixel_info)(struct xrt_display_processor *xdp,
+                                   uint32_t *out_width, uint32_t *out_height,
+                                   int32_t *out_screen_left, int32_t *out_screen_top);
+    bool (*request_display_mode)(struct xrt_display_processor *xdp,
+                                 bool enable_3d);
+
+    // --- Optional: flags ---
+    bool prefers_sbs_input;  // true if weaver expects side-by-side stereo input
 };
 ```
 
 Key design points:
+- **Unified object**: One struct per session covers weaving, eye tracking,
+  window metrics, and display mode — no separate "tracker" component
 - **Separate L/R views**: Input is two distinct `VkImageView` objects
 - **Command buffer recording**: Implementation records Vulkan commands into the
   provided command buffer (deferred execution)
 - **Target framebuffer**: Output goes to the provided `VkFramebuffer`
 - **`VkFormat_XDP`**: `int32_t` alias for `VkFormat` values, avoids pulling in
   full `vulkan.h` in this header
+- **Optional methods**: NULL means not supported — all helpers check for NULL
+  before calling
 
 **Helper functions** for safe calling:
 
 ```c
 // Call process_views through the vtable
 xrt_display_processor_process_views(xdp, cmd_buffer, ...);
+
+// Query eye positions (returns false if method is NULL or tracking unavailable)
+xrt_display_processor_get_predicted_eye_positions(xdp, &eye_pair);
 
 // Destroy and NULL the pointer
 xrt_display_processor_destroy(&xdp);
@@ -371,6 +409,7 @@ xrt_display_processor_destroy(&xdp);
 ```c
 struct xrt_display_processor_d3d11
 {
+    // --- Required: stereo→display conversion ---
     void (*process_stereo)(struct xrt_display_processor_d3d11 *xdp,
                            void *d3d11_context,      // ID3D11DeviceContext*
                            void *stereo_srv,          // ID3D11ShaderResourceView*
@@ -381,6 +420,19 @@ struct xrt_display_processor_d3d11
                            uint32_t target_height);
 
     void (*destroy)(struct xrt_display_processor_d3d11 *xdp);
+
+    // --- Optional (same as Vulkan variant) ---
+    bool (*get_predicted_eye_positions)(struct xrt_display_processor_d3d11 *xdp,
+                                        struct xrt_eye_pair *out_eye_pair);
+    bool (*get_window_metrics)(struct xrt_display_processor_d3d11 *xdp,
+                               struct xrt_window_metrics *out_metrics);
+    bool (*get_display_dimensions)(struct xrt_display_processor_d3d11 *xdp,
+                                   float *out_width_m, float *out_height_m);
+    bool (*get_display_pixel_info)(struct xrt_display_processor_d3d11 *xdp,
+                                   uint32_t *out_width, uint32_t *out_height,
+                                   int32_t *out_screen_left, int32_t *out_screen_top);
+    bool (*request_display_mode)(struct xrt_display_processor_d3d11 *xdp,
+                                 bool enable_3d);
 };
 ```
 
@@ -391,6 +443,8 @@ Key differences from Vulkan:
 - **Bound render target**: Output goes to the currently bound render target
   (set via `OMSetRenderTargets` before the call)
 - **`void*` types**: D3D11 types are passed as `void*` to avoid COM header deps
+- **Same optional methods**: Eye tracking, window metrics, display mode — identical
+  contract to the Vulkan variant
 
 ### 4.3 Ownership Model
 
@@ -428,18 +482,40 @@ leia_dp_process_views(struct xrt_display_processor *xdp,
     leiasr_weave(ldp->leiasr, cmd_buffer, left_view, right_view, ...);
 }
 
+// Eye tracking delivered through the SAME struct as weaving
+static bool
+leia_dp_get_predicted_eye_positions(struct xrt_display_processor *xdp,
+                                    struct xrt_eye_pair *out_eye_pair)
+{
+    struct leia_display_processor *ldp = (struct leia_display_processor *)xdp;
+    return leiasr_get_predicted_eye_positions(ldp->leiasr, out_eye_pair);
+}
+
 xrt_result_t
 leia_display_processor_create(struct leiasr *leiasr,
                               struct xrt_display_processor **out_xdp)
 {
     struct leia_display_processor *ldp = calloc(1, sizeof(*ldp));
+    // Required
     ldp->base.process_views = leia_dp_process_views;
     ldp->base.destroy = leia_dp_destroy;
+    // Eye tracking + queries (all on the same unified struct)
+    ldp->base.get_predicted_eye_positions = leia_dp_get_predicted_eye_positions;
+    ldp->base.get_window_metrics = leia_dp_get_window_metrics;
+    ldp->base.request_display_mode = leia_dp_request_display_mode;
+    ldp->base.get_display_dimensions = leia_dp_get_display_dimensions;
+    ldp->base.get_display_pixel_info = leia_dp_get_display_pixel_info;
+    ldp->base.prefers_sbs_input = true;
     ldp->leiasr = leiasr;  // Borrowed, not owned
     *out_xdp = &ldp->base;
     return XRT_SUCCESS;
 }
 ```
+
+Note how the Leia SR SDK's weaver object provides both interlacing and eye
+tracking (via `LookaroundFilter`).  The display processor simply delegates
+both `process_views` and `get_predicted_eye_positions` to the same underlying
+`leiasr` handle.
 
 ### 4.5 Reference: sim_display Display Processor (Vulkan)
 
@@ -587,11 +663,18 @@ my_vendor_get_tracked_pose(struct xrt_device *xdev,
 
 ---
 
-## 6. Component 3: Eye Tracking
+## 6. Eye Tracking (via Display Processor)
 
 Eye tracking provides predicted eye positions used for Kooima asymmetric
 frustum projection.  This is what makes the 3D effect correct for the viewer's
 actual head position.
+
+> **Key design decision:** Eye tracking is delivered through the display
+> processor's `get_predicted_eye_positions()` vtable method — **not** as a
+> separate component.  Even if a vendor has separate tracker and weaver SDKs
+> internally, the display processor must unify them behind a single struct.
+> This guarantees the runtime never needs to match trackers to weavers, and
+> each session has exactly one object providing both capabilities.
 
 ### 6.1 Data Types
 
@@ -670,10 +753,13 @@ to the runtime.
 
 ### 6.2 Data Flow
 
-The vendor's eye tracking data takes different paths depending on whether the
-app uses the extension (RAW mode) or is a legacy app (RENDER_READY mode).
-The vendor only provides the raw eye positions; the runtime decides what to
-do with them.
+The vendor's eye tracking data flows through the **display processor vtable**
+(`get_predicted_eye_positions`) — the same struct that handles weaving.
+The runtime calls this method each frame; the vendor returns `xrt_eye_pair`.
+
+The data then takes different paths depending on whether the app uses the
+extension (RAW mode) or is a legacy app (RENDER_READY mode).  The vendor
+only provides the raw eye positions; the runtime decides what to do with them.
 
 Note the **boundary between vendor driver and runtime**: vendor-specific types
 (`leiasr_eye_pair`, etc.) exist only inside the driver box.  At the boundary,
@@ -683,23 +769,26 @@ data is converted to vendor-neutral `xrt_eye_pair`.
  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
  │  VENDOR DRIVER  (src/xrt/drivers/<vendor>/)                 │
  │                                                              │
- │  ┌──────────────────────────────┐                            │
- │  │     Vendor Eye Tracking SDK  │                            │
- │  │  (face camera, IR tracker)   │                            │
- │  └──────────────┬───────────────┘                            │
- │                 │  vendor-specific types (internal)           │
- │                 ▼                                             │
- │  ┌──────────────────────────────┐                            │
- │  │     SDK Wrapper              │                            │
- │  │  vendor_get_predicted_eyes() │                            │
- │  └──────────────┬───────────────┘                            │
- └ ─ ─ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘
-     ══════════════╪══════════════════  BOUNDARY: xrt_eye_pair
- ┌ ─ ─ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐
- │  OPENXR RUNTIME │ (vendor-neutral types only)                │
- │                 ▼                                             │
+ │  ┌──────────────┐  ┌──────────────────────────────┐         │
+ │  │ Vendor Weaver│  │     Vendor Eye Tracking SDK  │         │
+ │  │ (interlacing)│  │  (face camera, IR tracker)   │         │
+ │  └──────┬───────┘  └──────────────┬───────────────┘         │
+ │         │                         │  vendor-specific types  │
+ │         ▼                         ▼                          │
+ │  ┌──────────────────────────────────────────────┐            │
+ │  │  Display Processor (unified vtable)          │            │
+ │  │  process_views()                → weaving    │            │
+ │  │  get_predicted_eye_positions()  → tracking   │            │
+ │  │  get_window_metrics()           → geometry   │            │
+ │  └──────────────────┬───────────────────────────┘            │
+ └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘
+     ═══════════════════╪═══════════  BOUNDARY: xrt_eye_pair
+ ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐
+ │  OPENXR RUNTIME     │ (vendor-neutral types only)            │
+ │                      ▼                                        │
  │  ┌──────────────────────────────┐                            │
  │  │     Compositor               │                            │
+ │  │  calls display_processor->   │                            │
  │  │  get_predicted_eye_positions │                            │
  │  │  → xrt_eye_pair             │                            │
  │  └──────────────┬───────────────┘                            │
@@ -813,28 +902,31 @@ out_right_eye[2] =  0.6f;
 return false;  // Indicates fallback, not tracked
 ```
 
-### 6.5 Integration Points for Vendor Eye Tracking
+### 6.5 Integration Points
 
-Eye positions flow from the vendor driver to the runtime through compositor
-functions that return `xrt_eye_pair` (vendor-neutral):
+Eye positions flow from the display processor vtable through the compositor
+to `oxr_session.c`.  The compositor simply delegates to the display processor:
 
 1. **D3D11 path:** `comp_d3d11_compositor_get_predicted_eye_positions()`
-   → internally calls vendor SDK → returns `xrt_vec3` left/right
+   → calls `xrt_display_processor_d3d11_get_predicted_eye_positions()` on
+   the session's display processor → returns `xrt_eye_pair`
 2. **Vulkan path:** `multi_compositor_get_predicted_eye_positions()`
-   → internally calls vendor SDK via per-session weaver → returns eye pair
+   → calls `xrt_display_processor_get_predicted_eye_positions()` on
+   the session's display processor → returns `xrt_eye_pair`
+3. **Metal/D3D12/GL paths:** Same pattern — compositor holds the display
+   processor and delegates eye tracking queries to it.
 
-Both paths feed into the runtime's `oxr_session_get_predicted_eye_positions()`
-which dispatches based on the compositor type and converts to `xrt_eye_pair`.
+All paths feed into `oxr_session_get_predicted_eye_positions()` which
+dispatches based on compositor type.
 
 **Display dimensions** are read from `xrt_system_compositor_info` which is
 populated once at device init.  The runtime calls
 `oxr_session_get_display_dimensions()` which reads `info.display_width_m`
 and `info.display_height_m` — no vendor SDK call at runtime.
 
-**Window metrics** flow through `multi_compositor_get_window_metrics()` which
-returns `xrt_window_metrics`.  The Vulkan path computes window metrics from
-generic Win32/macOS APIs (no vendor SDK needed); the D3D11 path may query
-the vendor SDK if it manages the window.
+**Window metrics** flow through the display processor's `get_window_metrics()`
+method.  The compositor calls this on the same display processor struct that
+handles weaving and eye tracking.
 
 ### 6.6 Eye Tracking Mode Control (v6)
 
@@ -1813,8 +1905,10 @@ For a vendor starting from scratch, here is the recommended order:
 1. **Copy sim_display** as a template → rename to `my_vendor/`
 2. **Replace the device** with your display's actual specs
 3. **Replace the display processor** shaders with your interlacing algorithm
-4. **Add your SDK wrapper** (.h/.cpp pair with opaque struct)
-5. **Wire up eye tracking** — return `xrt_eye_pair` through the compositor interface
+4. **Add eye tracking** to the same display processor struct — implement
+   `get_predicted_eye_positions()` on the vtable (see §4 and §6)
+5. **Add your SDK wrapper** (.h/.cpp pair with opaque struct) if using an
+   external vendor SDK
 6. **Populate `xrt_system_compositor_info`** with display geometry at device init
 7. **Register in the build system** (all 5 files — see §8.1 checklist):
    - Add `"MY_VENDOR"` to `AVAILABLE_DRIVERS` in root `CMakeLists.txt`
