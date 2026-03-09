@@ -819,11 +819,11 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 	}
 #endif // XRT_OS_ANDROID
 
-#ifdef XRT_OS_MACOS
-skip_macos_pump:;
-#endif
-
 	bool read_more_events = true;
+#ifdef XRT_OS_MACOS
+skip_macos_pump:
+	read_more_events = true;
+#endif
 	while (read_more_events) {
 		union xrt_session_event xse = {0};
 		xret = xrt_session_poll_events(xs, &xse);
