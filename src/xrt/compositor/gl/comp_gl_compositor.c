@@ -644,6 +644,17 @@ gl_compositor_layer_quad(struct xrt_compositor *xc,
 	return XRT_SUCCESS;
 }
 
+static xrt_result_t
+gl_compositor_layer_window_space(struct xrt_compositor *xc,
+                                  struct xrt_device *xdev,
+                                  struct xrt_swapchain *xsc,
+                                  const struct xrt_layer_data *data)
+{
+	struct comp_gl_compositor *c = gl_comp(xc);
+	comp_layer_accum_window_space(&c->layer_accum, xsc, data);
+	return XRT_SUCCESS;
+}
+
 
 /*
  *
@@ -1513,6 +1524,7 @@ comp_gl_compositor_create(struct xrt_device *xdev,
 	xc->layer_projection = gl_compositor_layer_projection;
 	xc->layer_projection_depth = gl_compositor_layer_projection_depth;
 	xc->layer_quad = gl_compositor_layer_quad;
+	xc->layer_window_space = gl_compositor_layer_window_space;
 	xc->layer_commit = gl_compositor_layer_commit;
 	xc->destroy = gl_compositor_destroy;
 
