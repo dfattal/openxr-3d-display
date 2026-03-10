@@ -1034,10 +1034,22 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 		// Normal window mode: present to screen
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-		// Use actual window backing dimensions (Retina-aware)
+		// Use actual window backing dimensions
 		uint32_t present_w = c->view_width * 2;
 		uint32_t present_h = c->view_height;
-#ifdef __APPLE__
+#ifdef XRT_OS_WINDOWS
+		if (c->hwnd != NULL) {
+			RECT rc;
+			if (GetClientRect(c->hwnd, &rc)) {
+				uint32_t ww = (uint32_t)(rc.right - rc.left);
+				uint32_t wh = (uint32_t)(rc.bottom - rc.top);
+				if (ww > 0 && wh > 0) {
+					present_w = ww;
+					present_h = wh;
+				}
+			}
+		}
+#elif defined(__APPLE__)
 		comp_gl_window_macos_get_dimensions(c->macos_window, &present_w, &present_h);
 #endif
 
