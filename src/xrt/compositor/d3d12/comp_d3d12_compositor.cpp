@@ -222,14 +222,30 @@ d3d12_compositor_create_semaphore(struct xrt_compositor *xc,
 static xrt_result_t
 d3d12_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
 {
+	struct comp_d3d12_compositor *c = d3d12_comp(xc);
+
 	U_LOG_I("D3D12 compositor session begin");
+
+	// Switch display to 3D mode
+	if (c->display_processor != nullptr) {
+		xrt_display_processor_d3d12_request_display_mode(c->display_processor, true);
+	}
+
 	return XRT_SUCCESS;
 }
 
 static xrt_result_t
 d3d12_compositor_end_session(struct xrt_compositor *xc)
 {
+	struct comp_d3d12_compositor *c = d3d12_comp(xc);
+
 	U_LOG_I("D3D12 compositor session end");
+
+	// Switch display back to 2D mode
+	if (c->display_processor != nullptr) {
+		xrt_display_processor_d3d12_request_display_mode(c->display_processor, false);
+	}
+
 	return XRT_SUCCESS;
 }
 
@@ -615,11 +631,22 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 		c->cmd_list->ResourceBarrier(1, &barrier);
 
+		// Copy stereo SRV descriptor from renderer's heap to dp_srv_heap
+		// (D3D12 requires the bound heap to contain the referenced descriptors)
+		{
+			D3D12_CPU_DESCRIPTOR_HANDLE src_cpu;
+			src_cpu.ptr = static_cast<SIZE_T>(comp_d3d12_renderer_get_stereo_srv_cpu_handle(c->renderer));
+			D3D12_CPU_DESCRIPTOR_HANDLE dst_cpu = c->dp_srv_heap->GetCPUDescriptorHandleForHeapStart();
+			c->device->CopyDescriptorsSimple(1, dst_cpu, src_cpu,
+			                                 D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		}
+
 		// Set descriptor heaps for display processor
 		ID3D12DescriptorHeap *heaps[] = {c->dp_srv_heap};
 		c->cmd_list->SetDescriptorHeaps(1, heaps);
 
-		uint64_t stereo_srv = comp_d3d12_renderer_get_stereo_srv_handle(c->renderer);
+		// Get GPU handle from dp_srv_heap (which now has the copied SRV)
+		uint64_t stereo_srv = c->dp_srv_heap->GetGPUDescriptorHandleForHeapStart().ptr;
 		uint64_t target_rtv = comp_d3d12_target_get_rtv_handle(c->target, bb_index);
 
 		uint32_t view_width, view_height;

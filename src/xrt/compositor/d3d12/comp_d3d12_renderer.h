@@ -90,6 +90,17 @@ uint64_t
 comp_d3d12_renderer_get_stereo_srv_handle(struct comp_d3d12_renderer *renderer);
 
 /*!
+ * Get the stereo texture SRV CPU descriptor handle (for copying to another heap).
+ *
+ * @param renderer The renderer.
+ * @return D3D12_CPU_DESCRIPTOR_HANDLE as uint64_t.
+ *
+ * @ingroup comp_d3d12
+ */
+uint64_t
+comp_d3d12_renderer_get_stereo_srv_cpu_handle(struct comp_d3d12_renderer *renderer);
+
+/*!
  * Get stereo texture dimensions.
  *
  * @param renderer The renderer.
