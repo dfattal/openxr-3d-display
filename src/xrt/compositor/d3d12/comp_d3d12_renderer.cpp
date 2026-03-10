@@ -395,6 +395,17 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
+	// Diagnostic: log draw info periodically
+	static uint32_t draw_counter = 0;
+	bool draw_log = (draw_counter % 60 == 0);
+	draw_counter++;
+	if (draw_log) {
+		U_LOG_I("D3D12 renderer draw: layers=%u, mono=%d, view=%ux%u, target=%ux%u",
+		        layers->layer_count, force_mono,
+		        renderer->view_width, renderer->view_height,
+		        target_width, target_height);
+	}
+
 	// Transition stereo texture to COPY_DEST for receiving swapchain content
 	D3D12_RESOURCE_BARRIER barrier = {};
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -458,6 +469,13 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 				dst_x = 0;
 			} else {
 				dst_x = vi * renderer->view_width;
+			}
+
+			if (draw_log) {
+				U_LOG_I("D3D12 renderer: copy layer=%u view=%u, src=%p (%llux%u), dst_x=%u, copy=%ux%u",
+				        li, vi, (void *)src_resource,
+				        (unsigned long long)src_desc.Width, (unsigned)src_desc.Height,
+				        dst_x, copy_w, copy_h);
 			}
 
 			// Copy region from swapchain to stereo texture

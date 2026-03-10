@@ -517,6 +517,16 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		}
 	}
 
+	// Diagnostic: log layer info periodically (every ~60 frames)
+	static uint32_t diag_counter = 0;
+	bool diag_log = (diag_counter % 60 == 0);
+	diag_counter++;
+	if (diag_log) {
+		U_LOG_I("D3D12 layer_commit: layers=%u, is_mono=%d, dp=%p, target=%p",
+		        c->layer_accum.layer_count, is_mono,
+		        (void *)c->display_processor, (void *)c->target);
+	}
+
 	// Runtime-side 2D/3D toggle from qwerty V key
 #ifdef XRT_BUILD_DRIVER_QWERTY
 	if (c->xsysd != nullptr) {
@@ -618,19 +628,31 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		}
 
 		// Execute stereo copy so the texture is ready for the weaver
-		c->cmd_list->Close();
+		HRESULT hr_close = c->cmd_list->Close();
+		if (diag_log) {
+			U_LOG_I("D3D12 dp path: copy Close hr=0x%08x", (unsigned)hr_close);
+		}
 		ID3D12CommandList *copy_lists[] = {c->cmd_list};
 		c->command_queue->ExecuteCommandLists(1, copy_lists);
 		gpu_wait_idle(c);
 
 		// Give the weaver a fresh command list
-		c->cmd_allocator->Reset();
-		c->cmd_list->Reset(c->cmd_allocator, nullptr);
+		HRESULT hr_alloc = c->cmd_allocator->Reset();
+		HRESULT hr_list = c->cmd_list->Reset(c->cmd_allocator, nullptr);
+		if (diag_log) {
+			U_LOG_I("D3D12 dp path: alloc Reset hr=0x%08x, list Reset hr=0x%08x",
+			        (unsigned)hr_alloc, (unsigned)hr_list);
+		}
 
 		uint32_t view_width, view_height;
 		comp_d3d12_renderer_get_view_dimensions(c->renderer, &view_width, &view_height);
 
 		void *stereo_resource = comp_d3d12_renderer_get_stereo_resource(c->renderer);
+
+		if (diag_log) {
+			U_LOG_I("D3D12 dp path: stereo_resource=%p, view=%ux%u, target=%ux%u",
+			        stereo_resource, view_width, view_height, tgt_width, tgt_height);
+		}
 
 		xrt_display_processor_d3d12_process_stereo(
 		    c->display_processor, c->cmd_list, stereo_resource, 0, 0,
@@ -638,9 +660,10 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 
 		// The weaver recorded draw commands onto our command list.
 		// Close and execute so the GPU processes the weaving.
-		// The SR D3D12 weaver's own swapchain present happens
-		// internally (either during weave() or on command execution).
-		c->cmd_list->Close();
+		HRESULT hr_weave_close = c->cmd_list->Close();
+		if (diag_log) {
+			U_LOG_I("D3D12 dp path: weave Close hr=0x%08x", (unsigned)hr_weave_close);
+		}
 		ID3D12CommandList *weave_lists[] = {c->cmd_list};
 		c->command_queue->ExecuteCommandLists(1, weave_lists);
 
