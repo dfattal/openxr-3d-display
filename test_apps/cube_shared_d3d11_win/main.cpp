@@ -51,6 +51,7 @@ static XrSessionManager* g_xr = nullptr;
 static UINT g_windowWidth = 1280;
 static UINT g_windowHeight = 720;
 static bool g_inSizeMove = false;
+static bool g_resizeNeeded = false;
 static const uint32_t HUD_PIXEL_WIDTH = 380;
 static const uint32_t HUD_PIXEL_HEIGHT = 470;
 static const float CAMERA_HALF_TAN_VFOV = 0.32491969623f;
@@ -111,6 +112,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (wParam != SIZE_MINIMIZED) {
             g_windowWidth = LOWORD(lParam);
             g_windowHeight = HIWORD(lParam);
+            g_resizeNeeded = true;
         }
         return 0;
     case WM_ENTERSIZEMOVE:
@@ -650,6 +652,19 @@ static void RenderOneFrame(RenderState& rs) {
                     0.0f, 0.0f, fracW, fracH, 0.0f, submitViewCount);
             } else {
                 EndFrame(xr, frameState.predictedDisplayTime, projectionViews, submitViewCount);
+            }
+
+            // Resize app swap chain if window size changed
+            if (g_resizeNeeded && !g_inSizeMove && rs.appSwapchain) {
+                g_resizeNeeded = false;
+                rs.appBackBufferRTV.Reset();
+                HRESULT hr = rs.appSwapchain->ResizeBuffers(0, g_windowWidth, g_windowHeight,
+                                                             DXGI_FORMAT_UNKNOWN, 0);
+                if (SUCCEEDED(hr)) {
+                    ComPtr<ID3D11Texture2D> backBuf;
+                    rs.appSwapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), &backBuf);
+                    renderer.device->CreateRenderTargetView(backBuf.Get(), nullptr, &rs.appBackBufferRTV);
+                }
             }
 
             // After xrEndFrame: blit shared texture to app window
