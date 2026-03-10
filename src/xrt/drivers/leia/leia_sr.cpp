@@ -248,15 +248,15 @@ leiasr_create(double maxTime,
 	sr->device = device;
 	sr->windowHandle = (HWND)windowHandle;
 
-	// Check for fullscreen weaver override (diagnostic: bypass windowed mode)
-	HWND weaverHwnd = (HWND)windowHandle;
-	const char *fullscreen_env = getenv("SR_VK_FULLSCREEN_WEAVER");
-	if (fullscreen_env != nullptr && fullscreen_env[0] == '1') {
-		U_LOG_W("SR_VK_FULLSCREEN_WEAVER=1: forcing NULL HWND (fullscreen weaver mode)");
-		weaverHwnd = NULL;
-	}
-
-	// Pass windowHandle to CreateSRWeaver: NULL = fullscreen mode, valid HWND = windowed mode
+	// ALWAYS pass NULL HWND to CreateVulkanWeaver.
+	// The SR VK weaver creates its own internal VkSwapchain when given a
+	// valid HWND. Our compositor also creates a VkSwapchain on the same HWND
+	// (via comp_vk_native_target_create) for framebuffer management. Having
+	// two VkSwapchains on the same HWND violates the Vulkan spec and crashes.
+	// By passing NULL, the weaver skips internal swapchain creation and we
+	// provide framebuffers via setOutputFrameBuffer instead.
+	// The HWND is still stored in sr->windowHandle for window metrics queries.
+	HWND weaverHwnd = NULL;
 	if (!CreateSRWeaver(sr->context, device, physicalDevice, graphicsQueue, commandPool, weaverHwnd, sr)) {
 		U_LOG_E("Failed to create SR weaver");
 		delete sr;
@@ -267,7 +267,7 @@ leiasr_create(double maxTime,
 
 	*out = sr;
 
-	U_LOG_W("Created leiasr instance with weaver for HWND %p (weaver HWND %p)", windowHandle, (void *)weaverHwnd);
+	U_LOG_W("Created leiasr instance with weaver (window HWND %p, weaver HWND=NULL to avoid dual swapchain)", windowHandle);
 
 	return XRT_SUCCESS;
 }
