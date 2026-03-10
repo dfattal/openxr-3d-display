@@ -395,37 +395,19 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	// Transition stereo texture to render target
+	// Transition stereo texture to COPY_DEST for receiving swapchain content
 	D3D12_RESOURCE_BARRIER barrier = {};
 	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	barrier.Transition.pResource = renderer->stereo_texture;
 	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
 	barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 	cmd_list->ResourceBarrier(1, &barrier);
-
-	// Set render target to stereo texture
-	D3D12_CPU_DESCRIPTOR_HANDLE rtv_handle = renderer->rtv_heap->GetCPUDescriptorHandleForHeapStart();
-	cmd_list->OMSetRenderTargets(1, &rtv_handle, FALSE, nullptr);
-
-	// Clear stereo texture
-	float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-	cmd_list->ClearRenderTargetView(rtv_handle, clear_color, 0, nullptr);
-
-	// Set up descriptor heap for SRV access
-	ID3D12DescriptorHeap *heaps[] = {renderer->srv_heap};
-	cmd_list->SetDescriptorHeaps(1, heaps);
-
-	// Set root signature and PSO
-	cmd_list->SetGraphicsRootSignature(renderer->root_signature);
-	cmd_list->SetPipelineState(renderer->blit_pso);
-	cmd_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-	cmd_list->IASetVertexBuffers(0, 0, nullptr);
 
 	// Determine view count
 	uint32_t view_count = force_mono ? 1 : 2;
 
-	// For each projection layer, blit swapchain images into left/right halves
+	// For each projection layer, copy swapchain images into left/right halves
 	for (uint32_t li = 0; li < layers->layer_count; li++) {
 		struct comp_layer *layer = &layers->layers[li];
 
@@ -447,9 +429,7 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 
 			// Get the swapchain native image handle (ID3D12Resource*)
 			struct xrt_swapchain_native *xscn = (struct xrt_swapchain_native *)xsc;
-			uint32_t img_index = layer->data.flip_y ? 0 : 0; // Use last released
-			// The image to use is determined by the sub_image index
-			img_index = layer->data.proj.v[vi].sub.image_index;
+			uint32_t img_index = layer->data.proj.v[vi].sub.image_index;
 			ID3D12Resource *src_resource = reinterpret_cast<ID3D12Resource *>(
 			    xscn->images[img_index].handle);
 
@@ -457,44 +437,65 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 				continue;
 			}
 
-			// TODO: Create SRV for swapchain image and bind it.
-			// For now, we record the viewport setup — actual SRV binding
-			// requires per-swapchain-image descriptor management.
+			// Transition swapchain image: RENDER_TARGET → COPY_SOURCE
+			D3D12_RESOURCE_BARRIER src_barrier = {};
+			src_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			src_barrier.Transition.pResource = src_resource;
+			src_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			src_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+			src_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			cmd_list->ResourceBarrier(1, &src_barrier);
 
-			// Set viewport for this eye
-			D3D12_VIEWPORT viewport = {};
+			// Get swapchain image dimensions
+			D3D12_RESOURCE_DESC src_desc = src_resource->GetDesc();
+			uint32_t copy_w = (std::min)(static_cast<uint32_t>(src_desc.Width), renderer->view_width);
+			uint32_t copy_h = (std::min)(static_cast<uint32_t>(src_desc.Height), renderer->texture_height);
+
+			// Destination X offset: view 0 = left half, view 1 = right half
+			uint32_t dst_x = 0;
 			if (layer_view_count == 1) {
-				// Mono: fill full stereo texture width
-				viewport.Width = static_cast<float>(renderer->view_width * 2);
+				// Mono: copy to left half, will be duplicated or stretched later
+				dst_x = 0;
 			} else {
-				// Stereo: left half or right half
-				viewport.TopLeftX = static_cast<float>(vi * renderer->view_width);
-				viewport.Width = static_cast<float>(renderer->view_width);
+				dst_x = vi * renderer->view_width;
 			}
-			viewport.TopLeftY = 0.0f;
-			viewport.Height = static_cast<float>(renderer->texture_height);
-			viewport.MinDepth = 0.0f;
-			viewport.MaxDepth = 1.0f;
-			cmd_list->RSSetViewports(1, &viewport);
 
-			D3D12_RECT scissor = {};
-			scissor.left = static_cast<LONG>(viewport.TopLeftX);
-			scissor.top = 0;
-			scissor.right = static_cast<LONG>(viewport.TopLeftX + viewport.Width);
-			scissor.bottom = static_cast<LONG>(viewport.Height);
-			cmd_list->RSSetScissorRects(1, &scissor);
+			// Copy region from swapchain to stereo texture
+			D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
+			dst_loc.pResource = renderer->stereo_texture;
+			dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+			dst_loc.SubresourceIndex = 0;
 
-			// Set source rect root constants (full image)
-			float src_rect[4] = {0.0f, 0.0f, 1.0f, 1.0f};
-			cmd_list->SetGraphicsRoot32BitConstants(1, 4, src_rect, 0);
+			D3D12_TEXTURE_COPY_LOCATION src_loc = {};
+			src_loc.pResource = src_resource;
+			src_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+			src_loc.SubresourceIndex = 0;
 
-			// Draw fullscreen quad
-			cmd_list->DrawInstanced(4, 1, 0, 0);
+			D3D12_BOX src_box = {};
+			src_box.left = 0;
+			src_box.top = 0;
+			src_box.front = 0;
+			src_box.right = copy_w;
+			src_box.bottom = copy_h;
+			src_box.back = 1;
+
+			cmd_list->CopyTextureRegion(&dst_loc, dst_x, 0, 0, &src_loc, &src_box);
+
+			// For mono: duplicate left eye to right half
+			if (layer_view_count == 1 && view_count == 2) {
+				cmd_list->CopyTextureRegion(&dst_loc, renderer->view_width, 0, 0,
+				                            &src_loc, &src_box);
+			}
+
+			// Transition swapchain image back: COPY_SOURCE → RENDER_TARGET
+			src_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+			src_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			cmd_list->ResourceBarrier(1, &src_barrier);
 		}
 	}
 
 	// Transition stereo texture back to shader resource for display processor
-	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
 	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 	cmd_list->ResourceBarrier(1, &barrier);
 
@@ -506,6 +507,13 @@ extern "C" uint64_t
 comp_d3d12_renderer_get_stereo_srv_handle(struct comp_d3d12_renderer *renderer)
 {
 	D3D12_GPU_DESCRIPTOR_HANDLE handle = renderer->srv_heap->GetGPUDescriptorHandleForHeapStart();
+	return handle.ptr;
+}
+
+extern "C" uint64_t
+comp_d3d12_renderer_get_stereo_srv_cpu_handle(struct comp_d3d12_renderer *renderer)
+{
+	D3D12_CPU_DESCRIPTOR_HANDLE handle = renderer->srv_heap->GetCPUDescriptorHandleForHeapStart();
 	return handle.ptr;
 }
 
