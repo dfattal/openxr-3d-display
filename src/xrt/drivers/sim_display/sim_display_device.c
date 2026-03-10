@@ -345,7 +345,7 @@ sim_display_hmd_set_property(struct xrt_device *xdev,
                               int32_t value)
 {
 	if (property == XRT_DEVICE_PROPERTY_OUTPUT_MODE) {
-		// Unified mode index: 0=2D, 1=SBS, 2=Anaglyph, 3=Blend
+		// Unified mode index: 0=2D, 1=Anaglyph, 2=SBS, 3=Blend
 		// Map to internal sim_display output mode: 0=SBS, 1=Anaglyph, 2=Blend
 		enum sim_display_output_mode internal_mode;
 		const char *mode_name;
@@ -353,12 +353,12 @@ sim_display_hmd_set_property(struct xrt_device *xdev,
 		case 0: // 2D — keep current output mode, 3D toggle handled by state tracker
 			return XRT_SUCCESS;
 		case 1:
-			internal_mode = SIM_DISPLAY_OUTPUT_SBS;
-			mode_name = "SBS";
-			break;
-		case 2:
 			internal_mode = SIM_DISPLAY_OUTPUT_ANAGLYPH;
 			mode_name = "Anaglyph";
+			break;
+		case 2:
+			internal_mode = SIM_DISPLAY_OUTPUT_SBS;
+			mode_name = "SBS";
 			break;
 		case 3:
 			internal_mode = SIM_DISPLAY_OUTPUT_BLEND;
@@ -384,9 +384,14 @@ sim_display_hmd_get_property(struct xrt_device *xdev,
                               int32_t *out_value)
 {
 	if (property == XRT_DEVICE_PROPERTY_OUTPUT_MODE) {
-		// Return unified mode index: internal 0=SBS→1, 1=Anaglyph→2, 2=Blend→3
-		int32_t internal = (int32_t)sim_display_get_output_mode();
-		*out_value = internal + 1; // Offset by 1 (mode 0 is 2D)
+		// Return unified mode index: internal SBS(0)→2, Anaglyph(1)→1, Blend(2)→3
+		enum sim_display_output_mode internal = sim_display_get_output_mode();
+		switch (internal) {
+		case SIM_DISPLAY_OUTPUT_SBS:      *out_value = 2; break;
+		case SIM_DISPLAY_OUTPUT_ANAGLYPH: *out_value = 1; break;
+		case SIM_DISPLAY_OUTPUT_BLEND:    *out_value = 3; break;
+		default:                          *out_value = 1; break;
+		}
 		return XRT_SUCCESS;
 	}
 	if (property == XRT_DEVICE_PROPERTY_SBS_MODE) {
@@ -517,6 +522,7 @@ sim_display_hmd_create(void)
 	snprintf(hmd->base.serial, XRT_DEVICE_NAME_LEN, "sim_display_0");
 
 	// Rendering modes: sim_display supports 4 modes (2D + 3 stereo).
+	// Order: 0=2D, 1=Anaglyph (default 3D), 2=SBS, 3=Blend
 	hmd->base.rendering_mode_count = 4;
 
 	// Mode 0: 2D (mono, full resolution)
@@ -527,17 +533,17 @@ sim_display_hmd_create(void)
 	hmd->base.rendering_modes[0].view_scale_y = 1.0f;
 	hmd->base.rendering_modes[0].display_3d = false;
 
-	// Mode 1: SBS (stereo)
+	// Mode 1: Anaglyph (stereo, default 3D)
 	hmd->base.rendering_modes[1].mode_index = 1;
-	snprintf(hmd->base.rendering_modes[1].mode_name, XRT_DEVICE_NAME_LEN, "SBS");
+	snprintf(hmd->base.rendering_modes[1].mode_name, XRT_DEVICE_NAME_LEN, "Anaglyph");
 	hmd->base.rendering_modes[1].view_count = 2;
 	hmd->base.rendering_modes[1].view_scale_x = 0.5f;
 	hmd->base.rendering_modes[1].view_scale_y = 0.5f;
 	hmd->base.rendering_modes[1].display_3d = true;
 
-	// Mode 2: Anaglyph (stereo)
+	// Mode 2: SBS (stereo)
 	hmd->base.rendering_modes[2].mode_index = 2;
-	snprintf(hmd->base.rendering_modes[2].mode_name, XRT_DEVICE_NAME_LEN, "Anaglyph");
+	snprintf(hmd->base.rendering_modes[2].mode_name, XRT_DEVICE_NAME_LEN, "SBS");
 	hmd->base.rendering_modes[2].view_count = 2;
 	hmd->base.rendering_modes[2].view_scale_x = 0.5f;
 	hmd->base.rendering_modes[2].view_scale_y = 0.5f;
@@ -551,7 +557,17 @@ sim_display_hmd_create(void)
 	hmd->base.rendering_modes[3].view_scale_y = 0.5f;
 	hmd->base.rendering_modes[3].display_3d = true;
 
-	hmd->base.hmd->active_rendering_mode_index = 1; // Default to SBS (3D)
+	// Set default active mode from env var
+	{
+		enum sim_display_output_mode sd_mode = sim_display_get_output_mode();
+		// Map internal mode to unified index: SBS→2, Anaglyph→1, Blend→3
+		switch (sd_mode) {
+		case SIM_DISPLAY_OUTPUT_SBS:      hmd->base.hmd->active_rendering_mode_index = 2; break;
+		case SIM_DISPLAY_OUTPUT_ANAGLYPH: hmd->base.hmd->active_rendering_mode_index = 1; break;
+		case SIM_DISPLAY_OUTPUT_BLEND:    hmd->base.hmd->active_rendering_mode_index = 3; break;
+		default:                          hmd->base.hmd->active_rendering_mode_index = 1; break;
+		}
+	}
 
 	// Head pose input.
 	hmd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;

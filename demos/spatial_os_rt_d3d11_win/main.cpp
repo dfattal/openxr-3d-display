@@ -19,7 +19,7 @@
  *   Escape  = reset layout
  *   WASD/QE = fly camera (3D scene)
  *   Mouse   = look around (3D scene)
- *   V       = toggle 2D/3D display mode
+ *   V       = cycle rendering modes
  *   F11     = fullscreen
  */
 
@@ -271,12 +271,10 @@ static void RenderOneFrame(RenderState& rs) {
         g_inputState.fullscreenToggleRequested = false;
     }
 
-    if (g_inputState.displayModeToggleRequested) {
-        g_inputState.displayModeToggleRequested = false;
-        if (xr.pfnRequestDisplayModeEXT && xr.session != XR_NULL_HANDLE) {
-            XrDisplayModeEXT mode = g_inputState.displayMode3D ?
-                XR_DISPLAY_MODE_3D_EXT : XR_DISPLAY_MODE_2D_EXT;
-            xr.pfnRequestDisplayModeEXT(xr.session, mode);
+    if (g_inputState.renderingModeChangeRequested) {
+        g_inputState.renderingModeChangeRequested = false;
+        if (xr.pfnRequestDisplayRenderingModeEXT && xr.session != XR_NULL_HANDLE) {
+            xr.pfnRequestDisplayRenderingModeEXT(xr.session, g_inputState.currentRenderingMode);
         }
     }
 
@@ -312,6 +310,7 @@ static void RenderOneFrame(RenderState& rs) {
                     uint32_t eyeRenderH = xr.swapchain.height;
 
                     Display3DStereoView stereoViews[2];
+                    bool appMonoMode = (g_inputState.currentRenderingMode == 0) || (xr.renderingModeCount > 0 && !xr.renderingModeDisplay3D[g_inputState.currentRenderingMode]);
                     bool useAppProjection = (xr.hasDisplayInfoExt && xr.displayWidthM > 0.0f);
                     if (useAppProjection) {
                         float pxSizeX = xr.displayWidthM / (float)xr.swapchain.width;
@@ -324,7 +323,7 @@ static void RenderOneFrame(RenderState& rs) {
 
                         XrVector3f rawLeft = rawViews[0].pose.position;
                         XrVector3f rawRight = rawViews[1].pose.position;
-                        if (!g_inputState.displayMode3D) {
+                        if (appMonoMode) {
                             XrVector3f center = {
                                 (rawLeft.x + rawRight.x) * 0.5f,
                                 (rawLeft.y + rawRight.y) * 0.5f,
@@ -392,7 +391,7 @@ static void RenderOneFrame(RenderState& rs) {
                     }
 
                     // Render center 3D scene
-                    bool monoMode = !g_inputState.displayMode3D;
+                    bool monoMode = appMonoMode;
                     int eyeCount = monoMode ? 1 : 2;
 
                     uint32_t imageIndex;
@@ -460,7 +459,7 @@ static void RenderOneFrame(RenderState& rs) {
             }
 
             // Submit all layers
-            uint32_t submitViewCount = g_inputState.displayMode3D ? 2 : 1;
+            uint32_t submitViewCount = (xr.renderingModeCount > 0 && g_inputState.currentRenderingMode < xr.renderingModeCount) ? xr.renderingModeViewCounts[g_inputState.currentRenderingMode] : 2;
             EndFrameMultiLayer(xr, frameState.predictedDisplayTime, projectionViews,
                 submitViewCount, g_app.panels, NUM_PANELS);
         }
@@ -614,12 +613,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     ToggleFullscreen(hwnd);
 
     LOG_INFO("=== Entering main loop ===");
-    LOG_INFO("Controls: Tab=Select, Space=Focus, 3=Depth, ESC=Reset, WASD=Fly, V=2D/3D, F11=Fullscreen");
+    LOG_INFO("Controls: Tab=Select, Space=Focus, 3=Depth, ESC=Reset, WASD=Fly, V=Cycle Modes, F11=Fullscreen");
 
     PerformanceStats perfStats = {};
     perfStats.lastTime = std::chrono::high_resolution_clock::now();
     g_inputState.stereo.virtualDisplayHeight = 0.24f;
     g_inputState.nominalViewerZ = xr.nominalViewerZ;
+    g_inputState.renderingModeCount = xr.renderingModeCount;
 
     RenderState rs = {};
     rs.hwnd = hwnd;

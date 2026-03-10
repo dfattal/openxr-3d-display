@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 #define XR_EXT_display_info 1
-#define XR_EXT_display_info_SPEC_VERSION 8
+#define XR_EXT_display_info_SPEC_VERSION 9
 #define XR_EXT_DISPLAY_INFO_EXTENSION_NAME "XR_EXT_display_info"
 
 // Reuse the type value from the deleted XR_EXT_dynamic_render_resolution
@@ -225,6 +225,10 @@ typedef struct XrDisplayRenderingModeInfoEXT {
     void* XR_MAY_ALIAS          next;       //!< Pointer to next structure in chain
     uint32_t                    modeIndex;  //!< Vendor-defined mode index (pass to xrRequestDisplayRenderingModeEXT)
     char                        modeName[XR_MAX_SYSTEM_NAME_SIZE]; //!< Human-readable mode name
+    uint32_t                    viewCount;  //!< Number of views (1=mono, 2=stereo, etc.)
+    float                       viewScaleX; //!< Per-view horizontal scale (vendor-provided)
+    float                       viewScaleY; //!< Per-view vertical scale (vendor-provided)
+    XrBool32                    display3D;  //!< Whether display hardware is in 3D mode
 } XrDisplayRenderingModeInfoEXT;
 
 /*!

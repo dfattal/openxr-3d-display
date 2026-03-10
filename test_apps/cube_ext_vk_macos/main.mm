@@ -98,11 +98,9 @@ struct InputState {
     // HUD toggle (Tab)
     bool hudVisible = true;
 
-    // Display mode toggle (V key)
-    bool displayMode3D = true;
-    bool displayModeToggleRequested = false;
-
-    // Rendering mode change (1/2/3 keys)
+    // Rendering mode (V=cycle, 0-8=direct)
+    uint32_t currentRenderingMode = 1;
+    uint32_t renderingModeCount = 0;
     bool renderingModeChangeRequested = false;
 
     // Camera vs display mode toggle (C key)
@@ -122,9 +120,6 @@ static NSWindow *g_window = nil;
 static NSView *g_metalView = nil;
 static InputState g_input;
 static const float CAMERA_HALF_TAN_VFOV = 0.32491969623f; // tan(18°) → 36° vFOV
-
-// Current display rendering mode (0=SBS, 1=anaglyph, 2=blend — vendor-defined)
-static int g_currentOutputMode = 0;
 
 // Borderless fullscreen state
 static bool g_fullscreen = false;
@@ -1686,8 +1681,10 @@ static void PumpMacOSEvents() {
                     else if (ch == ' ') { g_input.resetViewRequested = true; }
                     else if (ch == '\t' && !isRepeat) { g_input.hudVisible = !g_input.hudVisible; }
                     else if (ch == 'v' && !isRepeat) {
-                        g_input.displayMode3D = !g_input.displayMode3D;
-                        g_input.displayModeToggleRequested = true;
+                        if (g_input.renderingModeCount > 0) {
+                            g_input.currentRenderingMode = (g_input.currentRenderingMode + 1) % g_input.renderingModeCount;
+                        }
+                        g_input.renderingModeChangeRequested = true;
                     }
                     else if (ch == 't' && !isRepeat) {
                         g_input.eyeTrackingModeToggleRequested = true;
@@ -1711,9 +1708,12 @@ static void PumpMacOSEvents() {
                             g_input.pitch = 0.0f;
                         }
                     }
-                    else if ((ch == '1' || ch == '2' || ch == '3') && !isRepeat) {
-                        g_currentOutputMode = ch - '1'; // 0=SBS, 1=anaglyph, 2=blend
-                        g_input.renderingModeChangeRequested = true;
+                    else if (ch >= '0' && ch <= '8' && !isRepeat) {
+                        uint32_t idx = ch - '0';
+                        if (idx < g_input.renderingModeCount) {
+                            g_input.currentRenderingMode = idx;
+                            g_input.renderingModeChangeRequested = true;
+                        }
                     }
                 }
             } else if (type == NSEventTypeKeyUp) {
@@ -1840,6 +1840,10 @@ struct AppXrSession {
     PFN_xrEnumerateDisplayRenderingModesEXT pfnEnumerateDisplayRenderingModesEXT = nullptr;
     uint32_t renderingModeCount = 0;
     char renderingModeNames[8][XR_MAX_SYSTEM_NAME_SIZE] = {};
+    uint32_t renderingModeViewCounts[8] = {};
+    float renderingModeScaleX[8] = {};
+    float renderingModeScaleY[8] = {};
+    bool renderingModeDisplay3D[8] = {};
 
     // Eye tracking mode control (XR_EXT_display_info v6)
     uint32_t supportedEyeTrackingModes = 0;
@@ -2216,8 +2220,16 @@ static bool CreateSession(AppXrSession& xr, VkInstance vkInstance, VkPhysicalDev
                 for (uint32_t i = 0; i < xr.renderingModeCount; i++) {
                     strncpy(xr.renderingModeNames[i], modes[i].modeName, XR_MAX_SYSTEM_NAME_SIZE - 1);
                     xr.renderingModeNames[i][XR_MAX_SYSTEM_NAME_SIZE - 1] = '\0';
-                    LOG_INFO("  [%u] %s", modes[i].modeIndex, modes[i].modeName);
+                    xr.renderingModeViewCounts[i] = modes[i].viewCount;
+                    xr.renderingModeScaleX[i] = modes[i].viewScaleX;
+                    xr.renderingModeScaleY[i] = modes[i].viewScaleY;
+                    xr.renderingModeDisplay3D[i] = modes[i].display3D ? true : false;
+                    LOG_INFO("  [%u] %s (views=%u, scale=%.2fx%.2f, 3D=%s)",
+                        modes[i].modeIndex, modes[i].modeName,
+                        modes[i].viewCount, modes[i].viewScaleX, modes[i].viewScaleY,
+                        modes[i].display3D ? "yes" : "no");
                 }
+                g_input.renderingModeCount = xr.renderingModeCount;
             }
         }
     }
@@ -2410,11 +2422,13 @@ int main() {
         const char *mode_str = getenv("SIM_DISPLAY_OUTPUT");
         if (mode_str) {
             if (strcmp(mode_str, "anaglyph") == 0)
-                g_currentOutputMode = 1;
+                g_input.currentRenderingMode = 1;
+            else if (strcmp(mode_str, "sbs") == 0)
+                g_input.currentRenderingMode = 2;
             else if (strcmp(mode_str, "blend") == 0)
-                g_currentOutputMode = 2;
+                g_input.currentRenderingMode = 3;
             else
-                g_currentOutputMode = 0;
+                g_input.currentRenderingMode = 1; // default to anaglyph
         }
     }
 
@@ -2536,12 +2550,14 @@ int main() {
         LOG_INFO("Framebuffers created OK");
     }
 
+    g_input.renderingModeChangeRequested = true;
+
     g_input.stereo.virtualDisplayHeight = 0.24f;
     g_input.nominalViewerZ = xr.nominalViewerZ;
 
     LOG_INFO("=== Entering main loop ===");
-    LOG_INFO("Controls: WASD=move, Mouse=look, Scroll=zoom, Space=reset, V=2D/3D, 1/2/3=SBS/anaglyph/blend, TAB=HUD, Cmd+Ctrl+F=fullscreen, ESC=quit");
-    LOG_INFO("          V=2D/3D, Tab=HUD, 1/2/3=SBS/Ana/Blend, ESC=quit");
+    LOG_INFO("Controls: WASD=move, Mouse=look, Scroll=zoom, Space=reset, V=Mode, 1/2/3=SBS/anaglyph/blend, TAB=HUD, Cmd+Ctrl+F=fullscreen, ESC=quit");
+    LOG_INFO("          V=Mode, Tab=HUD, 1/2/3=SBS/Ana/Blend, ESC=quit");
 
     // Known issue: during window resize, [NSApp sendEvent:] enters a modal
     // tracking loop that blocks this while loop, freezing animation and frame
@@ -2578,15 +2594,16 @@ int main() {
         if (vkRenderer.cubeRotation > 2.0f * 3.14159265f)
             vkRenderer.cubeRotation -= 2.0f * 3.14159265f;
 
-        // Handle display mode toggle (V key)
-        if (g_input.displayModeToggleRequested) {
-            g_input.displayModeToggleRequested = false;
-            if (xr.pfnRequestDisplayModeEXT && xr.session != XR_NULL_HANDLE) {
-                XrDisplayModeEXT mode = g_input.displayMode3D
-                    ? XR_DISPLAY_MODE_3D_EXT : XR_DISPLAY_MODE_2D_EXT;
-                XrResult modeResult = xr.pfnRequestDisplayModeEXT(xr.session, mode);
-                LOG_INFO("Display mode → %s (%s)", g_input.displayMode3D ? "3D" : "2D",
-                    XR_SUCCEEDED(modeResult) ? "OK" : "failed");
+        // Handle rendering mode change (V=cycle, 0-8=direct)
+        if (g_input.renderingModeChangeRequested) {
+            g_input.renderingModeChangeRequested = false;
+            if (xr.pfnRequestDisplayRenderingModeEXT && xr.session != XR_NULL_HANDLE) {
+                const char *modeName = (g_input.currentRenderingMode < xr.renderingModeCount)
+                    ? xr.renderingModeNames[g_input.currentRenderingMode] : "?";
+                XrResult res = xr.pfnRequestDisplayRenderingModeEXT(xr.session, g_input.currentRenderingMode);
+                LOG_INFO("Rendering mode -> %s (%s)",
+                    modeName,
+                    XR_SUCCEEDED(res) ? "OK" : "failed");
             }
         }
 
@@ -2597,22 +2614,9 @@ int main() {
                 XrEyeTrackingModeEXT newMode = (xr.activeEyeTrackingMode == XR_EYE_TRACKING_MODE_SMOOTH_EXT)
                     ? XR_EYE_TRACKING_MODE_RAW_EXT : XR_EYE_TRACKING_MODE_SMOOTH_EXT;
                 XrResult etResult = xr.pfnRequestEyeTrackingModeEXT(xr.session, newMode);
-                LOG_INFO("Eye tracking mode → %s (%s)",
+                LOG_INFO("Eye tracking mode -> %s (%s)",
                     newMode == XR_EYE_TRACKING_MODE_RAW_EXT ? "RAW" : "SMOOTH",
                     XR_SUCCEEDED(etResult) ? "OK" : "unsupported");
-            }
-        }
-
-        // Handle rendering mode change (1/2/3 keys)
-        if (g_input.renderingModeChangeRequested) {
-            g_input.renderingModeChangeRequested = false;
-            if (xr.pfnRequestDisplayRenderingModeEXT && xr.session != XR_NULL_HANDLE) {
-                const char *modeName = (xr.renderingModeCount > 0 && (uint32_t)g_currentOutputMode < xr.renderingModeCount)
-                    ? xr.renderingModeNames[g_currentOutputMode] : "?";
-                XrResult res = xr.pfnRequestDisplayRenderingModeEXT(xr.session, (uint32_t)g_currentOutputMode);
-                LOG_INFO("Rendering mode → %s (%s)",
-                    modeName,
-                    XR_SUCCEEDED(res) ? "OK" : "failed");
             }
         }
 
@@ -2623,6 +2627,8 @@ int main() {
             if (BeginFrame(xr, frameState)) {
                 XrCompositionLayerProjectionView projectionViews[2] = {};
                 bool rendered = false;
+                bool display3D = (g_input.currentRenderingMode < xr.renderingModeCount)
+                    ? xr.renderingModeDisplay3D[g_input.currentRenderingMode] : true;
 
                 if (frameState.shouldRender) {
                     XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
@@ -2647,7 +2653,9 @@ int main() {
                         (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT))
                     {
                         // Save raw display-space positions for Kooima + HUD
-                        XrVector3f rawEyePos[2] = {views[0].pose.position, views[1].pose.position};
+                        XrVector3f rawEyePos[2];
+                        rawEyePos[0] = views[0].pose.position;
+                        rawEyePos[1] = (viewCount >= 2) ? views[1].pose.position : views[0].pose.position;
 
                         // Store raw eye positions for HUD (pre-player-transform)
                         xr.leftEyeX = rawEyePos[0].x; xr.leftEyeY = rawEyePos[0].y; xr.leftEyeZ = rawEyePos[0].z;
@@ -2656,11 +2664,11 @@ int main() {
                         xr.activeEyeTrackingMode = (uint32_t)eyeTrackingState.activeMode;
                         xr.eyeTrackingActive = xr.isEyeTracking;
 
-                        // Determine eye count (mono in 2D, stereo in 3D)
-                        int eyeCount = g_input.displayMode3D ? 2 : 1;
+                        // Determine eye count from rendering mode
+                        int eyeCount = display3D ? 2 : 1;
 
                         // In mono mode, use center eye (average of L/R)
-                        if (!g_input.displayMode3D) {
+                        if (!display3D) {
                             rawEyePos[0] = {
                                 (rawEyePos[0].x + rawEyePos[1].x) / 2.0f,
                                 (rawEyePos[0].y + rawEyePos[1].y) / 2.0f,
@@ -2677,17 +2685,17 @@ int main() {
 
                         // Compute render dims for SBS single-swapchain.
                         // Scale depends on current output mode (may change at runtime):
-                        //   SBS (0):          scaleX=0.5, scaleY=1.0
-                        //   Anaglyph/Blend:   scaleX=0.5, scaleY=0.5
-                        float scaleX = 0.5f;
-                        float scaleY = (g_currentOutputMode == 0) ? 1.0f : 0.5f;
+                        float scaleX = (g_input.currentRenderingMode < xr.renderingModeCount)
+                            ? xr.renderingModeScaleX[g_input.currentRenderingMode] : 0.5f;
+                        float scaleY = (g_input.currentRenderingMode < xr.renderingModeCount)
+                            ? xr.renderingModeScaleY[g_input.currentRenderingMode] : 0.5f;
                         xr.recommendedViewScaleX = scaleX;
                         xr.recommendedViewScaleY = scaleY;
 
                         uint32_t eyeRenderW = xr.swapchain.width / 2;
                         uint32_t eyeRenderH = xr.swapchain.height;
                         uint32_t renderW, renderH;
-                        if (!g_input.displayMode3D) {
+                        if (!display3D) {
                             renderW = g_windowW;
                             renderH = g_windowH;
                             if (renderW > xr.swapchain.width) renderW = xr.swapchain.width;
@@ -2719,7 +2727,7 @@ int main() {
                             float screenHeightM = winH_m * vs;
                             // Halve screenW only for SBS mode (each eye sees
                             // half the display). Anaglyph/blend: full width.
-                            bool sbsMode = g_input.displayMode3D && g_currentOutputMode == 0;
+                            bool sbsMode = display3D && g_input.currentRenderingMode == 2;
                             float baseScreenW = sbsMode ? screenWidthM / 2.0f : screenWidthM;
 
                             Display3DScreen screen;
@@ -2780,7 +2788,7 @@ int main() {
                                     mat4_from_xr_fov(eyeParams[eye].projMat, views[eye].fov, 0.01f, 100.0f);
                                 }
 
-                                uint32_t vpX = g_input.displayMode3D ? (eye * renderW) : 0;
+                                uint32_t vpX = display3D ? (eye * renderW) : 0;
                                 eyeParams[eye].viewportX = vpX;
                                 eyeParams[eye].viewportY = 0;
                                 eyeParams[eye].width = renderW;
@@ -2805,7 +2813,7 @@ int main() {
                 }
 
                 if (rendered) {
-                    uint32_t submitCount = g_input.displayMode3D ? 2u : 1u;
+                    uint32_t submitCount = display3D ? 2u : 1u;
                     EndFrame(xr, frameState.predictedDisplayTime, projectionViews, submitCount);
                 } else {
                     XrFrameEndInfo endInfo = {XR_TYPE_FRAME_END_INFO};
@@ -2827,13 +2835,15 @@ int main() {
             @autoreleasepool {
                 if (g_input.hudVisible && g_hudView != nil) {
                     double fps = (g_avgFrameTime > 0) ? 1.0 / g_avgFrameTime : 0;
-                    const char *outputModeName = (xr.renderingModeCount > 0 && (uint32_t)g_currentOutputMode < xr.renderingModeCount)
-                        ? xr.renderingModeNames[g_currentOutputMode] : "?";
+                    const char *outputModeName = (g_input.currentRenderingMode < xr.renderingModeCount)
+                        ? xr.renderingModeNames[g_input.currentRenderingMode] : "?";
+                    bool display3D = (g_input.currentRenderingMode < xr.renderingModeCount)
+                        ? xr.renderingModeDisplay3D[g_input.currentRenderingMode] : true;
 
-                    // Build output mode hint: "1-N=Output" if >1 mode, empty if single
+                    // Build output mode hint: "0-N=Mode" if >1 mode, empty if single
                     NSString *outputHintStr = @"";
                     if (xr.renderingModeCount > 1) {
-                        outputHintStr = [NSString stringWithFormat:@"  1-%u=Output", xr.renderingModeCount];
+                        outputHintStr = [NSString stringWithFormat:@"  0-%u=Mode", xr.renderingModeCount - 1];
                     }
 
                     // Session state name lookup
@@ -2893,11 +2903,11 @@ int main() {
                         "\n"
                         "WASD/QE=Move  Drag=Look  Space=Reset\n"
                         "%s  Shift=IPD  Ctrl=Parallax  %s\n"
-                        "C=Mode  V=2D/3D  T=EyeMode%@  Tab=HUD  ESC=Quit",
+                        "C=Mode  V=Mode  T=EyeMode%@  Tab=HUD  ESC=Quit",
                         xr.systemName,
                         sessionStateName,
                         xr.hasCocoaWindowBinding ? "ACTIVE" : "NOT AVAILABLE",
-                        g_input.displayMode3D ? "3D (Stereo)" : "2D (Mono)",
+                        display3D ? "3D (Stereo)" : "2D (Mono)",
                         xr.supportsDisplayModeSwitch ? "" : " [no switch]",
                         outputModeName,
                         kooimaMode,

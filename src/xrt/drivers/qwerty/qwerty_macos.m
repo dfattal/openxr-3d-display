@@ -365,9 +365,9 @@ qwerty_process_macos(struct xrt_device **xdevs,
 
 		case kVK_ANSI_V:
 			if (qsys->hmd_focused) {
-				// HMD focused: toggle runtime-side 2D/3D display mode
+				// HMD focused: cycle through rendering modes (unified)
 				if (is_down && ![event isARepeat])
-					qwerty_toggle_display_mode(qsys);
+					qwerty_set_rendering_mode(qsys, qsys->rendering_mode + 1);
 			} else {
 				// Controller focused: thumbstick click
 				for (int i = 0; i < target_count; i++) {
@@ -377,12 +377,16 @@ qwerty_process_macos(struct xrt_device **xdevs,
 			}
 			break;
 
-		// 1/2/3: rendering mode (HMD focused, keydown, no repeat)
+		// 0/1/2/3: unified rendering mode (HMD focused, keydown, no repeat)
+		case kVK_ANSI_0:
+			if (is_down && ![event isARepeat] && qsys->hmd_focused)
+				qwerty_set_rendering_mode(qsys, 0);
+			break;
 		case kVK_ANSI_1:
 		case kVK_ANSI_2:
 		case kVK_ANSI_3:
 			if (is_down && ![event isARepeat] && qsys->hmd_focused)
-				qwerty_set_rendering_mode(qsys, keyCode - kVK_ANSI_1);
+				qwerty_set_rendering_mode(qsys, keyCode - kVK_ANSI_1 + 1);
 			break;
 
 		// Controller follow HMD toggle

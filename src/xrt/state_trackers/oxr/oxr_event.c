@@ -370,6 +370,17 @@ oxr_event_push_XrEventDataUserPresenceChangedEXT(struct oxr_logger *log, struct 
 #endif // OXR_HAVE_EXT_user_presence
 
 XrResult
+oxr_event_push_XrEventDataViewConfigurationChanged(struct oxr_logger *log, struct oxr_session *sess)
+{
+	// No standard OpenXR event type for view config changes.
+	// Apps calling xrRequestDisplayRenderingModeEXT already know the mode changed.
+	// This is a hook point for future extension events.
+	(void)sess;
+	U_LOG_I("View configuration changed (mode switch)");
+	return XR_SUCCESS;
+}
+
+XrResult
 oxr_event_remove_session_events(struct oxr_logger *log, struct oxr_session *sess)
 {
 	struct oxr_instance *inst = sess->sys->inst;

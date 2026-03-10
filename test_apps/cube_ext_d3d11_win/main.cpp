@@ -261,13 +261,11 @@ static void RenderOneFrame(RenderState& rs) {
         g_inputState.fullscreenToggleRequested = false;
     }
 
-    // Handle display mode toggle (V key)
-    if (g_inputState.displayModeToggleRequested) {
-        g_inputState.displayModeToggleRequested = false;
-        if (xr.pfnRequestDisplayModeEXT && xr.session != XR_NULL_HANDLE) {
-            XrDisplayModeEXT mode = g_inputState.displayMode3D ?
-                XR_DISPLAY_MODE_3D_EXT : XR_DISPLAY_MODE_2D_EXT;
-            xr.pfnRequestDisplayModeEXT(xr.session, mode);
+    // Handle rendering mode change (V=cycle, 0-8=direct)
+    if (g_inputState.renderingModeChangeRequested) {
+        g_inputState.renderingModeChangeRequested = false;
+        if (xr.pfnRequestDisplayRenderingModeEXT && xr.session != XR_NULL_HANDLE) {
+            xr.pfnRequestDisplayRenderingModeEXT(xr.session, g_inputState.currentRenderingMode);
         }
     }
 
@@ -281,14 +279,6 @@ static void RenderOneFrame(RenderState& rs) {
             LOG_INFO("Eye tracking mode -> %s (%s)",
                 newMode == XR_EYE_TRACKING_MODE_RAW_EXT ? "RAW" : "SMOOTH",
                 XR_SUCCEEDED(etResult) ? "OK" : "unsupported");
-        }
-    }
-
-    // Handle output mode change (1/2/3 keys)
-    if (g_inputState.outputModeChangeRequested) {
-        g_inputState.outputModeChangeRequested = false;
-        if (xr.pfnRequestDisplayRenderingModeEXT && xr.session != XR_NULL_HANDLE) {
-            xr.pfnRequestDisplayRenderingModeEXT(xr.session, (uint32_t)g_inputState.outputMode);
         }
     }
 
@@ -355,7 +345,8 @@ static void RenderOneFrame(RenderState& rs) {
                         // For mono: pass center eye as both L/R
                         XrVector3f rawLeft = rawViews[0].pose.position;
                         XrVector3f rawRight = rawViews[1].pose.position;
-                        if (!g_inputState.displayMode3D) {
+                        bool appMonoMode = (g_inputState.currentRenderingMode == 0) || (xr.renderingModeCount > 0 && !xr.renderingModeDisplay3D[g_inputState.currentRenderingMode]);
+                        if (appMonoMode) {
                             XrVector3f center = {
                                 (rawLeft.x + rawRight.x) * 0.5f,
                                 (rawLeft.y + rawRight.y) * 0.5f,
@@ -425,17 +416,19 @@ static void RenderOneFrame(RenderState& rs) {
                                 L"XR_EXT_win32_window_binding: ACTIVE (D3D11)" :
                                 L"XR_EXT_win32_window_binding: NOT AVAILABLE (D3D11)";
                             if (xr.supportsDisplayModeSwitch) {
-                                modeText += g_inputState.displayMode3D ?
-                                    L"\nDisplay Mode: 3D Stereo [V=Toggle]" :
-                                    L"\nDisplay Mode: 2D Mono [V=Toggle]";
+                                bool is3D = xr.renderingModeCount > 0 ? xr.renderingModeDisplay3D[g_inputState.currentRenderingMode] : true;
+                                modeText += is3D ?
+                                    L"\nDisplay Mode: 3D Stereo [V=Cycle]" :
+                                    L"\nDisplay Mode: 2D Mono [V=Cycle]";
                             }
                             modeText += g_inputState.cameraMode ?
                                 L"\nKooima: Camera-Centric [C=Toggle]" :
                                 L"\nKooima: Display-Centric [C=Toggle]";
 
                             // Dynamic render dims matching the actual viewport computation
+                            bool dispMonoMode = (g_inputState.currentRenderingMode == 0) || (xr.renderingModeCount > 0 && !xr.renderingModeDisplay3D[g_inputState.currentRenderingMode]);
                             uint32_t dispRenderW, dispRenderH;
-                            if (!g_inputState.displayMode3D) {
+                            if (dispMonoMode) {
                                 dispRenderW = g_windowWidth;
                                 dispRenderH = g_windowHeight;
                                 if (dispRenderW > xr.swapchain.width) dispRenderW = xr.swapchain.width;
@@ -452,8 +445,8 @@ static void RenderOneFrame(RenderState& rs) {
                             std::wstring dispText = FormatDisplayInfo(xr.displayWidthM, xr.displayHeightM,
                                 xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ);
                             dispText += L"\n" + FormatScaleInfo(xr.recommendedViewScaleX, xr.recommendedViewScaleY);
-                            dispText += L"\n" + FormatOutputMode(g_inputState.outputMode, xr.pfnRequestDisplayRenderingModeEXT != nullptr,
-                                (xr.renderingModeCount > 0 && (uint32_t)g_inputState.outputMode < xr.renderingModeCount) ? xr.renderingModeNames[g_inputState.outputMode] : nullptr,
+                            dispText += L"\n" + FormatOutputMode(g_inputState.currentRenderingMode, xr.pfnRequestDisplayRenderingModeEXT != nullptr,
+                                (xr.renderingModeCount > 0 && g_inputState.currentRenderingMode < xr.renderingModeCount) ? xr.renderingModeNames[g_inputState.currentRenderingMode] : nullptr,
                                 xr.renderingModeCount);
                             std::wstring eyeText = FormatEyeTrackingInfo(
                                 xr.leftEyeX, xr.leftEyeY, xr.leftEyeZ,
@@ -505,7 +498,7 @@ static void RenderOneFrame(RenderState& rs) {
                     }
 
                     // Determine mono vs stereo rendering
-                    bool monoMode = !g_inputState.displayMode3D;
+                    bool monoMode = (g_inputState.currentRenderingMode == 0) || (xr.renderingModeCount > 0 && !xr.renderingModeDisplay3D[g_inputState.currentRenderingMode]);
                     int eyeCount = monoMode ? 1 : 2;
 
                     // For mono: compute center eye position and projection
@@ -631,8 +624,8 @@ static void RenderOneFrame(RenderState& rs) {
             }
 
             // Submit frame with window-space HUD layer if visible
-            // submitViewCount: 1 for mono (2D mode), 2 for stereo (3D mode)
-            uint32_t submitViewCount = g_inputState.displayMode3D ? 2 : 1;
+            // submitViewCount from rendering mode view count
+            uint32_t submitViewCount = (xr.renderingModeCount > 0 && g_inputState.currentRenderingMode < xr.renderingModeCount) ? xr.renderingModeViewCounts[g_inputState.currentRenderingMode] : 2;
             if (hudSubmitted) {
                 float hudAR = (float)HUD_PIXEL_WIDTH / (float)HUD_PIXEL_HEIGHT;
                 float windowAR = (g_windowWidth > 0 && g_windowHeight > 0) ? (float)g_windowWidth / (float)g_windowHeight : 1.0f;
@@ -826,6 +819,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Set virtual display height (app units). 0.24 = 4x the 0.06m cube height.
     g_inputState.stereo.virtualDisplayHeight = 0.24f;
     g_inputState.nominalViewerZ = xr.nominalViewerZ;
+    g_inputState.renderingModeCount = xr.renderingModeCount;
 
     RenderState rs = {};
     rs.hwnd = hwnd;

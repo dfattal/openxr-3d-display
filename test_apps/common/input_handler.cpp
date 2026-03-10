@@ -148,20 +148,47 @@ bool UpdateInputState(InputState& state, UINT msg, WPARAM wParam, LPARAM lParam)
             state.hudVisible = !state.hudVisible;
             break;
         case 'V':
-            state.displayMode3D = !state.displayMode3D;
-            state.displayModeToggleRequested = true;
+            // Cycle through all rendering modes
+            if (state.renderingModeCount > 0) {
+                state.currentRenderingMode = (state.currentRenderingMode + 1) % state.renderingModeCount;
+            }
+            state.renderingModeChangeRequested = true;
+            break;
+        case '0':
+            state.currentRenderingMode = 0; // 2D mode
+            state.renderingModeChangeRequested = true;
             break;
         case '1':
-            state.outputMode = 0;
-            state.outputModeChangeRequested = true;
+            if (state.renderingModeCount > 1) state.currentRenderingMode = 1;
+            state.renderingModeChangeRequested = true;
             break;
         case '2':
-            state.outputMode = 1;
-            state.outputModeChangeRequested = true;
+            if (state.renderingModeCount > 2) state.currentRenderingMode = 2;
+            state.renderingModeChangeRequested = true;
             break;
         case '3':
-            state.outputMode = 2;
-            state.outputModeChangeRequested = true;
+            if (state.renderingModeCount > 3) state.currentRenderingMode = 3;
+            state.renderingModeChangeRequested = true;
+            break;
+        case '4':
+            if (state.renderingModeCount > 4) state.currentRenderingMode = 4;
+            state.renderingModeChangeRequested = true;
+            break;
+        case '5':
+            if (state.renderingModeCount > 5) state.currentRenderingMode = 5;
+            state.renderingModeChangeRequested = true;
+            break;
+        case '6':
+            if (state.renderingModeCount > 6) state.currentRenderingMode = 6;
+            state.renderingModeChangeRequested = true;
+            break;
+        case '7':
+            if (state.renderingModeCount > 7) state.currentRenderingMode = 7;
+            state.renderingModeChangeRequested = true;
+            break;
+        case '8':
+            if (state.renderingModeCount > 8) state.currentRenderingMode = 8;
+            state.renderingModeChangeRequested = true;
             break;
         case 'T':
             state.eyeTrackingModeToggleRequested = true;

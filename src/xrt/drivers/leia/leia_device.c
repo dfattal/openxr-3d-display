@@ -203,10 +203,26 @@ leia_hmd_create(void)
 	snprintf(hmd->base.str, XRT_DEVICE_NAME_LEN, "Leia 3D Display");
 	snprintf(hmd->base.serial, XRT_DEVICE_NAME_LEN, "leia_display_0");
 
-	// Rendering modes: Leia exposes 1 mode (LeiaSR).
-	hmd->base.rendering_mode_count = 1;
+	// Rendering modes: Leia exposes 2 modes (2D + LeiaSR).
+	hmd->base.rendering_mode_count = 2;
+
+	// Mode 0: 2D (mono, full resolution)
 	hmd->base.rendering_modes[0].mode_index = 0;
-	snprintf(hmd->base.rendering_modes[0].mode_name, XRT_DEVICE_NAME_LEN, "LeiaSR");
+	snprintf(hmd->base.rendering_modes[0].mode_name, XRT_DEVICE_NAME_LEN, "2D");
+	hmd->base.rendering_modes[0].view_count = 1;
+	hmd->base.rendering_modes[0].view_scale_x = 1.0f;
+	hmd->base.rendering_modes[0].view_scale_y = 1.0f;
+	hmd->base.rendering_modes[0].display_3d = false;
+
+	// Mode 1: LeiaSR (stereo, scale from SR SDK — set later by target_instance)
+	hmd->base.rendering_modes[1].mode_index = 1;
+	snprintf(hmd->base.rendering_modes[1].mode_name, XRT_DEVICE_NAME_LEN, "LeiaSR");
+	hmd->base.rendering_modes[1].view_count = 2;
+	hmd->base.rendering_modes[1].view_scale_x = 0.5f; // Default, overridden by SR SDK
+	hmd->base.rendering_modes[1].view_scale_y = 0.5f;
+	hmd->base.rendering_modes[1].display_3d = true;
+
+	hmd->base.hmd->active_rendering_mode_index = 1; // Default to LeiaSR (3D)
 
 	// Head pose input.
 	hmd->base.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
