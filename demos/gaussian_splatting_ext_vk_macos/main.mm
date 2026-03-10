@@ -12,8 +12,8 @@
  * - App creates and owns the NSWindow (XR_EXT_cocoa_window_binding)
  * - Mouse drag camera, WASD/QE movement, scroll zoom
  * - XR_EXT_display_info: Kooima projection, display metrics
- * - 2D/3D toggle (V key) via xrRequestDisplayModeEXT
- * - 1/2/3 keys for sim_display modes (SBS/anaglyph/blend)
+ * - V key cycles rendering modes via xrRequestDisplayRenderingModeEXT
+ * - 0-3 keys select rendering mode directly
  * - L key or button click: NSOpenPanel to load .ply/.spz scenes
  * - Tab: toggle HUD overlay, Space: reset camera, ESC: quit
  */
@@ -88,8 +88,6 @@ struct InputState {
     bool resetViewRequested = false;
     StereoParams stereo;
     bool hudVisible = true;
-    bool displayMode3D = true;
-    bool displayModeToggleRequested = false;
     bool cameraMode = false;
     float nominalViewerZ = 0.5f;
     bool eyeTrackingModeToggleRequested = false;
@@ -100,6 +98,11 @@ struct InputState {
     // Teleport animation
     bool teleportAnimating = false;
     float teleportTargetX = 0, teleportTargetY = 0, teleportTargetZ = 0;
+
+    // Unified rendering mode (V key cycles, 0-8 keys select directly)
+    uint32_t currentRenderingMode = 1;   // Default: mode 1 (first 3D mode)
+    uint32_t renderingModeCount = 0;     // Set from xrEnumerateDisplayRenderingModesEXT
+    bool renderingModeChangeRequested = false;
 };
 
 // ============================================================================
@@ -114,7 +117,6 @@ static const float CAMERA_HALF_TAN_VFOV = 0.32491969623f;
 
 typedef void (*PFN_sim_display_set_output_mode)(int mode);
 static PFN_sim_display_set_output_mode g_pfnSetOutputMode = nullptr;
-static int g_currentOutputMode = 0;
 
 static bool g_fullscreen = false;
 static NSRect g_savedWindowFrame = {};
@@ -419,8 +421,11 @@ static void OpenLoadDialog() {
         case 'e': case 'E': g_input.keyE = true; break;
         case 'q': case 'Q': g_input.keyQ = true; break;
         case 'v': case 'V':
-            g_input.displayMode3D = !g_input.displayMode3D;
-            g_input.displayModeToggleRequested = true;
+            // Cycle through all rendering modes
+            if (g_input.renderingModeCount > 0) {
+                g_input.currentRenderingMode = (g_input.currentRenderingMode + 1) % g_input.renderingModeCount;
+            }
+            g_input.renderingModeChangeRequested = true;
             break;
         case 'c': case 'C':
             g_input.cameraMode = !g_input.cameraMode;
@@ -434,14 +439,21 @@ static void OpenLoadDialog() {
         case ' ':
             g_input.resetViewRequested = true;
             break;
+        case '0':
+            g_input.currentRenderingMode = 0;
+            g_input.renderingModeChangeRequested = true;
+            break;
         case '1':
-            if (g_pfnSetOutputMode) { g_pfnSetOutputMode(0); g_currentOutputMode = 0; }
+            if (g_input.renderingModeCount > 1) g_input.currentRenderingMode = 1;
+            g_input.renderingModeChangeRequested = true;
             break;
         case '2':
-            if (g_pfnSetOutputMode) { g_pfnSetOutputMode(1); g_currentOutputMode = 1; }
+            if (g_input.renderingModeCount > 2) g_input.currentRenderingMode = 2;
+            g_input.renderingModeChangeRequested = true;
             break;
         case '3':
-            if (g_pfnSetOutputMode) { g_pfnSetOutputMode(2); g_currentOutputMode = 2; }
+            if (g_input.renderingModeCount > 3) g_input.currentRenderingMode = 3;
+            g_input.renderingModeChangeRequested = true;
             break;
         case '\t':
             g_input.hudVisible = !g_input.hudVisible;
@@ -596,6 +608,16 @@ struct AppXrSession {
     // Function pointers
     PFN_xrRequestDisplayModeEXT pfnRequestDisplayModeEXT = nullptr;
     PFN_xrRequestEyeTrackingModeEXT pfnRequestEyeTrackingModeEXT = nullptr;
+    PFN_xrRequestDisplayRenderingModeEXT pfnRequestDisplayRenderingModeEXT = nullptr;
+    PFN_xrEnumerateDisplayRenderingModesEXT pfnEnumerateDisplayRenderingModesEXT = nullptr;
+
+    // Enumerated rendering mode info
+    uint32_t renderingModeCount = 0;
+    char renderingModeNames[8][XR_MAX_SYSTEM_NAME_SIZE] = {};
+    uint32_t renderingModeViewCounts[8] = {};
+    float renderingModeScaleX[8] = {};
+    float renderingModeScaleY[8] = {};
+    bool renderingModeDisplay3D[8] = {};
 
     void* windowHandle = nullptr;  // unused on macOS, kept for compatibility
 };
@@ -685,6 +707,10 @@ static bool InitializeOpenXR(AppXrSession& xr) {
             xrGetInstanceProcAddr(xr.instance, "xrRequestDisplayModeEXT", (PFN_xrVoidFunction*)&xr.pfnRequestDisplayModeEXT);
         if (xr.supportedEyeTrackingModes != 0)
             xrGetInstanceProcAddr(xr.instance, "xrRequestEyeTrackingModeEXT", (PFN_xrVoidFunction*)&xr.pfnRequestEyeTrackingModeEXT);
+
+        // Load unified rendering mode function pointers (v7)
+        xrGetInstanceProcAddr(xr.instance, "xrRequestDisplayRenderingModeEXT", (PFN_xrVoidFunction*)&xr.pfnRequestDisplayRenderingModeEXT);
+        xrGetInstanceProcAddr(xr.instance, "xrEnumerateDisplayRenderingModesEXT", (PFN_xrVoidFunction*)&xr.pfnEnumerateDisplayRenderingModesEXT);
     }
 
     LOG_INFO("OpenXR initialized: %s", xr.systemName);
@@ -814,6 +840,36 @@ static bool CreateSession(AppXrSession& xr, VkInstance vkInstance, VkPhysicalDev
     XrSessionCreateInfo si = {XR_TYPE_SESSION_CREATE_INFO};
     si.next = &vkBinding; si.systemId = xr.systemId;
     XR_CHECK(xrCreateSession(xr.instance, &si, &xr.session));
+
+    // Enumerate available rendering modes and store names
+    if (xr.pfnEnumerateDisplayRenderingModesEXT && xr.session != XR_NULL_HANDLE) {
+        uint32_t modeCount = 0;
+        XrResult enumRes = xr.pfnEnumerateDisplayRenderingModesEXT(xr.session, 0, &modeCount, nullptr);
+        if (XR_SUCCEEDED(enumRes) && modeCount > 0) {
+            std::vector<XrDisplayRenderingModeInfoEXT> modes(modeCount);
+            for (uint32_t i = 0; i < modeCount; i++) {
+                modes[i].type = XR_TYPE_DISPLAY_RENDERING_MODE_INFO_EXT;
+                modes[i].next = nullptr;
+            }
+            enumRes = xr.pfnEnumerateDisplayRenderingModesEXT(xr.session, modeCount, &modeCount, modes.data());
+            if (XR_SUCCEEDED(enumRes)) {
+                xr.renderingModeCount = modeCount > 8 ? 8 : modeCount;
+                LOG_INFO("Display rendering modes (%u):", modeCount);
+                for (uint32_t i = 0; i < xr.renderingModeCount; i++) {
+                    strncpy(xr.renderingModeNames[i], modes[i].modeName, XR_MAX_SYSTEM_NAME_SIZE - 1);
+                    xr.renderingModeNames[i][XR_MAX_SYSTEM_NAME_SIZE - 1] = '\0';
+                    xr.renderingModeViewCounts[i] = modes[i].viewCount;
+                    xr.renderingModeScaleX[i] = modes[i].viewScaleX;
+                    xr.renderingModeScaleY[i] = modes[i].viewScaleY;
+                    xr.renderingModeDisplay3D[i] = (modes[i].display3D == XR_TRUE);
+                    LOG_INFO("  [%u] %s (views=%u, scale=%.2fx%.2f, 3D=%d)",
+                        modes[i].modeIndex, modes[i].modeName, modes[i].viewCount,
+                        modes[i].viewScaleX, modes[i].viewScaleY, modes[i].display3D);
+                }
+            }
+        }
+    }
+
     return true;
 }
 
@@ -986,13 +1042,14 @@ int main() {
 
     LOG_INFO("=== SR 3DGS OpenXR + External macOS Window ===");
 
-    // Initialize output mode from env var
+    // Initialize rendering mode from env var (legacy fallback)
     {
         const char *mode_str = getenv("SIM_DISPLAY_OUTPUT");
         if (mode_str) {
-            if (strcmp(mode_str, "anaglyph") == 0) g_currentOutputMode = 1;
-            else if (strcmp(mode_str, "blend") == 0) g_currentOutputMode = 2;
-            else g_currentOutputMode = 0;
+            if (strcmp(mode_str, "anaglyph") == 0) g_input.currentRenderingMode = 1;
+            else if (strcmp(mode_str, "sbs") == 0) g_input.currentRenderingMode = 2;
+            else if (strcmp(mode_str, "blend") == 0) g_input.currentRenderingMode = 3;
+            else g_input.currentRenderingMode = 1; // default to anaglyph
         }
     }
 
@@ -1079,10 +1136,11 @@ int main() {
 
     g_input.stereo.virtualDisplayHeight = 0.24f;
     g_input.nominalViewerZ = xr.nominalViewerZ;
+    g_input.renderingModeCount = xr.renderingModeCount;
 
     LOG_INFO("=== Entering main loop ===");
     LOG_INFO("Controls: L=Load Scene, WASD=Move, Drag=Look, Scroll=Scale");
-    LOG_INFO("          V=2D/3D, Tab=HUD, 1/2/3=SBS/Ana/Blend, ESC=Quit");
+    LOG_INFO("          V=Cycle Modes, Tab=HUD, 0-3=Select Mode, ESC=Quit");
 
     auto lastTime = std::chrono::high_resolution_clock::now();
 
@@ -1103,12 +1161,11 @@ int main() {
 
         UpdateCameraMovement(g_input, deltaTime, xr.displayHeightM);
 
-        // Handle display mode toggle
-        if (g_input.displayModeToggleRequested) {
-            g_input.displayModeToggleRequested = false;
-            if (xr.pfnRequestDisplayModeEXT && xr.session != XR_NULL_HANDLE) {
-                XrDisplayModeEXT mode = g_input.displayMode3D ? XR_DISPLAY_MODE_3D_EXT : XR_DISPLAY_MODE_2D_EXT;
-                xr.pfnRequestDisplayModeEXT(xr.session, mode);
+        // Handle rendering mode change (V=cycle, 0-3=direct)
+        if (g_input.renderingModeChangeRequested) {
+            g_input.renderingModeChangeRequested = false;
+            if (xr.pfnRequestDisplayRenderingModeEXT && xr.session != XR_NULL_HANDLE) {
+                xr.pfnRequestDisplayRenderingModeEXT(xr.session, g_input.currentRenderingMode);
             }
         }
 
@@ -1155,8 +1212,9 @@ int main() {
                         xr.isEyeTracking = (eyeTrackingState.isTracking == XR_TRUE);
                         xr.activeEyeTrackingMode = (uint32_t)eyeTrackingState.activeMode;
 
-                        int eyeCount = g_input.displayMode3D ? 2 : 1;
-                        if (!g_input.displayMode3D) {
+                        bool monoMode = (g_input.currentRenderingMode == 0) || (xr.renderingModeCount > 0 && !xr.renderingModeDisplay3D[g_input.currentRenderingMode]);
+                        int eyeCount = monoMode ? 1 : 2;
+                        if (monoMode) {
                             rawEyePos[0] = {
                                 (rawEyePos[0].x + rawEyePos[1].x) / 2.0f,
                                 (rawEyePos[0].y + rawEyePos[1].y) / 2.0f,
@@ -1170,12 +1228,12 @@ int main() {
 
                         XrVector3f nominalViewer = {xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ};
 
-                        float scaleX = 0.5f;
-                        float scaleY = (g_currentOutputMode == 0) ? 1.0f : 0.5f;
+                        float scaleX = (xr.renderingModeCount > 0 && g_input.currentRenderingMode < xr.renderingModeCount) ? xr.renderingModeScaleX[g_input.currentRenderingMode] : 0.5f;
+                        float scaleY = (xr.renderingModeCount > 0 && g_input.currentRenderingMode < xr.renderingModeCount) ? xr.renderingModeScaleY[g_input.currentRenderingMode] : 1.0f;
                         uint32_t eyeRenderW = xr.swapchain.width / 2;
                         uint32_t eyeRenderH = xr.swapchain.height;
                         uint32_t renderW, renderH;
-                        if (!g_input.displayMode3D) {
+                        if (monoMode) {
                             renderW = g_windowW; renderH = g_windowH;
                             if (renderW > xr.swapchain.width) renderW = xr.swapchain.width;
                             if (renderH > xr.swapchain.height) renderH = xr.swapchain.height;
@@ -1202,7 +1260,7 @@ int main() {
                             float vs = minDisp / minWin;
                             float screenWidthM = winW_m * vs;
                             float screenHeightM = winH_m * vs;
-                            bool sbsMode = g_input.displayMode3D && g_currentOutputMode == 0;
+                            bool sbsMode = !monoMode && scaleX <= 0.5f;
                             float baseScreenW = sbsMode ? screenWidthM / 2.0f : screenWidthM;
 
                             Display3DScreen screen = {baseScreenW, screenHeightM};
@@ -1279,7 +1337,7 @@ int main() {
                                     mat4_from_xr_fov(projMat[eye], views[eye].fov, 0.01f, 100.0f);
                                 }
 
-                                uint32_t vpX = g_input.displayMode3D ? (eye * renderW) : 0;
+                                uint32_t vpX = monoMode ? 0 : (eye * renderW);
                                 projectionViews[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
                                 projectionViews[eye].subImage.swapchain = xr.swapchain.swapchain;
                                 projectionViews[eye].subImage.imageRect.offset = {(int32_t)vpX, 0};
@@ -1295,7 +1353,7 @@ int main() {
 
                             if (g_gsRenderer.hasScene()) {
                                 for (int eye = 0; eye < eyeCount; eye++) {
-                                    uint32_t vpX = g_input.displayMode3D ? (eye * renderW) : 0;
+                                    uint32_t vpX = monoMode ? 0 : (eye * renderW);
                                     g_gsRenderer.renderEye(
                                         targetImage, swapFormat,
                                         xr.swapchain.width, xr.swapchain.height,
@@ -1316,7 +1374,7 @@ int main() {
                 }
 
                 if (rendered) {
-                    uint32_t submitCount = g_input.displayMode3D ? 2u : 1u;
+                    uint32_t submitCount = (xr.renderingModeCount > 0 && g_input.currentRenderingMode < xr.renderingModeCount) ? xr.renderingModeViewCounts[g_input.currentRenderingMode] : 2u;
                     EndFrame(xr, frameState.predictedDisplayTime, projectionViews, submitCount);
                 } else {
                     XrFrameEndInfo ei = {XR_TYPE_FRAME_END_INFO};
@@ -1355,9 +1413,9 @@ int main() {
                         "IPD: %.2f  Parallax: %.2f  Scale: %.2f\n"
                         "\nL=Load  WASD=Move  DblClick=Teleport\n"
                         "Scroll=Scale  Shift+Scroll=IPD+Parallax\n"
-                        "V=2D/3D  Tab=HUD  Space=Reset  ESC=Quit",
+                        "V=Cycle  Tab=HUD  Space=Reset  ESC=Quit",
                         xr.systemName, (int)xr.sessionState,
-                        g_input.displayMode3D ? "3D" : "2D", g_currentOutputMode,
+                        (xr.renderingModeCount > 0 ? (xr.renderingModeDisplay3D[g_input.currentRenderingMode] ? "3D" : "2D") : "3D"), g_input.currentRenderingMode,
                         sceneInfo,
                         fps, g_avgFrameTime * 1000.0,
                         g_renderW, g_renderH, g_windowW, g_windowH,

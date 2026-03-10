@@ -1138,6 +1138,9 @@ oxr_event_push_XrEventDataReferenceSpaceChangePending(struct oxr_logger *log,
                                                       XrBool32 poseValid,
                                                       const XrPosef *poseInPreviousSpace);
 
+XrResult
+oxr_event_push_XrEventDataViewConfigurationChanged(struct oxr_logger *log, struct oxr_session *sess);
+
 #ifdef OXR_HAVE_FB_display_refresh_rate
 XrResult
 oxr_event_push_XrEventDataDisplayRefreshRateChangedFB(struct oxr_logger *log,
@@ -1665,7 +1668,7 @@ struct oxr_system
 	bool gotten_requirements;
 
 	XrViewConfigurationType view_config_type;
-	XrViewConfigurationView views[2];
+	XrViewConfigurationView views[XRT_MAX_VIEWS];
 	uint32_t blend_mode_count;
 	XrEnvironmentBlendMode blend_modes[3];
 
@@ -1676,7 +1679,7 @@ struct oxr_system
 	struct xrt_system_roles dynamic_roles_cache;
 	struct os_mutex sync_actions_mutex;
 
-	struct xrt_visibility_mask *visibility_mask[2];
+	struct xrt_visibility_mask *visibility_mask[XRT_MAX_VIEWS];
 
 #ifdef OXR_HAVE_MNDX_xdev_space
 	bool supports_xdev_space;

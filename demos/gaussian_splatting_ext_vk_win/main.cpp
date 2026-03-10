@@ -51,7 +51,7 @@ static const float LOAD_BTN_HEIGHT_FRACTION = 0.04f;
 static const float LOAD_BTN_X_FRACTION = 0.87f;
 static const float LOAD_BTN_Y_FRACTION = 0.02f;
 
-// sim_display output mode switching (loaded at runtime via GetProcAddress)
+// sim_display output mode switching (legacy — replaced by unified rendering mode)
 typedef void (*PFN_sim_display_set_output_mode)(int mode);
 static PFN_sim_display_set_output_mode g_pfnSetOutputMode = nullptr;
 
@@ -359,7 +359,6 @@ static void RenderThreadFunc(
     while (g_running.load() && !xr->exitRequested) {
         InputState inputSnapshot;
         bool resetRequested = false;
-        bool outputModeChanged = false;
         uint32_t windowW, windowH;
         {
             std::lock_guard<std::mutex> lock(g_inputMutex);
@@ -368,24 +367,16 @@ static void RenderThreadFunc(
             g_inputState.resetViewRequested = false;
             g_inputState.teleportRequested = false;
             g_inputState.fullscreenToggleRequested = false;
-            g_inputState.displayModeToggleRequested = false;
+            g_inputState.renderingModeChangeRequested = false;
             g_inputState.eyeTrackingModeToggleRequested = false;
-            outputModeChanged = g_inputState.outputModeChangeRequested;
-            g_inputState.outputModeChangeRequested = false;
             windowW = g_windowWidth;
             windowH = g_windowHeight;
         }
 
-        if (outputModeChanged && g_pfnSetOutputMode) {
-            g_pfnSetOutputMode(inputSnapshot.outputMode);
-        }
-
-        // Handle display mode toggle (V key)
-        if (inputSnapshot.displayModeToggleRequested) {
-            if (xr->pfnRequestDisplayModeEXT && xr->session != XR_NULL_HANDLE) {
-                XrDisplayModeEXT mode = inputSnapshot.displayMode3D ?
-                    XR_DISPLAY_MODE_3D_EXT : XR_DISPLAY_MODE_2D_EXT;
-                xr->pfnRequestDisplayModeEXT(xr->session, mode);
+        // Handle rendering mode change (V=cycle, 0-8=direct)
+        if (inputSnapshot.renderingModeChangeRequested) {
+            if (xr->pfnRequestDisplayRenderingModeEXT && xr->session != XR_NULL_HANDLE) {
+                xr->pfnRequestDisplayRenderingModeEXT(xr->session, inputSnapshot.currentRenderingMode);
             }
         }
 
@@ -454,7 +445,7 @@ static void RenderThreadFunc(
                         xr->rightEyeY = rawViews[1].pose.position.y;
                         xr->rightEyeZ = rawViews[1].pose.position.z;
 
-                        bool monoMode = !inputSnapshot.displayMode3D;
+                        bool monoMode = (inputSnapshot.currentRenderingMode == 0) || (xr->renderingModeCount > 0 && !xr->renderingModeDisplay3D[inputSnapshot.currentRenderingMode]);
                         uint32_t eyeRenderW = xr->swapchain.width / 2;
                         uint32_t eyeRenderH = xr->swapchain.height;
 
@@ -487,7 +478,7 @@ static void RenderThreadFunc(
 
                             XrVector3f rawLeft = rawViews[0].pose.position;
                             XrVector3f rawRight = rawViews[1].pose.position;
-                            if (!inputSnapshot.displayMode3D) {
+                            if (monoMode) {
                                 XrVector3f center = {
                                     (rawLeft.x + rawRight.x) * 0.5f,
                                     (rawLeft.y + rawRight.y) * 0.5f,
@@ -669,9 +660,10 @@ static void RenderThreadFunc(
                                     L"XR_EXT_win32_window_binding: ACTIVE (Vulkan + 3DGS)" :
                                     L"XR_EXT_win32_window_binding: NOT AVAILABLE";
                                 if (xr->supportsDisplayModeSwitch) {
-                                    modeText += inputSnapshot.displayMode3D ?
-                                        L"\nDisplay Mode: 3D Stereo [V=Toggle]" :
-                                        L"\nDisplay Mode: 2D Mono [V=Toggle]";
+                                    bool is3D = xr->renderingModeCount > 0 ? xr->renderingModeDisplay3D[inputSnapshot.currentRenderingMode] : true;
+                                    modeText += is3D ?
+                                        L"\nDisplay Mode: 3D Stereo [V=Cycle]" :
+                                        L"\nDisplay Mode: 2D Mono [V=Cycle]";
                                 }
 
                                 // Scene info
@@ -687,8 +679,9 @@ static void RenderThreadFunc(
                                 }
                                 modeText += sceneText;
 
+                                bool dispMonoMode = (inputSnapshot.currentRenderingMode == 0) || (xr->renderingModeCount > 0 && !xr->renderingModeDisplay3D[inputSnapshot.currentRenderingMode]);
                                 uint32_t dispRenderW, dispRenderH;
-                                if (!inputSnapshot.displayMode3D) {
+                                if (dispMonoMode) {
                                     dispRenderW = windowW;
                                     dispRenderH = windowH;
                                     if (dispRenderW > xr->swapchain.width) dispRenderW = xr->swapchain.width;
@@ -704,7 +697,9 @@ static void RenderThreadFunc(
                                 std::wstring dispText = FormatDisplayInfo(xr->displayWidthM, xr->displayHeightM,
                                     xr->nominalViewerX, xr->nominalViewerY, xr->nominalViewerZ);
                                 dispText += L"\n" + FormatScaleInfo(xr->recommendedViewScaleX, xr->recommendedViewScaleY);
-                                dispText += L"\n" + FormatOutputMode(inputSnapshot.outputMode, g_pfnSetOutputMode != nullptr);
+                                dispText += L"\n" + FormatOutputMode(inputSnapshot.currentRenderingMode, xr->pfnRequestDisplayRenderingModeEXT != nullptr,
+                                    (xr->renderingModeCount > 0 && inputSnapshot.currentRenderingMode < xr->renderingModeCount) ? xr->renderingModeNames[inputSnapshot.currentRenderingMode] : nullptr,
+                                    xr->renderingModeCount);
                                 std::wstring eyeText = FormatEyeTrackingInfo(
                                     xr->leftEyeX, xr->leftEyeY, xr->leftEyeZ,
                                     xr->rightEyeX, xr->rightEyeY, xr->rightEyeZ,
@@ -730,7 +725,7 @@ static void RenderThreadFunc(
                                     stereoText += vhBuf;
                                 }
                                 std::wstring helpText = L"[L] Load Scene | [WASD] Fly | [Tab] HUD\n"
-                                    L"[V] 2D/3D | [F11] Fullscreen | [ESC] Quit";
+                                    L"[V] Cycle Mode | [F11] Fullscreen | [ESC] Quit";
 
                                 uint32_t srcRowPitch = 0;
                                 const void* pixels = RenderHudAndMap(*hud, &srcRowPitch, sessionText, modeText, perfText, dispText, eyeText,
@@ -813,7 +808,7 @@ static void RenderThreadFunc(
                 }
 
                 // Submit frame
-                uint32_t submitViewCount = inputSnapshot.displayMode3D ? 2 : 1;
+                uint32_t submitViewCount = (xr->renderingModeCount > 0 && inputSnapshot.currentRenderingMode < xr->renderingModeCount) ? xr->renderingModeViewCounts[inputSnapshot.currentRenderingMode] : 2;
                 if (rendered && hudSubmitted) {
                     float hudAR = (float)hudWidth / (float)hudHeight;
                     float windowAR = (windowW > 0 && windowH > 0) ? (float)windowW / (float)windowH : 1.0f;
@@ -1125,10 +1120,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     LOG_INFO("");
     LOG_INFO("=== Entering main loop ===");
     LOG_INFO("Controls: L=Load Scene, WASD=Fly, QE=Up/Down, Mouse=Look, Space/DblClick=Reset");
-    LOG_INFO("          V=2D/3D, TAB=HUD, F11=Fullscreen, ESC=Quit");
+    LOG_INFO("          V=Cycle Modes, TAB=HUD, F11=Fullscreen, ESC=Quit");
     LOG_INFO("");
 
     g_inputState.stereo.virtualDisplayHeight = 0.24f;
+    g_inputState.renderingModeCount = xr.renderingModeCount;
 
     std::thread renderThread(RenderThreadFunc, hwnd, &xr, vkDevice, graphicsQueue,
         queueFamilyIndex, vkInstance, physDevice,

@@ -73,17 +73,14 @@ struct InputState {
     // HUD visibility toggle (TAB key)
     bool hudVisible = true;
 
-    // Display mode toggle (V key)
-    bool displayMode3D = true;
-    bool displayModeToggleRequested = false;
+    // Unified rendering mode (V key cycles, 0-8 keys select directly)
+    uint32_t currentRenderingMode = 1;   // Default: mode 1 (first 3D mode)
+    uint32_t renderingModeCount = 0;     // Set from xrEnumerateDisplayRenderingModesEXT
+    bool renderingModeChangeRequested = false;
 
     // Camera vs display mode toggle (C key)
     bool cameraMode = false;
     float nominalViewerZ = 0.5f;  // Cached from runtime for camera-mode init
-
-    // Output mode for sim_display (1/2/3 keys: 0=SBS, 1=Anaglyph, 2=Blend)
-    int outputMode = 0;
-    bool outputModeChangeRequested = false;
 
     // Eye tracking mode toggle (T key)
     bool eyeTrackingModeToggleRequested = false;

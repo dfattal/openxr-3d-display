@@ -262,29 +262,28 @@ out:
 				xsysc->info.nominal_viewer_x_m = 0.0f;
 				xsysc->info.nominal_viewer_y_m = sd_info.nominal_y_m;
 				xsysc->info.nominal_viewer_z_m = sd_info.nominal_z_m;
-				// Use worst-case (largest) scale across all modes so that
-				// mode switching never degrades quality for unmodified apps
-				// whose swapchain size is frozen at init.
-				// SBS needs 0.5x1.0, anaglyph/blend need 0.5x0.5.
-				// max(0.5,0.5)=0.5 for X, max(1.0,0.5)=1.0 for Y.
-				float sd_scale_x = 0.5f;
-				float sd_scale_y = 1.0f;
-				xsysc->info.recommended_view_scale_x = sd_scale_x;
-				xsysc->info.recommended_view_scale_y = sd_scale_y;
+				// Read scale from the active rendering mode
+				uint32_t active_idx = head->hmd->active_rendering_mode_index;
+				if (active_idx < head->rendering_mode_count) {
+					xsysc->info.recommended_view_scale_x = head->rendering_modes[active_idx].view_scale_x;
+					xsysc->info.recommended_view_scale_y = head->rendering_modes[active_idx].view_scale_y;
+				} else {
+					xsysc->info.recommended_view_scale_x = 0.5f;
+					xsysc->info.recommended_view_scale_y = 0.5f;
+				}
 				xsysc->info.supports_display_mode_switch = true;
 				xsysc->info.display_pixel_width = sd_info.display_pixel_width;
 				xsysc->info.display_pixel_height = sd_info.display_pixel_height;
 				// Sim display: raw eye tracking only (simulated device, always "tracking")
 				xsysc->info.supported_eye_tracking_modes = 2; // RAW_BIT
 				xsysc->info.default_eye_tracking_mode = 1;    // RAW
-				enum sim_display_output_mode sd_mode = sim_display_get_output_mode();
 				U_LOG_W("XR_EXT_display_info (sim_display): display=%.3fx%.3f m, "
-				        "nominal=(0, %.3f, %.3f) m, scale=%.1fx%.1f (worst-case, init=%s), pixels=%ux%u",
+				        "nominal=(0, %.3f, %.3f) m, scale=%.2fx%.2f (mode %u), pixels=%ux%u",
 				        sd_info.display_width_m, sd_info.display_height_m,
 				        sd_info.nominal_y_m, sd_info.nominal_z_m,
-				        sd_scale_x, sd_scale_y,
-				        sd_mode == SIM_DISPLAY_OUTPUT_SBS ? "SBS" :
-				        sd_mode == SIM_DISPLAY_OUTPUT_ANAGLYPH ? "Anaglyph" : "Blend",
+				        xsysc->info.recommended_view_scale_x,
+				        xsysc->info.recommended_view_scale_y,
+				        active_idx,
 				        sd_info.display_pixel_width, sd_info.display_pixel_height);
 
 				// Set sim_display factories (only if Leia SR didn't already set them)

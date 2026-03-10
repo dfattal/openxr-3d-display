@@ -1380,20 +1380,41 @@ oxr_session_locate_views(struct oxr_logger *log,
 		// Override view poses for stereo controls or eye tracking.
 		// stereo_eye_world[] is set by either camera-centric or display-centric path
 		// to ensure FOV and view position are consistent.
-		if ((have_eyes || have_stereo_eye_override) && view_count == 2) {
+		// Apply for mono too (view_count==1): use center eye position so ext apps
+		// get display-relative coords instead of head-tracked world position.
+		if (have_eyes || have_stereo_eye_override) {
+			// For mono (view_count==1), use center eye; for stereo, use per-eye
+			uint32_t eye_idx = i; // 0=left, 1=right for stereo
+
 			if (have_stereo_eye_override) {
 				// STEREO OVERRIDE: use pre-computed eye positions
 				// For ext apps: display-local coords; for non-ext: world-space
-				views[i].pose.position.x = stereo_eye_world[i].x;
-				views[i].pose.position.y = stereo_eye_world[i].y;
-				views[i].pose.position.z = stereo_eye_world[i].z;
+				if (view_count == 1) {
+					// Mono: center eye
+					views[i].pose.position.x = (stereo_eye_world[0].x + stereo_eye_world[1].x) / 2.0f;
+					views[i].pose.position.y = (stereo_eye_world[0].y + stereo_eye_world[1].y) / 2.0f;
+					views[i].pose.position.z = (stereo_eye_world[0].z + stereo_eye_world[1].z) / 2.0f;
+				} else {
+					views[i].pose.position.x = stereo_eye_world[eye_idx].x;
+					views[i].pose.position.y = stereo_eye_world[eye_idx].y;
+					views[i].pose.position.z = stereo_eye_world[eye_idx].z;
+				}
 				views[i].pose.orientation = (XrQuaternionf){
 				    world_head_ori.x, world_head_ori.y, world_head_ori.z, world_head_ori.w};
 			} else if (have_eyes) {
 				// Get tracked eye position for this view (in display-local coords)
-				struct xrt_vec3 tracked_eye = (i == 0)
-				    ? (struct xrt_vec3){eye_pair.left.x, eye_pair.left.y, eye_pair.left.z}
-				    : (struct xrt_vec3){eye_pair.right.x, eye_pair.right.y, eye_pair.right.z};
+				struct xrt_vec3 tracked_eye;
+				if (view_count == 1) {
+					// Mono: center eye
+					tracked_eye = (struct xrt_vec3){
+					    (eye_pair.left.x + eye_pair.right.x) / 2.0f,
+					    (eye_pair.left.y + eye_pair.right.y) / 2.0f,
+					    (eye_pair.left.z + eye_pair.right.z) / 2.0f};
+				} else {
+					tracked_eye = (eye_idx == 0)
+					    ? (struct xrt_vec3){eye_pair.left.x, eye_pair.left.y, eye_pair.left.z}
+					    : (struct xrt_vec3){eye_pair.right.x, eye_pair.right.y, eye_pair.right.z};
+				}
 
 				if (!sess->has_external_window) {
 					// DISPLAY MODE (Monado window): Transform tracked eye to world

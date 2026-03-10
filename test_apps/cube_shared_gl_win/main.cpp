@@ -379,23 +379,23 @@ static void RenderThreadFunc(
 
     while (g_running.load() && !xr->exitRequested) {
         InputState inputSnapshot;
-        bool outputModeChanged = false;
+        bool renderingModeChanged = false;
         uint32_t windowW, windowH;
         {
             std::lock_guard<std::mutex> lock(g_inputMutex);
             inputSnapshot = g_inputState;
             g_inputState.resetViewRequested = false;
             g_inputState.fullscreenToggleRequested = false;
-            g_inputState.displayModeToggleRequested = false;
             g_inputState.eyeTrackingModeToggleRequested = false;
-            outputModeChanged = g_inputState.outputModeChangeRequested;
-            g_inputState.outputModeChangeRequested = false;
+            renderingModeChanged = g_inputState.renderingModeChangeRequested;
+            g_inputState.renderingModeChangeRequested = false;
             windowW = g_windowWidth;
             windowH = g_windowHeight;
         }
 
-        if (outputModeChanged && xr->pfnRequestDisplayRenderingModeEXT && xr->session != XR_NULL_HANDLE) {
-            xr->pfnRequestDisplayRenderingModeEXT(xr->session, (uint32_t)inputSnapshot.outputMode);
+        // Handle rendering mode change (V=cycle, 0-8=direct)
+        if (renderingModeChanged && xr->pfnRequestDisplayRenderingModeEXT && xr->session != XR_NULL_HANDLE) {
+            xr->pfnRequestDisplayRenderingModeEXT(xr->session, inputSnapshot.currentRenderingMode);
         }
 
         UpdatePerformanceStats(perfStats);
@@ -410,13 +410,6 @@ static void RenderThreadFunc(
 
         if (inputSnapshot.fullscreenToggleRequested) {
             // Post to main thread
-        }
-        if (inputSnapshot.displayModeToggleRequested) {
-            if (xr->pfnRequestDisplayModeEXT && xr->session != XR_NULL_HANDLE) {
-                XrDisplayModeEXT mode = inputSnapshot.displayMode3D ?
-                    XR_DISPLAY_MODE_3D_EXT : XR_DISPLAY_MODE_2D_EXT;
-                xr->pfnRequestDisplayModeEXT(xr->session, mode);
-            }
         }
         if (inputSnapshot.eyeTrackingModeToggleRequested) {
             if (xr->pfnRequestEyeTrackingModeEXT && xr->session != XR_NULL_HANDLE) {
@@ -464,7 +457,8 @@ static void RenderThreadFunc(
                         xr->rightEyeY = rawViews[1].pose.position.y;
                         xr->rightEyeZ = rawViews[1].pose.position.z;
 
-                        bool monoMode = !inputSnapshot.displayMode3D;
+                        bool monoMode = (inputSnapshot.currentRenderingMode == 0) ||
+                            (xr->renderingModeCount > 0 && !xr->renderingModeDisplay3D[inputSnapshot.currentRenderingMode]);
                         uint32_t eyeRenderW = xr->swapchain.width / 2;
                         uint32_t eyeRenderH = xr->swapchain.height;
 
@@ -495,7 +489,9 @@ static void RenderThreadFunc(
 
                             XrVector3f rawLeft = rawViews[0].pose.position;
                             XrVector3f rawRight = rawViews[1].pose.position;
-                            if (!inputSnapshot.displayMode3D) {
+                            bool appMonoMode = (inputSnapshot.currentRenderingMode == 0) ||
+                                (xr->renderingModeCount > 0 && !xr->renderingModeDisplay3D[inputSnapshot.currentRenderingMode]);
+                            if (appMonoMode) {
                                 XrVector3f center = {
                                     (rawLeft.x + rawRight.x) * 0.5f,
                                     (rawLeft.y + rawRight.y) * 0.5f,
@@ -633,16 +629,19 @@ static void RenderThreadFunc(
                                 sessionText += FormatSessionState((int)xr->sessionState);
                                 std::wstring modeText = L"Shared Texture OpenGL (offscreen)";
                                 if (xr->supportsDisplayModeSwitch) {
-                                    modeText += inputSnapshot.displayMode3D ?
-                                        L"\nDisplay Mode: 3D Stereo [V=Toggle]" :
-                                        L"\nDisplay Mode: 2D Mono [V=Toggle]";
+                                    bool is3D = xr->renderingModeCount > 0 ? xr->renderingModeDisplay3D[inputSnapshot.currentRenderingMode] : true;
+                                    modeText += is3D ?
+                                        L"\nDisplay Mode: 3D Stereo [V=Cycle]" :
+                                        L"\nDisplay Mode: 2D Mono [V=Cycle]";
                                 }
                                 modeText += inputSnapshot.cameraMode ?
                                     L"\nKooima: Camera-Centric [C=Toggle]" :
                                     L"\nKooima: Display-Centric [C=Toggle]";
 
+                                bool hudMonoMode = (inputSnapshot.currentRenderingMode == 0) ||
+                                    (xr->renderingModeCount > 0 && !xr->renderingModeDisplay3D[inputSnapshot.currentRenderingMode]);
                                 uint32_t dispRenderW, dispRenderH;
-                                if (!inputSnapshot.displayMode3D) {
+                                if (hudMonoMode) {
                                     dispRenderW = g_sharedWidth;
                                     dispRenderH = g_sharedHeight;
                                     if (dispRenderW > xr->swapchain.width) dispRenderW = xr->swapchain.width;
@@ -658,8 +657,8 @@ static void RenderThreadFunc(
                                 std::wstring dispText = FormatDisplayInfo(xr->displayWidthM, xr->displayHeightM,
                                     xr->nominalViewerX, xr->nominalViewerY, xr->nominalViewerZ);
                                 dispText += L"\n" + FormatScaleInfo(xr->recommendedViewScaleX, xr->recommendedViewScaleY);
-                                dispText += L"\n" + FormatOutputMode(inputSnapshot.outputMode, xr->pfnRequestDisplayRenderingModeEXT != nullptr,
-                                    (xr->renderingModeCount > 0 && (uint32_t)inputSnapshot.outputMode < xr->renderingModeCount) ? xr->renderingModeNames[inputSnapshot.outputMode] : nullptr,
+                                dispText += L"\n" + FormatOutputMode(inputSnapshot.currentRenderingMode, xr->pfnRequestDisplayRenderingModeEXT != nullptr,
+                                    (xr->renderingModeCount > 0 && inputSnapshot.currentRenderingMode < xr->renderingModeCount) ? xr->renderingModeNames[inputSnapshot.currentRenderingMode] : nullptr,
                                     xr->renderingModeCount);
                                 std::wstring eyeText = FormatEyeTrackingInfo(
                                     xr->leftEyeX, xr->leftEyeY, xr->leftEyeZ,
@@ -726,7 +725,8 @@ static void RenderThreadFunc(
                     }
                 }
 
-                uint32_t submitViewCount = inputSnapshot.displayMode3D ? 2 : 1;
+                uint32_t submitViewCount = (xr->renderingModeCount > 0 && inputSnapshot.currentRenderingMode < xr->renderingModeCount)
+                    ? xr->renderingModeViewCounts[inputSnapshot.currentRenderingMode] : 2;
                 if (hudSubmitted) {
                     float hudAR = (float)HUD_PIXEL_WIDTH / (float)HUD_PIXEL_HEIGHT;
                     float windowAR = (windowW > 0 && windowH > 0) ? (float)windowW / (float)windowH : 1.0f;
@@ -1010,6 +1010,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     g_inputState.stereo.virtualDisplayHeight = 0.24f;
     g_inputState.nominalViewerZ = xr.nominalViewerZ;
+    g_inputState.renderingModeCount = xr.renderingModeCount;
 
     std::thread renderThread(RenderThreadFunc, hwnd, hDC, hGLRC, &xr, &glRenderer,
         &swapchainImages,

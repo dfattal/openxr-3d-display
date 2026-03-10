@@ -1276,8 +1276,21 @@ oxr_xrRequestDisplayModeEXT(XrSession session, XrDisplayModeEXT displayMode)
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Invalid displayMode %d", (int)displayMode);
 	}
 
-	bool enable_3d = (displayMode == XR_DISPLAY_MODE_3D_EXT);
-	return oxr_session_request_display_mode(&log, sess, enable_3d);
+	// Thin wrapper: find first mode matching display_3d, delegate to unified API
+	struct xrt_device *head = GET_XDEV_BY_ROLE(sess->sys, head);
+	if (head == NULL) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "No head device available");
+	}
+
+	bool want_3d = (displayMode == XR_DISPLAY_MODE_3D_EXT);
+	for (uint32_t i = 0; i < head->rendering_mode_count; i++) {
+		if (head->rendering_modes[i].display_3d == want_3d) {
+			return oxr_xrRequestDisplayRenderingModeEXT(session, i);
+		}
+	}
+
+	// No matching mode found — fall back to legacy behavior
+	return oxr_session_request_display_mode(&log, sess, want_3d);
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL
@@ -1322,7 +1335,36 @@ oxr_xrRequestDisplayRenderingModeEXT(XrSession session, uint32_t modeIndex)
 		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "No head device available");
 	}
 
+	if (modeIndex >= head->rendering_mode_count) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "modeIndex %u >= rendering_mode_count %u",
+		                 modeIndex, head->rendering_mode_count);
+	}
+
+	struct xrt_rendering_mode *mode = &head->rendering_modes[modeIndex];
+
+	// 1. Set device output mode
 	xrt_device_set_property(head, XRT_DEVICE_PROPERTY_OUTPUT_MODE, modeIndex);
+
+	// 2. Toggle 3D mode if needed
+	if (mode->display_3d != sess->display_mode_3d) {
+		oxr_session_request_display_mode(&log, sess, mode->display_3d);
+	}
+
+	// 3. Update view count and active mode
+	head->hmd->view_count = mode->view_count;
+	head->hmd->active_rendering_mode_index = modeIndex;
+
+	// 4. Update recommended view scales
+	struct xrt_system_compositor *xsysc = sess->sys->xsysc;
+	if (xsysc != NULL) {
+		xsysc->info.recommended_view_scale_x = mode->view_scale_x;
+		xsysc->info.recommended_view_scale_y = mode->view_scale_y;
+	}
+
+	// 5. Push view configuration changed event
+	oxr_event_push_XrEventDataViewConfigurationChanged(&log, sess);
+
 	return XR_SUCCESS;
 }
 
@@ -1363,6 +1405,10 @@ oxr_xrEnumerateDisplayRenderingModesEXT(XrSession session,
 		modes[i].modeIndex = head->rendering_modes[i].mode_index;
 		snprintf(modes[i].modeName, XR_MAX_SYSTEM_NAME_SIZE, "%s",
 		         head->rendering_modes[i].mode_name);
+		modes[i].viewCount = head->rendering_modes[i].view_count;
+		modes[i].viewScaleX = head->rendering_modes[i].view_scale_x;
+		modes[i].viewScaleY = head->rendering_modes[i].view_scale_y;
+		modes[i].display3D = head->rendering_modes[i].display_3d ? XR_TRUE : XR_FALSE;
 	}
 
 	return XR_SUCCESS;

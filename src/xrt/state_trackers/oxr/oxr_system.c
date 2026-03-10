@@ -110,10 +110,9 @@ oxr_system_fill_in(
 	sys->systemId = systemId;
 	if (view_count == 1) {
 		sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO;
-	} else if (view_count == 2) {
-		sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 	} else {
-		assert(false && "view_count must be 1 or 2");
+		// view_count >= 2: treat as stereo (including quad, lightfield, etc.)
+		sys->view_config_type = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 	}
 	U_LOG_D("sys->view_config_type = %d", sys->view_config_type);
 	sys->dynamic_roles_cache = (struct xrt_system_roles)XRT_SYSTEM_ROLES_INIT;
