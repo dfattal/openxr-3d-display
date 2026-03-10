@@ -455,6 +455,7 @@ static void RenderOneFrame(RenderState& rs) {
                                 L"\nKooima: Camera-Centric [C=Toggle]" :
                                 L"\nKooima: Display-Centric [C=Toggle]";
 
+                            bool monoMode = (g_inputState.currentRenderingMode == 0) || (xr.renderingModeCount > 0 && !xr.renderingModeDisplay3D[g_inputState.currentRenderingMode]);
                             uint32_t dispRenderW, dispRenderH;
                             if (monoMode) {
                                 dispRenderW = g_sharedWidth;
