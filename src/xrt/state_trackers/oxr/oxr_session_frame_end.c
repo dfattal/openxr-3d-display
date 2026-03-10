@@ -610,14 +610,16 @@ verify_projection_layer(struct oxr_session *sess,
 		// Get dynamic view_count from device
 		struct xrt_device *head = GET_XDEV_BY_ROLE(sess->sys, head);
 		uint32_t expected_views = (head && head->hmd) ? (uint32_t)head->hmd->view_count : 2;
-		if (proj->viewCount == 1 && !sess->display_mode_3d) {
-			// 2D mode: mono submission allowed
+		if (proj->viewCount == 1) {
+			// Mono submission: allowed in 2D mode or when app submits
+			// fewer views during rendering mode transitions. The compositor
+			// handles mono via is_mono detection in layer_commit.
 			break;
 		}
 		if (proj->viewCount != expected_views) {
 			return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
 			                 "(frameEndInfo->layers[%u]->viewCount == %u) must be %u for "
-			                 "XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO (or 1 in 2D mode)",
+			                 "XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO (or 1 for mono)",
 			                 layer_index, proj->viewCount, expected_views);
 		}
 		break;
