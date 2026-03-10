@@ -293,6 +293,18 @@ leiasr_d3d12_weave(struct leiasr_d3d12 *leiasr,
 
 	ID3D12GraphicsCommandList *cmd_list = static_cast<ID3D12GraphicsCommandList *>(command_list);
 
+	// Diagnostic: log weave parameters periodically
+	static uint32_t weave_counter = 0;
+	bool weave_log = (weave_counter % 60 == 0);
+	weave_counter++;
+	if (weave_log) {
+		U_LOG_I("SR D3D12 weave: cmd_list=%p, target=%ux%u, input=%p (%ux%u fmt=%u)",
+		        (void *)cmd_list, target_width, target_height,
+		        (void *)leiasr->input_resource,
+		        leiasr->view_width, leiasr->view_height,
+		        (unsigned)leiasr->input_format);
+	}
+
 	// Set command list for the weaver to record commands onto
 	leiasr->weaver->setCommandList(cmd_list);
 
