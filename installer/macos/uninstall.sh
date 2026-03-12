@@ -11,7 +11,7 @@ echo "Removing OpenXR runtime registration..."
 sudo rm -f /etc/xdg/openxr/1/active_runtime.json
 
 echo "Removing test app..."
-rm -rf "/Applications/SimCubeOpenXR.app"
+rm -rf "/Applications/DisplayXRCube.app"
 
 echo "Forgetting installer receipts..."
 sudo pkgutil --forget com.displayxr.displayxr.runtime 2>/dev/null || true

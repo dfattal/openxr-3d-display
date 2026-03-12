@@ -18,7 +18,7 @@
     </choice>
 
     <choice id="testapp" visible="true" start_selected="true"
-        title="SimCube OpenXR Test App"
+        title="DisplayXR Cube Test App"
         description="Double-clickable test application that renders a spinning cube using OpenXR with sim_display output.">
         <pkg-ref id="com.displayxr.displayxr.testapp" />
     </choice>

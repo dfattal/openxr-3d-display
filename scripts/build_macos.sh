@@ -7,6 +7,7 @@
 #   ./scripts/build_macos.sh             # In-process mode (default)
 #   ./scripts/build_macos.sh --service   # IPC service mode (displayxr-service + client)
 #   ./scripts/build_macos.sh --hybrid    # Hybrid mode (in-process + IPC auto-switching)
+#   ./scripts/build_macos.sh --installer # Also build .pkg installer
 #
 # Then run:
 #   XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json \
@@ -24,10 +25,12 @@ OPENXR_VERSION="1.1.43"
 # Parse arguments
 SERVICE_MODE=OFF
 HYBRID_MODE=OFF
+BUILD_INSTALLER=OFF
 for arg in "$@"; do
   case "$arg" in
     --service) SERVICE_MODE=ON ;;
     --hybrid) SERVICE_MODE=ON; HYBRID_MODE=ON ;;
+    --installer) BUILD_INSTALLER=ON ;;
   esac
 done
 
@@ -379,19 +382,19 @@ exec "$DIR/bin/gaussian_splatting_ext_vk_macos" "$@"
 SCRIPT
 chmod +x "$PKG_DIR/run_gaussian_splatting_ext_vk.sh"
 
-# Step 5: Build .app bundles and .pkg installer (commented out for dev -- uncomment when ready)
-# NOTE: if _package has root-owned files from a previous sudo run, clean up first:
-#   sudo rm -rf /Users/david.fattal/Documents/GitHub/CNSDK-OpenXR/_package
-# echo "=== Building .app bundles ==="
-# "$ROOT/installer/macos/create_app_bundle.sh" "$PKG_DIR" "$ROOT/_package/CubeVKMacOS.app" cube_rt_vk_macos
-# "$ROOT/installer/macos/create_app_bundle.sh" "$PKG_DIR" "$ROOT/_package/CubeExtVKMacOS.app" cube_ext_vk_macos
-#
-# echo "=== Building .pkg installer ==="
-# "$ROOT/installer/macos/build_installer.sh" "$PKG_DIR" "$ROOT/_package/DisplayXR-Installer.pkg"
+# Step 5: Build .pkg installer (optional)
+if [ "$BUILD_INSTALLER" = "ON" ]; then
+  echo "=== Building .pkg installer ==="
+  "$ROOT/installer/macos/build_installer.sh" "$PKG_DIR" "$ROOT/_package/DisplayXR-Installer.pkg"
+fi
 
 echo ""
 echo "=== Build complete! ==="
 echo ""
+if [ "$BUILD_INSTALLER" = "ON" ]; then
+  echo "Installer: $ROOT/_package/DisplayXR-Installer.pkg"
+  echo ""
+fi
 echo "Artifacts in _package/:"
 ls -lh "$ROOT/_package/" 2>/dev/null
 echo ""
