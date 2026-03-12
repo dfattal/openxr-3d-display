@@ -594,7 +594,6 @@ struct AppXrSession {
     float displayWidthM = 0, displayHeightM = 0;
     float nominalViewerX = 0, nominalViewerY = 0, nominalViewerZ = 0.5f;
     float recommendedViewScaleX = 0.5f, recommendedViewScaleY = 1.0f;
-    bool supportsDisplayModeSwitch = false;
     uint32_t displayPixelWidth = 0, displayPixelHeight = 0;
 
     // Eye tracking
@@ -698,13 +697,11 @@ static bool InitializeOpenXR(AppXrSession& xr) {
             xr.nominalViewerX = di.nominalViewerPositionInDisplaySpace.x;
             xr.nominalViewerY = di.nominalViewerPositionInDisplaySpace.y;
             xr.nominalViewerZ = di.nominalViewerPositionInDisplaySpace.z;
-            xr.supportsDisplayModeSwitch = (di.supportsDisplayModeSwitch == XR_TRUE);
             xr.displayPixelWidth = di.displayPixelWidth;
             xr.displayPixelHeight = di.displayPixelHeight;
             xr.supportedEyeTrackingModes = (uint32_t)ec.supportedModes;
         }
-        if (xr.supportsDisplayModeSwitch)
-            xrGetInstanceProcAddr(xr.instance, "xrRequestDisplayModeEXT", (PFN_xrVoidFunction*)&xr.pfnRequestDisplayModeEXT);
+        xrGetInstanceProcAddr(xr.instance, "xrRequestDisplayModeEXT", (PFN_xrVoidFunction*)&xr.pfnRequestDisplayModeEXT);
         if (xr.supportedEyeTrackingModes != 0)
             xrGetInstanceProcAddr(xr.instance, "xrRequestEyeTrackingModeEXT", (PFN_xrVoidFunction*)&xr.pfnRequestEyeTrackingModeEXT);
 
@@ -861,10 +858,10 @@ static bool CreateSession(AppXrSession& xr, VkInstance vkInstance, VkPhysicalDev
                     xr.renderingModeViewCounts[i] = modes[i].viewCount;
                     xr.renderingModeScaleX[i] = modes[i].viewScaleX;
                     xr.renderingModeScaleY[i] = modes[i].viewScaleY;
-                    xr.renderingModeDisplay3D[i] = (modes[i].display3D == XR_TRUE);
+                    xr.renderingModeDisplay3D[i] = (modes[i].hardwareDisplay3D == XR_TRUE);
                     LOG_INFO("  [%u] %s (views=%u, scale=%.2fx%.2f, 3D=%d)",
                         modes[i].modeIndex, modes[i].modeName, modes[i].viewCount,
-                        modes[i].viewScaleX, modes[i].viewScaleY, modes[i].display3D);
+                        modes[i].viewScaleX, modes[i].viewScaleY, modes[i].hardwareDisplay3D);
                 }
             }
         }
@@ -1400,7 +1397,7 @@ int main() {
 
                     NSString *text = [NSString stringWithFormat:
                         @"%s\nSession: %d\n"
-                        "Mode: %s  Output: %d\n"
+                        "Mode: %s (%s)\n"
                         "%@\n"
                         "FPS: %.0f (%.1f ms)\n"
                         "Render: %ux%u  Window: %ux%u\n"
@@ -1412,9 +1409,10 @@ int main() {
                         "IPD: %.2f  Parallax: %.2f  Scale: %.2f\n"
                         "\nL=Load  WASD=Move  DblClick=Teleport\n"
                         "Scroll=Scale  Shift+Scroll=IPD+Parallax\n"
-                        "V=Cycle  Tab=HUD  Space=Reset  ESC=Quit",
+                        "V=Mode  Tab=HUD  Space=Reset  ESC=Quit",
                         xr.systemName, (int)xr.sessionState,
-                        (xr.renderingModeCount > 0 ? (xr.renderingModeDisplay3D[g_input.currentRenderingMode] ? "3D" : "2D") : "3D"), g_input.currentRenderingMode,
+                        (xr.renderingModeCount > 0 && xr.renderingModeNames[g_input.currentRenderingMode][0] != '\0') ? xr.renderingModeNames[g_input.currentRenderingMode] : "Unknown",
+                        (xr.renderingModeCount > 0 ? (xr.renderingModeDisplay3D[g_input.currentRenderingMode] ? "3D" : "2D") : "3D"),
                         sceneInfo,
                         fps, g_avgFrameTime * 1000.0,
                         g_renderW, g_renderH, g_windowW, g_windowH,

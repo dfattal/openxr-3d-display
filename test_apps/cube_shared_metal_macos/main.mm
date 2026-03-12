@@ -1316,7 +1316,6 @@ struct AppXrSession {
     float nominalViewerX, nominalViewerY, nominalViewerZ;
     uint32_t displayPixelWidth, displayPixelHeight;
     float recommendedViewScaleX, recommendedViewScaleY;
-    bool supportsDisplayModeSwitch;
     PFN_xrRequestDisplayModeEXT pfnRequestDisplayModeEXT;
     PFN_xrRequestDisplayRenderingModeEXT pfnRequestDisplayRenderingModeEXT;
     PFN_xrEnumerateDisplayRenderingModesEXT pfnEnumerateDisplayRenderingModesEXT;
@@ -1418,7 +1417,6 @@ static bool InitializeOpenXR(AppXrSession &app)
                 app.displayPixelHeight = displayInfo.displayPixelHeight;
                 app.recommendedViewScaleX = displayInfo.recommendedViewScaleX;
                 app.recommendedViewScaleY = displayInfo.recommendedViewScaleY;
-                app.supportsDisplayModeSwitch = displayInfo.supportsDisplayModeSwitch;
                 LOG_INFO("Display pixels: %ux%u", app.displayPixelWidth, app.displayPixelHeight);
                 LOG_INFO("Display info: %.3fx%.3f m, nominal=(%.3f,%.3f,%.3f)",
                     app.displayWidthM, app.displayHeightM,
@@ -1515,11 +1513,11 @@ static bool CreateSession(AppXrSession &app, MetalRenderer &r)
                     app.renderingModeViewCounts[i] = modes[i].viewCount;
                     app.renderingModeScaleX[i] = modes[i].viewScaleX;
                     app.renderingModeScaleY[i] = modes[i].viewScaleY;
-                    app.renderingModeDisplay3D[i] = modes[i].display3D ? true : false;
+                    app.renderingModeDisplay3D[i] = modes[i].hardwareDisplay3D ? true : false;
                     LOG_INFO("  [%u] %s (views=%u, scale=%.2fx%.2f, 3D=%s)",
                         modes[i].modeIndex, modes[i].modeName,
                         modes[i].viewCount, modes[i].viewScaleX, modes[i].viewScaleY,
-                        modes[i].display3D ? "yes" : "no");
+                        modes[i].hardwareDisplay3D ? "yes" : "no");
                 }
                 g_input.renderingModeCount = app.renderingModeCount;
             }
@@ -1989,9 +1987,9 @@ int main(int argc, char **argv)
                 if (g_toolbarView != nil) {
                     dispatch_async(dispatch_get_main_queue(), ^{
                         g_toolbarView.toolbarText = [NSString stringWithFormat:
-                            @"IOSurface Shared Texture | %s | Output: %s | FPS: %.0f (%.1fms) | IOSurf: %ux%u",
-                            display3D ? "3D" : "2D",
-                            outputModeName, fps, g_avgFrameTime * 1000.0,
+                            @"IOSurface Shared Texture | Mode: %s (%s) | FPS: %.0f (%.1fms) | IOSurf: %ux%u",
+                            outputModeName,
+                            display3D ? "3D" : "2D", fps, g_avgFrameTime * 1000.0,
                             g_ioSurfaceWidth, g_ioSurfaceHeight];
                         [g_toolbarView setNeedsDisplay:YES];
                     });
@@ -2054,7 +2052,7 @@ int main(int argc, char **argv)
                             "\n"
                             "WASD/QE=Move  Drag=Look  Space=Reset\n"
                             "%s  Shift=IPD  Ctrl=Parallax  %s\n"
-                            "C=Mode  V=Mode%@  Tab=HUD  ESC=Quit",
+                            "V=Mode%@  Tab=HUD  ESC=Quit",
                             app.systemName,
                             sessionStateName,
                             kooimaMode,

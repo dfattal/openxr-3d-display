@@ -162,7 +162,7 @@ typedef struct XrDisplayInfoEXT {
     XrVector3f      nominalViewerPositionInDisplaySpace; // Default eye position
     float           recommendedViewScaleX;      // sr_recommended_w / display_pixel_w
     float           recommendedViewScaleY;      // sr_recommended_h / display_pixel_h
-    XrBool32        supportsDisplayModeSwitch;  // Can switch 2D/3D?
+    XrBool32        hardwareDisplay3D;           // Is a hardware 3D display?
 } XrDisplayInfoEXT;
 ```
 
@@ -171,7 +171,7 @@ typedef struct XrDisplayInfoEXT {
 - `info.display_width_m` / `info.display_height_m` → `displaySizeMeters`
 - `info.nominal_viewer_x_m` / `_y_m` / `_z_m` → `nominalViewerPositionInDisplaySpace`
 - `info.recommended_view_scale_x` / `_y` → `recommendedViewScale*`
-- `info.supports_display_mode_switch` → `supportsDisplayModeSwitch`
+- `info.hardware_display_3d` → `hardwareDisplay3D`
 
 The runtime reads from `xrt_system_compositor_info` — it never calls vendor SDK
 functions directly.  For example, the Leia driver queries SR SDK during device
@@ -736,7 +736,7 @@ float nominal_viewer_y_m;         // Nominal viewer Y (screen-centered, meters)
 float nominal_viewer_z_m;         // Nominal viewer Z (screen-centered, meters)
 float recommended_view_scale_x;   // Recommended render scale X
 float recommended_view_scale_y;   // Recommended render scale Y
-bool  supports_display_mode_switch; // 2D/3D mode switching
+bool  hardware_display_3d;          // Is a hardware 3D display?
 uint32_t supported_eye_tracking_modes; // Bitmask: SMOOTH_BIT=1, RAW_BIT=2 (v6)
 uint32_t default_eye_tracking_mode;    // 0=SMOOTH, 1=RAW (v6)
 ```

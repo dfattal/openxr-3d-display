@@ -96,7 +96,6 @@ struct XrSessionManager {
     uint32_t displayPixelHeight = 0;
 
     // Display mode switching (XR_EXT_display_info v4)
-    bool supportsDisplayModeSwitch = false;
     PFN_xrRequestDisplayModeEXT pfnRequestDisplayModeEXT = nullptr;
 
     // Eye tracking mode control (XR_EXT_display_info v6)

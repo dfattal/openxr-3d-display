@@ -3572,10 +3572,6 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 				sys->base.info.display_height_m = h_m;
 			}
 
-			// Check if display mode switching is supported
-			sys->base.info.supports_display_mode_switch =
-			    (tmp_dp->request_display_mode != NULL);
-
 			xrt_display_processor_d3d11_destroy(&tmp_dp);
 		} else {
 			U_LOG_W("Temporary display processor creation failed, using default dimensions");
@@ -3622,8 +3618,7 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 	sys->base.info.supported_blend_mode_count = 1;
 
 	// Populate display info for XR_EXT_display_info
-	// (display_width_m, display_height_m, and supports_display_mode_switch
-	//  are already set above from the temporary display processor query)
+	// (display_width_m and display_height_m are already set above from the temporary display processor query)
 	if (sys->output_width > 0 && sys->output_height > 0) {
 		sys->base.info.recommended_view_scale_x = (float)sys->view_width / (float)sys->output_width;
 		sys->base.info.recommended_view_scale_y = (float)sys->view_height / (float)sys->output_height;

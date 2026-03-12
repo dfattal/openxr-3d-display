@@ -118,7 +118,6 @@ bool InitializeOpenXR(XrSessionManager& xr) {
             xr.nominalViewerX = displayInfo.nominalViewerPositionInDisplaySpace.x;
             xr.nominalViewerY = displayInfo.nominalViewerPositionInDisplaySpace.y;
             xr.nominalViewerZ = displayInfo.nominalViewerPositionInDisplaySpace.z;
-            xr.supportsDisplayModeSwitch = (displayInfo.supportsDisplayModeSwitch == XR_TRUE);
             xr.displayPixelWidth = displayInfo.displayPixelWidth;
             xr.displayPixelHeight = displayInfo.displayPixelHeight;
             xr.supportedEyeTrackingModes = (uint32_t)eyeCaps.supportedModes;
@@ -129,10 +128,8 @@ bool InitializeOpenXR(XrSessionManager& xr) {
                 xr.recommendedViewScaleX, xr.recommendedViewScaleY);
         }
 
-        if (xr.supportsDisplayModeSwitch) {
-            xrGetInstanceProcAddr(xr.instance, "xrRequestDisplayModeEXT",
-                (PFN_xrVoidFunction*)&xr.pfnRequestDisplayModeEXT);
-        }
+        xrGetInstanceProcAddr(xr.instance, "xrRequestDisplayModeEXT",
+            (PFN_xrVoidFunction*)&xr.pfnRequestDisplayModeEXT);
         if (xr.supportedEyeTrackingModes != 0) {
             xrGetInstanceProcAddr(xr.instance, "xrRequestEyeTrackingModeEXT",
                 (PFN_xrVoidFunction*)&xr.pfnRequestEyeTrackingModeEXT);
@@ -194,10 +191,10 @@ bool CreateSession(XrSessionManager& xr, ID3D11Device* d3d11Device, HWND hwnd) {
                     xr.renderingModeViewCounts[i] = modes[i].viewCount;
                     xr.renderingModeScaleX[i] = modes[i].viewScaleX;
                     xr.renderingModeScaleY[i] = modes[i].viewScaleY;
-                    xr.renderingModeDisplay3D[i] = (modes[i].display3D == XR_TRUE);
+                    xr.renderingModeDisplay3D[i] = (modes[i].hardwareDisplay3D == XR_TRUE);
                     LOG_INFO("  [%u] %s (views=%u, scale=%.2fx%.2f, 3D=%d)",
                         modes[i].modeIndex, modes[i].modeName, modes[i].viewCount,
-                        modes[i].viewScaleX, modes[i].viewScaleY, modes[i].display3D);
+                        modes[i].viewScaleX, modes[i].viewScaleY, modes[i].hardwareDisplay3D);
                 }
             }
         }

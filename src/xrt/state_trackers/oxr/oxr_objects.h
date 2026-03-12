@@ -1139,7 +1139,15 @@ oxr_event_push_XrEventDataReferenceSpaceChangePending(struct oxr_logger *log,
                                                       const XrPosef *poseInPreviousSpace);
 
 XrResult
-oxr_event_push_XrEventDataViewConfigurationChanged(struct oxr_logger *log, struct oxr_session *sess);
+oxr_event_push_XrEventDataRenderingModeChanged(struct oxr_logger *log,
+                                                struct oxr_session *sess,
+                                                uint32_t previousModeIndex,
+                                                uint32_t currentModeIndex);
+
+XrResult
+oxr_event_push_XrEventDataHardwareDisplayStateChanged(struct oxr_logger *log,
+                                                       struct oxr_session *sess,
+                                                       XrBool32 hardwareDisplay3D);
 
 #ifdef OXR_HAVE_FB_display_refresh_rate
 XrResult
@@ -1988,8 +1996,8 @@ struct oxr_session
 	//! True if session was created with an external window handle (XR_EXT_win32_window_binding).
 	bool has_external_window;
 
-	//! True if display is currently in 3D mode (set by xrRequestDisplayModeEXT).
-	bool display_mode_3d;
+	//! True if display hardware is currently in 3D mode.
+	bool hardware_display_3d;
 
 	//! Active eye tracking mode (0=SMOOTH, 1=RAW). Default: 0 (SMOOTH).
 	uint32_t eye_tracking_mode;

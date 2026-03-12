@@ -1276,7 +1276,7 @@ oxr_xrRequestDisplayModeEXT(XrSession session, XrDisplayModeEXT displayMode)
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Invalid displayMode %d", (int)displayMode);
 	}
 
-	// Thin wrapper: find first mode matching display_3d, delegate to unified API
+	// Thin wrapper: find first mode matching hardware_display_3d, delegate to unified API
 	struct xrt_device *head = GET_XDEV_BY_ROLE(sess->sys, head);
 	if (head == NULL) {
 		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "No head device available");
@@ -1284,7 +1284,7 @@ oxr_xrRequestDisplayModeEXT(XrSession session, XrDisplayModeEXT displayMode)
 
 	bool want_3d = (displayMode == XR_DISPLAY_MODE_3D_EXT);
 	for (uint32_t i = 0; i < head->rendering_mode_count; i++) {
-		if (head->rendering_modes[i].display_3d == want_3d) {
+		if (head->rendering_modes[i].hardware_display_3d == want_3d) {
 			return oxr_xrRequestDisplayRenderingModeEXT(session, i);
 		}
 	}
@@ -1342,13 +1342,15 @@ oxr_xrRequestDisplayRenderingModeEXT(XrSession session, uint32_t modeIndex)
 	}
 
 	struct xrt_rendering_mode *mode = &head->rendering_modes[modeIndex];
+	uint32_t previousModeIndex = head->hmd->active_rendering_mode_index;
+	bool hardware_state_changed = (mode->hardware_display_3d != sess->hardware_display_3d);
 
 	// 1. Set device output mode
 	xrt_device_set_property(head, XRT_DEVICE_PROPERTY_OUTPUT_MODE, modeIndex);
 
-	// 2. Toggle 3D mode if needed
-	if (mode->display_3d != sess->display_mode_3d) {
-		oxr_session_request_display_mode(&log, sess, mode->display_3d);
+	// 2. Toggle hardware 3D mode if needed
+	if (hardware_state_changed) {
+		oxr_session_request_display_mode(&log, sess, mode->hardware_display_3d);
 	}
 
 	// 3. Update active mode (view_count stays fixed at 2 for STEREO)
@@ -1361,8 +1363,16 @@ oxr_xrRequestDisplayRenderingModeEXT(XrSession session, uint32_t modeIndex)
 		xsysc->info.recommended_view_scale_y = mode->view_scale_y;
 	}
 
-	// 5. Push view configuration changed event
-	oxr_event_push_XrEventDataViewConfigurationChanged(&log, sess);
+	// 5. Push rendering mode changed event (on every actual mode change)
+	if (modeIndex != previousModeIndex) {
+		oxr_event_push_XrEventDataRenderingModeChanged(&log, sess, previousModeIndex, modeIndex);
+	}
+
+	// 6. Push hardware display state changed event (only when hardware state flips)
+	if (hardware_state_changed) {
+		oxr_event_push_XrEventDataHardwareDisplayStateChanged(
+			&log, sess, mode->hardware_display_3d ? XR_TRUE : XR_FALSE);
+	}
 
 	return XR_SUCCESS;
 }
@@ -1407,7 +1417,7 @@ oxr_xrEnumerateDisplayRenderingModesEXT(XrSession session,
 		modes[i].viewCount = head->rendering_modes[i].view_count;
 		modes[i].viewScaleX = head->rendering_modes[i].view_scale_x;
 		modes[i].viewScaleY = head->rendering_modes[i].view_scale_y;
-		modes[i].display3D = head->rendering_modes[i].display_3d ? XR_TRUE : XR_FALSE;
+		modes[i].hardwareDisplay3D = head->rendering_modes[i].hardware_display_3d ? XR_TRUE : XR_FALSE;
 	}
 
 	return XR_SUCCESS;

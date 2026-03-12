@@ -624,8 +624,6 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 		display_info->nominalViewerPositionInDisplaySpace.x = info ? info->nominal_viewer_x_m : 0.0f;
 		display_info->nominalViewerPositionInDisplaySpace.y = info ? info->nominal_viewer_y_m : 0.0f;
 		display_info->nominalViewerPositionInDisplaySpace.z = info ? info->nominal_viewer_z_m : 0.5f;
-		display_info->supportsDisplayModeSwitch =
-		    (info && info->supports_display_mode_switch) ? XR_TRUE : XR_FALSE;
 		display_info->displayPixelWidth = info ? info->display_pixel_width : 0;
 		display_info->displayPixelHeight = info ? info->display_pixel_height : 0;
 	}

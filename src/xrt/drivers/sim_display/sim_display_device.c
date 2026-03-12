@@ -356,30 +356,24 @@ sim_display_hmd_set_property(struct xrt_device *xdev,
 
 		if (value == 0) {
 			// 2D — don't change weaver, compositor bypasses it
-			snprintf(xdev->str, XRT_DEVICE_NAME_LEN, "Sim 3D Display (2D)");
 			return XRT_SUCCESS;
 		}
 
 		enum sim_display_output_mode internal_mode;
-		const char *mode_name;
 		switch (value) {
 		case 1:
 			internal_mode = SIM_DISPLAY_OUTPUT_ANAGLYPH;
-			mode_name = "Anaglyph";
 			break;
 		case 2:
 			internal_mode = SIM_DISPLAY_OUTPUT_SBS;
-			mode_name = "SBS";
 			break;
 		case 3:
 			internal_mode = SIM_DISPLAY_OUTPUT_BLEND;
-			mode_name = "Blend";
 			break;
 		default:
 			return XRT_ERROR_NOT_IMPLEMENTED;
 		}
 		sim_display_set_output_mode(internal_mode);
-		snprintf(xdev->str, XRT_DEVICE_NAME_LEN, "Sim 3D Display (%s)", mode_name);
 		return XRT_SUCCESS;
 	}
 	if (property == XRT_DEVICE_PROPERTY_EXT_APP_MODE) {
@@ -524,12 +518,7 @@ sim_display_hmd_create(void)
 
 	hmd->base.hmd->view_count = 2;
 
-	{
-		const char *mode_names[] = {"SBS", "Anaglyph", "Blended"};
-		int idx = (int)sim_display_get_output_mode(); // internal: 0=SBS, 1=Anaglyph, 2=Blend
-		if (idx < 0 || idx > 2) idx = 0;
-		snprintf(hmd->base.str, XRT_DEVICE_NAME_LEN, "Sim 3D Display (%s)", mode_names[idx]);
-	}
+	snprintf(hmd->base.str, XRT_DEVICE_NAME_LEN, "Sim 3D Display");
 	snprintf(hmd->base.serial, XRT_DEVICE_NAME_LEN, "sim_display_0");
 
 	// Rendering modes: sim_display supports 4 modes (2D + 3 stereo).
@@ -542,7 +531,7 @@ sim_display_hmd_create(void)
 	hmd->base.rendering_modes[0].view_count = 1;
 	hmd->base.rendering_modes[0].view_scale_x = 1.0f;
 	hmd->base.rendering_modes[0].view_scale_y = 1.0f;
-	hmd->base.rendering_modes[0].display_3d = false;
+	hmd->base.rendering_modes[0].hardware_display_3d = false;
 
 	// Mode 1: Anaglyph (stereo, default 3D)
 	hmd->base.rendering_modes[1].mode_index = 1;
@@ -550,7 +539,7 @@ sim_display_hmd_create(void)
 	hmd->base.rendering_modes[1].view_count = 2;
 	hmd->base.rendering_modes[1].view_scale_x = 0.5f;
 	hmd->base.rendering_modes[1].view_scale_y = 0.5f;
-	hmd->base.rendering_modes[1].display_3d = true;
+	hmd->base.rendering_modes[1].hardware_display_3d = true;
 
 	// Mode 2: SBS (stereo)
 	hmd->base.rendering_modes[2].mode_index = 2;
@@ -558,7 +547,7 @@ sim_display_hmd_create(void)
 	hmd->base.rendering_modes[2].view_count = 2;
 	hmd->base.rendering_modes[2].view_scale_x = 0.5f;
 	hmd->base.rendering_modes[2].view_scale_y = 0.5f;
-	hmd->base.rendering_modes[2].display_3d = true;
+	hmd->base.rendering_modes[2].hardware_display_3d = true;
 
 	// Mode 3: Blend (stereo)
 	hmd->base.rendering_modes[3].mode_index = 3;
@@ -566,7 +555,7 @@ sim_display_hmd_create(void)
 	hmd->base.rendering_modes[3].view_count = 2;
 	hmd->base.rendering_modes[3].view_scale_x = 0.5f;
 	hmd->base.rendering_modes[3].view_scale_y = 0.5f;
-	hmd->base.rendering_modes[3].display_3d = true;
+	hmd->base.rendering_modes[3].hardware_display_3d = true;
 
 	// Set default active mode from env var
 	{
