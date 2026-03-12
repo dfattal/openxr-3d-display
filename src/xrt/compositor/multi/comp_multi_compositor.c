@@ -1899,6 +1899,8 @@ multi_compositor_create(struct multi_system_compositor *msc,
 	mc->msc = msc;
 	mc->xses = xses;
 	mc->xsi = *xsi;
+	mc->hardware_display_3d = true;
+	mc->last_3d_mode_index = 1;
 	mc->session_render.saved_output_mode = -1;
 
 	os_mutex_init(&mc->slot_lock);

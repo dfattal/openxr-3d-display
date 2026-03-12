@@ -1805,8 +1805,7 @@ session_render_hud_overlay(struct multi_compositor *mc,
                            VkImage swapchain_image,
                            VkImageView swapchain_view,
                            uint32_t fb_width,
-                           uint32_t fb_height,
-                           bool is_mono)
+                           uint32_t fb_height)
 {
 	if (mc->session_render.hud == NULL || !u_hud_is_visible()) {
 		return;
@@ -1907,7 +1906,7 @@ session_render_hud_overlay(struct multi_compositor *mc,
 	data.device_name = device_name;
 	data.fps = fps;
 	data.frame_time_ms = mc->session_render.hud_smoothed_frame_time_ms;
-	data.mode_3d = !is_mono;
+	data.mode_3d = mc->hardware_display_3d;
 	if (xdev != NULL && xdev->hmd != NULL) {
 		uint32_t idx = xdev->hmd->active_rendering_mode_index;
 		if (idx < xdev->rendering_mode_count) {
@@ -2012,7 +2011,7 @@ session_render_hud_overlay(struct multi_compositor *mc,
 
 	// Alpha-blend HUD onto swapchain (PRESENT_SRC -> COLOR_ATTACHMENT -> PRESENT_SRC)
 	static bool mono_hud_blend_logged = false;
-	if (is_mono && !mono_hud_blend_logged) {
+	if (!mc->hardware_display_3d && !mono_hud_blend_logged) {
 		U_LOG_W("[HUD] Mono (2D) mode: blend draw fb=%ux%u hud=%ux%u init=%d",
 		        fb_width, fb_height, hud_w, hud_h,
 		        mc->session_render.hud_blend.initialized);
@@ -2074,8 +2073,19 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		return;
 	}
 
-	// Detect mono (2D) vs stereo (3D) submission
-	bool is_mono = (layer->data.view_count == 1);
+	// Sync hardware_display_3d from device's active rendering mode
+	struct xrt_device *xdev_head = (mc->xsysd != NULL) ? mc->xsysd->static_roles.head : NULL;
+	if (xdev_head != NULL && xdev_head->hmd != NULL) {
+		uint32_t idx = xdev_head->hmd->active_rendering_mode_index;
+		if (idx < xdev_head->rendering_mode_count) {
+			mc->hardware_display_3d = xdev_head->rendering_modes[idx].hardware_display_3d;
+		}
+	}
+
+	// App-submitted mono (viewCount=1) forces 2D path regardless of device mode
+	if (layer->data.view_count == 1) {
+		mc->hardware_display_3d = false;
+	}
 
 	// Runtime-side 2D/3D toggle from qwerty V key
 #ifdef XRT_BUILD_DRIVER_QWERTY
@@ -2084,10 +2094,25 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		bool toggled =
 		    qwerty_check_display_mode_toggle(mc->xsysd->xdevs, mc->xsysd->xdev_count, &force_2d);
 		if (toggled) {
+			struct xrt_device *head = mc->xsysd->static_roles.head;
+			if (head != NULL && head->hmd != NULL) {
+				if (force_2d) {
+					// Save current 3D mode index before switching to 2D
+					mc->last_3d_mode_index = head->hmd->active_rendering_mode_index;
+					// Find first 2D mode
+					for (uint32_t i = 0; i < head->rendering_mode_count; i++) {
+						if (!head->rendering_modes[i].hardware_display_3d) {
+							head->hmd->active_rendering_mode_index = i;
+							break;
+						}
+					}
+				} else {
+					// Restore last known 3D mode index
+					head->hmd->active_rendering_mode_index = mc->last_3d_mode_index;
+				}
+				mc->hardware_display_3d = !force_2d;
+			}
 			multi_compositor_request_display_mode(mc, !force_2d);
-		}
-		if (force_2d) {
-			is_mono = true;
 		}
 
 		// Rendering mode change from qwerty 1/2/3 keys
@@ -2112,13 +2137,13 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	bool leftOk = get_session_layer_view(layer, 0, &imageWidth, &imageHeight, &imageFormat, &leftImageView,
 	                                     &leftImage, &leftArrayIndex);
 	bool rightOk = false;
-	if (!is_mono) {
+	if (mc->hardware_display_3d) {
 		rightOk = get_session_layer_view(layer, 1, &imageWidth, &imageHeight, &imageFormat, &rightImageView,
 		                                 &rightImage, &rightArrayIndex);
 	}
 
-	if (!leftOk || (!is_mono && !rightOk)) {
-		U_LOG_W("[per-session] Could not extract views for per-session rendering (mono=%d)", is_mono);
+	if (!leftOk || (mc->hardware_display_3d && !rightOk)) {
+		U_LOG_W("[per-session] Could not extract views for per-session rendering (3d=%d)", mc->hardware_display_3d);
 		return;
 	}
 
@@ -2128,13 +2153,13 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	int leftOffsetX = layer->data.proj.v[0].sub.rect.offset.w;
 	int leftOffsetY = layer->data.proj.v[0].sub.rect.offset.h;
 	int rightOffsetX = 0, rightOffsetY = 0;
-	if (!is_mono) {
+	if (mc->hardware_display_3d) {
 		rightOffsetX = layer->data.proj.v[1].sub.rect.offset.w;
 		rightOffsetY = layer->data.proj.v[1].sub.rect.offset.h;
 	}
 
 	// Detect single-swapchain SBS layout: both eyes reference the same VkImage
-	bool same_swapchain = (!is_mono && leftImage == rightImage &&
+	bool same_swapchain = (mc->hardware_display_3d && leftImage == rightImage &&
 	                       leftArrayIndex == rightArrayIndex);
 
 	// Wait for pending fence if exists (from previous frame using same buffer)
@@ -2228,7 +2253,7 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	// In 2D mode the app submits only one view (viewCount=1). We blit it
 	// directly to the presentation target without side-by-side packing or
 	// light-field interlacing (weaving).
-	if (is_mono) {
+	if (!mc->hardware_display_3d) {
 		// Mono + window-space overlays: composite projection + HUD overlays
 		// into an intermediate image, then blit left eye to target.
 		// Works for both app-submitted mono (viewCount=1) and runtime-forced
@@ -2795,7 +2820,7 @@ submit_and_present:
 	// matching the D3D11 compositor which renders HUD for all sessions.
 	session_render_hud_overlay(mc, vk, cmd, ct->images[buffer_index].handle,
 	                           ct->images[buffer_index].view,
-	                           framebufferWidth, framebufferHeight, is_mono);
+	                           framebufferWidth, framebufferHeight);
 
 	// End command buffer
 	ret = vk->vkEndCommandBuffer(cmd);
@@ -2997,7 +3022,6 @@ transfer_layers_locked(struct multi_system_compositor *msc, int64_t display_time
 	// Runtime-side 2D/3D toggle from qwerty V key for shared compositor path.
 	// Per-session clients handle this in render_session_to_own_target().
 #ifdef XRT_BUILD_DRIVER_QWERTY
-	bool shared_force_2d = false;
 	for (size_t k = 0; k < count; k++) {
 		struct multi_compositor *mc = array[k];
 		if (mc->session_render.initialized) {
@@ -3008,9 +3032,22 @@ transfer_layers_locked(struct multi_system_compositor *msc, int64_t display_time
 			bool toggled =
 			    qwerty_check_display_mode_toggle(mc->xsysd->xdevs, mc->xsysd->xdev_count, &force_2d);
 			if (toggled) {
+				struct xrt_device *head = mc->xsysd->static_roles.head;
+				if (head != NULL && head->hmd != NULL) {
+					if (force_2d) {
+						mc->last_3d_mode_index = head->hmd->active_rendering_mode_index;
+						for (uint32_t i = 0; i < head->rendering_mode_count; i++) {
+							if (!head->rendering_modes[i].hardware_display_3d) {
+								head->hmd->active_rendering_mode_index = i;
+								break;
+							}
+						}
+					} else {
+						head->hmd->active_rendering_mode_index = mc->last_3d_mode_index;
+					}
+				}
 				multi_compositor_request_display_mode(mc, !force_2d);
 			}
-			shared_force_2d = force_2d;
 
 			// Rendering mode change from qwerty 1/2/3 keys
 			int render_mode = -1;
@@ -3040,14 +3077,23 @@ transfer_layers_locked(struct multi_system_compositor *msc, int64_t display_time
 			continue;
 		}
 
+		// Sync hardware_display_3d for shared clients
+		struct xrt_device *shared_head = (mc->xsysd != NULL) ? mc->xsysd->static_roles.head : NULL;
+		if (shared_head != NULL && shared_head->hmd != NULL) {
+			uint32_t idx = shared_head->hmd->active_rendering_mode_index;
+			if (idx < shared_head->rendering_mode_count) {
+				mc->hardware_display_3d = shared_head->rendering_modes[idx].hardware_display_3d;
+			}
+		}
+
 		for (uint32_t i = 0; i < mc->delivered.layer_count; i++) {
 			struct multi_layer_entry *layer = &mc->delivered.layers[i];
 
-			// When force_2d is active, override projection layers to mono (view_count=1)
+			// When 2D mode is active, override projection layers to mono (view_count=1)
 			// so the main compositor's dispatch_graphics() uses full-width viewport
 			// and skips weaving.
 #ifdef XRT_BUILD_DRIVER_QWERTY
-			bool override_mono = shared_force_2d &&
+			bool override_mono = !mc->hardware_display_3d &&
 			                     (layer->data.type == XRT_LAYER_PROJECTION ||
 			                      layer->data.type == XRT_LAYER_PROJECTION_DEPTH) &&
 			                     layer->data.view_count > 1;

@@ -349,9 +349,11 @@ struct d3d11_service_system
 	//! Mutex for active_compositor access
 	std::mutex active_compositor_mutex;
 
-	//! Runtime-side 2D/3D toggle (V key). When true, forces 2D rendering
-	//! even if the app submits stereo layers.
-	bool force_2d_mode;
+	//! True when display is in 3D mode (weaver active). False = 2D passthrough.
+	bool hardware_display_3d;
+
+	//! Last known 3D rendering mode index (for V-key toggle restore).
+	uint32_t last_3d_mode_index;
 };
 
 
@@ -1360,7 +1362,7 @@ init_client_render_resources(struct d3d11_service_system *sys,
 		} else {
 			U_LOG_W("D3D11 display processor created via factory for client");
 			// Auto-switch to 3D mode when display processor is ready
-			if (!sys->force_2d_mode) {
+			if (sys->hardware_display_3d) {
 				xrt_display_processor_d3d11_request_display_mode(
 				    res->display_processor, true);
 			}
@@ -2259,7 +2261,6 @@ compositor_layer_passthrough(struct xrt_compositor *xc,
 static void
 d3d11_service_render_hud(struct d3d11_service_system *sys,
                           struct d3d11_client_render_resources *res,
-                          bool is_mono,
                           bool weaving_done,
                           const struct xrt_vec3 *left_eye,
                           const struct xrt_vec3 *right_eye)
@@ -2302,7 +2303,7 @@ d3d11_service_render_hud(struct d3d11_service_system *sys,
 	data.device_name = sys->xdev->str;
 	data.fps = fps;
 	data.frame_time_ms = res->smoothed_frame_time_ms;
-	data.mode_3d = !is_mono;
+	data.mode_3d = sys->hardware_display_3d;
 	if (sys->xdev != NULL && sys->xdev->hmd != NULL) {
 		uint32_t idx = sys->xdev->hmd->active_rendering_mode_index;
 		if (idx < sys->xdev->rendering_mode_count) {
@@ -2597,13 +2598,11 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		sys->context->ClearRenderTargetView(c->render.stereo_rtv.get(), clear_color);
 	}
 
-	// Detect mono submission from first projection layer
-	bool is_mono = false;
-	for (uint32_t i = 0; i < c->layer_accum.layer_count; i++) {
-		if (c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION ||
-		    c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION_DEPTH) {
-			is_mono = (c->layer_accum.layers[i].data.view_count == 1);
-			break;
+	// Sync hardware_display_3d from device's active rendering mode
+	if (sys->xdev != NULL && sys->xdev->hmd != NULL) {
+		uint32_t idx = sys->xdev->hmd->active_rendering_mode_index;
+		if (idx < sys->xdev->rendering_mode_count) {
+			sys->hardware_display_3d = sys->xdev->rendering_modes[idx].hardware_display_3d;
 		}
 	}
 
@@ -2613,11 +2612,27 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		bool force_2d = false;
 		bool toggled = qwerty_check_display_mode_toggle(
 		    sys->xsysd->xdevs, sys->xsysd->xdev_count, &force_2d);
-		if (toggled && c->render.display_processor != nullptr) {
-			xrt_display_processor_d3d11_request_display_mode(
-			    c->render.display_processor, !force_2d);
+		if (toggled) {
+			struct xrt_device *head = sys->xsysd->static_roles.head;
+			if (head != nullptr && head->hmd != NULL) {
+				if (force_2d) {
+					// Save current 3D mode index before switching to 2D
+					uint32_t cur = head->hmd->active_rendering_mode_index;
+					if (cur < head->rendering_mode_count &&
+					    head->rendering_modes[cur].hardware_display_3d) {
+						sys->last_3d_mode_index = cur;
+					}
+					head->hmd->active_rendering_mode_index = 0;
+				} else {
+					// Restore last 3D mode index
+					head->hmd->active_rendering_mode_index = sys->last_3d_mode_index;
+				}
+			}
+			if (c->render.display_processor != nullptr) {
+				xrt_display_processor_d3d11_request_display_mode(
+				    c->render.display_processor, !force_2d);
+			}
 		}
-		sys->force_2d_mode = force_2d;
 
 		// Rendering mode change from qwerty 1/2/3 keys
 		int render_mode = -1;
@@ -2629,9 +2644,6 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		}
 	}
 #endif
-	if (sys->force_2d_mode) {
-		is_mono = true;
-	}
 
 	// Get predicted eye positions (used for UI layers and HUD)
 	struct xrt_vec3 left_eye = {-0.032f, 0.0f, 0.6f};   // Default: 64mm IPD, 60cm from screen
@@ -3000,11 +3012,11 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		}
 
 		// Render UI layers for each view (1 for mono, 2 for stereo)
-		uint32_t ui_view_count = is_mono ? 1 : 2;
+		uint32_t ui_view_count = sys->hardware_display_3d ? 2 : 1;
 		for (uint32_t view_index = 0; view_index < ui_view_count; view_index++) {
 			// Set viewport for this view
 			D3D11_VIEWPORT viewport = {};
-			if (is_mono) {
+			if (!sys->hardware_display_3d) {
 				// MONO: use output (window) dimensions so 2D content
 				// fills the full window, capped to stereo texture size.
 				uint32_t mono_w = (sys->output_width < sys->display_width)
@@ -3079,7 +3091,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 	// Process stereo texture through display processor for display output
 	// Skip processing for mono — display is in 2D mode, no interlacing needed
-	if (!is_mono && c->render.display_processor != nullptr && input_srv) {
+	if (sys->hardware_display_3d && c->render.display_processor != nullptr && input_srv) {
 		// Bind back buffer as output
 		ID3D11RenderTargetView *rtvs[] = {c->render.back_buffer_rtv.get()};
 		sys->context->OMSetRenderTargets(1, rtvs, nullptr);
@@ -3110,7 +3122,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			wil::com_ptr<ID3D11Resource> back_buffer;
 			c->render.back_buffer_rtv->GetResource(back_buffer.put());
 
-			if (is_mono) {
+			if (!sys->hardware_display_3d) {
 				// MONO / forced 2D: stretch-blit left eye to fill entire back buffer.
 				// The source is SBS (2*view_width x view_height); we sample only the
 				// left half and stretch it to the full back buffer via a GPU blit.
@@ -3206,7 +3218,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	}
 
 	// Render HUD overlay (post-weave, pre-present)
-	d3d11_service_render_hud(sys, &c->render, is_mono, weaving_done, &left_eye, &right_eye);
+	d3d11_service_render_hud(sys, &c->render, weaving_done, &left_eye, &right_eye);
 
 	// Present to display
 	if (c->render.swap_chain) {
@@ -3451,6 +3463,8 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 
 	sys->xdev = xdev;
 	sys->log_level = U_LOGGING_INFO;
+	sys->hardware_display_3d = true;
+	sys->last_3d_mode_index = 1;
 
 	// Default display dimensions (used when no display processor is available)
 	sys->display_width = 1920;
