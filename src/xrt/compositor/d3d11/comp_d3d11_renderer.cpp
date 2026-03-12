@@ -964,7 +964,7 @@ comp_d3d11_renderer_draw(struct comp_d3d11_renderer *renderer,
                          struct xrt_vec3 *right_eye,
                          uint32_t target_width,
                          uint32_t target_height,
-                         bool force_mono)
+                         bool hardware_display_3d)
 {
 	auto internals = get_internals(renderer->c);
 
@@ -1017,7 +1017,7 @@ comp_d3d11_renderer_draw(struct comp_d3d11_renderer *renderer,
 	}
 
 	// Determine effective view count from first projection layer.
-	// force_mono overrides to 1 (runtime-side 2D toggle from qwerty V key).
+	// In 2D mode (!hardware_display_3d), override to 1 view.
 	uint32_t effective_views = 2;
 	for (uint32_t i = 0; i < layers->layer_count; i++) {
 		if (layers->layers[i].data.type == XRT_LAYER_PROJECTION ||
@@ -1026,7 +1026,7 @@ comp_d3d11_renderer_draw(struct comp_d3d11_renderer *renderer,
 			break;
 		}
 	}
-	if (force_mono && effective_views > 1) {
+	if (!hardware_display_3d && effective_views > 1) {
 		effective_views = 1;
 	}
 

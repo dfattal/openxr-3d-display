@@ -370,7 +370,7 @@ comp_vk_native_renderer_draw(struct comp_vk_native_renderer *r,
                               struct xrt_vec3 *right_eye,
                               uint32_t target_width,
                               uint32_t target_height,
-                              bool force_mono)
+                              bool hardware_display_3d)
 {
 	struct vk_bundle *vk = r->vk;
 	(void)left_eye;
@@ -426,7 +426,7 @@ comp_vk_native_renderer_draw(struct comp_vk_native_renderer *r,
 			continue;
 		}
 
-		uint32_t view_count = force_mono ? 1 : layer->data.view_count;
+		uint32_t view_count = hardware_display_3d ? layer->data.view_count : 1;
 		if (view_count == 0) view_count = 1;
 
 		for (uint32_t eye = 0; eye < view_count; eye++) {
@@ -452,7 +452,7 @@ comp_vk_native_renderer_draw(struct comp_vk_native_renderer *r,
 			int32_t sy1 = sy0 + (int32_t)src_rect->extent.h;
 
 			int32_t dx0, dy0, dx1, dy1;
-			if (force_mono || view_count == 1) {
+			if (!hardware_display_3d || view_count == 1) {
 				dx0 = 0;
 				dy0 = 0;
 				dx1 = (int32_t)(r->view_width * 2);

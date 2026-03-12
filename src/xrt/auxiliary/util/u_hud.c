@@ -577,13 +577,11 @@ u_hud_update(struct u_hud *hud, const struct u_hud_data *data)
 	y += s * 3;
 
 	// === Mode ===
-	if (data->rendering_mode_name) {
-		snprintf(buf, sizeof(buf), "%s (%s)", data->rendering_mode_name, data->mode_3d ? "3D" : "2D");
-	} else {
-		const char *out_str = data->output_mode ? data->output_mode : "?";
-		snprintf(buf, sizeof(buf), "%s (%s)", out_str, data->mode_3d ? "3D" : "2D");
+	{
+		const char *mname = data->rendering_mode_name ? data->rendering_mode_name : "?";
+		snprintf(buf, sizeof(buf), "%s (%s)", mname, data->mode_3d ? "3D" : "2D");
+		y += draw_label_value(hud, x, y, "Mode    ", buf);
 	}
-	y += draw_label_value(hud, x, y, "Mode    ", buf);
 
 	// === Performance section ===
 	snprintf(buf, sizeof(buf), "%.1f    (%.1f ms)", data->fps, data->frame_time_ms);

@@ -2279,14 +2279,6 @@ d3d11_service_render_hud(struct d3d11_service_system *sys,
 
 	float fps = (res->smoothed_frame_time_ms > 0.0f) ? (1000.0f / res->smoothed_frame_time_ms) : 0.0f;
 
-	// Determine output mode string
-	const char *output_mode = "Fallback";
-	if (!is_mono && weaving_done) {
-		output_mode = "Weaved";
-	} else if (is_mono) {
-		output_mode = "2D";
-	}
-
 	// Get render and window dimensions
 	uint32_t render_w = sys->view_width;
 	uint32_t render_h = sys->view_height;
@@ -2311,7 +2303,12 @@ d3d11_service_render_hud(struct d3d11_service_system *sys,
 	data.fps = fps;
 	data.frame_time_ms = res->smoothed_frame_time_ms;
 	data.mode_3d = !is_mono;
-	data.output_mode = output_mode;
+	if (sys->xdev != NULL && sys->xdev->hmd != NULL) {
+		uint32_t idx = sys->xdev->hmd->active_rendering_mode_index;
+		if (idx < sys->xdev->rendering_mode_count) {
+			data.rendering_mode_name = sys->xdev->rendering_modes[idx].mode_name;
+		}
+	}
 	data.render_width = render_w;
 	data.render_height = render_h;
 	data.window_width = win_w;

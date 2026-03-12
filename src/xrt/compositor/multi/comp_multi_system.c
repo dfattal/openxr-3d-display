@@ -1869,14 +1869,6 @@ session_render_hud_overlay(struct multi_compositor *mc,
 		}
 	}
 
-	// Determine output mode
-	const char *output_mode = "Fallback";
-	if (is_mono) {
-		output_mode = "2D";
-	} else if (mc->session_render.display_processor != NULL) {
-		output_mode = "Weaved";
-	}
-
 	// Get render dimensions from last delivered layer
 	uint32_t render_w = 0, render_h = 0;
 	for (uint32_t i = 0; i < mc->delivered.layer_count; i++) {
@@ -1916,7 +1908,12 @@ session_render_hud_overlay(struct multi_compositor *mc,
 	data.fps = fps;
 	data.frame_time_ms = mc->session_render.hud_smoothed_frame_time_ms;
 	data.mode_3d = !is_mono;
-	data.output_mode = output_mode;
+	if (xdev != NULL && xdev->hmd != NULL) {
+		uint32_t idx = xdev->hmd->active_rendering_mode_index;
+		if (idx < xdev->rendering_mode_count) {
+			data.rendering_mode_name = xdev->rendering_modes[idx].mode_name;
+		}
+	}
 	data.render_width = render_w;
 	data.render_height = render_h;
 	data.window_width = fb_width;

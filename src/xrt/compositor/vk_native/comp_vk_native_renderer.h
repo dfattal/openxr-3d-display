@@ -61,7 +61,8 @@ comp_vk_native_renderer_destroy(struct comp_vk_native_renderer **renderer_ptr);
  * @param right_eye Right eye position (NULL for default).
  * @param target_width Width of the render target (window).
  * @param target_height Height of the render target (window).
- * @param force_mono If true, render only 1 view (mono).
+ * @param hardware_display_3d True when in 3D mode (stereo rendering),
+ *        false for 2D passthrough (mono rendering).
  *
  * @return XRT_SUCCESS on success, error code otherwise.
  *
@@ -74,7 +75,7 @@ comp_vk_native_renderer_draw(struct comp_vk_native_renderer *renderer,
                               struct xrt_vec3 *right_eye,
                               uint32_t target_width,
                               uint32_t target_height,
-                              bool force_mono);
+                              bool hardware_display_3d);
 
 /*!
  * Get the stereo texture left and right VkImageViews for the display processor.

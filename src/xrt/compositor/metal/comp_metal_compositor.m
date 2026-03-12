@@ -1108,14 +1108,13 @@ metal_compositor_update_hud(struct comp_metal_compositor *c, float dt)
 	// Device name
 	const char *dev_name = (c->xdev != NULL) ? c->xdev->str : "Unknown";
 
-	// Output mode
-	int32_t output_mode = 0;
-	if (c->xdev != NULL) {
-		xrt_device_get_property(c->xdev, XRT_DEVICE_PROPERTY_OUTPUT_MODE, &output_mode);
-	}
+	// Active rendering mode name (from active_rendering_mode_index, not OUTPUT_MODE property)
 	const char *mode_name = "?";
-	if (c->xdev != NULL && output_mode >= 0 && (uint32_t)output_mode < c->xdev->rendering_mode_count) {
-		mode_name = c->xdev->rendering_modes[output_mode].mode_name;
+	if (c->xdev != NULL && c->xdev->hmd != NULL) {
+		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
+		if (idx < c->xdev->rendering_mode_count) {
+			mode_name = c->xdev->rendering_modes[idx].mode_name;
+		}
 	}
 
 	// Display info from system compositor
@@ -1207,7 +1206,7 @@ metal_compositor_update_hud(struct comp_metal_compositor *c, float dt)
 	    "%s\n"
 	    "%s\n"
 	    "\n"
-	    "Output: %s  (0-3=Mode  V=Cycle)\n"
+	    "Mode: %s (%s)  (0-3  V=Cycle)\n"
 	    "TAB=HUD  P=Cam/Disp  ESC=Quit",
 	    dev_name,
 	    fps, c->smoothed_frame_time_ms,
@@ -1218,7 +1217,7 @@ metal_compositor_update_hud(struct comp_metal_compositor *c, float dt)
 	    half_ipd, nom_y, nom_z,
 	    pos_buf, fwd_buf,
 	    stereo_line1, stereo_line2,
-	    mode_name];
+	    mode_name, c->hardware_display_3d ? "3D" : "2D"];
 
 	dispatch_async(dispatch_get_main_queue(), ^{
 	    c->hud_view.hudText = text;

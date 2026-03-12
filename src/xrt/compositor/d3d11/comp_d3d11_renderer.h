@@ -64,9 +64,8 @@ comp_d3d11_renderer_destroy(struct comp_d3d11_renderer **renderer_ptr);
  * @param target_width Width of the render target (window). Used for mono
  *        viewport sizing so 2D content fills the full window.
  * @param target_height Height of the render target (window).
- * @param force_mono If true, override layer view_count to render 1 view
- *        (mono) even if the app submitted 2 views. Used by the runtime-side
- *        display mode toggle (V key) to show 2D content from a stereo app.
+ * @param hardware_display_3d True when in 3D mode (stereo rendering),
+ *        false for 2D passthrough (mono rendering, single view fills window).
  *
  * @return XRT_SUCCESS on success, error code otherwise.
  *
@@ -79,7 +78,7 @@ comp_d3d11_renderer_draw(struct comp_d3d11_renderer *renderer,
                          struct xrt_vec3 *right_eye,
                          uint32_t target_width,
                          uint32_t target_height,
-                         bool force_mono);
+                         bool hardware_display_3d);
 
 /*!
  * Get the stereo texture SRV for weaving.
