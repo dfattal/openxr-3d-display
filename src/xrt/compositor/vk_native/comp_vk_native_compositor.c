@@ -137,6 +137,12 @@ struct comp_vk_native_compositor
 	//! Generic Vulkan display processor (vendor-agnostic weaving).
 	struct xrt_display_processor *display_processor;
 
+	//! True when display is in 3D mode (weaver active). False = 2D passthrough.
+	bool hardware_display_3d;
+
+	//! Last known 3D rendering mode index (for V-key toggle restore).
+	uint32_t last_3d_mode_index;
+
 	//! System devices (for qwerty driver).
 	struct xrt_system_devices *xsysd;
 
@@ -1013,13 +1019,11 @@ vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 		}
 	}
 
-	// Detect mono submission
-	bool is_mono = false;
-	for (uint32_t i = 0; i < c->layer_accum.layer_count; i++) {
-		if (c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION ||
-		    c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION_DEPTH) {
-			is_mono = (c->layer_accum.layers[i].data.view_count == 1);
-			break;
+	// Sync hardware_display_3d from device's active rendering mode
+	if (c->xdev != NULL && c->xdev->hmd != NULL) {
+		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
+		if (idx < c->xdev->rendering_mode_count) {
+			c->hardware_display_3d = c->xdev->rendering_modes[idx].hardware_display_3d;
 		}
 	}
 
@@ -1029,10 +1033,20 @@ vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 		bool force_2d = false;
 		bool toggled = qwerty_check_display_mode_toggle(c->xsysd->xdevs, c->xsysd->xdev_count, &force_2d);
 		if (toggled) {
+			struct xrt_device *head = c->xsysd->static_roles.head;
+			if (head != NULL && head->hmd != NULL) {
+				if (force_2d) {
+					uint32_t cur = head->hmd->active_rendering_mode_index;
+					if (cur < head->rendering_mode_count &&
+					    head->rendering_modes[cur].hardware_display_3d) {
+						c->last_3d_mode_index = cur;
+					}
+					head->hmd->active_rendering_mode_index = 0;
+				} else {
+					head->hmd->active_rendering_mode_index = c->last_3d_mode_index;
+				}
+			}
 			comp_vk_native_compositor_request_display_mode(&c->base.base, !force_2d);
-		}
-		if (force_2d) {
-			is_mono = true;
 		}
 	}
 #endif
@@ -1046,7 +1060,7 @@ vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 
 	// Render projection layers to stereo texture (per-eye images)
 	xrt_result_t xret = comp_vk_native_renderer_draw(
-	    c->renderer, &c->layer_accum, &left_eye, &right_eye, tgt_width, tgt_height, is_mono);
+	    c->renderer, &c->layer_accum, &left_eye, &right_eye, tgt_width, tgt_height, c->hardware_display_3d);
 	if (xret != XRT_SUCCESS) {
 		U_LOG_E("Failed to render layers");
 		return xret;
@@ -1080,7 +1094,7 @@ vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 		bool weaving_done = false;
 
 		// Display processor weaving path
-		if (!is_mono && c->display_processor != NULL) {
+		if (c->hardware_display_3d && c->display_processor != NULL) {
 			uint64_t left_view, right_view;
 			comp_vk_native_renderer_get_stereo_views(c->renderer, &left_view, &right_view);
 
@@ -1191,7 +1205,7 @@ vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 			// into our command buffer using a framebuffer from our target.
 			// This matches the multi-compositor approach where the weaver is
 			// a command recorder, not a standalone presenter.
-			if (!is_mono && c->display_processor != NULL && c->dp_render_pass != VK_NULL_HANDLE) {
+			if (c->hardware_display_3d && c->display_processor != NULL && c->dp_render_pass != VK_NULL_HANDLE) {
 				static bool dp_logged = false;
 				if (!dp_logged) {
 					U_LOG_W("VK weaving via display processor (compositor-owned swapchain)");
@@ -1418,6 +1432,8 @@ comp_vk_native_compositor_create(struct xrt_device *xdev,
 	c->xdev = xdev;
 	c->queue_family_index = queue_family_index;
 	c->shared_texture_handle = shared_texture_handle;
+	c->hardware_display_3d = true;
+	c->last_3d_mode_index = 1;
 
 	// Initialize vk_bundle from the app's existing VkDevice
 	VkResult vk_ret = vk_init_from_given(

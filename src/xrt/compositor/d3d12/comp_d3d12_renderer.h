@@ -62,7 +62,8 @@ comp_d3d12_renderer_destroy(struct comp_d3d12_renderer **renderer_ptr);
  * @param right_eye Right eye position for projection (NULL for default).
  * @param target_width Width of the render target (window).
  * @param target_height Height of the render target (window).
- * @param force_mono If true, render 1 view even if app submitted 2.
+ * @param hardware_display_3d True when in 3D mode (stereo rendering),
+ *        false for 2D passthrough (mono rendering).
  *
  * @return XRT_SUCCESS on success, error code otherwise.
  *
@@ -76,7 +77,7 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
                          struct xrt_vec3 *right_eye,
                          uint32_t target_width,
                          uint32_t target_height,
-                         bool force_mono);
+                         bool hardware_display_3d);
 
 /*!
  * Get the stereo texture SRV GPU descriptor handle for weaving.

@@ -137,6 +137,12 @@ struct comp_d3d12_compositor
 	//! Time of the last predicted display time.
 	uint64_t last_display_time_ns;
 
+	//! True when display is in 3D mode (weaver active). False = 2D passthrough.
+	bool hardware_display_3d;
+
+	//! Last known 3D rendering mode index (for V-key toggle restore).
+	uint32_t last_3d_mode_index;
+
 	//! Thread safety.
 	std::mutex mutex;
 };
@@ -507,13 +513,11 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		}
 	}
 
-	// Detect mono submission
-	bool is_mono = false;
-	for (uint32_t i = 0; i < c->layer_accum.layer_count; i++) {
-		if (c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION ||
-		    c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION_DEPTH) {
-			is_mono = (c->layer_accum.layers[i].data.view_count == 1);
-			break;
+	// Sync hardware_display_3d from device's active rendering mode
+	if (c->xdev != NULL && c->xdev->hmd != NULL) {
+		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
+		if (idx < c->xdev->rendering_mode_count) {
+			c->hardware_display_3d = c->xdev->rendering_modes[idx].hardware_display_3d;
 		}
 	}
 
@@ -522,8 +526,8 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	bool diag_log = (diag_counter < 5 || diag_counter % 300 == 0);
 	diag_counter++;
 	if (diag_log) {
-		U_LOG_I("D3D12 layer_commit: layers=%u, is_mono=%d, dp=%p, target=%p",
-		        c->layer_accum.layer_count, is_mono,
+		U_LOG_I("D3D12 layer_commit: layers=%u, 3d=%d, dp=%p, target=%p",
+		        c->layer_accum.layer_count, c->hardware_display_3d,
 		        (void *)c->display_processor, (void *)c->target);
 	}
 
@@ -533,10 +537,20 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		bool force_2d = false;
 		bool toggled = qwerty_check_display_mode_toggle(c->xsysd->xdevs, c->xsysd->xdev_count, &force_2d);
 		if (toggled) {
+			struct xrt_device *head = c->xsysd->static_roles.head;
+			if (head != nullptr && head->hmd != NULL) {
+				if (force_2d) {
+					uint32_t cur = head->hmd->active_rendering_mode_index;
+					if (cur < head->rendering_mode_count &&
+					    head->rendering_modes[cur].hardware_display_3d) {
+						c->last_3d_mode_index = cur;
+					}
+					head->hmd->active_rendering_mode_index = 0;
+				} else {
+					head->hmd->active_rendering_mode_index = c->last_3d_mode_index;
+				}
+			}
 			comp_d3d12_compositor_request_display_mode(&c->base.base, !force_2d);
-		}
-		if (force_2d) {
-			is_mono = true;
 		}
 
 		int render_mode = -1;
@@ -562,7 +576,7 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 
 	// Render layers to SBS stereo texture
 	xrt_result_t xret = comp_d3d12_renderer_draw(
-	    c->renderer, c->cmd_list, &c->layer_accum, &left_eye, &right_eye, tgt_width, tgt_height, is_mono);
+	    c->renderer, c->cmd_list, &c->layer_accum, &left_eye, &right_eye, tgt_width, tgt_height, c->hardware_display_3d);
 	if (xret != XRT_SUCCESS) {
 		U_LOG_E("Failed to render layers");
 		return xret;
@@ -749,7 +763,7 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		if (back_buffer != nullptr) {
 			static bool fallback_warned = false;
 			if (!fallback_warned) {
-				U_LOG_W("Display processing not available, using fallback copy (mono=%d)", is_mono);
+				U_LOG_W("Display processing not available, using fallback copy (3d=%d)", c->hardware_display_3d);
 				fallback_warned = true;
 			}
 
@@ -916,6 +930,8 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 	c->xdev = xdev;
 	c->own_window = nullptr;
 	c->owns_window = false;
+	c->hardware_display_3d = true;
+	c->last_3d_mode_index = 1;
 
 	// Handle window
 	if (hwnd != nullptr) {

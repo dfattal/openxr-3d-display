@@ -163,6 +163,12 @@ struct comp_d3d11_compositor
 	//! Smoothed frame time for display.
 	float smoothed_frame_time_ms;
 
+	//! True when display is in 3D mode (weaver active). False = 2D passthrough.
+	bool hardware_display_3d;
+
+	//! Last known 3D rendering mode index (for V-key toggle restore).
+	uint32_t last_3d_mode_index;
+
 	//! Thread safety.
 	std::mutex mutex;
 };
@@ -610,7 +616,7 @@ d3d11_compositor_layer_window_space(struct xrt_compositor *xc,
  * Uses CopySubresourceRegion for zero-shader simplicity.
  */
 static void
-d3d11_render_hud_overlay(struct comp_d3d11_compositor *c, bool is_mono, bool weaving_done,
+d3d11_render_hud_overlay(struct comp_d3d11_compositor *c, bool weaving_done,
                          const struct xrt_vec3 *left_eye, const struct xrt_vec3 *right_eye)
 {
 	if (!c->owns_window || c->hud == NULL || !u_hud_is_visible()) {
@@ -627,14 +633,6 @@ d3d11_render_hud_overlay(struct comp_d3d11_compositor *c, bool is_mono, bool wea
 	c->last_frame_time_ns = now_ns;
 
 	float fps = (c->smoothed_frame_time_ms > 0.0f) ? (1000.0f / c->smoothed_frame_time_ms) : 0.0f;
-
-	// Determine output mode string
-	const char *output_mode = "Fallback";
-	if (!is_mono && weaving_done) {
-		output_mode = (c->display_processor != NULL) ? "Weaved" : "Weaved (direct)";
-	} else if (is_mono) {
-		output_mode = "2D";
-	}
 
 	// Get render and window dimensions
 	uint32_t render_w = 0, render_h = 0;
@@ -659,8 +657,7 @@ d3d11_render_hud_overlay(struct comp_d3d11_compositor *c, bool is_mono, bool wea
 	data.device_name = c->xdev->str;
 	data.fps = fps;
 	data.frame_time_ms = c->smoothed_frame_time_ms;
-	data.mode_3d = !is_mono;
-	data.output_mode = output_mode;
+	data.mode_3d = c->hardware_display_3d;
 	if (c->xdev != NULL && c->xdev->hmd != NULL) {
 		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
 		if (idx < c->xdev->rendering_mode_count) {
@@ -793,13 +790,11 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		}
 	}
 
-	// Detect mono submission from first projection layer
-	bool is_mono = false;
-	for (uint32_t i = 0; i < c->layer_accum.layer_count; i++) {
-		if (c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION ||
-		    c->layer_accum.layers[i].data.type == XRT_LAYER_PROJECTION_DEPTH) {
-			is_mono = (c->layer_accum.layers[i].data.view_count == 1);
-			break;
+	// Sync hardware_display_3d from device's active rendering mode
+	if (c->xdev != NULL && c->xdev->hmd != NULL) {
+		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
+		if (idx < c->xdev->rendering_mode_count) {
+			c->hardware_display_3d = c->xdev->rendering_modes[idx].hardware_display_3d;
 		}
 	}
 
@@ -809,10 +804,22 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		bool force_2d = false;
 		bool toggled = qwerty_check_display_mode_toggle(c->xsysd->xdevs, c->xsysd->xdev_count, &force_2d);
 		if (toggled) {
+			struct xrt_device *head = c->xsysd->static_roles.head;
+			if (head != nullptr && head->hmd != NULL) {
+				if (force_2d) {
+					// Save current 3D mode index before switching to 2D
+					uint32_t cur = head->hmd->active_rendering_mode_index;
+					if (cur < head->rendering_mode_count &&
+					    head->rendering_modes[cur].hardware_display_3d) {
+						c->last_3d_mode_index = cur;
+					}
+					head->hmd->active_rendering_mode_index = 0;
+				} else {
+					// Restore last 3D mode index
+					head->hmd->active_rendering_mode_index = c->last_3d_mode_index;
+				}
+			}
 			comp_d3d11_compositor_request_display_mode(&c->base.base, !force_2d);
-		}
-		if (force_2d) {
-			is_mono = true;
 		}
 
 		// Rendering mode change from qwerty 1/2/3 keys
@@ -834,10 +841,9 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	}
 
 	// Render layers to side-by-side stereo texture (or full-width mono).
-	// Pass is_mono so the renderer forces 1-view rendering even if the app submitted 2 views
-	// (e.g. runtime-side V toggle where the app doesn't know about the 2D switch).
+	// Pass hardware_display_3d so the renderer knows the current display mode.
 	xrt_result_t xret = comp_d3d11_renderer_draw(
-	    c->renderer, &c->layer_accum, &left_eye, &right_eye, tgt_width, tgt_height, is_mono);
+	    c->renderer, &c->layer_accum, &left_eye, &right_eye, tgt_width, tgt_height, c->hardware_display_3d);
 	if (xret != XRT_SUCCESS) {
 		U_LOG_E("Failed to render layers");
 		return xret;
@@ -870,7 +876,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		}
 
 		// Weave/blit directly into the shared texture
-		if (!is_mono && c->display_processor != NULL && c->shared_rtv != nullptr) {
+		if (c->hardware_display_3d && c->display_processor != NULL && c->shared_rtv != nullptr) {
 			void *stereo_srv = comp_d3d11_renderer_get_stereo_srv(c->renderer);
 			uint32_t view_width, view_height;
 			comp_d3d11_renderer_get_view_dimensions(c->renderer, &view_width, &view_height);
@@ -889,7 +895,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 
 		if (!weaving_done) {
 			// Fallback: blit stereo texture directly to shared texture
-			if (is_mono) {
+			if (!c->hardware_display_3d) {
 				D3D11_TEXTURE2D_DESC st_desc;
 				c->shared_texture->GetDesc(&st_desc);
 				comp_d3d11_renderer_blit_stretch(c->renderer, c->shared_texture,
@@ -916,7 +922,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	}
 
 	// Use generic display processor for weaving (vendor-agnostic path)
-	if (!is_mono && c->display_processor != NULL) {
+	if (c->hardware_display_3d && c->display_processor != NULL) {
 		static bool dp_logged = false;
 		if (!dp_logged) {
 			U_LOG_W("D3D11 weaving via display processor interface");
@@ -941,7 +947,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	if (!weaving_done) {
 		static bool fallback_warned = false;
 		if (!fallback_warned) {
-			U_LOG_W("Display processing not available, using fallback blit (mono=%d)", is_mono);
+			U_LOG_W("Display processing not available, using fallback blit (3d=%d)", c->hardware_display_3d);
 			fallback_warned = true;
 		}
 
@@ -949,7 +955,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		    comp_d3d11_target_get_back_buffer(c->target));
 
 		if (back_buffer != nullptr) {
-			if (is_mono) {
+			if (!c->hardware_display_3d) {
 				comp_d3d11_renderer_blit_stretch(c->renderer, back_buffer,
 				                                 tgt_width, tgt_height);
 			} else {
@@ -980,7 +986,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	}
 
 	// HUD overlay (post-processing, always readable)
-	d3d11_render_hud_overlay(c, is_mono, weaving_done, &left_eye, &right_eye);
+	d3d11_render_hud_overlay(c, weaving_done, &left_eye, &right_eye);
 
 	// Copy composited output into shared texture if active (dual output: window + shared)
 	if (c->has_shared_texture && c->shared_texture != nullptr) {
@@ -1125,6 +1131,8 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 	c->own_window = nullptr;
 	c->owns_window = false;
 	c->app_hwnd = nullptr;
+	c->hardware_display_3d = true;
+	c->last_3d_mode_index = 1;
 
 	// Handle window: use provided HWND, create our own, or go offscreen (shared texture)
 	if (shared_texture_handle != nullptr) {

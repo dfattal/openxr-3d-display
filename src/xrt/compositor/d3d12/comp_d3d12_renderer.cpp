@@ -387,7 +387,7 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
                          struct xrt_vec3 *right_eye,
                          uint32_t target_width,
                          uint32_t target_height,
-                         bool force_mono)
+                         bool hardware_display_3d)
 {
 	ID3D12GraphicsCommandList *cmd_list = static_cast<ID3D12GraphicsCommandList *>(cmd_list_ptr);
 
@@ -400,8 +400,8 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 	bool draw_log = (draw_counter % 60 == 0);
 	draw_counter++;
 	if (draw_log) {
-		U_LOG_I("D3D12 renderer draw: layers=%u, mono=%d, view=%ux%u, target=%ux%u",
-		        layers->layer_count, force_mono,
+		U_LOG_I("D3D12 renderer draw: layers=%u, 3d=%d, view=%ux%u, target=%ux%u",
+		        layers->layer_count, hardware_display_3d,
 		        renderer->view_width, renderer->view_height,
 		        target_width, target_height);
 	}
@@ -416,7 +416,7 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 	cmd_list->ResourceBarrier(1, &barrier);
 
 	// Determine view count
-	uint32_t view_count = force_mono ? 1 : 2;
+	uint32_t view_count = hardware_display_3d ? 2 : 1;
 
 	// For each projection layer, copy swapchain images into left/right halves
 	for (uint32_t li = 0; li < layers->layer_count; li++) {
@@ -428,7 +428,7 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 		}
 
 		uint32_t layer_view_count = layer->data.view_count;
-		if (force_mono) {
+		if (!hardware_display_3d) {
 			layer_view_count = 1;
 		}
 

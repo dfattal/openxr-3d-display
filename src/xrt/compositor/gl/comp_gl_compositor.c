@@ -734,14 +734,13 @@ gl_compositor_update_hud(struct comp_gl_compositor *c, float dt)
 	// Device name
 	const char *dev_name = (c->xdev != NULL) ? c->xdev->str : "Unknown";
 
-	// Output mode
-	int32_t output_mode = 0;
-	if (c->xdev != NULL) {
-		xrt_device_get_property(c->xdev, XRT_DEVICE_PROPERTY_OUTPUT_MODE, &output_mode);
-	}
+	// Active rendering mode name (from active_rendering_mode_index, not OUTPUT_MODE property)
 	const char *mode_name = "?";
-	if (c->xdev != NULL && output_mode >= 0 && (uint32_t)output_mode < c->xdev->rendering_mode_count) {
-		mode_name = c->xdev->rendering_modes[output_mode].mode_name;
+	if (c->xdev != NULL && c->xdev->hmd != NULL) {
+		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
+		if (idx < c->xdev->rendering_mode_count) {
+			mode_name = c->xdev->rendering_modes[idx].mode_name;
+		}
 	}
 
 	// Display info from system compositor
@@ -832,7 +831,7 @@ gl_compositor_update_hud(struct comp_gl_compositor *c, float dt)
 	    "%s\n"
 	    "%s\n"
 	    "\n"
-	    "Output: %s  (1/2/3)\n"
+	    "Mode: %s (%s)  (1/2/3)\n"
 	    "TAB=HUD  V=Mode  P=Cam/Disp  ESC=Quit",
 	    dev_name,
 	    fps, c->smoothed_frame_time_ms,
@@ -843,7 +842,7 @@ gl_compositor_update_hud(struct comp_gl_compositor *c, float dt)
 	    half_ipd, nom_y, nom_z,
 	    pos_buf, fwd_buf,
 	    stereo_line1, stereo_line2,
-	    mode_name);
+	    mode_name, c->hardware_display_3d ? "3D" : "2D");
 
 	comp_gl_window_macos_update_hud(c->macos_window, hud_text);
 }
