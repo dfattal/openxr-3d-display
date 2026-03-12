@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 #define XR_EXT_display_info 1
-#define XR_EXT_display_info_SPEC_VERSION 9
+#define XR_EXT_display_info_SPEC_VERSION 10
 #define XR_EXT_DISPLAY_INFO_EXTENSION_NAME "XR_EXT_display_info"
 
 // Reuse the type value from the deleted XR_EXT_dynamic_render_resolution
@@ -50,13 +50,15 @@ typedef struct XrDisplayInfoEXT {
     XrVector3f                  nominalViewerPositionInDisplaySpace; //!< Nominal viewer position in display space (meters)
     float                       recommendedViewScaleX;      //!< Horizontal scale: sr_recommended_w / display_pixel_w
     float                       recommendedViewScaleY;      //!< Vertical scale: sr_recommended_h / display_pixel_h
-    XrBool32                    supportsDisplayModeSwitch;  //!< XR_TRUE if display supports 2D/3D mode switching
     uint32_t                    displayPixelWidth;          //!< Native display panel width in pixels (0 if unknown)
     uint32_t                    displayPixelHeight;         //!< Native display panel height in pixels (0 if unknown)
 } XrDisplayInfoEXT;
 
 /*!
  * @brief Display mode for XR_EXT_display_info 2D/3D switching.
+ *
+ * @deprecated Use xrRequestDisplayRenderingModeEXT instead. Each rendering mode
+ * carries a hardwareDisplay3D field that triggers physical switching automatically.
  */
 typedef enum XrDisplayModeEXT {
     XR_DISPLAY_MODE_2D_EXT = 0,
@@ -66,6 +68,10 @@ typedef enum XrDisplayModeEXT {
 
 /*!
  * @brief Request display mode switch (2D/3D).
+ *
+ * @deprecated Use xrRequestDisplayRenderingModeEXT instead. This function is a
+ * thin wrapper that finds the first rendering mode matching the requested
+ * hardware display state and delegates to xrRequestDisplayRenderingModeEXT.
  *
  * Switches the display between 2D and 3D modes. In 3D mode, the display's
  * light field hardware is active for stereoscopic viewing. In 2D mode, the
@@ -228,7 +234,7 @@ typedef struct XrDisplayRenderingModeInfoEXT {
     uint32_t                    viewCount;  //!< Number of views (1=mono, 2=stereo, etc.)
     float                       viewScaleX; //!< Per-view horizontal scale (vendor-provided)
     float                       viewScaleY; //!< Per-view vertical scale (vendor-provided)
-    XrBool32                    display3D;  //!< Whether display hardware is in 3D mode
+    XrBool32                    hardwareDisplay3D;  //!< Whether display hardware is in 3D mode
 } XrDisplayRenderingModeInfoEXT;
 
 /*!
@@ -256,6 +262,42 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateDisplayRenderingModesEXT(
     uint32_t                           *modeCountOutput,
     XrDisplayRenderingModeInfoEXT      *modes);
 #endif
+
+// ---- v10: Unified Display Mode Events ----
+
+#define XR_TYPE_EVENT_DATA_RENDERING_MODE_CHANGED_EXT        ((XrStructureType)1000999010)
+#define XR_TYPE_EVENT_DATA_HARDWARE_DISPLAY_STATE_CHANGED_EXT ((XrStructureType)1000999011)
+
+/*!
+ * @brief Event fired when the active rendering mode changes.
+ *
+ * Pushed by xrRequestDisplayRenderingModeEXT on every actual mode change.
+ *
+ * @extends XrEventDataBaseHeader
+ */
+typedef struct XrEventDataRenderingModeChangedEXT {
+    XrStructureType             type;       //!< Must be XR_TYPE_EVENT_DATA_RENDERING_MODE_CHANGED_EXT
+    const void* XR_MAY_ALIAS    next;
+    XrSession                   session;
+    uint32_t                    previousModeIndex;
+    uint32_t                    currentModeIndex;
+} XrEventDataRenderingModeChangedEXT;
+
+/*!
+ * @brief Event fired when the physical display hardware state changes.
+ *
+ * Pushed by xrRequestDisplayRenderingModeEXT only when the hardware 3D
+ * state flips (i.e., when switching between modes with different
+ * hardwareDisplay3D values).
+ *
+ * @extends XrEventDataBaseHeader
+ */
+typedef struct XrEventDataHardwareDisplayStateChangedEXT {
+    XrStructureType             type;       //!< Must be XR_TYPE_EVENT_DATA_HARDWARE_DISPLAY_STATE_CHANGED_EXT
+    const void* XR_MAY_ALIAS    next;
+    XrSession                   session;
+    XrBool32                    hardwareDisplay3D;
+} XrEventDataHardwareDisplayStateChangedEXT;
 
 #ifdef __cplusplus
 }

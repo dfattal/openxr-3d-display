@@ -444,12 +444,6 @@ static void RenderOneFrame(RenderState& rs) {
                             sessionText += L"\nSession: ";
                             sessionText += FormatSessionState((int)xr.sessionState);
                             std::wstring modeText = L"Shared Texture VK (offscreen)";
-                            if (xr.supportsDisplayModeSwitch) {
-                                bool is3D = xr.renderingModeCount > 0 ? xr.renderingModeDisplay3D[g_inputState.currentRenderingMode] : true;
-                                modeText += is3D ?
-                                    L"\nDisplay Mode: 3D Stereo [V=Cycle]" :
-                                    L"\nDisplay Mode: 2D Mono [V=Cycle]";
-                            }
                             modeText += g_inputState.cameraMode ?
                                 L"\nKooima: Camera-Centric [C=Toggle]" :
                                 L"\nKooima: Display-Centric [C=Toggle]";
@@ -472,9 +466,10 @@ static void RenderOneFrame(RenderState& rs) {
                             std::wstring dispText = FormatDisplayInfo(xr.displayWidthM, xr.displayHeightM,
                                 xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ);
                             dispText += L"\n" + FormatScaleInfo(xr.recommendedViewScaleX, xr.recommendedViewScaleY);
-                            dispText += L"\n" + FormatOutputMode(g_inputState.currentRenderingMode, xr.pfnRequestDisplayRenderingModeEXT != nullptr,
+                            dispText += L"\n" + FormatMode(g_inputState.currentRenderingMode, xr.pfnRequestDisplayRenderingModeEXT != nullptr,
                                 (xr.renderingModeCount > 0 && g_inputState.currentRenderingMode < xr.renderingModeCount) ? xr.renderingModeNames[g_inputState.currentRenderingMode] : nullptr,
-                                xr.renderingModeCount);
+                                xr.renderingModeCount,
+                                xr.renderingModeCount > 0 ? xr.renderingModeDisplay3D[g_inputState.currentRenderingMode] : true);
                             std::wstring eyeText = FormatEyeTrackingInfo(
                                 xr.leftEyeX, xr.leftEyeY, xr.leftEyeZ,
                                 xr.rightEyeX, xr.rightEyeY, xr.rightEyeZ,

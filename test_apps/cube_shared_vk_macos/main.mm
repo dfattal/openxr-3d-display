@@ -2077,7 +2077,6 @@ struct AppXrSession {
     float nominalViewerX = 0.0f;
     float nominalViewerY = 0.0f;
     float nominalViewerZ = 0.5f;
-    bool supportsDisplayModeSwitch = false;
     PFN_xrRequestDisplayModeEXT pfnRequestDisplayModeEXT = nullptr;
     PFN_xrRequestDisplayRenderingModeEXT pfnRequestDisplayRenderingModeEXT = nullptr;
     PFN_xrEnumerateDisplayRenderingModesEXT pfnEnumerateDisplayRenderingModesEXT = nullptr;
@@ -2183,7 +2182,6 @@ static bool InitializeOpenXR(AppXrSession& xr) {
             xr.nominalViewerX = displayInfo.nominalViewerPositionInDisplaySpace.x;
             xr.nominalViewerY = displayInfo.nominalViewerPositionInDisplaySpace.y;
             xr.nominalViewerZ = displayInfo.nominalViewerPositionInDisplaySpace.z;
-            xr.supportsDisplayModeSwitch = displayInfo.supportsDisplayModeSwitch;
             xr.displayPixelWidth = displayInfo.displayPixelWidth;
             xr.displayPixelHeight = displayInfo.displayPixelHeight;
             xr.supportedEyeTrackingModes = (uint32_t)eyeCaps.supportedModes;
@@ -2193,7 +2191,6 @@ static bool InitializeOpenXR(AppXrSession& xr) {
                 xr.displayWidthM, xr.displayHeightM,
                 xr.recommendedViewScaleX, xr.recommendedViewScaleY,
                 xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ);
-            LOG_INFO("Display mode switch: %s", xr.supportsDisplayModeSwitch ? "supported" : "not supported");
             LOG_INFO("Eye tracking: supported=0x%x, default=%u",
                 xr.supportedEyeTrackingModes, xr.defaultEyeTrackingMode);
         }
@@ -2469,11 +2466,11 @@ static bool CreateSession(AppXrSession& xr, VkInstance vkInstance, VkPhysicalDev
                     xr.renderingModeViewCounts[i] = modes[i].viewCount;
                     xr.renderingModeScaleX[i] = modes[i].viewScaleX;
                     xr.renderingModeScaleY[i] = modes[i].viewScaleY;
-                    xr.renderingModeDisplay3D[i] = modes[i].display3D ? true : false;
+                    xr.renderingModeDisplay3D[i] = modes[i].hardwareDisplay3D ? true : false;
                     LOG_INFO("  [%u] %s (views=%u, scale=%.2fx%.2f, 3D=%s)",
                         modes[i].modeIndex, modes[i].modeName,
                         modes[i].viewCount, modes[i].viewScaleX, modes[i].viewScaleY,
-                        modes[i].display3D ? "yes" : "no");
+                        modes[i].hardwareDisplay3D ? "yes" : "no");
                 }
                 g_input.renderingModeCount = xr.renderingModeCount;
             }
@@ -3143,7 +3140,7 @@ int main() {
                         @"%s\n"
                         "Session: %s\n"
                         "IOSurface: %ux%u (shared texture)\n"
-                        "Mode: %s%s  Output: %s\n"
+                        "Mode: %s (%s)\n"
                         "Kooima: %s\n"
                         "FPS: %.0f  (%.1f ms)\n"
                         "Render: %ux%u\n"
@@ -3162,13 +3159,12 @@ int main() {
                         "\n"
                         "WASD/QE=Move  Drag=Look  Space=Reset\n"
                         "%s  Shift=IPD  Ctrl=Parallax  %s\n"
-                        "C=Mode  V=Mode  T=EyeMode%@  Tab=HUD  ESC=Quit",
+                        "V=Mode  T=EyeMode  Tab=HUD  ESC=Quit",
                         xr.systemName,
                         sessionStateName,
                         g_ioSurfaceWidth, g_ioSurfaceHeight,
-                        display3D ? "3D (Stereo)" : "2D (Mono)",
-                        xr.supportsDisplayModeSwitch ? "" : " [no switch]",
                         outputModeName,
+                        display3D ? "3D" : "2D",
                         kooimaMode,
                         fps, g_avgFrameTime * 1000.0,
                         g_renderW, g_renderH,

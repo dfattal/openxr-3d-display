@@ -161,7 +161,7 @@ struct comp_metal_compositor
 	struct xrt_display_processor_metal *display_processor;
 
 	//! True when display is in 3D mode (weaver active). False = 2D passthrough.
-	bool display_3d;
+	bool hardware_display_3d;
 
 	//! System devices (for qwerty driver keyboard input).
 	struct xrt_system_devices *xsysd;
@@ -1262,12 +1262,12 @@ metal_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		return XRT_SUCCESS;
 	}
 
-	// Sync display_3d from device's active rendering mode (for _rt apps where
+	// Sync hardware_display_3d from device's active rendering mode (for _rt apps where
 	// qwerty driver updates the device directly without going through request_display_mode)
 	if (c->xdev != NULL && c->xdev->hmd != NULL) {
 		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
 		if (idx < c->xdev->rendering_mode_count) {
-			c->display_3d = c->xdev->rendering_modes[idx].display_3d;
+			c->hardware_display_3d = c->xdev->rendering_modes[idx].hardware_display_3d;
 		}
 	}
 
@@ -1322,13 +1322,13 @@ metal_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 				}
 
 				// In 2D mode, only render eye 0 at full width (skip eye 1)
-				if (!c->display_3d && eye > 0) {
+				if (!c->hardware_display_3d && eye > 0) {
 					continue;
 				}
 
 				// Set viewport for this eye
 				MTLViewport vp;
-				if (!c->display_3d) {
+				if (!c->hardware_display_3d) {
 					vp.originX = 0;
 					vp.width = c->view_width * 2;
 				} else {
@@ -1397,7 +1397,7 @@ metal_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	}
 
 	// Step 2: Blit stereo texture to drawable (or process through display processor)
-	if (c->display_3d && c->display_processor != NULL && c->stereo_texture != nil) {
+	if (c->hardware_display_3d && c->display_processor != NULL && c->stereo_texture != nil) {
 		xrt_display_processor_metal_process_stereo(
 		    c->display_processor,
 		    (__bridge void *)cmd_buf,
@@ -1410,9 +1410,9 @@ metal_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		    (uint32_t)output_texture.height);
 	} else {
 		// No display processor OR 2D mode: do conversion here.
-		// In 2D mode (display_3d=false), always blit (passthrough).
+		// In 2D mode (hardware_display_3d=false), always blit (passthrough).
 		id<MTLRenderPipelineState> pipeline;
-		if (!c->display_3d) {
+		if (!c->hardware_display_3d) {
 			pipeline = c->blit_pipeline;
 		} else {
 			// 3D mode without display processor: query output mode
@@ -1766,7 +1766,7 @@ comp_metal_compositor_create(struct xrt_device *xdev,
 			U_LOG_W("Display processor creation failed, continuing without it");
 		}
 	}
-	c->display_3d = true; // Start in 3D mode (session begin will confirm)
+	c->hardware_display_3d = true; // Start in 3D mode (session begin will confirm)
 
 	// Set up xrt_compositor_native vtable
 	struct xrt_compositor *xc = &c->base.base;
@@ -1861,8 +1861,8 @@ bool
 comp_metal_compositor_request_display_mode(struct xrt_compositor *xc, bool enable_3d)
 {
 	struct comp_metal_compositor *c = metal_comp(xc);
-	c->display_3d = enable_3d;
-	U_LOG_W("Metal compositor: display_3d = %s", enable_3d ? "true" : "false");
+	c->hardware_display_3d = enable_3d;
+	U_LOG_W("Metal compositor: hardware_display_3d = %s", enable_3d ? "true" : "false");
 	if (c->display_processor == NULL) {
 		return false;
 	}

@@ -212,7 +212,7 @@ leia_hmd_create(void)
 	hmd->base.rendering_modes[0].view_count = 1;
 	hmd->base.rendering_modes[0].view_scale_x = 1.0f;
 	hmd->base.rendering_modes[0].view_scale_y = 1.0f;
-	hmd->base.rendering_modes[0].display_3d = false;
+	hmd->base.rendering_modes[0].hardware_display_3d = false;
 
 	// Mode 1: LeiaSR (stereo, scale from SR SDK — set later by target_instance)
 	hmd->base.rendering_modes[1].mode_index = 1;
@@ -220,7 +220,7 @@ leia_hmd_create(void)
 	hmd->base.rendering_modes[1].view_count = 2;
 	hmd->base.rendering_modes[1].view_scale_x = 0.5f; // Default, overridden by SR SDK
 	hmd->base.rendering_modes[1].view_scale_y = 0.5f;
-	hmd->base.rendering_modes[1].display_3d = true;
+	hmd->base.rendering_modes[1].hardware_display_3d = true;
 
 	hmd->base.hmd->active_rendering_mode_index = 1; // Default to LeiaSR (3D)
 

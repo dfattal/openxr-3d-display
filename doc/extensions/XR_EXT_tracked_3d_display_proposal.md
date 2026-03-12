@@ -108,7 +108,7 @@ displays. See [OPEN 4](#open-issues) in the Issues section.
         │           • displaySizeMeters
         │           • nominalViewerPositionInDisplaySpace
         │           • recommendedViewScaleX / Y
-        │           • supportsDisplayModeSwitch
+        │           • hardwareDisplay3D
         │
         ├── xrCreateSession()
         │       XrSessionCreateInfo
@@ -678,7 +678,7 @@ Chained to `XrSystemProperties` to return physical display information.
 | `nominalViewerPositionInDisplaySpace` | `XrVector3f` | Design-time expected viewer position relative to display center (meters). Defines the apex of the canonical display pyramid. See [Nominal Viewer Position](#nominal-viewer-position). |
 | `recommendedViewScaleX` | `float` | Horizontal render resolution scale factor. See [Recommended View Scale](#recommended-view-scale). |
 | `recommendedViewScaleY` | `float` | Vertical render resolution scale factor. See [Recommended View Scale](#recommended-view-scale). |
-| `supportsDisplayModeSwitch` | `XrBool32` | `XR_TRUE` if the display supports switching between 2D and 3D modes via `xrRequestDisplayModeEXT`. See [Display Mode Switching](#display-mode-switching). |
+| `hardwareDisplay3D` | `XrBool32` | `XR_TRUE` if the physical display is a hardware 3D display (i.e., supports hardware-accelerated 3D rendering). See [Display Mode Switching](#display-mode-switching). |
 
 ```c
 typedef struct XrDisplayInfoEXT {
@@ -688,7 +688,7 @@ typedef struct XrDisplayInfoEXT {
     XrVector3f                  nominalViewerPositionInDisplaySpace;
     float                       recommendedViewScaleX;
     float                       recommendedViewScaleY;
-    XrBool32                    supportsDisplayModeSwitch;
+    XrBool32                    hardwareDisplay3D;
 } XrDisplayInfoEXT;
 ```
 
@@ -705,6 +705,8 @@ typedef struct XrDisplayInfoEXT {
 
 #### XrDisplayModeEXT
 
+> **Deprecated in v10.** `XrDisplayModeEXT` is deprecated in favor of `xrRequestDisplayRenderingModeEXT`, which provides a unified rendering mode API covering both 2D/3D switching and vendor-specific rendering variations. New applications should use `xrRequestDisplayRenderingModeEXT`. `XrDisplayModeEXT` and `xrRequestDisplayModeEXT` remain supported for backward compatibility.
+
 ```c
 typedef enum XrDisplayModeEXT {
     XR_DISPLAY_MODE_2D_EXT = 0,
@@ -720,6 +722,8 @@ typedef enum XrDisplayModeEXT {
 ### New Functions
 
 #### xrRequestDisplayModeEXT
+
+> **Deprecated in v10.** Use `xrRequestDisplayRenderingModeEXT` instead. See [Display Rendering Mode Control (v7)](#7-display-rendering-mode-control-v7) for the unified replacement. `xrRequestDisplayModeEXT` remains supported for backward compatibility.
 
 Requests that the runtime switch the display between 2D and 3D modes.
 
@@ -741,7 +745,7 @@ XrResult xrRequestDisplayModeEXT(
 | Code | Meaning |
 |---|---|
 | `XR_SUCCESS` | The mode request was accepted by the runtime. |
-| `XR_ERROR_FEATURE_UNSUPPORTED` | The display does not support mode switching (`supportsDisplayModeSwitch` is `XR_FALSE`). |
+| `XR_ERROR_FEATURE_UNSUPPORTED` | The display does not support mode switching (`hardwareDisplay3D` is `XR_FALSE`). |
 | `XR_ERROR_SESSION_NOT_RUNNING` | The session is not in a running state. |
 | `XR_ERROR_HANDLE_INVALID` | The session handle is invalid. |
 
@@ -753,7 +757,7 @@ XrResult xrRequestDisplayModeEXT(
 - The function returns `XR_SUCCESS` when the request has been accepted, regardless of
   whether the display has physically completed the mode change.
 - The application **may** call this function at any time while the session is running.
-- If `supportsDisplayModeSwitch` in `XrDisplayInfoEXT` is `XR_FALSE`, this function
+- If `hardwareDisplay3D` in `XrDisplayInfoEXT` is `XR_FALSE`, this function
   returns `XR_ERROR_FEATURE_UNSUPPORTED` and has no effect.
 
 ### Display Mode Switching
@@ -822,6 +826,14 @@ This abstraction also operates through:
 - `XrDisplayInfoEXT` chaining to `xrGetSystemProperties`.
 - `xrRequestDisplayModeEXT` for explicit display mode control.
 
+### New Event Types (v10)
+
+Two new event types are delivered via `xrPollEvent` to notify applications of asynchronous state changes:
+
+- **`XrEventDataRenderingModeChangedEXT`** — fired when the active display rendering mode changes (e.g., after a call to `xrRequestDisplayRenderingModeEXT` completes, or when the runtime changes modes autonomously). Applications that need to react to rendering mode transitions (e.g., reconfigure swapchains or shaders) should poll for this event.
+
+- **`XrEventDataHardwareDisplayStateChangedEXT`** — fired when the hardware 3D display state changes (e.g., the switchable lenses or backlight are enabled or disabled). Applications can use this event to update their UI or rendering pipeline in response to system-level display state changes.
+
 ### Example Code: Querying Display Mode Support and Requesting 2D
 
 ```cpp
@@ -831,8 +843,8 @@ XrDisplayInfoEXT displayInfo = {(XrStructureType)XR_TYPE_DISPLAY_INFO_EXT};
 sysProps.next = &displayInfo;
 xrGetSystemProperties(instance, systemId, &sysProps);
 
-if (displayInfo.supportsDisplayModeSwitch) {
-    // Display supports 2D/3D switching.
+if (displayInfo.hardwareDisplay3D) {
+    // Display is a hardware 3D display supporting 2D/3D switching.
     // The runtime automatically requests 3D mode when the session becomes READY.
 
     // Example: temporarily switch to 2D for a settings menu
@@ -1015,7 +1027,7 @@ float scaleX = displayInfo.recommendedViewScaleX;             // e.g. 0.5
 float scaleY = displayInfo.recommendedViewScaleY;             // e.g. 1.0
 XrVector3f nominalPos = displayInfo.nominalViewerPositionInDisplaySpace;
 // nominalPos ~ {0.0, 0.0, 0.65}
-XrBool32 canSwitch = displayInfo.supportsDisplayModeSwitch;   // XR_TRUE or XR_FALSE
+XrBool32 isHardware3D = displayInfo.hardwareDisplay3D;         // XR_TRUE if hardware 3D display
 ```
 
 ### Example Code: Locating Views in RAW Mode
@@ -1457,8 +1469,8 @@ this capability, and if so, how?
 
 *Resolution*: **Capability flag + request function with automatic lifecycle.**
 
-- `XrDisplayInfoEXT` includes `supportsDisplayModeSwitch` (`XrBool32`) so the application
-  can discover whether mode switching is available. Not all tracked 3D displays support
+- `XrDisplayInfoEXT` includes `hardwareDisplay3D` (`XrBool32`) so the application
+  can discover whether the display is a hardware 3D display capable of mode switching. Not all tracked 3D displays support
   switching — some are always-3D — so the capability must be queryable.
 - `xrRequestDisplayModeEXT(session, mode)` allows explicit mode control. The function is
   a **request** (not a hard set) because the underlying platform may aggregate preferences
@@ -1760,6 +1772,7 @@ the property) silently ignore the call — graceful degradation.
 | 6 | 2026-02-27 | David Fattal | Eye tracking mode control: `XrEyeTrackingModeEXT` enum, `XrEyeTrackingModeCapabilitiesEXT` (chained to `XrSystemProperties`), `XrViewEyeTrackingStateEXT` (chained to `XrViewState`), and `xrRequestEyeTrackingModeEXT` function. Allows apps to choose between smooth (SDK-filtered) and raw eye tracking, with explicit `isTracking` flag. |
 | 7 | 2026-03-04 | David Fattal | Vendor-specific display rendering mode control: `xrRequestDisplayRenderingModeEXT(session, modeIndex)` for switching between vendor-defined rendering variations (e.g., SBS stereo, anaglyph, lenticular). Mode 0 = standard (always available), mode 1+ = vendor-defined. Dispatches through `xrt_device_set_property`; no-op if driver doesn't support it. |
 | 8 | 2026-03-06 | David Fattal | Removed `XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT`. In RAW mode, `xrLocateViews` returns screen-centered eye positions regardless of the reference space parameter — a dedicated DISPLAY space is unnecessary. Applications use LOCAL space for both view location and layer submission. |
+| 10 | 2026-03-12 | David Fattal | Removed `supportsDisplayModeSwitch` (derivable from mode enumeration), renamed `display3D` to `hardwareDisplay3D`, deprecated `xrRequestDisplayModeEXT` in favor of unified `xrRequestDisplayRenderingModeEXT`, added rendering mode and hardware display state change events (`XrEventDataRenderingModeChangedEXT`, `XrEventDataHardwareDisplayStateChangedEXT`). |
 
 ---
 

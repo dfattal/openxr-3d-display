@@ -136,6 +136,14 @@ is_session_link_to_event(struct oxr_event *event, XrSession session)
 		XrEventDataReferenceSpaceChangePending *pending = (XrEventDataReferenceSpaceChangePending *)type;
 		return pending->session == session;
 	}
+	case XR_TYPE_EVENT_DATA_RENDERING_MODE_CHANGED_EXT: {
+		XrEventDataRenderingModeChangedEXT *changed = (XrEventDataRenderingModeChangedEXT *)type;
+		return changed->session == session;
+	}
+	case XR_TYPE_EVENT_DATA_HARDWARE_DISPLAY_STATE_CHANGED_EXT: {
+		XrEventDataHardwareDisplayStateChangedEXT *changed = (XrEventDataHardwareDisplayStateChangedEXT *)type;
+		return changed->session == session;
+	}
 	default: return false;
 	}
 }
@@ -370,13 +378,56 @@ oxr_event_push_XrEventDataUserPresenceChangedEXT(struct oxr_logger *log, struct 
 #endif // OXR_HAVE_EXT_user_presence
 
 XrResult
-oxr_event_push_XrEventDataViewConfigurationChanged(struct oxr_logger *log, struct oxr_session *sess)
+oxr_event_push_XrEventDataRenderingModeChanged(struct oxr_logger *log,
+                                                struct oxr_session *sess,
+                                                uint32_t previousModeIndex,
+                                                uint32_t currentModeIndex)
 {
-	// No standard OpenXR event type for view config changes.
-	// Apps calling xrRequestDisplayRenderingModeEXT already know the mode changed.
-	// This is a hook point for future extension events.
-	(void)sess;
-	U_LOG_I("View configuration changed (mode switch)");
+	struct oxr_instance *inst = sess->sys->inst;
+	XrEventDataRenderingModeChangedEXT *changed;
+	struct oxr_event *event = NULL;
+
+	ALLOC(log, inst, &event, &changed);
+
+	changed->type = XR_TYPE_EVENT_DATA_RENDERING_MODE_CHANGED_EXT;
+	changed->next = NULL;
+	changed->session = oxr_session_to_openxr(sess);
+	changed->previousModeIndex = previousModeIndex;
+	changed->currentModeIndex = currentModeIndex;
+	event->result = XR_SUCCESS;
+
+	U_LOG_I("OXR EVENT: Rendering mode changed %u -> %u", previousModeIndex, currentModeIndex);
+
+	lock(inst);
+	push(inst, event);
+	unlock(inst);
+
+	return XR_SUCCESS;
+}
+
+XrResult
+oxr_event_push_XrEventDataHardwareDisplayStateChanged(struct oxr_logger *log,
+                                                       struct oxr_session *sess,
+                                                       XrBool32 hardwareDisplay3D)
+{
+	struct oxr_instance *inst = sess->sys->inst;
+	XrEventDataHardwareDisplayStateChangedEXT *changed;
+	struct oxr_event *event = NULL;
+
+	ALLOC(log, inst, &event, &changed);
+
+	changed->type = XR_TYPE_EVENT_DATA_HARDWARE_DISPLAY_STATE_CHANGED_EXT;
+	changed->next = NULL;
+	changed->session = oxr_session_to_openxr(sess);
+	changed->hardwareDisplay3D = hardwareDisplay3D;
+	event->result = XR_SUCCESS;
+
+	U_LOG_I("OXR EVENT: Hardware display state changed to %s", hardwareDisplay3D ? "3D" : "2D");
+
+	lock(inst);
+	push(inst, event);
+	unlock(inst);
+
 	return XR_SUCCESS;
 }
 

@@ -257,7 +257,7 @@ leiasr_d3d12_set_output_format(struct leiasr_d3d12 *leiasr, uint32_t format)
 
 	DXGI_FORMAT dxgi_format = static_cast<DXGI_FORMAT>(format);
 	leiasr->weaver->setOutputFormat(dxgi_format);
-	U_LOG_I("SR D3D12 weaver output format set to %u", (unsigned)format);
+	U_LOG_W("SR D3D12 weaver output format set to %u", (unsigned)format);
 }
 
 void

@@ -237,7 +237,6 @@ out:
 				xsysc->info.nominal_viewer_x_m = dims.nominal_x_m;
 				xsysc->info.nominal_viewer_y_m = dims.nominal_y_m;
 				xsysc->info.nominal_viewer_z_m = dims.nominal_z_m;
-				xsysc->info.supports_display_mode_switch = true;
 				// Leia SR: smooth eye tracking only (SDK handles grace period + smoothing)
 				xsysc->info.supported_eye_tracking_modes = 1; // SMOOTH_BIT
 				xsysc->info.default_eye_tracking_mode = 0;    // SMOOTH
@@ -283,7 +282,6 @@ out:
 				}
 				xsysc->info.recommended_view_scale_x = min_scale_x;
 				xsysc->info.recommended_view_scale_y = min_scale_y;
-				xsysc->info.supports_display_mode_switch = true;
 				xsysc->info.display_pixel_width = sd_info.display_pixel_width;
 				xsysc->info.display_pixel_height = sd_info.display_pixel_height;
 				// Sim display: raw eye tracking only (simulated device, always "tracking")

@@ -659,12 +659,6 @@ static void RenderThreadFunc(
                                 std::wstring modeText = xr->hasWin32WindowBindingExt ?
                                     L"XR_EXT_win32_window_binding: ACTIVE (Vulkan + 3DGS)" :
                                     L"XR_EXT_win32_window_binding: NOT AVAILABLE";
-                                if (xr->supportsDisplayModeSwitch) {
-                                    bool is3D = xr->renderingModeCount > 0 ? xr->renderingModeDisplay3D[inputSnapshot.currentRenderingMode] : true;
-                                    modeText += is3D ?
-                                        L"\nDisplay Mode: 3D Stereo [V=Cycle]" :
-                                        L"\nDisplay Mode: 2D Mono [V=Cycle]";
-                                }
 
                                 // Scene info
                                 std::wstring sceneText = L"\n--- 3DGS Scene ---";
@@ -697,9 +691,10 @@ static void RenderThreadFunc(
                                 std::wstring dispText = FormatDisplayInfo(xr->displayWidthM, xr->displayHeightM,
                                     xr->nominalViewerX, xr->nominalViewerY, xr->nominalViewerZ);
                                 dispText += L"\n" + FormatScaleInfo(xr->recommendedViewScaleX, xr->recommendedViewScaleY);
-                                dispText += L"\n" + FormatOutputMode(inputSnapshot.currentRenderingMode, xr->pfnRequestDisplayRenderingModeEXT != nullptr,
+                                dispText += L"\n" + FormatMode(inputSnapshot.currentRenderingMode, xr->pfnRequestDisplayRenderingModeEXT != nullptr,
                                     (xr->renderingModeCount > 0 && inputSnapshot.currentRenderingMode < xr->renderingModeCount) ? xr->renderingModeNames[inputSnapshot.currentRenderingMode] : nullptr,
-                                    xr->renderingModeCount);
+                                    xr->renderingModeCount,
+                                    xr->renderingModeCount > 0 ? xr->renderingModeDisplay3D[inputSnapshot.currentRenderingMode] : true);
                                 std::wstring eyeText = FormatEyeTrackingInfo(
                                     xr->leftEyeX, xr->leftEyeY, xr->leftEyeZ,
                                     xr->rightEyeX, xr->rightEyeY, xr->rightEyeZ,

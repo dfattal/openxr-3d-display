@@ -112,26 +112,22 @@ bool InitializeOpenXR(XrSessionManager& xr) {
             xr.nominalViewerX = displayInfo.nominalViewerPositionInDisplaySpace.x;
             xr.nominalViewerY = displayInfo.nominalViewerPositionInDisplaySpace.y;
             xr.nominalViewerZ = displayInfo.nominalViewerPositionInDisplaySpace.z;
-            xr.supportsDisplayModeSwitch = (displayInfo.supportsDisplayModeSwitch == XR_TRUE);
             xr.displayPixelWidth = displayInfo.displayPixelWidth;
             xr.displayPixelHeight = displayInfo.displayPixelHeight;
             xr.supportedEyeTrackingModes = (uint32_t)eyeCaps.supportedModes;
             xr.defaultEyeTrackingMode = (uint32_t)eyeCaps.defaultMode;
-            LOG_INFO("Display info: scale=%.3fx%.3f, size=%.3fx%.3fm, pixels=%ux%u, nominal=(%.0f,%.0f,%.0f)mm, modeSwitch=%s",
+            LOG_INFO("Display info: scale=%.3fx%.3f, size=%.3fx%.3fm, pixels=%ux%u, nominal=(%.0f,%.0f,%.0f)mm",
                 xr.recommendedViewScaleX, xr.recommendedViewScaleY,
                 xr.displayWidthM, xr.displayHeightM,
                 xr.displayPixelWidth, xr.displayPixelHeight,
-                xr.nominalViewerX * 1000.0f, xr.nominalViewerY * 1000.0f, xr.nominalViewerZ * 1000.0f,
-                xr.supportsDisplayModeSwitch ? "YES" : "NO");
+                xr.nominalViewerX * 1000.0f, xr.nominalViewerY * 1000.0f, xr.nominalViewerZ * 1000.0f);
             LOG_INFO("Eye tracking: supported=0x%x, default=%u",
                 xr.supportedEyeTrackingModes, xr.defaultEyeTrackingMode);
         }
 
         // Load xrRequestDisplayModeEXT function pointer
-        if (xr.supportsDisplayModeSwitch) {
-            xrGetInstanceProcAddr(xr.instance, "xrRequestDisplayModeEXT",
-                (PFN_xrVoidFunction*)&xr.pfnRequestDisplayModeEXT);
-        }
+        xrGetInstanceProcAddr(xr.instance, "xrRequestDisplayModeEXT",
+            (PFN_xrVoidFunction*)&xr.pfnRequestDisplayModeEXT);
 
         // Load xrRequestEyeTrackingModeEXT function pointer
         if (xr.supportedEyeTrackingModes != 0) {
@@ -436,11 +432,11 @@ bool CreateSession(XrSessionManager& xr, VkInstance vkInstance, VkPhysicalDevice
                 for (uint32_t i = 0; i < xr.renderingModeCount; i++) {
                     strncpy(xr.renderingModeNames[i], modes[i].modeName, XR_MAX_SYSTEM_NAME_SIZE - 1);
                     xr.renderingModeNames[i][XR_MAX_SYSTEM_NAME_SIZE - 1] = '\0';
-                    LOG_INFO("  [%u] %s (views=%u, scale=%.2fx%.2f, 3D=%d)", modes[i].modeIndex, modes[i].modeName, modes[i].viewCount, modes[i].viewScaleX, modes[i].viewScaleY, modes[i].display3D);
+                    LOG_INFO("  [%u] %s (views=%u, scale=%.2fx%.2f, 3D=%d)", modes[i].modeIndex, modes[i].modeName, modes[i].viewCount, modes[i].viewScaleX, modes[i].viewScaleY, modes[i].hardwareDisplay3D);
                     xr.renderingModeViewCounts[i] = modes[i].viewCount;
                     xr.renderingModeScaleX[i] = modes[i].viewScaleX;
                     xr.renderingModeScaleY[i] = modes[i].viewScaleY;
-                    xr.renderingModeDisplay3D[i] = modes[i].display3D ? true : false;
+                    xr.renderingModeDisplay3D[i] = modes[i].hardwareDisplay3D ? true : false;
                 }
             }
         }
