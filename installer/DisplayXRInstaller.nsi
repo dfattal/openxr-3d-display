@@ -586,7 +586,9 @@ Section "DisplayXR Runtime" SecRuntime
 	WriteRegStr HKLM "Software\DisplayXR\Runtime" "Version" "${VERSION}"
 
 	; Set as active OpenXR runtime
+	SetRegView 64
 	WriteRegStr HKLM "Software\Khronos\OpenXR\1" "ActiveRuntime" "$INSTDIR\DisplayXR_win64.json"
+	SetRegView 32
 
 	; Add install directory to system PATH
 	; This is needed so OpenXR apps can find DisplayXRClient.dll's dependencies
@@ -694,9 +696,11 @@ Section "Uninstall"
 	DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR"
 
 	; Only remove ActiveRuntime if it points to our manifest
+	SetRegView 64
 	ReadRegStr $0 HKLM "Software\Khronos\OpenXR\1" "ActiveRuntime"
 	StrCmp $0 "$INSTDIR\DisplayXR_win64.json" 0 +2
 		DeleteRegValue HKLM "Software\Khronos\OpenXR\1" "ActiveRuntime"
+	SetRegView 32
 
 	; Remove install directory from system PATH
 	Push $INSTDIR
