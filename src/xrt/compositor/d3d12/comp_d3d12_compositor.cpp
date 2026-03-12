@@ -1030,11 +1030,11 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 			// Tell the weaver the output render target format so it can
 			// create its internal pipeline state. Without this, the weaver's
 			// pipeline state stays null and weave() silently no-ops.
-			if (c->target != nullptr) {
-				xrt_display_processor_d3d12_set_output_format(
-				    c->display_processor,
-				    DXGI_FORMAT_R8G8B8A8_UNORM);
-			}
+			xrt_display_processor_d3d12_set_output_format(
+			    c->display_processor,
+			    DXGI_FORMAT_R8G8B8A8_UNORM);
+			U_LOG_W("D3D12 display processor: output format set to RGBA8_UNORM (target=%p)",
+			        (void *)c->target);
 		}
 	} else {
 		U_LOG_W("No D3D12 display processor factory provided");
@@ -1053,6 +1053,39 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 			view_height = disp_px_h;
 			U_LOG_W("Display processor: using native resolution %ux%u per eye (display %ux%u)",
 			        view_width, view_height, disp_px_w, disp_px_h);
+
+			// Take over app window: resize to cover the Leia display
+			// at native resolution. The SR weaver's interlacing pattern
+			// must match the physical pixel grid — a 1280x720 window
+			// on a 2240x1400 display would produce wrong interlacing.
+			if (c->hwnd != nullptr && c->target != nullptr) {
+				// Make window borderless for exact display coverage
+				LONG style = GetWindowLong(c->hwnd, GWL_STYLE);
+				SetWindowLong(c->hwnd, GWL_STYLE,
+				              style & ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER));
+
+				// Position and resize to cover the Leia display exactly
+				SetWindowPos(c->hwnd, HWND_TOP,
+				             (int)disp_left, (int)disp_top,
+				             (int)disp_px_w, (int)disp_px_h,
+				             SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+				// Resize swapchain to match native display resolution
+				gpu_wait_idle(c);
+				xrt_result_t resize_ret = comp_d3d12_target_resize(
+				    c->target, disp_px_w, disp_px_h);
+				if (resize_ret == XRT_SUCCESS) {
+					c->settings.preferred.width = disp_px_w;
+					c->settings.preferred.height = disp_px_h;
+					U_LOG_W("Resized window+swapchain to display native: "
+					        "%ux%u at (%d,%d)",
+					        disp_px_w, disp_px_h,
+					        (int)disp_left, (int)disp_top);
+				} else {
+					U_LOG_E("Failed to resize swapchain to %ux%u",
+					        disp_px_w, disp_px_h);
+				}
+			}
 		}
 	}
 
