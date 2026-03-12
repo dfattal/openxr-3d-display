@@ -136,6 +136,12 @@ struct multi_compositor
 	//! System devices for qwerty input forwarding to self-owned window
 	struct xrt_system_devices *xsysd;
 
+	//! True when display is in 3D mode (weaver active). False = 2D passthrough.
+	bool hardware_display_3d;
+
+	//! Last known 3D rendering mode index (for V-key toggle restore).
+	uint32_t last_3d_mode_index;
+
 	//! Used to implement wait frame, only used for in process.
 	struct os_precise_sleeper frame_sleeper;
 
