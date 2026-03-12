@@ -848,12 +848,22 @@ vk_compositor_layer_window_space(struct xrt_compositor *xc,
 }
 
 /*!
- * Blit window-space (HUD) layers onto the per-eye images, pre-weave.
- * Called after renderer_draw has produced the per-eye images in
- * SHADER_READ_ONLY_OPTIMAL layout.
+ * Blit window-space (HUD) layers onto the target image POST-WEAVE.
+ * HUD must not be interlaced — it should appear flat on screen.
+ * Records commands into the provided command buffer.
+ *
+ * @param c The compositor.
+ * @param cmd Active command buffer to record into.
+ * @param target_image Target swapchain VkImage (already in PRESENT_SRC_KHR).
+ * @param target_width Target width.
+ * @param target_height Target height.
  */
 static void
-vk_compositor_blit_window_space_layers(struct comp_vk_native_compositor *c)
+vk_compositor_blit_window_space_layers(struct comp_vk_native_compositor *c,
+                                        VkCommandBuffer cmd,
+                                        VkImage target_image,
+                                        uint32_t target_width,
+                                        uint32_t target_height)
 {
 	struct vk_bundle *vk = &c->vk;
 
@@ -869,52 +879,22 @@ vk_compositor_blit_window_space_layers(struct comp_vk_native_compositor *c)
 		return;
 	}
 
-	// Get the stereo SBS image — we blit window_space layers directly onto
-	// the SBS texture so the weaver sees them (per-eye images are copies).
-	uint64_t stereo_img_u64 = comp_vk_native_renderer_get_stereo_image(c->renderer);
-	VkImage stereo_img = (VkImage)(uintptr_t)stereo_img_u64;
-
-	uint32_t view_width, view_height;
-	comp_vk_native_renderer_get_view_dimensions(c->renderer, &view_width, &view_height);
-
-	VkCommandPool cmd_pool = (VkCommandPool)(uintptr_t)
-	    comp_vk_native_renderer_get_cmd_pool(c->renderer);
-
-	VkCommandBufferAllocateInfo alloc_info = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-	    .commandPool = cmd_pool,
-	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-	    .commandBufferCount = 1,
-	};
-
-	VkCommandBuffer cmd;
-	VkResult res = vk->vkAllocateCommandBuffers(vk->device, &alloc_info, &cmd);
-	if (res != VK_SUCCESS) {
-		return;
-	}
-
-	VkCommandBufferBeginInfo begin_info = {
-	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-	};
-	vk->vkBeginCommandBuffer(cmd, &begin_info);
-
-	// Transition stereo SBS image from SHADER_READ_ONLY to TRANSFER_DST
+	// Transition target from PRESENT_SRC_KHR to TRANSFER_DST for blitting
 	VkImageMemoryBarrier to_dst = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-	    .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+	    .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 	    .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-	    .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	    .oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 	    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	    .image = stereo_img,
+	    .image = target_image,
 	    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
 	};
 	vk->vkCmdPipelineBarrier(cmd,
-	    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+	    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 	    VK_PIPELINE_STAGE_TRANSFER_BIT,
 	    0, 0, NULL, 0, NULL, 1, &to_dst);
 
-	// Blit each window-space layer onto both per-eye images
+	// Blit each window-space layer onto target (post-weave, flat 2D overlay)
 	for (uint32_t i = 0; i < c->layer_accum.layer_count; i++) {
 		struct comp_layer *layer = &c->layer_accum.layers[i];
 		if (layer->data.type != XRT_LAYER_WINDOW_SPACE) {
@@ -942,14 +922,11 @@ vk_compositor_blit_window_space_layers(struct comp_vk_native_compositor *c)
 		int32_t sx1 = sx0 + (int32_t)src_rect->extent.w;
 		int32_t sy1 = sy0 + (int32_t)src_rect->extent.h;
 
-		// Destination rect in per-eye coordinates (fractional window position)
-		int32_t dx0 = (int32_t)(ws->x * (float)view_width);
-		int32_t dy0 = (int32_t)(ws->y * (float)view_height);
-		int32_t dw = (int32_t)(ws->width * (float)view_width);
-		int32_t dh = (int32_t)(ws->height * (float)view_height);
-
-		// Disparity shift in pixels (fraction of view width)
-		int32_t disp_px = (int32_t)(ws->disparity * (float)view_width);
+		// Destination rect in full-window coordinates (fractional position)
+		int32_t dx0 = (int32_t)(ws->x * (float)target_width);
+		int32_t dy0 = (int32_t)(ws->y * (float)target_height);
+		int32_t dw = (int32_t)(ws->width * (float)target_width);
+		int32_t dh = (int32_t)(ws->height * (float)target_height);
 
 		// Transition source to TRANSFER_SRC
 		VkImageMemoryBarrier src_to_transfer = {
@@ -967,34 +944,18 @@ vk_compositor_blit_window_space_layers(struct comp_vk_native_compositor *c)
 		    VK_PIPELINE_STAGE_TRANSFER_BIT,
 		    0, 0, NULL, 0, NULL, 1, &src_to_transfer);
 
-		// Blit to left half of SBS stereo image (x offset = 0)
-		VkImageBlit left_blit = {
+		// Blit HUD onto target (no disparity — flat 2D overlay post-weave)
+		VkImageBlit blit = {
 		    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
 		                       ws->sub.array_index, 1},
 		    .srcOffsets = {{sx0, sy0, 0}, {sx1, sy1, 1}},
 		    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-		    .dstOffsets = {{dx0 - disp_px, dy0, 0},
-		                   {dx0 - disp_px + dw, dy0 + dh, 1}},
+		    .dstOffsets = {{dx0, dy0, 0}, {dx0 + dw, dy0 + dh, 1}},
 		};
 		vk->vkCmdBlitImage(cmd,
 		    src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		    stereo_img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		    1, &left_blit, VK_FILTER_LINEAR);
-
-		// Blit to right half of SBS stereo image (x offset = view_width)
-		int32_t right_x_offset = (int32_t)view_width;
-		VkImageBlit right_blit = {
-		    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
-		                       ws->sub.array_index, 1},
-		    .srcOffsets = {{sx0, sy0, 0}, {sx1, sy1, 1}},
-		    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-		    .dstOffsets = {{right_x_offset + dx0 + disp_px, dy0, 0},
-		                   {right_x_offset + dx0 + disp_px + dw, dy0 + dh, 1}},
-		};
-		vk->vkCmdBlitImage(cmd,
-		    src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		    stereo_img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		    1, &right_blit, VK_FILTER_LINEAR);
+		    target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		    1, &blit, VK_FILTER_LINEAR);
 
 		// Transition source back to COLOR_ATTACHMENT
 		VkImageMemoryBarrier src_back = {
@@ -1013,33 +974,20 @@ vk_compositor_blit_window_space_layers(struct comp_vk_native_compositor *c)
 		    0, 0, NULL, 0, NULL, 1, &src_back);
 	}
 
-	// Transition stereo SBS image back to SHADER_READ_ONLY
-	VkImageMemoryBarrier to_shader = {
+	// Transition target back to PRESENT_SRC_KHR
+	VkImageMemoryBarrier to_present = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
 	    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-	    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+	    .dstAccessMask = 0,
 	    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-	    .image = stereo_img,
+	    .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+	    .image = target_image,
 	    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
 	};
 	vk->vkCmdPipelineBarrier(cmd,
 	    VK_PIPELINE_STAGE_TRANSFER_BIT,
-	    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-	    0, 0, NULL, 0, NULL, 1, &to_shader);
-
-	vk->vkEndCommandBuffer(cmd);
-
-	VkSubmitInfo submit_info = {
-	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-	    .commandBufferCount = 1,
-	    .pCommandBuffers = &cmd,
-	};
-	res = vk->vkQueueSubmit(vk->main_queue->queue, 1, &submit_info, VK_NULL_HANDLE);
-	if (res == VK_SUCCESS) {
-		vk->vkQueueWaitIdle(vk->main_queue->queue);
-	}
-	vk->vkFreeCommandBuffers(vk->device, cmd_pool, 1, &cmd);
+	    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+	    0, 0, NULL, 0, NULL, 1, &to_present);
 }
 
 static xrt_result_t
@@ -1103,9 +1051,6 @@ vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 		U_LOG_E("Failed to render layers");
 		return xret;
 	}
-
-	// Composite window-space (HUD) layers onto per-eye images before weaving
-	vk_compositor_blit_window_space_layers(c);
 
 	// Shared texture output path — render to IOSurface-backed VkImage
 	if (c->has_shared_texture && c->shared_image != VK_NULL_HANDLE) {
@@ -1321,6 +1266,10 @@ vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 				}
 
 				// Render pass finalLayout handles transition to PRESENT_SRC_KHR
+
+				// Post-weave: blit HUD overlays onto target (flat, not interlaced)
+				vk_compositor_blit_window_space_layers(c, cmd,
+				    (VkImage)(uintptr_t)target_image, tgt_width, tgt_height);
 			} else {
 				// No display processor: blit stereo texture to target
 				comp_vk_native_renderer_blit_to_target(c->renderer, cmd,
