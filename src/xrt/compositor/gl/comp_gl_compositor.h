@@ -88,6 +88,19 @@ bool
 comp_gl_compositor_get_predicted_eye_positions(struct xrt_compositor *xc,
                                                struct xrt_eye_positions *out_eye_pos);
 
+/*!
+ * Get window metrics for adaptive FOV calculation.
+ *
+ * @param xc          GL compositor base.
+ * @param out_metrics Output window metrics.
+ * @return true if valid metrics were computed.
+ *
+ * @ingroup comp_gl
+ */
+bool
+comp_gl_compositor_get_window_metrics(struct xrt_compositor *xc,
+                                      struct xrt_window_metrics *out_metrics);
+
 #ifdef __cplusplus
 }
 #endif
