@@ -1089,7 +1089,6 @@ metal_compositor_update_hud(struct comp_metal_compositor *c, float dt)
 	// Display info from system compositor
 	float disp_w_mm = 0, disp_h_mm = 0;
 	float nom_y = 0, nom_z = 0;
-	float ipd_mm = 60.0f;
 	if (c->sys_info != NULL) {
 		disp_w_mm = c->sys_info->display_width_m * 1000.0f;
 		disp_h_mm = c->sys_info->display_height_m * 1000.0f;
@@ -1097,8 +1096,53 @@ metal_compositor_update_hud(struct comp_metal_compositor *c, float dt)
 		nom_z = c->sys_info->nominal_viewer_z_m * 1000.0f;
 	}
 
-	// Eye positions (nominal ± IPD/2)
-	float half_ipd = ipd_mm / 2.0f;
+	// View count and scale from active rendering mode
+	uint32_t view_count = c->tile_columns * c->tile_rows;
+	float scale_x = 1.0f, scale_y = 1.0f;
+	if (c->xdev != NULL && c->xdev->hmd != NULL) {
+		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
+		if (idx < c->xdev->rendering_mode_count) {
+			view_count = c->xdev->rendering_modes[idx].view_count;
+			scale_x = c->xdev->rendering_modes[idx].view_scale_x;
+			scale_y = c->xdev->rendering_modes[idx].view_scale_y;
+		}
+	}
+
+	// Actual window dimensions
+	uint32_t win_w = 0, win_h = 0;
+	if (c->window != nil) {
+		NSRect backing = [c->window.contentView convertRectToBacking:c->window.contentView.bounds];
+		win_w = (uint32_t)backing.size.width;
+		win_h = (uint32_t)backing.size.height;
+	}
+
+	// Eye positions from display processor
+	struct xrt_eye_positions eye_pos = {0};
+	bool have_eyes = xrt_display_processor_metal_get_predicted_eye_positions(
+	    c->display_processor, &eye_pos);
+	if (!have_eyes || !eye_pos.valid) {
+		eye_pos.count = 2;
+		eye_pos.eyes[0] = (struct xrt_eye_position){-0.032f, nom_y / 1000.0f, nom_z / 1000.0f};
+		eye_pos.eyes[1] = (struct xrt_eye_position){ 0.032f, nom_y / 1000.0f, nom_z / 1000.0f};
+		eye_pos.valid = true;
+		eye_pos.is_tracking = false;
+	}
+
+	// Format eye lines
+	char eye_buf[512] = {0};
+	int off = 0;
+	for (uint32_t e = 0; e < eye_pos.count && e < 8; e++) {
+		off += snprintf(eye_buf + off, sizeof(eye_buf) - off,
+		    "Eye[%u]: (%.0f, %.0f, %.0f) mm%s",
+		    e,
+		    eye_pos.eyes[e].x * 1000.0f,
+		    eye_pos.eyes[e].y * 1000.0f,
+		    eye_pos.eyes[e].z * 1000.0f,
+		    (e + 1 < eye_pos.count) ? "\n" : "");
+	}
+
+	const char *tracking_str = eye_pos.is_tracking ? "YES" : "NO";
+	const char *tracking_mode = have_eyes ? "SMOOTH" : "DEFAULT";
 
 	// Qwerty stereo state
 	const char *stereo_line1 = "";
@@ -1163,30 +1207,32 @@ metal_compositor_update_hud(struct comp_metal_compositor *c, float dt)
 	NSString *text = [NSString stringWithFormat:
 	    @"%s\n"
 	    "FPS  %.0f   (%.1f ms)\n"
-	    "Render  %u x %u\n"
+	    "Render  %u x %u   Views: %u\n"
+	    "Texture  %u x %u\n"
 	    "Window  %u x %u\n"
 	    "\n"
 	    "Display  %.0f x %.0f mm\n"
-	    "L Eye  %.0f, %.0f, %.0f mm\n"
-	    "R Eye  %.0f, %.0f, %.0f mm\n"
+	    "%s\n"
+	    "Tracking: %s [%s]\n"
 	    "\n"
 	    "%s\n"
 	    "%s\n"
 	    "%s\n"
 	    "%s\n"
 	    "\n"
-	    "Mode: %s (%s)\n"
+	    "Mode: %s (%s)  Scale: %.2f x %.2f\n"
 	    "TAB=HUD  V=Mode  P=Cam/Disp  ESC=Quit",
 	    dev_name,
 	    fps, c->smoothed_frame_time_ms,
-	    c->view_width, c->view_height,
+	    c->view_width, c->view_height, view_count,
 	    c->tile_columns * c->view_width, c->tile_rows * c->view_height,
+	    win_w, win_h,
 	    disp_w_mm, disp_h_mm,
-	    -half_ipd, nom_y, nom_z,
-	    half_ipd, nom_y, nom_z,
+	    eye_buf,
+	    tracking_str, tracking_mode,
 	    pos_buf, fwd_buf,
 	    stereo_line1, stereo_line2,
-	    mode_name, c->hardware_display_3d ? "3D" : "2D"];
+	    mode_name, c->hardware_display_3d ? "3D" : "2D", scale_x, scale_y];
 
 	dispatch_async(dispatch_get_main_queue(), ^{
 	    c->hud_view.hudText = text;
@@ -1204,11 +1250,6 @@ metal_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	uint64_t now_ns = os_monotonic_get_ns();
 	float dt = (c->last_frame_ns > 0) ? (float)(now_ns - c->last_frame_ns) / 1e9f : 0.016f;
 	c->last_frame_ns = now_ns;
-
-	// Update HUD overlay
-	if (c->owns_window) {
-		metal_compositor_update_hud(c, dt);
-	}
 
 	// Get output texture — either from shared IOSurface or CAMetalLayer drawable
 	id<MTLTexture> output_texture = nil;
@@ -1282,6 +1323,11 @@ metal_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 				c->view_height = mode->view_height_pixels;
 			}
 		}
+	}
+
+	// Update HUD overlay (after mode sync so dimensions are current)
+	if (c->owns_window) {
+		metal_compositor_update_hud(c, dt);
 	}
 
 	// Zero-copy check: can we pass the app's swapchain directly to the DP?
@@ -1924,10 +1970,62 @@ comp_metal_compositor_get_window_metrics(struct xrt_compositor *xc,
                                          struct xrt_window_metrics *out_metrics)
 {
 	struct comp_metal_compositor *c = metal_comp(xc);
-	if (c->display_processor == NULL) {
-		return false;
+	memset(out_metrics, 0, sizeof(*out_metrics));
+
+	// If we own the window, compute metrics directly from our window + sys_info
+	if (c->window != nil && c->sys_info != NULL) {
+		float disp_w_m = c->sys_info->display_width_m;
+		float disp_h_m = c->sys_info->display_height_m;
+		uint32_t disp_px_w = c->sys_info->display_pixel_width;
+		uint32_t disp_px_h = c->sys_info->display_pixel_height;
+		if (disp_px_w == 0 || disp_px_h == 0 || disp_w_m <= 0 || disp_h_m <= 0) {
+			return false;
+		}
+
+		NSRect backing = [c->window.contentView convertRectToBacking:c->window.contentView.bounds];
+		uint32_t win_px_w = (uint32_t)backing.size.width;
+		uint32_t win_px_h = (uint32_t)backing.size.height;
+		if (win_px_w == 0 || win_px_h == 0) {
+			return false;
+		}
+
+		float pixel_size_x = disp_w_m / (float)disp_px_w;
+		float pixel_size_y = disp_h_m / (float)disp_px_h;
+
+		out_metrics->display_width_m = disp_w_m;
+		out_metrics->display_height_m = disp_h_m;
+		out_metrics->display_pixel_width = disp_px_w;
+		out_metrics->display_pixel_height = disp_px_h;
+		out_metrics->display_screen_left = 0;
+		out_metrics->display_screen_top = 0;
+
+		out_metrics->window_pixel_width = win_px_w;
+		out_metrics->window_pixel_height = win_px_h;
+		out_metrics->window_screen_left = 0;
+		out_metrics->window_screen_top = 0;
+
+		out_metrics->window_width_m = (float)win_px_w * pixel_size_x;
+		out_metrics->window_height_m = (float)win_px_h * pixel_size_y;
+
+		// Center offset (assume centered — no screen position tracking yet)
+		float win_center_px_x = (float)win_px_w / 2.0f;
+		float win_center_px_y = (float)win_px_h / 2.0f;
+		float disp_center_px_x = (float)disp_px_w / 2.0f;
+		float disp_center_px_y = (float)disp_px_h / 2.0f;
+
+		out_metrics->window_center_offset_x_m = (win_center_px_x - disp_center_px_x) * pixel_size_x;
+		out_metrics->window_center_offset_y_m = -((win_center_px_y - disp_center_px_y) * pixel_size_y);
+
+		out_metrics->valid = true;
+		return true;
 	}
-	return xrt_display_processor_metal_get_window_metrics(c->display_processor, out_metrics);
+
+	// Fallback: delegate to display processor (ext/shared path)
+	if (c->display_processor != NULL) {
+		return xrt_display_processor_metal_get_window_metrics(c->display_processor, out_metrics);
+	}
+
+	return false;
 }
 
 bool

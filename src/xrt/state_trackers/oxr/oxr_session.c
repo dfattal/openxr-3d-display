@@ -269,6 +269,12 @@ oxr_session_get_window_metrics(struct oxr_session *sess,
 	}
 #endif
 
+#ifdef XRT_HAVE_GL_NATIVE_COMPOSITOR
+	if (sess->is_gl_native_compositor) {
+		return comp_gl_compositor_get_window_metrics(&sess->xcn->base, out_metrics);
+	}
+#endif
+
 #ifdef XRT_HAVE_VK_NATIVE_COMPOSITOR
 	if (sess->is_vk_native_compositor) {
 		return comp_vk_native_compositor_get_window_metrics(&sess->xcn->base, out_metrics);
@@ -2494,6 +2500,18 @@ oxr_session_create(struct oxr_logger *log,
 		sess->compositor_visible = sess->compositor->info.initial_visible;
 		sess->compositor_focused = sess->compositor->info.initial_focused;
 	}
+
+	// Initialize last_rendering_mode_index to the device's current active mode
+	// so that oxr_session_poll doesn't fire a spurious mode change event
+	// before oxr_session_begin has a chance to sync it.
+#ifdef OXR_HAVE_EXT_display_info
+	{
+		struct xrt_device *head = GET_XDEV_BY_ROLE(sess->sys, head);
+		if (head != NULL && head->hmd != NULL) {
+			sess->last_rendering_mode_index = head->hmd->active_rendering_mode_index;
+		}
+	}
+#endif
 
 	// Everything is in order, start the state changes.
 	oxr_session_change_state(log, sess, XR_SESSION_STATE_IDLE, 0);
