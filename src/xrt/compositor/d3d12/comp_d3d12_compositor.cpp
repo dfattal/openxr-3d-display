@@ -560,7 +560,7 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		}
 
 		// Rendering mode change from qwerty 1/2/3 keys (disabled for legacy apps).
-		if (!c->base.info.legacy_app_tile_scaling) {
+		if (!c->base.base.info.legacy_app_tile_scaling) {
 			int render_mode = -1;
 			if (qwerty_check_rendering_mode_change(c->xsysd->xdevs, c->xsysd->xdev_count, &render_mode)) {
 				struct xrt_device *head = c->xsysd->static_roles.head;
