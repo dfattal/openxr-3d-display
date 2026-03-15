@@ -783,17 +783,25 @@ gl_compositor_render_hud(struct comp_gl_compositor *c, float dt, uint32_t win_w,
 		glBindTexture(GL_TEXTURE_2D, 0);
 	}
 
-	// Blit HUD to bottom-left of screen with alpha blending
+	// Blit HUD to bottom-left of screen with alpha blending.
+	// Scale down if HUD would exceed 50% of window width.
 	uint32_t hud_w = u_hud_get_width(c->hud);
 	uint32_t hud_h = u_hud_get_height(c->hud);
 	uint32_t margin = 10;
+	float scale = 1.0f;
+	float max_frac = 0.5f;
+	if (hud_w > (uint32_t)(win_w * max_frac)) {
+		scale = (win_w * max_frac) / (float)hud_w;
+	}
+	uint32_t draw_w = (uint32_t)(hud_w * scale);
+	uint32_t draw_h = (uint32_t)(hud_h * scale);
 
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	glUseProgram(c->program_blit);
 	glBindVertexArray(c->vao_empty);
-	glViewport(margin, margin, hud_w, hud_h);
+	glViewport(margin, margin, draw_w, draw_h);
 
 	GLint loc_rect = glGetUniformLocation(c->program_blit, "u_src_rect");
 	glUniform4f(loc_rect, 0.0f, 0.0f, 1.0f, 1.0f);

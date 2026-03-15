@@ -1202,11 +1202,20 @@ metal_compositor_render_hud(struct comp_metal_compositor *c, float dt,
 		                  bytesPerRow:hud_w * 4];
 	}
 
-	// Blit HUD to bottom-left of output with alpha blending
+	// Blit HUD to bottom-left of output with alpha blending.
+	// Scale down if HUD would exceed 50% of output width.
 	uint32_t hud_w = u_hud_get_width(c->hud);
 	uint32_t hud_h = u_hud_get_height(c->hud);
+	uint32_t out_w = (uint32_t)output_texture.width;
 	uint32_t out_h = (uint32_t)output_texture.height;
 	uint32_t margin = 10;
+	float scale = 1.0f;
+	float max_frac = 0.5f;
+	if (hud_w > (uint32_t)(out_w * max_frac)) {
+		scale = (out_w * max_frac) / (float)hud_w;
+	}
+	uint32_t draw_w = (uint32_t)(hud_w * scale);
+	uint32_t draw_h = (uint32_t)(hud_h * scale);
 
 	MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
 	pass.colorAttachments[0].texture = output_texture;
@@ -1220,9 +1229,9 @@ metal_compositor_render_hud(struct comp_metal_compositor *c, float dt,
 
 	MTLViewport vp;
 	vp.originX = margin;
-	vp.originY = (out_h > hud_h + margin) ? (out_h - hud_h - margin) : 0;
-	vp.width = hud_w;
-	vp.height = hud_h;
+	vp.originY = (out_h > draw_h + margin) ? (out_h - draw_h - margin) : 0;
+	vp.width = draw_w;
+	vp.height = draw_h;
 	vp.znear = 0;
 	vp.zfar = 1;
 	[encoder setViewport:vp];
