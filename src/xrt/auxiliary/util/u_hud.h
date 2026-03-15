@@ -83,25 +83,6 @@ struct u_hud_data
 	float screen_height_m;           //!< Hardware: screen height (m)
 };
 
-/*!
- * Clamp eye positions to match the active rendering mode's view_count.
- * For 2D mode (view_count=1), averages L/R into a single eye.
- * @ingroup aux_util
- */
-static inline void
-u_hud_data_clamp_eyes(struct u_hud_data *data, uint32_t mode_view_count)
-{
-	if (data->eye_count <= mode_view_count || mode_view_count == 0) {
-		return;
-	}
-	if (mode_view_count == 1 && data->eye_count >= 2) {
-		data->eyes[0].x = (data->eyes[0].x + data->eyes[1].x) * 0.5f;
-		data->eyes[0].y = (data->eyes[0].y + data->eyes[1].y) * 0.5f;
-		data->eyes[0].z = (data->eyes[0].z + data->eyes[1].z) * 0.5f;
-	}
-	data->eye_count = mode_view_count;
-}
-
 struct u_hud;
 
 /*!

@@ -44,6 +44,8 @@ struct leia_display_processor_d3d11_impl
 	uint32_t sbs_height;               //!< Current staging texture height.
 	DXGI_FORMAT sbs_format;            //!< Current staging texture format.
 	//! @}
+
+	uint32_t view_count; //!< Active mode view count (1=2D, 2=stereo).
 };
 
 static inline struct leia_display_processor_d3d11_impl *
@@ -214,6 +216,13 @@ leia_dp_d3d11_get_predicted_eye_positions(struct xrt_display_processor_d3d11 *xd
 	out_eye_pos->count = 2;
 	out_eye_pos->valid = true;
 	out_eye_pos->is_tracking = true;
+	// In 2D mode, average L/R to a single midpoint eye.
+	if (ldp->view_count == 1 && out_eye_pos->count >= 2) {
+		out_eye_pos->eyes[0].x = (out_eye_pos->eyes[0].x + out_eye_pos->eyes[1].x) * 0.5f;
+		out_eye_pos->eyes[0].y = (out_eye_pos->eyes[0].y + out_eye_pos->eyes[1].y) * 0.5f;
+		out_eye_pos->eyes[0].z = (out_eye_pos->eyes[0].z + out_eye_pos->eyes[1].z) * 0.5f;
+		out_eye_pos->count = 1;
+	}
 	return true;
 }
 
@@ -234,7 +243,11 @@ static bool
 leia_dp_d3d11_request_display_mode(struct xrt_display_processor_d3d11 *xdp, bool enable_3d)
 {
 	struct leia_display_processor_d3d11_impl *ldp = leia_dp_d3d11(xdp);
-	return leiasr_d3d11_request_display_mode(ldp->leiasr, enable_3d);
+	bool ok = leiasr_d3d11_request_display_mode(ldp->leiasr, enable_3d);
+	if (ok) {
+		ldp->view_count = enable_3d ? 2 : 1;
+	}
+	return ok;
 }
 
 static bool
@@ -336,6 +349,7 @@ leia_dp_factory_d3d11(void *d3d11_device,
 	leia_dp_d3d11_init_vtable(ldp);
 	ldp->leiasr = weaver;
 	ldp->device = static_cast<ID3D11Device *>(d3d11_device);
+	ldp->view_count = 2;
 
 	*out_xdp = &ldp->base;
 
@@ -367,6 +381,7 @@ leia_display_processor_d3d11_create(struct leiasr_d3d11 *leiasr,
 
 	leia_dp_d3d11_init_vtable(ldp);
 	ldp->leiasr = leiasr;
+	ldp->view_count = 2;
 	// Legacy path: no device reference, SBS rearrangement not available.
 	// Atlas must already be SBS.
 

@@ -2370,14 +2370,6 @@ d3d11_service_render_hud(struct d3d11_service_system *sys,
 	}
 	data.eye_tracking_active = eye_pos->is_tracking;
 
-	// Clamp eye count to active mode's view_count (2D=1 eye at midpoint, stereo=2, quad=4)
-	if (sys->xdev != NULL && sys->xdev->hmd != NULL) {
-		uint32_t idx = sys->xdev->hmd->active_rendering_mode_index;
-		if (idx < sys->xdev->rendering_mode_count) {
-			u_hud_data_clamp_eyes(&data, sys->xdev->rendering_modes[idx].view_count);
-		}
-	}
-
 #ifdef XRT_BUILD_DRIVER_QWERTY
 	if (sys->xsysd != nullptr) {
 		// Virtual display position + forward vector from qwerty device pose.

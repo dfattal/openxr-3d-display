@@ -470,6 +470,7 @@ struct leia_display_processor
 {
     struct xrt_display_processor base;  // Must be first member
     struct leiasr *leiasr;              // Borrowed reference (not owned)
+    uint32_t view_count;                // Active mode view count (1=2D, 2=stereo)
 };
 
 static void
@@ -482,13 +483,33 @@ leia_dp_process_views(struct xrt_display_processor *xdp,
     leiasr_weave(ldp->leiasr, cmd_buffer, left_view, right_view, ...);
 }
 
-// Eye tracking delivered through the SAME struct as weaving
+// Eye tracking delivered through the SAME struct as weaving.
+// Returns mode-appropriate eye count (see §4.6).
 static bool
 leia_dp_get_predicted_eye_positions(struct xrt_display_processor *xdp,
                                     struct xrt_eye_positions *out_eye_pos)
 {
     struct leia_display_processor *ldp = (struct leia_display_processor *)xdp;
-    return leiasr_get_predicted_eye_positions(ldp->leiasr, out_eye_pos);
+    if (!leiasr_get_predicted_eye_positions(ldp->leiasr, out_eye_pos))
+        return false;
+    // In 2D mode, average L/R to a single midpoint eye.
+    if (ldp->view_count == 1 && out_eye_pos->count >= 2) {
+        out_eye_pos->eyes[0].x = (out_eye_pos->eyes[0].x + out_eye_pos->eyes[1].x) * 0.5f;
+        out_eye_pos->eyes[0].y = (out_eye_pos->eyes[0].y + out_eye_pos->eyes[1].y) * 0.5f;
+        out_eye_pos->eyes[0].z = (out_eye_pos->eyes[0].z + out_eye_pos->eyes[1].z) * 0.5f;
+        out_eye_pos->count = 1;
+    }
+    return true;
+}
+
+static bool
+leia_dp_request_display_mode(struct xrt_display_processor *xdp, bool enable_3d)
+{
+    struct leia_display_processor *ldp = (struct leia_display_processor *)xdp;
+    bool ok = leiasr_request_display_mode(ldp->leiasr, enable_3d);
+    if (ok)
+        ldp->view_count = enable_3d ? 2 : 1;
+    return ok;
 }
 
 xrt_result_t
@@ -507,6 +528,7 @@ leia_display_processor_create(struct leiasr *leiasr,
     ldp->base.get_display_pixel_info = leia_dp_get_display_pixel_info;
     ldp->base.prefers_sbs_input = true;
     ldp->leiasr = leiasr;  // Borrowed, not owned
+    ldp->view_count = 2;   // Default: stereo
     *out_xdp = &ldp->base;
     return XRT_SUCCESS;
 }
@@ -515,7 +537,8 @@ leia_display_processor_create(struct leiasr *leiasr,
 Note how the Leia SR SDK's weaver object provides both interlacing and eye
 tracking (via `LookaroundFilter`).  The display processor simply delegates
 both `process_views` and `get_predicted_eye_positions` to the same underlying
-`leiasr` handle.
+`leiasr` handle.  The `view_count` field tracks the active mode so that
+`get_predicted_eye_positions` returns the correct number of eyes (see §4.6).
 
 ### 4.5 Reference: sim_display Display Processor (Vulkan)
 
@@ -530,6 +553,46 @@ implementation without any external SDK:
 - Mode switching is instant (just selects a different pre-compiled pipeline)
 
 This is the best starting point for vendors developing without hardware.
+
+### 4.6 Mode-Aware Eye Positions
+
+The display processor is responsible for returning the correct number of eye
+positions for the **active rendering mode**.  The runtime does not post-process
+or clamp the eye count — `get_predicted_eye_positions()` must return data that
+matches the current mode's `view_count`.
+
+**Why this matters:** A vendor's tracker SDK typically always reports two eyes
+(left + right), but in 2D mode (`view_count == 1`) the runtime needs a single
+midpoint eye.  If the display processor returns 2 eyes in 2D mode, the HUD
+and Kooima projection will show stale/incorrect data for the inactive eye.
+
+**Implementation pattern:**
+
+1. Store a `view_count` field in the display processor struct.
+2. Initialize it to the default mode's view count (typically `2` for stereo).
+3. Update it in `request_display_mode()` when the mode changes.
+4. In `get_predicted_eye_positions()`, post-process the SDK's raw output:
+
+```c
+// After fetching raw L/R from the vendor SDK:
+if (ldp->view_count == 1 && out_eye_pos->count >= 2) {
+    // Average L/R to a single midpoint eye for 2D mode
+    out_eye_pos->eyes[0].x = (out_eye_pos->eyes[0].x + out_eye_pos->eyes[1].x) * 0.5f;
+    out_eye_pos->eyes[0].y = (out_eye_pos->eyes[0].y + out_eye_pos->eyes[1].y) * 0.5f;
+    out_eye_pos->eyes[0].z = (out_eye_pos->eyes[0].z + out_eye_pos->eyes[1].z) * 0.5f;
+    out_eye_pos->count = 1;
+}
+```
+
+> **Reference:** sim_display does this via `sim_display_get_view_count()`.
+> The Leia DPs (Vulkan, D3D11, D3D12, GL) all follow the same pattern.
+
+**Modes with identical tile layout but different tracking:**  Two rendering
+modes may share the same `view_count` and tile geometry but use different eye
+tracking algorithms (e.g., one smoothed, one raw; or one single-viewer, one
+multi-viewer).  The display processor should track which mode is active and
+adjust its tracking behavior accordingly — the mode index (not just
+`view_count`) may be needed to select the right algorithm.
 
 ---
 
@@ -694,11 +757,11 @@ struct xrt_eye_position
 
 struct xrt_eye_positions
 {
-    struct xrt_eye_position left;   //!< Left eye position in meters
-    struct xrt_eye_position right;  //!< Right eye position in meters
-    int64_t timestamp_ns;           //!< Monotonic timestamp when sampled
-    bool valid;                     //!< True if eye positions are valid
-    bool is_tracking;               //!< True if physical eye tracker has lock (v6)
+    struct xrt_eye_position eyes[8]; //!< Per-view eye positions (max XRT_MAX_VIEWS)
+    uint32_t count;                  //!< Number of valid eye positions
+    int64_t timestamp_ns;            //!< Monotonic timestamp when sampled
+    bool valid;                      //!< True if eye positions are valid
+    bool is_tracking;                //!< True if physical eye tracker has lock (v6)
 };
 
 struct xrt_window_metrics

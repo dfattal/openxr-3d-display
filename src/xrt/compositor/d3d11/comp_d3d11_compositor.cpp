@@ -700,14 +700,6 @@ d3d11_render_hud_overlay(struct comp_d3d11_compositor *c, bool weaving_done,
 	}
 	data.eye_tracking_active = eye_pos->is_tracking;
 
-	// Clamp eye count to active mode's view_count (2D=1 eye at midpoint, stereo=2, quad=4)
-	if (c->xdev != NULL && c->xdev->hmd != NULL) {
-		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
-		if (idx < c->xdev->rendering_mode_count) {
-			u_hud_data_clamp_eyes(&data, c->xdev->rendering_modes[idx].view_count);
-		}
-	}
-
 #ifdef XRT_BUILD_DRIVER_QWERTY
 	if (c->xsysd != nullptr) {
 		// Virtual display position + forward vector from qwerty device pose.
