@@ -989,16 +989,15 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 			xrt_display_processor_d3d11_process_atlas(
 			    c->display_processor, c->context, atlas_srv, view_width, view_height,
 			    tile_columns, tile_rows, DXGI_FORMAT_R8G8B8A8_UNORM, st_desc.Width, st_desc.Height);
-			weaving_done = true;
+			weaving_done = c->hardware_display_3d;
 		}
 
 		if (!weaving_done) {
-			// Fallback: blit stereo texture directly to shared texture
-			ID3D11Texture2D *atlas_texture = static_cast<ID3D11Texture2D *>(
-			    comp_d3d11_renderer_get_atlas_texture(c->renderer));
-			if (atlas_texture != nullptr) {
-				c->context->CopyResource(c->shared_texture, atlas_texture);
-			}
+			// 2D mode or no DP: stretch-blit content to shared texture
+			D3D11_TEXTURE2D_DESC st_desc2;
+			c->shared_texture->GetDesc(&st_desc2);
+			comp_d3d11_renderer_blit_stretch(c->renderer, c->shared_texture,
+			                                 st_desc2.Width, st_desc2.Height);
 		}
 
 		c->context->Flush();
@@ -1014,6 +1013,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	}
 
 	// Use generic display processor for weaving/blit (vendor-agnostic path)
+	// The DP may be a no-op in 2D mode (returns without rendering).
 	if (c->display_processor != NULL) {
 		static bool dp_logged = false;
 		if (!dp_logged) {
@@ -1034,43 +1034,16 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		xrt_display_processor_d3d11_process_atlas(
 		    c->display_processor, c->context, atlas_srv, view_width, view_height,
 		    tile_columns, tile_rows, DXGI_FORMAT_R8G8B8A8_UNORM, target_width, target_height);
-		weaving_done = true;
+		weaving_done = c->hardware_display_3d;
 	}
 
-	// Fallback: if display processing is not available, blit the stereo texture directly to the target
+	// Fallback: DP was a no-op (2D mode) or no DP available — stretch-blit to target
 	if (!weaving_done) {
-		static bool fallback_warned = false;
-		if (!fallback_warned) {
-			U_LOG_W("Display processing not available, using fallback blit (3d=%d)", c->hardware_display_3d);
-			fallback_warned = true;
-		}
-
 		ID3D11Texture2D *back_buffer = static_cast<ID3D11Texture2D *>(
 		    comp_d3d11_target_get_back_buffer(c->target));
-
 		if (back_buffer != nullptr) {
-			ID3D11Texture2D *atlas_texture = static_cast<ID3D11Texture2D *>(
-			    comp_d3d11_renderer_get_atlas_texture(c->renderer));
-			if (atlas_texture != nullptr) {
-				D3D11_TEXTURE2D_DESC src_desc, dst_desc;
-				atlas_texture->GetDesc(&src_desc);
-				back_buffer->GetDesc(&dst_desc);
-
-				if (src_desc.Width == dst_desc.Width &&
-				    src_desc.Height == dst_desc.Height) {
-					c->context->CopyResource(back_buffer, atlas_texture);
-				} else {
-					UINT copy_width = (src_desc.Width < dst_desc.Width)
-					                      ? src_desc.Width
-					                      : dst_desc.Width;
-					UINT copy_height = (src_desc.Height < dst_desc.Height)
-					                       ? src_desc.Height
-					                       : dst_desc.Height;
-					D3D11_BOX src_box = {0, 0, 0, copy_width, copy_height, 1};
-					c->context->CopySubresourceRegion(
-					    back_buffer, 0, 0, 0, 0, atlas_texture, 0, &src_box);
-				}
-			}
+			comp_d3d11_renderer_blit_stretch(c->renderer, back_buffer,
+			                                 tgt_width, tgt_height);
 		}
 	}
 

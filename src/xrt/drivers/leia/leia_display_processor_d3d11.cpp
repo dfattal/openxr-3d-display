@@ -142,33 +142,8 @@ leia_dp_d3d11_process_atlas(struct xrt_display_processor_d3d11 *xdp,
 	struct leia_display_processor_d3d11_impl *ldp = leia_dp_d3d11(xdp);
 	ID3D11DeviceContext *ctx = static_cast<ID3D11DeviceContext *>(d3d11_context);
 
-	// 2D mode: bypass weaver entirely, copy atlas content to bound render target
+	// 2D mode: no-op — compositor handles 2D blit via its own stretch-blit path
 	if (ldp->view_count == 1) {
-		// Get the atlas texture from the SRV
-		ID3D11Resource *atlas_resource = NULL;
-		static_cast<ID3D11ShaderResourceView *>(atlas_srv)->GetResource(&atlas_resource);
-
-		// Get the bound render target
-		ID3D11RenderTargetView *rtv = NULL;
-		ctx->OMGetRenderTargets(1, &rtv, NULL);
-
-		if (atlas_resource != NULL && rtv != NULL) {
-			ID3D11Resource *target_resource = NULL;
-			rtv->GetResource(&target_resource);
-
-			if (target_resource != NULL) {
-				// Copy the content region (single view tile) to the target
-				uint32_t copy_w = view_width < target_width ? view_width : target_width;
-				uint32_t copy_h = view_height < target_height ? view_height : target_height;
-				D3D11_BOX src_box = {0, 0, 0, copy_w, copy_h, 1};
-				ctx->CopySubresourceRegion(target_resource, 0, 0, 0, 0,
-				                           atlas_resource, 0, &src_box);
-				target_resource->Release();
-			}
-		}
-
-		if (rtv != NULL) rtv->Release();
-		if (atlas_resource != NULL) atlas_resource->Release();
 		return;
 	}
 
