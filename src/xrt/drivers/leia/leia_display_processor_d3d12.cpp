@@ -139,51 +139,8 @@ leia_dp_d3d12_process_atlas(struct xrt_display_processor_d3d12 *xdp,
 	(void)target_rtv_cpu_handle;
 	struct leia_display_processor_d3d12_impl *ldp = leia_dp_d3d12(xdp);
 
-	// 2D mode: bypass weaver, copy atlas content directly to target
+	// 2D mode: no-op — compositor handles 2D blit via its own stretch-blit path
 	if (ldp->view_count == 1) {
-		ID3D12GraphicsCommandList *cmd = static_cast<ID3D12GraphicsCommandList *>(d3d12_command_list);
-		ID3D12Resource *atlas_res = static_cast<ID3D12Resource *>(atlas_texture_resource);
-		ID3D12Resource *target_res = static_cast<ID3D12Resource *>(target_resource);
-
-		if (atlas_res != NULL && target_res != NULL) {
-			// Atlas is in COMMON state (compositor transitioned before calling DP).
-			// Target is in RENDER_TARGET state. Transition to COPY_DEST.
-			D3D12_RESOURCE_BARRIER barrier = {};
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Transition.pResource = target_res;
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-			cmd->ResourceBarrier(1, &barrier);
-
-			// Copy content region to target
-			D3D12_TEXTURE_COPY_LOCATION src_loc = {};
-			src_loc.pResource = atlas_res;
-			src_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-			src_loc.SubresourceIndex = 0;
-
-			D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
-			dst_loc.pResource = target_res;
-			dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-			dst_loc.SubresourceIndex = 0;
-
-			uint32_t copy_w = view_width < target_width ? view_width : target_width;
-			uint32_t copy_h = view_height < target_height ? view_height : target_height;
-			D3D12_BOX src_box = {};
-			src_box.left = 0;
-			src_box.top = 0;
-			src_box.front = 0;
-			src_box.right = copy_w;
-			src_box.bottom = copy_h;
-			src_box.back = 1;
-
-			cmd->CopyTextureRegion(&dst_loc, 0, 0, 0, &src_loc, &src_box);
-
-			// Transition target back to RENDER_TARGET
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			cmd->ResourceBarrier(1, &barrier);
-		}
 		return;
 	}
 
