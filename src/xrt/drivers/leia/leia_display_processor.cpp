@@ -45,6 +45,8 @@ struct leia_display_processor
 	uint32_t sbs_height;        //!< Current staging image height.
 	VkFormat sbs_format;        //!< Current staging image format.
 	//! @}
+
+	uint32_t view_count; //!< Active mode view count (1=2D, 2=stereo).
 };
 
 static inline struct leia_display_processor *
@@ -268,7 +270,17 @@ leia_dp_get_predicted_eye_positions(struct xrt_display_processor *xdp, struct xr
 {
 	struct leia_display_processor *ldp = leia_display_processor(xdp);
 	// leiasr_eye_pair is #defined to xrt_eye_positions in leia_types.h
-	return leiasr_get_predicted_eye_positions(ldp->leiasr, (struct leiasr_eye_pair *)out_eye_pos);
+	if (!leiasr_get_predicted_eye_positions(ldp->leiasr, (struct leiasr_eye_pair *)out_eye_pos)) {
+		return false;
+	}
+	// In 2D mode, average L/R to a single midpoint eye.
+	if (ldp->view_count == 1 && out_eye_pos->count >= 2) {
+		out_eye_pos->eyes[0].x = (out_eye_pos->eyes[0].x + out_eye_pos->eyes[1].x) * 0.5f;
+		out_eye_pos->eyes[0].y = (out_eye_pos->eyes[0].y + out_eye_pos->eyes[1].y) * 0.5f;
+		out_eye_pos->eyes[0].z = (out_eye_pos->eyes[0].z + out_eye_pos->eyes[1].z) * 0.5f;
+		out_eye_pos->count = 1;
+	}
+	return true;
 }
 
 static bool
@@ -283,7 +295,11 @@ static bool
 leia_dp_request_display_mode(struct xrt_display_processor *xdp, bool enable_3d)
 {
 	struct leia_display_processor *ldp = leia_display_processor(xdp);
-	return leiasr_request_display_mode(ldp->leiasr, enable_3d);
+	bool ok = leiasr_request_display_mode(ldp->leiasr, enable_3d);
+	if (ok) {
+		ldp->view_count = enable_3d ? 2 : 1;
+	}
+	return ok;
 }
 
 static bool
@@ -377,6 +393,7 @@ leia_dp_factory_vk(void *vk_bundle_ptr,
 
 	ldp->leiasr = leiasr;
 	ldp->vk = vk;
+	ldp->view_count = 2;
 
 	*out_xdp = &ldp->base;
 
@@ -416,6 +433,7 @@ leia_display_processor_create(struct leiasr *leiasr, struct xrt_display_processo
 	ldp->base.destroy = leia_dp_destroy;
 
 	ldp->leiasr = leiasr;
+	ldp->view_count = 2;
 
 	*out_xdp = &ldp->base;
 

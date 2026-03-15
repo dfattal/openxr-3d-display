@@ -1899,14 +1899,6 @@ session_render_hud_overlay(struct multi_compositor *mc,
 	}
 	data.eye_tracking_active = eye_pos.is_tracking;
 
-	// Clamp eye count to active mode's view_count (2D=1 eye at midpoint, stereo=2, quad=4)
-	if (xdev != NULL && xdev->hmd != NULL) {
-		uint32_t idx = xdev->hmd->active_rendering_mode_index;
-		if (idx < xdev->rendering_mode_count) {
-			u_hud_data_clamp_eyes(&data, xdev->rendering_modes[idx].view_count);
-		}
-	}
-
 	data.zoom_scale = zoom_scale;
 	data.vdisp_x = vdisp_x;
 	data.vdisp_y = vdisp_y;

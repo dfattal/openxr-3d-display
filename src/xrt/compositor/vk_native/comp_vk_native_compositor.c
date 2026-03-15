@@ -1122,14 +1122,6 @@ vk_compositor_render_hud(struct comp_vk_native_compositor *c,
 	}
 	data.eye_tracking_active = eye_pos.is_tracking;
 
-	// Clamp eye count to active mode's view_count (2D=1 eye at midpoint, stereo=2, quad=4)
-	if (c->xdev != NULL && c->xdev->hmd != NULL) {
-		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
-		if (idx < c->xdev->rendering_mode_count) {
-			u_hud_data_clamp_eyes(&data, c->xdev->rendering_modes[idx].view_count);
-		}
-	}
-
 #ifdef XRT_BUILD_DRIVER_QWERTY
 	if (c->xsysd != NULL) {
 		struct xrt_pose qwerty_pose;
