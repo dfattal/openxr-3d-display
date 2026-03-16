@@ -23,6 +23,34 @@ The current rendering mode system uses `view_scale_x/y` as an overloaded concept
 
 ---
 
+## Terminology: Display, Window, Canvas
+
+Five spatial concepts matter for view sizing:
+
+| Term | Definition |
+|------|-----------|
+| **Display** | The physical screen (e.g., 2240×1400 px, 0.304m × 0.190m) |
+| **Window** | The app's OS window on the display (may be fullscreen or smaller) |
+| **Canvas** | The sub-rect within the window where 3D content appears |
+| **Swapchain** | Runtime-allocated GPU texture, worst-case sized at init |
+| **Atlas** | The per-frame content region within the swapchain (tile_columns × view_width × tile_rows × view_height) |
+
+**Key invariant:** View dimensions and Kooima screen size must be based on **canvas** dimensions, not display or window dimensions. This ensures correct aspect ratio and perspective geometry.
+
+### Canvas for Each App Class
+
+| Class | Canvas definition |
+|-------|------------------|
+| `_ext` (window-handle) | Canvas = window client area. The app provides a window via `XR_EXT_*_window_binding`; the entire client area is 3D content. |
+| `_shared` (shared-texture) | Canvas = output rect — the sub-rect where the app places the shared texture in its window. May be a fraction of the window. |
+| `_rt` (runtime-managed) | Canvas = window. The runtime owns the window, so the full window is 3D content. |
+
+For `_ext` and `_rt` apps, canvas and window dimensions typically match (or are trivially derived). For `_shared` apps, the canvas can be arbitrarily smaller than both the window and the display — this is the case that requires special handling.
+
+> **Current limitation:** `u_tiling_compute_mode()` always uses display dimensions (`D_w`, `D_h`) as the base for view sizing. For `_shared` apps, these should be canvas dimensions instead. Similarly, Kooima projection in sim_display uses full display physical size (`hmd->display_width_m / display_height_m`) — this should be canvas physical size for `_shared` apps. See the code fix tracking issue for details.
+
+---
+
 ## The Tiling Algorithm
 
 Given per mode: N views, `view_scale_x`, `view_scale_y`, display `D_w x D_h`:

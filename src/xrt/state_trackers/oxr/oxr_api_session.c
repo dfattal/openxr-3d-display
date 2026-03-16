@@ -32,6 +32,14 @@
 #include "d3d11/comp_d3d11_compositor.h"
 #endif
 
+#ifdef XRT_HAVE_METAL_NATIVE_COMPOSITOR
+#include "metal/comp_metal_compositor.h"
+#endif
+
+#ifdef XRT_HAVE_GL_NATIVE_COMPOSITOR
+#include "gl/comp_gl_compositor.h"
+#endif
+
 
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrCreateSession(XrInstance instance, const XrSessionCreateInfo *createInfo, XrSession *out_session)
@@ -1445,6 +1453,20 @@ oxr_xrSetSharedTextureOutputRectEXT(XrSession session,
 #ifdef XRT_HAVE_D3D11_NATIVE_COMPOSITOR
 	if (sess->is_d3d11_native_compositor && sess->xcn != NULL) {
 		comp_d3d11_compositor_set_output_rect(&sess->xcn->base, x, y, width, height);
+		return XR_SUCCESS;
+	}
+#endif
+
+#ifdef XRT_HAVE_METAL_NATIVE_COMPOSITOR
+	if (sess->is_metal_native_compositor && sess->xcn != NULL) {
+		comp_metal_compositor_set_output_rect(&sess->xcn->base, x, y, width, height);
+		return XR_SUCCESS;
+	}
+#endif
+
+#ifdef XRT_HAVE_GL_NATIVE_COMPOSITOR
+	if (sess->is_gl_native_compositor && sess->xcn != NULL) {
+		comp_gl_compositor_set_output_rect(&sess->xcn->base, x, y, width, height);
 		return XR_SUCCESS;
 	}
 #endif

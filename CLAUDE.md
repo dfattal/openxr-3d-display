@@ -85,6 +85,8 @@ Legacy app compromise scaling is computed in `oxr_system_fill_in()` — see `doc
   Compositors must crop valid region before passing to DP.
   See docs/specs/multiview-tiling.md "Compositor-Side Contract" section.
 
+- **Canvas concept:** View dimensions and Kooima projection must be based on **canvas** size (the sub-rect of the window where 3D content appears), not display size. Critical for `_shared` apps where the canvas may be smaller than the display. See `docs/specs/multiview-tiling.md` "Terminology: Display, Window, Canvas".
+
 For the vendor isolation rule and layer "must NOT contain" constraints, see `docs/architecture/separation-of-concerns.md`.
 For display processor vtable design (all 5 API variants), see `docs/specs/vendor-integration.md`.
 

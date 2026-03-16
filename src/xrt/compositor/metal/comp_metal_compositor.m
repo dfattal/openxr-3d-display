@@ -39,6 +39,7 @@
 #include "math/m_api.h"
 #include "util/u_hud.h"
 #include "util/u_tiling.h"
+#include "util/u_canvas.h"
 
 #ifdef XRT_BUILD_DRIVER_QWERTY
 #include "qwerty_interface.h"
@@ -205,6 +206,9 @@ struct comp_metal_compositor
 
 	//! System compositor info (for display dimensions, nominal viewer).
 	const struct xrt_system_compositor_info *sys_info;
+
+	//! Canvas output rect for shared-texture apps.
+	struct u_canvas_rect canvas;
 
 	//! Thread safety.
 	struct os_mutex mutex;
@@ -1332,6 +1336,10 @@ metal_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 			if (mode->view_width_pixels > 0) {
 				c->view_width = mode->view_width_pixels;
 				c->view_height = mode->view_height_pixels;
+				if (c->canvas.valid) {
+					u_tiling_compute_canvas_view(mode, c->canvas.w, c->canvas.h,
+					                             &c->view_width, &c->view_height);
+				}
 			}
 		}
 	}
@@ -2065,15 +2073,29 @@ comp_metal_compositor_get_window_metrics(struct xrt_compositor *xc,
 		out_metrics->window_center_offset_y_m = -((win_center_px_y - disp_center_px_y) * pixel_size_y);
 
 		out_metrics->valid = true;
+		u_canvas_apply_to_metrics(out_metrics, &c->canvas);
 		return true;
 	}
 
 	// Fallback: delegate to display processor (ext/shared path)
 	if (c->display_processor != NULL) {
-		return xrt_display_processor_metal_get_window_metrics(c->display_processor, out_metrics);
+		bool ok = xrt_display_processor_metal_get_window_metrics(c->display_processor, out_metrics);
+		if (ok) {
+			u_canvas_apply_to_metrics(out_metrics, &c->canvas);
+		}
+		return ok;
 	}
 
 	return false;
+}
+
+void
+comp_metal_compositor_set_output_rect(struct xrt_compositor *xc,
+                                       int32_t x, int32_t y,
+                                       uint32_t w, uint32_t h)
+{
+	struct comp_metal_compositor *c = metal_comp(xc);
+	c->canvas = (struct u_canvas_rect){.valid = true, .x = x, .y = y, .w = w, .h = h};
 }
 
 bool

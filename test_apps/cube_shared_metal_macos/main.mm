@@ -788,12 +788,14 @@ static const float CAMERA_HALF_TAN_VFOV = 0.32491969623f; // tan(18deg) -> 36deg
 // Performance stats
 static double g_avgFrameTime = 0.0;
 static float g_hudUpdateTimer = 0.0f;
-static uint32_t g_windowW = 1512, g_windowH = 823;
+static uint32_t g_windowW = 1512, g_windowH = 823;  // Full window backing pixels
+static uint32_t g_canvasW = 1512, g_canvasH = 823;  // Canvas (Metal view) backing pixels
 static uint32_t g_renderW = 0, g_renderH = 0;
 
 // UI layout constants
 static const float TOOLBAR_HEIGHT = 30.0f;
 static const float STATUSBAR_HEIGHT = 30.0f;
+static const float SIDE_MARGIN = 80.0f;  // Canvas inset from window edges (demo: show canvas ≠ window)
 
 static void SignalHandler(int)
 {
@@ -961,12 +963,13 @@ static bool CreateMacOSWindow(uint32_t width, uint32_t height, id<MTLDevice> dev
         g_statusBarView.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin;
         [container addSubview:g_statusBarView];
 
-        // Metal view (center, between toolbar and status bar)
+        // Metal view (canvas — inset from all sides to clearly show canvas ≠ window)
         float metalH = height - TOOLBAR_HEIGHT - STATUSBAR_HEIGHT;
-        NSRect metalFrame = NSMakeRect(0, STATUSBAR_HEIGHT, width, metalH);
+        float metalW = width - 2 * SIDE_MARGIN;
+        NSRect metalFrame = NSMakeRect(SIDE_MARGIN, STATUSBAR_HEIGHT, metalW, metalH);
         g_metalView = [[AppMetalView alloc] initWithFrame:metalFrame];
         [g_metalView setWantsLayer:YES];
-        g_metalView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        g_metalView.autoresizingMask = NSViewHeightSizable;
 
         // Set Retina scale
         CAMetalLayer *metalLayer = (CAMetalLayer *)[g_metalView layer];
@@ -1227,12 +1230,19 @@ static void PumpMacOSEvents()
             }
         }
 
-        // Update window pixel size (Retina-aware) — use Metal view area, not full window
+        // Update pixel sizes (Retina-aware)
         if (g_metalView != nil) {
-            NSSize viewSize = [g_metalView bounds].size;
             CGFloat backingScale = g_window ? [g_window backingScaleFactor] : 1.0;
-            g_windowW = (uint32_t)(viewSize.width * backingScale);
-            g_windowH = (uint32_t)(viewSize.height * backingScale);
+            // Canvas = Metal view area
+            NSSize viewSize = [g_metalView bounds].size;
+            g_canvasW = (uint32_t)(viewSize.width * backingScale);
+            g_canvasH = (uint32_t)(viewSize.height * backingScale);
+            // Full window content area
+            if (g_window) {
+                NSSize winSize = [[g_window contentView] bounds].size;
+                g_windowW = (uint32_t)(winSize.width * backingScale);
+                g_windowH = (uint32_t)(winSize.height * backingScale);
+            }
         }
     }
 }
@@ -1315,10 +1325,12 @@ struct AppXrSession {
     float displayHeightM;
     float nominalViewerX, nominalViewerY, nominalViewerZ;
     uint32_t displayPixelWidth, displayPixelHeight;
+    uint32_t canvasPixelWidth, canvasPixelHeight;
     float recommendedViewScaleX, recommendedViewScaleY;
     PFN_xrRequestDisplayModeEXT pfnRequestDisplayModeEXT;
     PFN_xrRequestDisplayRenderingModeEXT pfnRequestDisplayRenderingModeEXT;
     PFN_xrEnumerateDisplayRenderingModesEXT pfnEnumerateDisplayRenderingModesEXT;
+    PFN_xrSetSharedTextureOutputRectEXT pfnSetSharedTextureOutputRectEXT;
     uint32_t renderingModeCount;
     char renderingModeNames[8][XR_MAX_SYSTEM_NAME_SIZE];
     uint32_t renderingModeViewCounts[8] = {};
@@ -1432,6 +1444,8 @@ static bool InitializeOpenXR(AppXrSession &app)
                 (PFN_xrVoidFunction*)&app.pfnRequestDisplayRenderingModeEXT);
             xrGetInstanceProcAddr(app.instance, "xrEnumerateDisplayRenderingModesEXT",
                 (PFN_xrVoidFunction*)&app.pfnEnumerateDisplayRenderingModesEXT);
+            xrGetInstanceProcAddr(app.instance, "xrSetSharedTextureOutputRectEXT",
+                (PFN_xrVoidFunction*)&app.pfnSetSharedTextureOutputRectEXT);
         }
     }
 
@@ -1552,14 +1566,14 @@ static bool CreateSpaces(AppXrSession &app)
 static bool CreateSwapchain(AppXrSession &app)
 {
     // Size swapchain for the maximum atlas across all rendering modes.
-    // Each mode's atlas is: (tileColumns * scaleX * displayW) × (tileRows * scaleY * displayH).
+    // For _shared apps, use canvas dims (not display dims) — views land in the canvas.
     uint32_t w = app.configViews[0].recommendedImageRectWidth * 2;  // fallback: stereo SBS
     uint32_t h = app.configViews[0].recommendedImageRectHeight;
-    if (app.renderingModeCount > 0 && app.displayPixelWidth > 0 && app.displayPixelHeight > 0) {
+    if (app.renderingModeCount > 0 && app.canvasPixelWidth > 0 && app.canvasPixelHeight > 0) {
         w = 0; h = 0;
         for (uint32_t i = 0; i < app.renderingModeCount; i++) {
-            uint32_t mw = (uint32_t)(app.renderingModeTileColumns[i] * app.renderingModeScaleX[i] * app.displayPixelWidth);
-            uint32_t mh = (uint32_t)(app.renderingModeTileRows[i] * app.renderingModeScaleY[i] * app.displayPixelHeight);
+            uint32_t mw = (uint32_t)(app.renderingModeTileColumns[i] * app.renderingModeScaleX[i] * app.canvasPixelWidth);
+            uint32_t mh = (uint32_t)(app.renderingModeTileRows[i] * app.renderingModeScaleY[i] * app.canvasPixelHeight);
             if (mw > w) w = mw;
             if (mh > h) h = mh;
         }
@@ -1687,10 +1701,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // Determine IOSurface size from display pixel dimensions or recommended swapchain
-    uint32_t ioW = app.displayPixelWidth > 0 ? app.displayPixelWidth : 1920;
-    uint32_t ioH = app.displayPixelHeight > 0 ? app.displayPixelHeight : 1080;
-    LOG_INFO("IOSurface dimensions: %ux%u", ioW, ioH);
+    // IOSurface = canvas size (Metal view backing dimensions, not display size)
+    NSRect backing = [g_metalView convertRectToBacking:g_metalView.bounds];
+    uint32_t ioW = (uint32_t)backing.size.width;
+    uint32_t ioH = (uint32_t)backing.size.height;
+    app.canvasPixelWidth = ioW;
+    app.canvasPixelHeight = ioH;
+    LOG_INFO("IOSurface dimensions (canvas): %ux%u", ioW, ioH);
 
     // Create the shared IOSurface
     if (!CreateIOSurface(ioW, ioH, renderer.device)) {
@@ -1702,6 +1719,15 @@ int main(int argc, char **argv)
     if (!CreateSession(app, renderer)) {
         LOG_ERROR("Failed to create session");
         return 1;
+    }
+
+    // Tell the compositor where the canvas is within the window client area
+    if (app.pfnSetSharedTextureOutputRectEXT) {
+        CGFloat backingScale = g_window ? [g_window backingScaleFactor] : 2.0;
+        int32_t canvasX = (int32_t)(SIDE_MARGIN * backingScale);
+        int32_t canvasY = (int32_t)(STATUSBAR_HEIGHT * backingScale);
+        app.pfnSetSharedTextureOutputRectEXT(app.session, canvasX, canvasY, ioW, ioH);
+        LOG_INFO("Set shared texture output rect: x=%d, y=%d, w=%u, h=%u", canvasX, canvasY, ioW, ioH);
     }
 
     if (!CreateSpaces(app)) {
@@ -1860,13 +1886,13 @@ int main(int argc, char **argv)
             uint32_t maxTileH = tileRows > 0 ? app.swapchain.height / tileRows : app.swapchain.height;
             uint32_t renderW, renderH;
             if (!display3D) {
-                renderW = g_windowW;
-                renderH = g_windowH;
+                renderW = g_canvasW;
+                renderH = g_canvasH;
                 if (renderW > app.swapchain.width) renderW = app.swapchain.width;
                 if (renderH > app.swapchain.height) renderH = app.swapchain.height;
             } else {
-                renderW = (uint32_t)(g_windowW * scaleX);
-                renderH = (uint32_t)(g_windowH * scaleY);
+                renderW = (uint32_t)(g_canvasW * scaleX);
+                renderH = (uint32_t)(g_canvasH * scaleY);
                 if (renderW > maxTileW) renderW = maxTileW;
                 if (renderH > maxTileH) renderH = maxTileH;
             }
@@ -1881,8 +1907,8 @@ int main(int argc, char **argv)
                 float dispPxH = app.displayPixelHeight > 0 ? (float)app.displayPixelHeight : (float)app.swapchain.height;
                 float pxSizeX = app.displayWidthM / dispPxW;
                 float pxSizeY = app.displayHeightM / dispPxH;
-                float winW_m = (float)g_windowW * pxSizeX;
-                float winH_m = (float)g_windowH * pxSizeY;
+                float winW_m = (float)g_canvasW * pxSizeX;
+                float winH_m = (float)g_canvasH * pxSizeY;
                 float minDisp = fminf(app.displayWidthM, app.displayHeightM);
                 float minWin  = fminf(winW_m, winH_m);
                 float vs = minDisp / minWin;
@@ -2081,7 +2107,7 @@ int main(int argc, char **argv)
                             @"%s\n"
                             "Session: %s\n"
                             "Kooima: %s\n"
-                            "Render: %ux%u  Window: %ux%u\n"
+                            "Render: %ux%u  Window: %ux%u  Canvas: %ux%u\n"
                             "Display: %.3f x %.3f m\n"
                             "Nominal: (%.3f, %.3f, %.3f)\n"
                             "%s: (%.2f, %.2f, %.2f)\n"
@@ -2097,6 +2123,7 @@ int main(int argc, char **argv)
                             kooimaMode,
                             g_renderW, g_renderH,
                             g_windowW, g_windowH,
+                            g_canvasW, g_canvasH,
                             app.displayWidthM, app.displayHeightM,
                             app.nominalViewerX, app.nominalViewerY, app.nominalViewerZ,
                             poseLabel,

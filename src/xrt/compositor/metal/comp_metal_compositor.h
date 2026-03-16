@@ -81,6 +81,21 @@ comp_metal_compositor_get_window_metrics(struct xrt_compositor *xc,
                                          struct xrt_window_metrics *out_metrics);
 
 /*!
+ * Set the output rect within the app's window where the shared texture
+ * is displayed. Used for canvas-aware Kooima FOV and view sizing.
+ *
+ * @param xc  The compositor.
+ * @param x   Left edge in window client-area pixels.
+ * @param y   Top edge in window client-area pixels.
+ * @param w   Width in pixels.
+ * @param h   Height in pixels.
+ */
+void
+comp_metal_compositor_set_output_rect(struct xrt_compositor *xc,
+                                       int32_t x, int32_t y,
+                                       uint32_t w, uint32_t h);
+
+/*!
  * Request a display mode switch (2D/3D).
  * Returns false if not supported.
  */

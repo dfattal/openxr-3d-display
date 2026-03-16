@@ -177,6 +177,34 @@ u_tiling_can_zero_copy(uint32_t view_count,
 	return true;
 }
 
+/*!
+ * Compute canvas-adjusted view dimensions for shared-texture apps.
+ *
+ * When the canvas (output rect) differs from the display, view dimensions
+ * should be based on canvas pixels, not display pixels. The mode's
+ * view_scale_x/y fractions are applied to canvas dims instead of display dims.
+ *
+ * @param mode       Rendering mode (for view_scale_x/y).
+ * @param canvas_w   Canvas width in pixels.
+ * @param canvas_h   Canvas height in pixels.
+ * @param[out] out_view_w  Canvas-adjusted view width.
+ * @param[out] out_view_h  Canvas-adjusted view height.
+ */
+static inline void
+u_tiling_compute_canvas_view(const struct xrt_rendering_mode *mode,
+                             uint32_t canvas_w,
+                             uint32_t canvas_h,
+                             uint32_t *out_view_w,
+                             uint32_t *out_view_h)
+{
+	*out_view_w = (uint32_t)(canvas_w * mode->view_scale_x);
+	*out_view_h = (uint32_t)(canvas_h * mode->view_scale_y);
+	if (*out_view_w == 0)
+		*out_view_w = canvas_w;
+	if (*out_view_h == 0)
+		*out_view_h = canvas_h;
+}
+
 #ifdef __cplusplus
 }
 #endif

@@ -27,6 +27,7 @@
 #include "util/u_logging.h"
 #include "util/u_misc.h"
 #include "util/u_tiling.h"
+#include "util/u_canvas.h"
 #include "util/u_time.h"
 #include "util/u_hud.h"
 #include "os/os_time.h"
@@ -266,6 +267,9 @@ struct comp_gl_compositor
 	struct xrt_system_compositor_info sys_info;
 	uint32_t last_3d_mode_index;       //!< Last 3D mode index (for V-key toggle restore)
 	bool legacy_app_tile_scaling;      //!< True if app is legacy (gates 1/2/3 key mode selection)
+
+	//! Canvas output rect for shared-texture apps.
+	struct u_canvas_rect canvas;
 };
 
 static inline struct comp_gl_compositor *
@@ -995,6 +999,10 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 			if (mode->view_width_pixels > 0) {
 				c->view_width = mode->view_width_pixels;
 				c->view_height = mode->view_height_pixels;
+				if (c->canvas.valid) {
+					u_tiling_compute_canvas_view(mode, c->canvas.w, c->canvas.h,
+					                             &c->view_width, &c->view_height);
+				}
 			}
 		}
 	}
@@ -1694,6 +1702,15 @@ comp_gl_compositor_set_sys_info(struct xrt_compositor *xc, const struct xrt_syst
 	c->last_3d_mode_index = 1;
 }
 
+void
+comp_gl_compositor_set_output_rect(struct xrt_compositor *xc,
+                                    int32_t x, int32_t y,
+                                    uint32_t w, uint32_t h)
+{
+	struct comp_gl_compositor *c = gl_comp(xc);
+	c->canvas = (struct u_canvas_rect){.valid = true, .x = x, .y = y, .w = w, .h = h};
+}
+
 bool
 comp_gl_compositor_request_display_mode(struct xrt_compositor *xc, bool enable_3d)
 {
@@ -1794,6 +1811,7 @@ comp_gl_compositor_get_window_metrics(struct xrt_compositor *xc,
 	out_metrics->window_center_offset_y_m = -((win_center_px_y - disp_center_px_y) * pixel_size_y);
 
 	out_metrics->valid = true;
+	u_canvas_apply_to_metrics(out_metrics, &c->canvas);
 	return true;
 #elif defined(__APPLE__)
 	if (!c->sys_info_set || c->macos_window == NULL) {
@@ -1842,6 +1860,7 @@ comp_gl_compositor_get_window_metrics(struct xrt_compositor *xc,
 	out_metrics->window_center_offset_y_m = -((win_center_px_y - disp_center_px_y) * pixel_size_y);
 
 	out_metrics->valid = true;
+	u_canvas_apply_to_metrics(out_metrics, &c->canvas);
 	return true;
 #else
 	(void)c;
