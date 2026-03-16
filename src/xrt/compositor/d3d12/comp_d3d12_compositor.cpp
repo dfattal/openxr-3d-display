@@ -31,6 +31,7 @@
 
 #include "math/m_api.h"
 #include "util/u_tiling.h"
+#include "util/u_hud.h"
 
 #ifdef XRT_BUILD_DRIVER_QWERTY
 #include "qwerty_interface.h"
@@ -146,6 +147,25 @@ struct comp_d3d12_compositor
 
 	//! True when a legacy app is using a compromise view scale.
 	bool legacy_app_tile_scaling;
+
+	//! HUD overlay.
+	struct u_hud *hud;
+
+	//! HUD texture (DEFAULT heap, for GPU copy source).
+	ID3D12Resource *hud_texture;
+
+	//! HUD upload buffer (UPLOAD heap, for CPU staging).
+	ID3D12Resource *hud_upload_buffer;
+
+	//! HUD upload buffer row pitch (aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT).
+	uint32_t hud_upload_pitch;
+
+	//! Whether HUD texture has been created.
+	bool hud_initialized;
+
+	//! Frame timing for HUD FPS display.
+	uint64_t last_frame_time_ns;
+	float smoothed_frame_time_ms;
 
 	//! Thread safety.
 	std::mutex mutex;
@@ -493,6 +513,254 @@ d3d12_compositor_layer_window_space(struct xrt_compositor *xc,
 	return XRT_SUCCESS;
 }
 
+/*!
+ * Render the HUD overlay onto the back buffer (D3D12 version).
+ *
+ * The back buffer must be in D3D12_RESOURCE_STATE_COPY_DEST when this is called.
+ */
+static void
+d3d12_render_hud_overlay(struct comp_d3d12_compositor *c,
+                         ID3D12GraphicsCommandList *cmd_list,
+                         ID3D12Resource *back_buffer,
+                         uint32_t win_w, uint32_t win_h,
+                         const struct xrt_eye_positions *eye_pos)
+{
+	if (!c->owns_window || c->hud == NULL || !u_hud_is_visible()) {
+		return;
+	}
+
+	// Compute FPS from frame timestamps
+	uint64_t now_ns = os_monotonic_get_ns();
+	if (c->last_frame_time_ns != 0) {
+		float dt_ms = (float)(now_ns - c->last_frame_time_ns) / 1e6f;
+		// Exponential moving average (alpha=0.1 for smooth display)
+		c->smoothed_frame_time_ms = c->smoothed_frame_time_ms * 0.9f + dt_ms * 0.1f;
+	}
+	c->last_frame_time_ns = now_ns;
+
+	float fps = (c->smoothed_frame_time_ms > 0.0f) ? (1000.0f / c->smoothed_frame_time_ms) : 0.0f;
+
+	// Get render and window dimensions
+	uint32_t render_w = 0, render_h = 0;
+	if (c->renderer != nullptr) {
+		comp_d3d12_renderer_get_view_dimensions(c->renderer, &render_w, &render_h);
+	}
+
+	// Get display physical dimensions from display processor
+	float disp_w_m = 0.0f, disp_h_m = 0.0f;
+	float nom_x = 0.0f, nom_y = 0.0f, nom_z = 600.0f;
+	comp_d3d12_compositor_get_display_dimensions(&c->base.base, &disp_w_m, &disp_h_m);
+	float disp_w_mm = disp_w_m * 1000.0f;
+	float disp_h_mm = disp_h_m * 1000.0f;
+
+	// Fill HUD data
+	struct u_hud_data data = {};
+	data.device_name = c->xdev->str;
+	data.fps = fps;
+	data.frame_time_ms = c->smoothed_frame_time_ms;
+	data.mode_3d = c->hardware_display_3d;
+	if (c->xdev != NULL && c->xdev->hmd != NULL) {
+		uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
+		if (idx < c->xdev->rendering_mode_count) {
+			data.rendering_mode_name = c->xdev->rendering_modes[idx].mode_name;
+		}
+	}
+	data.render_width = render_w;
+	data.render_height = render_h;
+	if (c->xdev != NULL && c->xdev->rendering_mode_count > 0) {
+		u_tiling_compute_system_atlas(c->xdev->rendering_modes, c->xdev->rendering_mode_count,
+		                              &data.swapchain_width, &data.swapchain_height);
+	}
+	data.window_width = win_w;
+	data.window_height = win_h;
+	data.display_width_mm = disp_w_mm;
+	data.display_height_mm = disp_h_mm;
+	data.nominal_x = nom_x;
+	data.nominal_y = nom_y;
+	data.nominal_z = nom_z;
+	data.eye_count = eye_pos->count;
+	for (uint32_t e = 0; e < eye_pos->count && e < 8; e++) {
+		data.eyes[e].x = eye_pos->eyes[e].x * 1000.0f;
+		data.eyes[e].y = eye_pos->eyes[e].y * 1000.0f;
+		data.eyes[e].z = eye_pos->eyes[e].z * 1000.0f;
+	}
+	data.eye_tracking_active = eye_pos->is_tracking;
+
+#ifdef XRT_BUILD_DRIVER_QWERTY
+	if (c->xsysd != nullptr) {
+		// Virtual display position + forward vector from qwerty device pose.
+		struct xrt_pose qwerty_pose;
+		if (qwerty_get_hmd_pose(c->xsysd->xdevs, c->xsysd->xdev_count, &qwerty_pose)) {
+			data.vdisp_x = qwerty_pose.position.x;
+			data.vdisp_y = qwerty_pose.position.y;
+			data.vdisp_z = qwerty_pose.position.z;
+			struct xrt_vec3 fwd_in = {0, 0, -1};
+			struct xrt_vec3 fwd_out;
+			math_quat_rotate_vec3(&qwerty_pose.orientation, &fwd_in, &fwd_out);
+			data.forward_x = fwd_out.x;
+			data.forward_y = fwd_out.y;
+			data.forward_z = fwd_out.z;
+		}
+
+		struct qwerty_view_state ss;
+		if (qwerty_get_view_state(c->xsysd->xdevs, c->xsysd->xdev_count, &ss)) {
+			data.camera_mode = ss.camera_mode;
+			data.cam_spread_factor = ss.cam_spread_factor;
+			data.cam_parallax_factor = ss.cam_parallax_factor;
+			data.cam_convergence = ss.cam_convergence;
+			data.cam_half_tan_vfov = ss.cam_half_tan_vfov;
+			data.disp_spread_factor = ss.disp_spread_factor;
+			data.disp_parallax_factor = ss.disp_parallax_factor;
+			data.disp_vHeight = ss.disp_vHeight;
+			data.nominal_viewer_z = ss.nominal_viewer_z;
+			data.screen_height_m = ss.screen_height_m;
+		}
+	}
+#endif
+
+	bool dirty = u_hud_update(c->hud, &data);
+
+	// Lazy-create HUD texture and upload buffer
+	if (!c->hud_initialized) {
+		uint32_t hud_w = u_hud_get_width(c->hud);
+		uint32_t hud_h = u_hud_get_height(c->hud);
+
+		// Aligned row pitch for D3D12 upload buffer
+		uint32_t aligned_pitch = (hud_w * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1) &
+		                         ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+		c->hud_upload_pitch = aligned_pitch;
+
+		// Create DEFAULT heap texture (GPU copy source)
+		D3D12_RESOURCE_DESC tex_desc = {};
+		tex_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		tex_desc.Width = hud_w;
+		tex_desc.Height = hud_h;
+		tex_desc.DepthOrArraySize = 1;
+		tex_desc.MipLevels = 1;
+		tex_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		tex_desc.SampleDesc.Count = 1;
+		tex_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+
+		D3D12_HEAP_PROPERTIES default_heap = {};
+		default_heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+		HRESULT hr = c->device->CreateCommittedResource(
+		    &default_heap, D3D12_HEAP_FLAG_NONE, &tex_desc,
+		    D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+		    __uuidof(ID3D12Resource),
+		    reinterpret_cast<void **>(&c->hud_texture));
+		if (FAILED(hr)) {
+			U_LOG_E("Failed to create HUD texture: 0x%08x", hr);
+			return;
+		}
+
+		// Create UPLOAD heap buffer for CPU staging
+		D3D12_RESOURCE_DESC buf_desc = {};
+		buf_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		buf_desc.Width = (uint64_t)aligned_pitch * hud_h;
+		buf_desc.Height = 1;
+		buf_desc.DepthOrArraySize = 1;
+		buf_desc.MipLevels = 1;
+		buf_desc.Format = DXGI_FORMAT_UNKNOWN;
+		buf_desc.SampleDesc.Count = 1;
+		buf_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+		D3D12_HEAP_PROPERTIES upload_heap = {};
+		upload_heap.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+		hr = c->device->CreateCommittedResource(
+		    &upload_heap, D3D12_HEAP_FLAG_NONE, &buf_desc,
+		    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+		    __uuidof(ID3D12Resource),
+		    reinterpret_cast<void **>(&c->hud_upload_buffer));
+		if (FAILED(hr)) {
+			U_LOG_E("Failed to create HUD upload buffer: 0x%08x", hr);
+			c->hud_texture->Release();
+			c->hud_texture = nullptr;
+			return;
+		}
+
+		c->hud_initialized = true;
+		dirty = true; // Force initial upload
+	}
+
+	// Upload pixels to upload buffer if changed
+	if (dirty && c->hud_texture != nullptr && c->hud_upload_buffer != nullptr) {
+		uint32_t hud_w = u_hud_get_width(c->hud);
+		uint32_t hud_h = u_hud_get_height(c->hud);
+		const uint8_t *pixels = u_hud_get_pixels(c->hud);
+
+		// Map upload buffer and copy row by row with aligned pitch
+		void *mapped = nullptr;
+		D3D12_RANGE read_range = {0, 0}; // We won't read from this buffer
+		HRESULT hr = c->hud_upload_buffer->Map(0, &read_range, &mapped);
+		if (SUCCEEDED(hr)) {
+			uint8_t *dst = static_cast<uint8_t *>(mapped);
+			for (uint32_t row = 0; row < hud_h; row++) {
+				memcpy(dst + row * c->hud_upload_pitch,
+				       pixels + row * hud_w * 4,
+				       hud_w * 4);
+			}
+			c->hud_upload_buffer->Unmap(0, nullptr);
+
+			// Copy from upload buffer to hud_texture
+			D3D12_TEXTURE_COPY_LOCATION src_loc = {};
+			src_loc.pResource = c->hud_upload_buffer;
+			src_loc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+			src_loc.PlacedFootprint.Offset = 0;
+			src_loc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			src_loc.PlacedFootprint.Footprint.Width = hud_w;
+			src_loc.PlacedFootprint.Footprint.Height = hud_h;
+			src_loc.PlacedFootprint.Footprint.Depth = 1;
+			src_loc.PlacedFootprint.Footprint.RowPitch = c->hud_upload_pitch;
+
+			D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
+			dst_loc.pResource = c->hud_texture;
+			dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+			dst_loc.SubresourceIndex = 0;
+
+			cmd_list->CopyTextureRegion(&dst_loc, 0, 0, 0, &src_loc, nullptr);
+		}
+	}
+
+	// Copy hud_texture to back buffer at bottom-left
+	if (c->hud_texture != nullptr && back_buffer != nullptr) {
+		uint32_t hud_w = u_hud_get_width(c->hud);
+		uint32_t hud_h = u_hud_get_height(c->hud);
+
+		// Transition hud_texture: COPY_DEST → COPY_SOURCE
+		D3D12_RESOURCE_BARRIER hud_barrier = {};
+		hud_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		hud_barrier.Transition.pResource = c->hud_texture;
+		hud_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+		hud_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+		hud_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		cmd_list->ResourceBarrier(1, &hud_barrier);
+
+		// Position at bottom-left with 10px margin
+		uint32_t dst_x = 10;
+		uint32_t dst_y = (win_h > hud_h + 10) ? (win_h - hud_h - 10) : 0;
+
+		D3D12_TEXTURE_COPY_LOCATION src_loc = {};
+		src_loc.pResource = c->hud_texture;
+		src_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		src_loc.SubresourceIndex = 0;
+
+		D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
+		dst_loc.pResource = back_buffer;
+		dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		dst_loc.SubresourceIndex = 0;
+
+		D3D12_BOX src_box = {0, 0, 0, hud_w, hud_h, 1};
+		cmd_list->CopyTextureRegion(&dst_loc, dst_x, dst_y, 0, &src_loc, &src_box);
+
+		// Transition hud_texture back: COPY_SOURCE → COPY_DEST
+		hud_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+		hud_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+		cmd_list->ResourceBarrier(1, &hud_barrier);
+	}
+}
+
 static xrt_result_t
 d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
@@ -501,21 +769,32 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	std::lock_guard<std::mutex> lock(c->mutex);
 
 	// Get predicted eye positions
-	struct xrt_vec3 left_eye = {-0.032f, 0.0f, 0.6f};
-	struct xrt_vec3 right_eye = {0.032f, 0.0f, 0.6f};
-
+	struct xrt_eye_positions eye_pos = {};
 	if (c->display_processor != nullptr) {
-		struct xrt_eye_positions eyes;
-		if (xrt_display_processor_d3d12_get_predicted_eye_positions(c->display_processor, &eyes) &&
-		    eyes.valid) {
-			left_eye.x = eyes.eyes[0].x;
-			left_eye.y = eyes.eyes[0].y;
-			left_eye.z = eyes.eyes[0].z;
-			right_eye.x = eyes.eyes[1].x;
-			right_eye.y = eyes.eyes[1].y;
-			right_eye.z = eyes.eyes[1].z;
+		xrt_display_processor_d3d12_get_predicted_eye_positions(c->display_processor, &eye_pos);
+	}
+	if (!eye_pos.valid) {
+		// Use view_count from the active rendering mode for the fallback
+		uint32_t fallback_count = 2;
+		if (c->xdev != NULL && c->xdev->hmd != NULL) {
+			uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
+			if (idx < c->xdev->rendering_mode_count) {
+				fallback_count = c->xdev->rendering_modes[idx].view_count;
+			}
+		}
+		if (fallback_count == 1) {
+			eye_pos.count = 1;
+			eye_pos.eyes[0] = {0.0f, 0.0f, 0.6f};
+		} else {
+			eye_pos.count = 2;
+			eye_pos.eyes[0] = {-0.032f, 0.0f, 0.6f};
+			eye_pos.eyes[1] = { 0.032f, 0.0f, 0.6f};
 		}
 	}
+
+	// Extract stereo pair for renderer (display processor still needs L/R)
+	struct xrt_vec3 left_eye = {eye_pos.eyes[0].x, eye_pos.eyes[0].y, eye_pos.eyes[0].z};
+	struct xrt_vec3 right_eye = {eye_pos.eyes[1].x, eye_pos.eyes[1].y, eye_pos.eyes[1].z};
 
 	// Sync hardware_display_3d and tile layout from device's active rendering mode
 	if (c->xdev != NULL && c->xdev->hmd != NULL) {
@@ -803,8 +1082,16 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 			atlas_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			c->cmd_list->ResourceBarrier(1, &atlas_barrier);
 
-			// Transition back buffer: RENDER_TARGET → PRESENT
+			// Transition back buffer for HUD overlay
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+			c->cmd_list->ResourceBarrier(1, &barrier);
+
+			// HUD overlay
+			d3d12_render_hud_overlay(c, c->cmd_list, back_buffer, tgt_width, tgt_height, &eye_pos);
+
+			// Transition back buffer: COPY_DEST → PRESENT
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
 			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
 			c->cmd_list->ResourceBarrier(1, &barrier);
 		} else {
@@ -963,6 +1250,17 @@ d3d12_compositor_destroy(struct xrt_compositor *xc)
 		c->device->Release();
 	}
 
+	// Destroy HUD resources
+	if (c->hud != NULL) {
+		u_hud_destroy(&c->hud);
+	}
+	if (c->hud_texture != nullptr) {
+		c->hud_texture->Release();
+	}
+	if (c->hud_upload_buffer != nullptr) {
+		c->hud_upload_buffer->Release();
+	}
+
 	// Destroy self-created window
 	if (c->owns_window && c->own_window != nullptr) {
 		comp_d3d11_window_destroy(&c->own_window);
@@ -1006,6 +1304,13 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 	c->owns_window = false;
 	c->hardware_display_3d = true;
 	c->last_3d_mode_index = 1;
+	c->hud = NULL;
+	c->hud_texture = nullptr;
+	c->hud_upload_buffer = nullptr;
+	c->hud_upload_pitch = 0;
+	c->hud_initialized = false;
+	c->last_frame_time_ns = 0;
+	c->smoothed_frame_time_ms = 16.67f;
 
 	// Handle window
 	if (hwnd != nullptr) {
@@ -1032,6 +1337,11 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 		c->hwnd = static_cast<HWND>(comp_d3d11_window_get_hwnd(c->own_window));
 		c->owns_window = true;
 		U_LOG_I("Created self-owned window: %p", (void *)c->hwnd);
+	}
+
+	// Create HUD overlay for self-owned windows
+	if (c->owns_window) {
+		u_hud_create(&c->hud, xdev->hmd->screens[0].w_pixels);
 	}
 
 	// Get D3D12 device and command queue
