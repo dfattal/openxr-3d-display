@@ -2728,13 +2728,13 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		if (has_ui_layers) break;
 	}
 
-	// Track same-swapchain direct SBS optimization: when both eyes are rendered
-	// into the same swapchain texture as an SBS pair, skip the blit and pass the
+	// Track zero-copy optimization: when all views are rendered into the same
+	// swapchain texture with matching tiling layout, skip the blit and pass the
 	// app's texture directly to the display processor.
-	bool use_direct_sbs = false;
-	wil::com_ptr<ID3D11ShaderResourceView> direct_sbs_srv;
-	ID3D11Texture2D *direct_sbs_tex = nullptr;
-	uint32_t direct_view_w = 0, direct_view_h = 0;
+	bool use_zero_copy = false;
+	wil::com_ptr<ID3D11ShaderResourceView> zc_srv;
+	ID3D11Texture2D *zc_tex = nullptr;
+	uint32_t zc_view_w = 0, zc_view_h = 0;
 
 	// Render projection layers to stereo texture (via copy)
 	for (uint32_t i = 0; i < c->layer_accum.layer_count; i++) {
@@ -2745,286 +2745,233 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			continue;
 		}
 
-		bool layer_is_mono = (layer->data.view_count == 1);
+		// Determine view count: mono apps have 1 view, 3D mode uses all views
+		uint32_t proj_view_count = layer->data.view_count;
+		if (!sys->hardware_display_3d)
+			proj_view_count = 1;
+		if (proj_view_count > XRT_MAX_VIEWS)
+			proj_view_count = XRT_MAX_VIEWS;
 
-		// Get swapchain(s) — mono has only sc_array[0]
-		struct xrt_swapchain *xsc_left = layer->sc_array[0];
-		struct xrt_swapchain *xsc_right = layer_is_mono ? nullptr : layer->sc_array[1];
+		// Extract per-view swapchains, textures, and image indices
+		struct d3d11_service_swapchain *view_scs[XRT_MAX_VIEWS] = {};
+		ID3D11Texture2D *view_textures[XRT_MAX_VIEWS] = {};
+		uint32_t view_img_indices[XRT_MAX_VIEWS] = {};
+		bool view_mutex_acquired[XRT_MAX_VIEWS] = {};
+		D3D11_TEXTURE2D_DESC view_descs[XRT_MAX_VIEWS] = {};
+		bool view_is_srgb[XRT_MAX_VIEWS] = {};
 
-		if (xsc_left == nullptr || (!layer_is_mono && xsc_right == nullptr)) {
-			U_LOG_W("Projection layer missing swapchain");
-			continue;
+		bool views_valid = true;
+		for (uint32_t eye = 0; eye < proj_view_count; eye++) {
+			struct xrt_swapchain *xsc = layer->sc_array[eye];
+			if (xsc == nullptr) {
+				U_LOG_W("Projection layer %u missing swapchain for view %u", i, eye);
+				views_valid = false;
+				break;
+			}
+			view_scs[eye] = d3d11_service_swapchain_from_xrt(xsc);
+			view_img_indices[eye] = layer->data.proj.v[eye].sub.image_index;
+
+			if (view_img_indices[eye] >= view_scs[eye]->image_count) {
+				U_LOG_W("Invalid image index in projection layer %u view %u", i, eye);
+				views_valid = false;
+				break;
+			}
+			view_textures[eye] = view_scs[eye]->images[view_img_indices[eye]].texture.get();
+			if (view_textures[eye] == nullptr) {
+				U_LOG_W("Missing texture in projection layer %u view %u", i, eye);
+				views_valid = false;
+				break;
+			}
+			view_textures[eye]->GetDesc(&view_descs[eye]);
+			view_is_srgb[eye] = is_srgb_format(view_descs[eye].Format);
 		}
-
-		struct d3d11_service_swapchain *sc_left = d3d11_service_swapchain_from_xrt(xsc_left);
-		struct d3d11_service_swapchain *sc_right = layer_is_mono ? nullptr :
-		    d3d11_service_swapchain_from_xrt(xsc_right);
-
-		// Get image indices from layer data
-		uint32_t left_index = layer->data.proj.v[0].sub.image_index;
-		uint32_t right_index = layer_is_mono ? 0 : layer->data.proj.v[1].sub.image_index;
-
-		if (left_index >= sc_left->image_count ||
-		    (!layer_is_mono && right_index >= sc_right->image_count)) {
-			U_LOG_W("Invalid image index in projection layer");
-			continue;
-		}
-
-		ID3D11Texture2D *left_tex = sc_left->images[left_index].texture.get();
-		ID3D11Texture2D *right_tex = layer_is_mono ? nullptr :
-		    sc_right->images[right_index].texture.get();
-
-		if (left_tex == nullptr || (!layer_is_mono && right_tex == nullptr)) {
-			U_LOG_W("Missing texture in projection layer");
-			continue;
-		}
+		if (!views_valid) continue;
 
 		// For service-created swapchains (WebXR), acquire KeyedMutex before reading
-		// This ensures cross-process GPU synchronization - client's writes are complete
-		bool left_mutex_acquired = false;
-		bool right_mutex_acquired = false;
-		const DWORD mutex_timeout_ms = 100; // 100ms timeout for mutex acquisition
-		if (sc_left->service_created && sc_left->images[left_index].keyed_mutex) {
-			HRESULT hr = sc_left->images[left_index].keyed_mutex->AcquireSync(0, mutex_timeout_ms);
-			if (SUCCEEDED(hr)) {
-				left_mutex_acquired = true;
-			} else if (hr == static_cast<HRESULT>(WAIT_TIMEOUT)) {
-				U_LOG_W("layer_commit: Left mutex timeout (client still holding?)");
-			} else {
-				U_LOG_W("layer_commit: Failed to acquire left mutex: 0x%08lx", hr);
+		const DWORD mutex_timeout_ms = 100;
+		bool any_mutex_acquired = false;
+		for (uint32_t eye = 0; eye < proj_view_count; eye++) {
+			// Skip mutex for views sharing the same swapchain+image as a prior view
+			bool already_locked = false;
+			for (uint32_t prev = 0; prev < eye; prev++) {
+				if (view_scs[eye] == view_scs[prev] && view_img_indices[eye] == view_img_indices[prev]) {
+					already_locked = true;
+					break;
+				}
+			}
+			if (already_locked) continue;
+
+			if (view_scs[eye]->service_created && view_scs[eye]->images[view_img_indices[eye]].keyed_mutex) {
+				HRESULT hr = view_scs[eye]->images[view_img_indices[eye]].keyed_mutex->AcquireSync(0, mutex_timeout_ms);
+				if (SUCCEEDED(hr)) {
+					view_mutex_acquired[eye] = true;
+					any_mutex_acquired = true;
+				} else if (hr == static_cast<HRESULT>(WAIT_TIMEOUT)) {
+					U_LOG_W("layer_commit: View %u mutex timeout (client still holding?)", eye);
+				} else {
+					U_LOG_W("layer_commit: Failed to acquire view %u mutex: 0x%08lx", eye, hr);
+				}
 			}
 		}
-		if (!layer_is_mono && sc_right != sc_left && sc_right->service_created &&
-		    sc_right->images[right_index].keyed_mutex) {
-			HRESULT hr = sc_right->images[right_index].keyed_mutex->AcquireSync(0, mutex_timeout_ms);
-			if (SUCCEEDED(hr)) {
-				right_mutex_acquired = true;
-			} else if (hr == static_cast<HRESULT>(WAIT_TIMEOUT)) {
-				U_LOG_W("layer_commit: Right mutex timeout (client still holding?)");
-			} else {
-				U_LOG_W("layer_commit: Failed to acquire right mutex: 0x%08lx", hr);
-			}
-		}
 
-		// Get texture format to check for SRGB
-		D3D11_TEXTURE2D_DESC left_desc = {};
-		left_tex->GetDesc(&left_desc);
-		bool left_is_srgb = is_srgb_format(left_desc.Format);
-
-		D3D11_TEXTURE2D_DESC right_desc = {};
-		bool right_is_srgb = false;
-		if (!layer_is_mono) {
-			right_tex->GetDesc(&right_desc);
-			right_is_srgb = is_srgb_format(right_desc.Format);
-		}
-
-		// Log projection layer rect values for debugging SR weaving
-		// Log first frame and every 60 frames
+		// Log projection layer info (first frame and every 60 frames)
 		static uint32_t proj_log_count = 0;
 		if (proj_log_count == 0 || proj_log_count % 60 == 0) {
-			if (layer_is_mono) {
-				U_LOG_W("Projection layer %u (MONO): rect=(%d,%d %dx%d) array=%u",
-				        i,
-				        layer->data.proj.v[0].sub.rect.offset.w, layer->data.proj.v[0].sub.rect.offset.h,
-				        layer->data.proj.v[0].sub.rect.extent.w, layer->data.proj.v[0].sub.rect.extent.h,
-				        layer->data.proj.v[0].sub.array_index);
-				U_LOG_W("  atlas_texture=%ux%u, view_width=%u, view_height=%u, fmt=%u(srgb=%d)",
-				        sys->display_width, sys->display_height, sys->view_width, sys->view_height,
-				        left_desc.Format, left_is_srgb);
-			} else {
-				U_LOG_W("Projection layer %u: left rect=(%d,%d %dx%d) right rect=(%d,%d %dx%d) array=[%u,%u]",
-				        i,
-				        layer->data.proj.v[0].sub.rect.offset.w, layer->data.proj.v[0].sub.rect.offset.h,
-				        layer->data.proj.v[0].sub.rect.extent.w, layer->data.proj.v[0].sub.rect.extent.h,
-				        layer->data.proj.v[1].sub.rect.offset.w, layer->data.proj.v[1].sub.rect.offset.h,
-				        layer->data.proj.v[1].sub.rect.extent.w, layer->data.proj.v[1].sub.rect.extent.h,
-				        layer->data.proj.v[0].sub.array_index, layer->data.proj.v[1].sub.array_index);
-				U_LOG_W("  atlas_texture=%ux%u, view_width=%u, view_height=%u, left_fmt=%u(srgb=%d), right_fmt=%u(srgb=%d)",
-				        sys->display_width, sys->display_height, sys->view_width, sys->view_height,
-				        left_desc.Format, left_is_srgb, right_desc.Format, right_is_srgb);
+			for (uint32_t eye = 0; eye < proj_view_count; eye++) {
+				U_LOG_W("Projection layer %u view %u/%u: rect=(%d,%d %dx%d) array=%u fmt=%u(srgb=%d)",
+				        i, eye, proj_view_count,
+				        layer->data.proj.v[eye].sub.rect.offset.w, layer->data.proj.v[eye].sub.rect.offset.h,
+				        layer->data.proj.v[eye].sub.rect.extent.w, layer->data.proj.v[eye].sub.rect.extent.h,
+				        layer->data.proj.v[eye].sub.array_index,
+				        view_descs[eye].Format, view_is_srgb[eye]);
 			}
+			U_LOG_W("  atlas_texture=%ux%u, view_width=%u, view_height=%u",
+			        sys->display_width, sys->display_height, sys->view_width, sys->view_height);
 		}
 		proj_log_count++;
 
-		// Source rect values
-		float left_src_x = static_cast<float>(layer->data.proj.v[0].sub.rect.offset.w);
-		float left_src_y = static_cast<float>(layer->data.proj.v[0].sub.rect.offset.h);
-		float left_src_w = static_cast<float>(layer->data.proj.v[0].sub.rect.extent.w);
-		float left_src_h = static_cast<float>(layer->data.proj.v[0].sub.rect.extent.h);
+		// Zero-copy optimization: all views reference the same swapchain texture,
+		// sub-rects match tiling layout, and texture matches content dimensions.
+		// Skip the blit and pass the app's texture directly to the display processor.
+		bool zero_copy = false;
 
-		float right_src_x = layer_is_mono ? 0.0f : static_cast<float>(layer->data.proj.v[1].sub.rect.offset.w);
-		float right_src_y = layer_is_mono ? 0.0f : static_cast<float>(layer->data.proj.v[1].sub.rect.offset.h);
-		float right_src_w = layer_is_mono ? 0.0f : static_cast<float>(layer->data.proj.v[1].sub.rect.extent.w);
-		float right_src_h = layer_is_mono ? 0.0f : static_cast<float>(layer->data.proj.v[1].sub.rect.extent.h);
-
-		// Same-swapchain SBS optimization: both eyes reference the same texture,
-		// so the app's swapchain already IS the SBS stereo pair. Skip the blit
-		// and pass the texture directly to the display processor (unless UI overlays need
-		// compositing on top of the stereo texture).
-		bool same_swapchain = (!layer_is_mono && sc_left == sc_right && left_index == right_index);
-		bool skip_this_blit = false;
-
-		if (same_swapchain && !has_ui_layers && !left_mutex_acquired && !right_mutex_acquired) {
-			uint32_t new_view_w = static_cast<uint32_t>(left_src_w);
-			uint32_t new_view_h = static_cast<uint32_t>(left_src_h);
-
-			// Create SRV on the app's texture for direct weaving
-			D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-			srv_desc.Format = left_is_srgb ? get_srgb_format(left_desc.Format) : left_desc.Format;
-			srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-			srv_desc.Texture2D.MipLevels = 1;
-			srv_desc.Texture2D.MostDetailedMip = 0;
-
-			wil::com_ptr<ID3D11ShaderResourceView> app_srv;
-			HRESULT hr = sys->device->CreateShaderResourceView(left_tex, &srv_desc, app_srv.put());
-			if (SUCCEEDED(hr)) {
-				skip_this_blit = true;
-				use_direct_sbs = true;
-				direct_sbs_srv = std::move(app_srv);
-				direct_sbs_tex = left_tex;
-				direct_view_w = new_view_w;
-				direct_view_h = new_view_h;
-
-				static bool logged_same_sc = false;
-				if (!logged_same_sc) {
-					U_LOG_W("Same-swapchain SBS: skipping stereo blit, view=%ux%u, fmt=0x%X",
-					        new_view_w, new_view_h, srv_desc.Format);
-					logged_same_sc = true;
+		if (proj_view_count > 1 && !has_ui_layers && !any_mutex_acquired) {
+			// Check all views reference the same swapchain image
+			bool all_same = true;
+			for (uint32_t eye = 1; eye < proj_view_count; eye++) {
+				if (view_scs[eye] != view_scs[0] || view_img_indices[eye] != view_img_indices[0]) {
+					all_same = false;
+					break;
 				}
 			}
-			// SRV creation failed — fall through to normal blit path
+
+			if (all_same) {
+				// Use u_tiling_can_zero_copy to verify sub-rects match tiling layout
+				int32_t rect_xs[XRT_MAX_VIEWS], rect_ys[XRT_MAX_VIEWS];
+				uint32_t rect_ws[XRT_MAX_VIEWS], rect_hs[XRT_MAX_VIEWS];
+				for (uint32_t eye = 0; eye < proj_view_count; eye++) {
+					rect_xs[eye] = layer->data.proj.v[eye].sub.rect.offset.w;
+					rect_ys[eye] = layer->data.proj.v[eye].sub.rect.offset.h;
+					rect_ws[eye] = layer->data.proj.v[eye].sub.rect.extent.w;
+					rect_hs[eye] = layer->data.proj.v[eye].sub.rect.extent.h;
+				}
+
+				// Get active rendering mode for zero-copy check
+				struct xrt_device *xdev_head = (sys->xsysd != nullptr) ? sys->xsysd->static_roles.head : nullptr;
+				const struct xrt_rendering_mode *active_mode = nullptr;
+				if (xdev_head != nullptr && xdev_head->hmd != nullptr) {
+					uint32_t idx = xdev_head->hmd->active_rendering_mode_index;
+					if (idx < xdev_head->rendering_mode_count) {
+						active_mode = &xdev_head->rendering_modes[idx];
+					}
+				}
+
+				if (active_mode != nullptr &&
+				    u_tiling_can_zero_copy(proj_view_count, rect_xs, rect_ys, rect_ws, rect_hs,
+				                           view_descs[0].Width, view_descs[0].Height, active_mode)) {
+					// Texture matches atlas dims exactly — zero-copy is safe
+					D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+					srv_desc.Format = view_is_srgb[0] ? get_srgb_format(view_descs[0].Format) : view_descs[0].Format;
+					srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+					srv_desc.Texture2D.MipLevels = 1;
+					srv_desc.Texture2D.MostDetailedMip = 0;
+
+					wil::com_ptr<ID3D11ShaderResourceView> app_srv;
+					HRESULT hr = sys->device->CreateShaderResourceView(view_textures[0], &srv_desc, app_srv.put());
+					if (SUCCEEDED(hr)) {
+						zero_copy = true;
+						use_zero_copy = true;
+						zc_srv = std::move(app_srv);
+						zc_tex = view_textures[0];
+						zc_view_w = static_cast<uint32_t>(rect_ws[0]);
+						zc_view_h = static_cast<uint32_t>(rect_hs[0]);
+
+						static bool logged_zc = false;
+						if (!logged_zc) {
+							U_LOG_W("Zero-copy atlas: skipping blit, view=%ux%u, views=%u, fmt=0x%X",
+							        rect_ws[0], rect_hs[0], proj_view_count, srv_desc.Format);
+							logged_zc = true;
+						}
+					}
+				}
+			}
 		}
 
-		if (!skip_this_blit) {
-		// Use shader-based blit for SRGB textures, CopySubresourceRegion for non-SRGB
-		// Log which path is used (first frame only)
+		if (!zero_copy) {
+		// Blit each view into its atlas tile position
 		static bool logged_blit_path = false;
 		if (!logged_blit_path) {
-			U_LOG_W("Blit path: left_is_srgb=%d, blit_vs=%p, srv=%p -> %s",
-			        left_is_srgb, (void*)sys->blit_vs.get(),
-			        (void*)sc_left->images[left_index].srv.get(),
-			        (left_is_srgb && sys->blit_vs && sc_left->images[left_index].srv)
-			            ? "SHADER BLIT (linear output)" : "COPY (no conversion)");
+			U_LOG_W("Blit path: srgb=%d, blit_vs=%p -> %s",
+			        view_is_srgb[0], (void*)sys->blit_vs.get(),
+			        (view_is_srgb[0] && sys->blit_vs) ? "SHADER BLIT (linear output)" : "COPY (no conversion)");
 			logged_blit_path = true;
 		}
 
-		if (left_is_srgb && sys->blit_vs && sc_left->images[left_index].srv) {
-			// Create SRGB SRV if needed for proper gamma handling
-			// The existing SRV might not be SRGB format, so we create a temp one
-			wil::com_ptr<ID3D11ShaderResourceView> srgb_srv;
-			D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-			srv_desc.Format = get_srgb_format(left_desc.Format);
-			srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-			srv_desc.Texture2D.MipLevels = 1;
-			srv_desc.Texture2D.MostDetailedMip = 0;
+		for (uint32_t eye = 0; eye < proj_view_count; eye++) {
+			float src_x = static_cast<float>(layer->data.proj.v[eye].sub.rect.offset.w);
+			float src_y = static_cast<float>(layer->data.proj.v[eye].sub.rect.offset.h);
+			float src_w = static_cast<float>(layer->data.proj.v[eye].sub.rect.extent.w);
+			float src_h = static_cast<float>(layer->data.proj.v[eye].sub.rect.extent.h);
 
-			HRESULT hr = sys->device->CreateShaderResourceView(left_tex, &srv_desc, srgb_srv.put());
-			if (SUCCEEDED(hr)) {
-				blit_to_atlas_texture(sys, &c->render, srgb_srv.get(),
-				                       left_src_x, left_src_y, left_src_w, left_src_h,
-				                       static_cast<float>(left_desc.Width), static_cast<float>(left_desc.Height),
-				                       0.0f, 0.0f,
-				                       true);  // is_srgb = true
-			} else {
-				U_LOG_W("Failed to create SRGB SRV for left eye, falling back to copy");
-				// Fall back to copy
-				D3D11_BOX left_box = {};
-				left_box.left = static_cast<UINT>(left_src_x);
-				left_box.top = static_cast<UINT>(left_src_y);
-				left_box.right = static_cast<UINT>(left_src_x + left_src_w);
-				left_box.bottom = static_cast<UINT>(left_src_y + left_src_h);
-				left_box.front = 0;
-				left_box.back = 1;
-				sys->context->CopySubresourceRegion(c->render.atlas_texture.get(), 0, 0, 0, 0,
-				                                     left_tex, layer->data.proj.v[0].sub.array_index, &left_box);
-			}
-		} else {
-			// Non-SRGB: use fast CopySubresourceRegion
-			D3D11_BOX left_box = {};
-			left_box.left = static_cast<UINT>(left_src_x);
-			left_box.top = static_cast<UINT>(left_src_y);
-			left_box.right = static_cast<UINT>(left_src_x + left_src_w);
-			left_box.bottom = static_cast<UINT>(left_src_y + left_src_h);
-			left_box.front = 0;
-			left_box.back = 1;
+			uint32_t tile_x, tile_y;
+			u_tiling_view_origin(eye, sys->tile_columns,
+			                     sys->view_width, sys->view_height,
+			                     &tile_x, &tile_y);
 
-			sys->context->CopySubresourceRegion(
-			    c->render.atlas_texture.get(),
-			    0,             // dst subresource
-			    0, 0, 0,       // dst x, y, z (left half)
-			    left_tex,
-			    layer->data.proj.v[0].sub.array_index,  // src subresource
-			    &left_box);
-		}
-
-		// Handle right eye (skip for mono — single view already fills full width)
-		if (!layer_is_mono) {
-			if (right_is_srgb && sys->blit_vs && sc_right->images[right_index].srv) {
+			if (view_is_srgb[eye] && sys->blit_vs && view_scs[eye]->images[view_img_indices[eye]].srv) {
 				wil::com_ptr<ID3D11ShaderResourceView> srgb_srv;
 				D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-				srv_desc.Format = get_srgb_format(right_desc.Format);
+				srv_desc.Format = get_srgb_format(view_descs[eye].Format);
 				srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
 				srv_desc.Texture2D.MipLevels = 1;
 				srv_desc.Texture2D.MostDetailedMip = 0;
 
-				// Compute right eye tile position in atlas
-				uint32_t right_tile_x, right_tile_y;
-				u_tiling_view_origin(1, sys->tile_columns,
-				                     sys->view_width, sys->view_height,
-				                     &right_tile_x, &right_tile_y);
-
-				HRESULT hr = sys->device->CreateShaderResourceView(right_tex, &srv_desc, srgb_srv.put());
+				HRESULT hr = sys->device->CreateShaderResourceView(view_textures[eye], &srv_desc, srgb_srv.put());
 				if (SUCCEEDED(hr)) {
 					blit_to_atlas_texture(sys, &c->render, srgb_srv.get(),
-					                       right_src_x, right_src_y, right_src_w, right_src_h,
-					                       static_cast<float>(right_desc.Width), static_cast<float>(right_desc.Height),
-					                       static_cast<float>(right_tile_x), static_cast<float>(right_tile_y),
+					                       src_x, src_y, src_w, src_h,
+					                       static_cast<float>(view_descs[eye].Width), static_cast<float>(view_descs[eye].Height),
+					                       static_cast<float>(tile_x), static_cast<float>(tile_y),
 					                       true);  // is_srgb = true
 				} else {
-					U_LOG_W("Failed to create SRGB SRV for right eye, falling back to copy");
-					D3D11_BOX right_box = {};
-					right_box.left = static_cast<UINT>(right_src_x);
-					right_box.top = static_cast<UINT>(right_src_y);
-					right_box.right = static_cast<UINT>(right_src_x + right_src_w);
-					right_box.bottom = static_cast<UINT>(right_src_y + right_src_h);
-					right_box.front = 0;
-					right_box.back = 1;
+					U_LOG_W("Failed to create SRGB SRV for view %u, falling back to copy", eye);
+					D3D11_BOX box = {};
+					box.left = static_cast<UINT>(src_x);
+					box.top = static_cast<UINT>(src_y);
+					box.right = static_cast<UINT>(src_x + src_w);
+					box.bottom = static_cast<UINT>(src_y + src_h);
+					box.front = 0;
+					box.back = 1;
 					sys->context->CopySubresourceRegion(c->render.atlas_texture.get(), 0,
-					                                     right_tile_x, right_tile_y, 0,
-					                                     right_tex, layer->data.proj.v[1].sub.array_index, &right_box);
+					                                     tile_x, tile_y, 0,
+					                                     view_textures[eye], layer->data.proj.v[eye].sub.array_index, &box);
 				}
 			} else {
 				// Non-SRGB: use fast CopySubresourceRegion
-				uint32_t right_tile_x, right_tile_y;
-				u_tiling_view_origin(1, sys->tile_columns,
-				                     sys->view_width, sys->view_height,
-				                     &right_tile_x, &right_tile_y);
-
-				D3D11_BOX right_box = {};
-				right_box.left = static_cast<UINT>(right_src_x);
-				right_box.top = static_cast<UINT>(right_src_y);
-				right_box.right = static_cast<UINT>(right_src_x + right_src_w);
-				right_box.bottom = static_cast<UINT>(right_src_y + right_src_h);
-				right_box.front = 0;
-				right_box.back = 1;
+				D3D11_BOX box = {};
+				box.left = static_cast<UINT>(src_x);
+				box.top = static_cast<UINT>(src_y);
+				box.right = static_cast<UINT>(src_x + src_w);
+				box.bottom = static_cast<UINT>(src_y + src_h);
+				box.front = 0;
+				box.back = 1;
 
 				sys->context->CopySubresourceRegion(
 				    c->render.atlas_texture.get(),
 				    0,                            // dst subresource
-				    right_tile_x, right_tile_y, 0, // dst x, y, z (right eye tile)
-				    right_tex,
-				    layer->data.proj.v[1].sub.array_index,  // src subresource
-				    &right_box);
+				    tile_x, tile_y, 0,            // dst x, y, z (tile position)
+				    view_textures[eye],
+				    layer->data.proj.v[eye].sub.array_index,  // src subresource
+				    &box);
 			}
 		}
-		} // !skip_this_blit
+		} // !zero_copy
 
 		// Release KeyedMutex after reading
-		if (left_mutex_acquired) {
-			sc_left->images[left_index].keyed_mutex->ReleaseSync(0);
-		}
-		if (!layer_is_mono && right_mutex_acquired) {
-			sc_right->images[right_index].keyed_mutex->ReleaseSync(0);
+		for (uint32_t eye = 0; eye < proj_view_count; eye++) {
+			if (view_mutex_acquired[eye]) {
+				view_scs[eye]->images[view_img_indices[eye]].keyed_mutex->ReleaseSync(0);
+			}
 		}
 
 		U_LOG_T("Rendered projection layer %u", i);
@@ -3042,36 +2989,39 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		sys->context->RSSetState(sys->rasterizer_state.get());
 		sys->context->OMSetDepthStencilState(sys->depth_disabled.get(), 0);
 
-		// Create default view poses and FOVs for each eye
-		struct xrt_pose view_poses[2];
-		struct xrt_fov fovs[2];
+		// Create default view poses and FOVs for each view
+		uint32_t ui_view_count = sys->hardware_display_3d
+		    ? (sys->tile_columns * sys->tile_rows) : 1;
+		if (ui_view_count > XRT_MAX_VIEWS)
+			ui_view_count = XRT_MAX_VIEWS;
 
-		// Use function-scoped eye positions (already fetched from display processor above)
+		struct xrt_pose view_poses[XRT_MAX_VIEWS];
+		struct xrt_fov fovs[XRT_MAX_VIEWS];
 
-		// Identity orientation for both eyes
-		view_poses[0].orientation.x = 0.0f;
-		view_poses[0].orientation.y = 0.0f;
-		view_poses[0].orientation.z = 0.0f;
-		view_poses[0].orientation.w = 1.0f;
-		view_poses[0].position = left_eye;
-
-		view_poses[1].orientation.x = 0.0f;
-		view_poses[1].orientation.y = 0.0f;
-		view_poses[1].orientation.z = 0.0f;
-		view_poses[1].orientation.w = 1.0f;
-		view_poses[1].position = right_eye;
-
-		// Default symmetric FOV (roughly 90 degrees)
+		// Use eye positions from display processor (interpolate for N views)
 		const float fov_angle = 0.785f;  // ~45 degrees
-		for (uint32_t view = 0; view < 2; view++) {
+		for (uint32_t view = 0; view < ui_view_count; view++) {
+			view_poses[view].orientation.x = 0.0f;
+			view_poses[view].orientation.y = 0.0f;
+			view_poses[view].orientation.z = 0.0f;
+			view_poses[view].orientation.w = 1.0f;
+
+			// Use eye position if available, fall back to interpolated stereo baseline
+			if (view < eye_pos.count) {
+				view_poses[view].position.x = eye_pos.eyes[view].x;
+				view_poses[view].position.y = eye_pos.eyes[view].y;
+				view_poses[view].position.z = eye_pos.eyes[view].z;
+			} else if (view == 0) {
+				view_poses[view].position = left_eye;
+			} else {
+				view_poses[view].position = right_eye;
+			}
+
 			fovs[view].angle_left = -fov_angle;
 			fovs[view].angle_right = fov_angle;
 			fovs[view].angle_up = fov_angle;
 			fovs[view].angle_down = -fov_angle;
 		}
-
-		// Render UI layers for each view (1 for mono, 2 for stereo)
-		uint32_t ui_view_count = sys->hardware_display_3d ? 2 : 1;
 		for (uint32_t view_index = 0; view_index < ui_view_count; view_index++) {
 			// Set viewport for this view
 			D3D11_VIEWPORT viewport = {};
@@ -3146,11 +3096,11 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		comp_d3d11_window_wait_for_paint(c->render.window);
 	}
 
-	// Select display processor input: direct SBS from app's swapchain, or intermediate atlas_texture
-	ID3D11ShaderResourceView *input_srv = use_direct_sbs
-	    ? direct_sbs_srv.get() : c->render.atlas_srv.get();
-	uint32_t input_view_w = use_direct_sbs ? direct_view_w : sys->view_width;
-	uint32_t input_view_h = use_direct_sbs ? direct_view_h : sys->view_height;
+	// Select display processor input: zero-copy from app's swapchain, or intermediate atlas_texture
+	ID3D11ShaderResourceView *input_srv = use_zero_copy
+	    ? zc_srv.get() : c->render.atlas_srv.get();
+	uint32_t input_view_w = use_zero_copy ? zc_view_w : sys->view_width;
+	uint32_t input_view_h = use_zero_copy ? zc_view_h : sys->view_height;
 
 	// Process stereo texture through display processor for display output
 	// Skip processing for mono — display is in 2D mode, no interlacing needed
@@ -3193,12 +3143,12 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 				uint32_t eye_w = 0, eye_h = 0;
 				uint32_t tex_w = 0, tex_h = 0;
 
-				if (use_direct_sbs && direct_sbs_srv) {
-					src_srv = direct_sbs_srv.get();
-					eye_w = direct_view_w;
-					eye_h = direct_view_h;
-					tex_w = direct_view_w * 2;
-					tex_h = direct_view_h;
+				if (use_zero_copy && zc_srv) {
+					src_srv = zc_srv.get();
+					eye_w = zc_view_w;
+					eye_h = zc_view_h;
+					tex_w = sys->tile_columns * zc_view_w;
+					tex_h = sys->tile_rows * zc_view_h;
 				} else if (c->render.atlas_srv) {
 					src_srv = c->render.atlas_srv.get();
 					eye_w = sys->view_width;
@@ -3268,12 +3218,12 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 					ID3D11ShaderResourceView *null_srv = nullptr;
 					sys->context->PSSetShaderResources(0, 1, &null_srv);
 				}
-			} else if (use_direct_sbs && direct_sbs_tex) {
-				// Same-swapchain SBS: copy app's SBS region to back buffer
-				D3D11_BOX src_box = {0, 0, 0, input_view_w * 2, input_view_h, 1};
+			} else if (use_zero_copy && zc_tex) {
+				// Zero-copy: copy app's atlas region to back buffer
+				D3D11_BOX src_box = {0, 0, 0, sys->tile_columns * input_view_w, sys->tile_rows * input_view_h, 1};
 				sys->context->CopySubresourceRegion(
 				    back_buffer.get(), 0, 0, 0, 0,
-				    direct_sbs_tex, 0, &src_box);
+				    zc_tex, 0, &src_box);
 			} else if (c->render.atlas_texture) {
 				sys->context->CopyResource(back_buffer.get(), c->render.atlas_texture.get());
 			}
