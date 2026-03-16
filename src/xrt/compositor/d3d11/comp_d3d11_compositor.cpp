@@ -38,6 +38,7 @@
 
 #include "math/m_api.h"
 #include "util/u_tiling.h"
+#include "util/u_canvas.h"
 
 #ifdef XRT_BUILD_DRIVER_QWERTY
 #include "qwerty_interface.h"
@@ -124,14 +125,10 @@ struct comp_d3d11_compositor
 	//! True if shared texture mode is active.
 	bool has_shared_texture;
 
-	//! Output rect within app's client area where shared texture is displayed.
-	//! When has_output_rect is true, the hidden weaver window is positioned
-	//! to match this sub-rect instead of the full client rect.
-	bool has_output_rect;
-	int32_t output_rect_x;
-	int32_t output_rect_y;
-	uint32_t output_rect_w;
-	uint32_t output_rect_h;
+	//! Canvas output rect for shared-texture apps.
+	//! When valid, the hidden weaver window is positioned to match this
+	//! sub-rect instead of the full client rect.
+	struct u_canvas_rect canvas;
 
 	//! Generic D3D11 display processor (vendor-agnostic weaving).
 	struct xrt_display_processor_d3d11 *display_processor;
@@ -903,13 +900,19 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		if (idx < c->xdev->rendering_mode_count) {
 			const struct xrt_rendering_mode *mode = &c->xdev->rendering_modes[idx];
 			if (mode->view_width_pixels > 0) {
+				uint32_t new_vw = mode->view_width_pixels;
+				uint32_t new_vh = mode->view_height_pixels;
+				if (c->canvas.valid) {
+					u_tiling_compute_canvas_view(mode, c->canvas.w, c->canvas.h,
+					                             &new_vw, &new_vh);
+				}
 				uint32_t cur_vw, cur_vh;
 				comp_d3d11_renderer_get_view_dimensions(c->renderer, &cur_vw, &cur_vh);
-				if (cur_vw != mode->view_width_pixels || cur_vh != mode->view_height_pixels) {
+				if (cur_vw != new_vw || cur_vh != new_vh) {
 					comp_d3d11_renderer_resize(
 					    c->renderer,
-					    mode->view_width_pixels,
-					    mode->view_height_pixels,
+					    new_vw,
+					    new_vh,
 					    tgt_height);
 				}
 			}
@@ -1005,12 +1008,12 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 			POINT origin = {0, 0};
 			ClientToScreen(c->app_hwnd, &origin);
 
-			if (c->has_output_rect) {
+			if (c->canvas.valid) {
 				comp_d3d11_window_set_rect(c->own_window,
-				    origin.x + c->output_rect_x,
-				    origin.y + c->output_rect_y,
-				    c->output_rect_w,
-				    c->output_rect_h);
+				    origin.x + c->canvas.x,
+				    origin.y + c->canvas.y,
+				    c->canvas.w,
+				    c->canvas.h);
 			} else {
 				RECT cr;
 				if (GetClientRect(c->app_hwnd, &cr)) {
@@ -1614,11 +1617,7 @@ comp_d3d11_compositor_set_output_rect(struct xrt_compositor *xc,
                                        uint32_t w, uint32_t h)
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
-	c->output_rect_x = x;
-	c->output_rect_y = y;
-	c->output_rect_w = w;
-	c->output_rect_h = h;
-	c->has_output_rect = true;
+	c->canvas = (struct u_canvas_rect){.valid = true, .x = x, .y = y, .w = w, .h = h};
 }
 
 extern "C" bool
@@ -1750,6 +1749,8 @@ comp_d3d11_compositor_get_window_metrics(struct xrt_compositor *xc,
 	out_metrics->window_center_offset_y_m = offset_y_m;
 
 	out_metrics->valid = true;
+
+	u_canvas_apply_to_metrics(out_metrics, &c->canvas);
 
 	return true;
 }

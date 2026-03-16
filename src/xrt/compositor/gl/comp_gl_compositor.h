@@ -64,6 +64,23 @@ void
 comp_gl_compositor_set_sys_info(struct xrt_compositor *xc, const struct xrt_system_compositor_info *info);
 
 /*!
+ * Set the output rect within the app's window where the shared texture
+ * is displayed. Used for canvas-aware Kooima FOV and view sizing.
+ *
+ * @param xc  GL compositor base.
+ * @param x   Left edge in window client-area pixels.
+ * @param y   Top edge in window client-area pixels.
+ * @param w   Width in pixels.
+ * @param h   Height in pixels.
+ *
+ * @ingroup comp_gl
+ */
+void
+comp_gl_compositor_set_output_rect(struct xrt_compositor *xc,
+                                    int32_t x, int32_t y,
+                                    uint32_t w, uint32_t h);
+
+/*!
  * Request display mode switch (2D/3D) via the GL display processor.
  *
  * @param xc        GL compositor base.
