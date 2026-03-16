@@ -314,9 +314,8 @@ get_session_layer_view(struct multi_layer_entry *layer,
 		return false;
 	}
 
-	// Get the swapchain for this view
-	const uint32_t sc_index = (view_index == 0) ? 0 : 1;
-	struct xrt_swapchain *xsc = layer->xscs[sc_index];
+	// Get the swapchain for this view (xscs[] is indexed by view index)
+	struct xrt_swapchain *xsc = layer->xscs[view_index];
 	if (xsc == NULL) {
 		return false;
 	}
@@ -1594,7 +1593,7 @@ get_active_tile_layout(struct multi_compositor *mc, uint32_t *out_tile_columns, 
  * Recreates if size or format changed.
  */
 static bool
-ensure_session_sbs_image(struct multi_compositor *mc, struct vk_bundle *vk, int per_eye_width, int height,
+ensure_session_atlas_image(struct multi_compositor *mc, struct vk_bundle *vk, int per_eye_width, int height,
                          uint32_t tile_columns, uint32_t tile_rows, VkFormat format)
 {
 	if (mc->session_render.flip_initialized && mc->session_render.flip_width == per_eye_width &&
@@ -2098,41 +2097,36 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 	}
 #endif
 
-	// Extract left and right view info
+	// Extract per-view info (N-view generalized)
+	uint32_t view_count = mc->hardware_display_3d ? layer->data.view_count : 1;
+	if (view_count > XRT_MAX_VIEWS)
+		view_count = XRT_MAX_VIEWS;
+
 	int imageWidth = 0, imageHeight = 0;
 	VkFormat imageFormat = VK_FORMAT_UNDEFINED;
-	VkImageView leftImageView = VK_NULL_HANDLE;
-	VkImageView rightImageView = VK_NULL_HANDLE;
-	VkImage leftImage = VK_NULL_HANDLE, rightImage = VK_NULL_HANDLE;
-	uint32_t leftArrayIndex = 0, rightArrayIndex = 0;
+	VkImageView viewImageViews[XRT_MAX_VIEWS];
+	VkImage viewImages[XRT_MAX_VIEWS];
+	uint32_t viewArrayIndices[XRT_MAX_VIEWS];
+	int viewOffsetX[XRT_MAX_VIEWS], viewOffsetY[XRT_MAX_VIEWS];
 
-	bool leftOk = get_session_layer_view(layer, 0, &imageWidth, &imageHeight, &imageFormat, &leftImageView,
-	                                     &leftImage, &leftArrayIndex);
-	bool rightOk = false;
-	if (mc->hardware_display_3d) {
-		rightOk = get_session_layer_view(layer, 1, &imageWidth, &imageHeight, &imageFormat, &rightImageView,
-		                                 &rightImage, &rightArrayIndex);
+	bool views_ok = true;
+	for (uint32_t v = 0; v < view_count; v++) {
+		viewImageViews[v] = VK_NULL_HANDLE;
+		viewImages[v] = VK_NULL_HANDLE;
+		viewArrayIndices[v] = 0;
+		if (!get_session_layer_view(layer, v, &imageWidth, &imageHeight, &imageFormat,
+		                            &viewImageViews[v], &viewImages[v], &viewArrayIndices[v])) {
+			views_ok = false;
+		}
+		viewOffsetX[v] = layer->data.proj.v[v].sub.rect.offset.w;
+		viewOffsetY[v] = layer->data.proj.v[v].sub.rect.offset.h;
 	}
 
-	if (!leftOk || (mc->hardware_display_3d && !rightOk)) {
-		U_LOG_W("[per-session] Could not extract views for per-session rendering (3d=%d)", mc->hardware_display_3d);
+	if (!views_ok) {
+		U_LOG_W("[per-session] Could not extract views for per-session rendering (3d=%d, count=%u)",
+		        mc->hardware_display_3d, view_count);
 		return;
 	}
-
-	// Extract source sub-region offsets from projection views.
-	// For two-swapchain apps, offsets are (0,0). For single-swapchain SBS apps,
-	// the right eye has offset (renderW, 0) to select the right half.
-	int leftOffsetX = layer->data.proj.v[0].sub.rect.offset.w;
-	int leftOffsetY = layer->data.proj.v[0].sub.rect.offset.h;
-	int rightOffsetX = 0, rightOffsetY = 0;
-	if (mc->hardware_display_3d) {
-		rightOffsetX = layer->data.proj.v[1].sub.rect.offset.w;
-		rightOffsetY = layer->data.proj.v[1].sub.rect.offset.h;
-	}
-
-	// Detect single-swapchain SBS layout: both eyes reference the same VkImage
-	bool same_swapchain = (mc->hardware_display_3d && leftImage == rightImage &&
-	                       leftArrayIndex == rightArrayIndex);
 
 	// Wait for pending fence if exists (from previous frame using same buffer)
 	if (mc->session_render.fenced_buffer >= 0) {
@@ -2304,8 +2298,8 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		}
 
 		bool flip_y = layer->data.flip_y;
-		int src_top = leftOffsetY + (flip_y ? imageHeight : 0);
-		int src_bot = leftOffsetY + (flip_y ? 0 : imageHeight);
+		int src_top = viewOffsetY[0] + (flip_y ? imageHeight : 0);
+		int src_bot = viewOffsetY[0] + (flip_y ? 0 : imageHeight);
 
 		// Pre-barriers: source GENERAL → TRANSFER_SRC, target UNDEFINED → TRANSFER_DST
 		VkImageMemoryBarrier mono_pre[2] = {
@@ -2315,8 +2309,8 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
 		        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
 		        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		        .image = leftImage,
-		        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, leftArrayIndex, 1},
+		        .image = viewImages[0],
+		        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, viewArrayIndices[0], 1},
 		    },
 		    {
 		        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -2333,12 +2327,12 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 
 		// Blit mono view to fill entire target
 		VkImageBlit mono_blit = {
-		    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, leftArrayIndex, 1},
-		    .srcOffsets = {{leftOffsetX, src_top, 0}, {leftOffsetX + imageWidth, src_bot, 1}},
+		    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, viewArrayIndices[0], 1},
+		    .srcOffsets = {{viewOffsetX[0], src_top, 0}, {viewOffsetX[0] + imageWidth, src_bot, 1}},
 		    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
 		    .dstOffsets = {{0, 0, 0}, {(int32_t)framebufferWidth, (int32_t)framebufferHeight, 1}},
 		};
-		vk->vkCmdBlitImage(cmd, leftImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		vk->vkCmdBlitImage(cmd, viewImages[0], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		                   ct->images[buffer_index].handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
 		                   &mono_blit, VK_FILTER_LINEAR);
 
@@ -2350,8 +2344,8 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 		        .dstAccessMask = 0,
 		        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-		        .image = leftImage,
-		        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, leftArrayIndex, 1},
+		        .image = viewImages[0],
+		        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, viewArrayIndices[0], 1},
 		    },
 		    {
 		        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -2409,153 +2403,139 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 
 			// Determine blit sources — either composited overlay images or
 			// direct swapchain sub-regions.
-			VkImage sbs_src_left = leftImage;
-			VkImage sbs_src_right = rightImage;
-			uint32_t sbs_left_array = leftArrayIndex;
-			uint32_t sbs_right_array = rightArrayIndex;
-			int sbs_left_off_x = leftOffsetX, sbs_left_off_y = leftOffsetY;
-			int sbs_right_off_x = rightOffsetX, sbs_right_off_y = rightOffsetY;
-			int sbs_eye_w = imageWidth, sbs_eye_h = imageHeight;
-			bool sbs_flip_y = layer->data.flip_y;
-			bool sbs_same_src = same_swapchain;
-			VkImageLayout sbs_src_old_layout = VK_IMAGE_LAYOUT_GENERAL;
+			VkImage blit_sources[XRT_MAX_VIEWS];
+			uint32_t blit_arrays[XRT_MAX_VIEWS];
+			int blit_off_x[XRT_MAX_VIEWS], blit_off_y[XRT_MAX_VIEWS];
+			int blit_eye_w = imageWidth, blit_eye_h = imageHeight;
+			bool blit_flip_y = layer->data.flip_y;
+			VkImageLayout blit_src_old_layout = VK_IMAGE_LAYOUT_GENERAL;
+
+			for (uint32_t v = 0; v < view_count; v++) {
+				blit_sources[v] = viewImages[v];
+				blit_arrays[v] = viewArrayIndices[v];
+				blit_off_x[v] = viewOffsetX[v];
+				blit_off_y[v] = viewOffsetY[v];
+			}
 
 			if (has_window_space_layers(mc)) {
 				VkImageView comp_left = VK_NULL_HANDLE, comp_right = VK_NULL_HANDLE;
 				if (composite_layers_to_intermediate(mc, vk, cmd, &comp_left, &comp_right)) {
-					sbs_src_left = mc->session_render.composite_images[0];
-					sbs_src_right = mc->session_render.composite_images[1];
-					sbs_left_array = sbs_right_array = 0;
-					sbs_left_off_x = sbs_left_off_y = 0;
-					sbs_right_off_x = sbs_right_off_y = 0;
-					sbs_eye_w = (int)mc->session_render.composite_width;
-					sbs_eye_h = (int)mc->session_render.composite_height;
-					sbs_flip_y = false;
-					sbs_same_src = false;
-					sbs_src_old_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					// Composite path currently supports 2 views
+					uint32_t comp_count = view_count < 2 ? view_count : 2;
+					for (uint32_t v = 0; v < comp_count; v++) {
+						blit_sources[v] = mc->session_render.composite_images[v];
+						blit_arrays[v] = 0;
+						blit_off_x[v] = 0;
+						blit_off_y[v] = 0;
+					}
+					blit_eye_w = (int)mc->session_render.composite_width;
+					blit_eye_h = (int)mc->session_render.composite_height;
+					blit_flip_y = false;
+					blit_src_old_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				}
 			}
 
 			// Ensure atlas intermediate image exists (tile_columns*eye_w x tile_rows*eye_h)
-			if (!ensure_session_sbs_image(mc, vk, sbs_eye_w, sbs_eye_h,
+			if (!ensure_session_atlas_image(mc, vk, blit_eye_w, blit_eye_h,
 			                              tile_columns, tile_rows, imageFormat)) {
 				U_LOG_E("[per-session] Failed to ensure atlas image");
 				goto submit_and_present;
 			}
 
-			// Y-flip handling for GL textures
-			int l_src_top = sbs_left_off_y + (sbs_flip_y ? sbs_eye_h : 0);
-			int l_src_bot = sbs_left_off_y + (sbs_flip_y ? 0 : sbs_eye_h);
-			int r_src_top = sbs_right_off_y + (sbs_flip_y ? sbs_eye_h : 0);
-			int r_src_bot = sbs_right_off_y + (sbs_flip_y ? 0 : sbs_eye_h);
+			// Collect unique source images for barriers
+			VkImage unique_sources[XRT_MAX_VIEWS];
+			uint32_t unique_arrays[XRT_MAX_VIEWS];
+			uint32_t unique_count = 0;
+			for (uint32_t v = 0; v < view_count; v++) {
+				bool found = false;
+				for (uint32_t u = 0; u < unique_count; u++) {
+					if (unique_sources[u] == blit_sources[v] &&
+					    unique_arrays[u] == blit_arrays[v]) {
+						found = true;
+						break;
+					}
+				}
+				if (!found) {
+					unique_sources[unique_count] = blit_sources[v];
+					unique_arrays[unique_count] = blit_arrays[v];
+					unique_count++;
+				}
+			}
 
-			// Pre-barriers: sources → TRANSFER_SRC, atlas image → TRANSFER_DST
-			uint32_t sbs_pre_count = sbs_same_src ? 2 : 3;
-			VkImageMemoryBarrier sbs_pre[3] = {
-			    {
-			        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			        .srcAccessMask = 0,
-			        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-			        .oldLayout = sbs_src_old_layout,
-			        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			        .image = sbs_src_left,
-			        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, sbs_left_array, 1},
-			    },
-			    {
-			        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			        .srcAccessMask = 0,
-			        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-			        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			        .image = mc->session_render.flip_sbs_image,
-			        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
-			    },
-			};
-			if (!sbs_same_src) {
-				sbs_pre[2] = (VkImageMemoryBarrier){
+			// Pre-barriers: unique sources → TRANSFER_SRC, atlas → TRANSFER_DST
+			VkImageMemoryBarrier pre_barriers[XRT_MAX_VIEWS + 1];
+			uint32_t pre_count = 0;
+			for (uint32_t u = 0; u < unique_count; u++) {
+				pre_barriers[pre_count++] = (VkImageMemoryBarrier){
 				    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
 				    .srcAccessMask = 0,
 				    .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-				    .oldLayout = sbs_src_old_layout,
+				    .oldLayout = blit_src_old_layout,
 				    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-				    .image = sbs_src_right,
-				    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, sbs_right_array, 1},
+				    .image = unique_sources[u],
+				    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, unique_arrays[u], 1},
 				};
 			}
+			pre_barriers[pre_count++] = (VkImageMemoryBarrier){
+			    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			    .srcAccessMask = 0,
+			    .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+			    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			    .image = mc->session_render.flip_sbs_image,
+			    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+			};
 			vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 			                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL,
-			                         sbs_pre_count, sbs_pre);
+			                         pre_count, pre_barriers);
 
-			// Blit left eye into tile position 0 of atlas
-			uint32_t left_tile_x, left_tile_y;
-			u_tiling_view_origin(0, tile_columns, (uint32_t)sbs_eye_w, (uint32_t)sbs_eye_h,
-			                     &left_tile_x, &left_tile_y);
-			VkImageBlit sbs_left_blit = {
-			    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, sbs_left_array, 1},
-			    .srcOffsets = {{sbs_left_off_x, l_src_top, 0},
-			                   {sbs_left_off_x + sbs_eye_w, l_src_bot, 1}},
-			    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-			    .dstOffsets = {{(int32_t)left_tile_x, (int32_t)left_tile_y, 0},
-			                   {(int32_t)(left_tile_x + sbs_eye_w), (int32_t)(left_tile_y + sbs_eye_h), 1}},
-			};
-			vk->vkCmdBlitImage(cmd, sbs_src_left, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			                   mc->session_render.flip_sbs_image,
-			                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			                   1, &sbs_left_blit, VK_FILTER_NEAREST);
+			// Blit each view into its tile position in the atlas
+			for (uint32_t v = 0; v < view_count; v++) {
+				uint32_t tile_x, tile_y;
+				u_tiling_view_origin(v, tile_columns, (uint32_t)blit_eye_w, (uint32_t)blit_eye_h,
+				                     &tile_x, &tile_y);
+				int src_top = blit_off_y[v] + (blit_flip_y ? blit_eye_h : 0);
+				int src_bot = blit_off_y[v] + (blit_flip_y ? 0 : blit_eye_h);
+				VkImageBlit blit = {
+				    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, blit_arrays[v], 1},
+				    .srcOffsets = {{blit_off_x[v], src_top, 0},
+				                   {blit_off_x[v] + blit_eye_w, src_bot, 1}},
+				    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+				    .dstOffsets = {{(int32_t)tile_x, (int32_t)tile_y, 0},
+				                   {(int32_t)(tile_x + blit_eye_w), (int32_t)(tile_y + blit_eye_h), 1}},
+				};
+				vk->vkCmdBlitImage(cmd, blit_sources[v], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				                   mc->session_render.flip_sbs_image,
+				                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				                   1, &blit, VK_FILTER_NEAREST);
+			}
 
-			// Blit right eye into tile position 1 of atlas
-			uint32_t right_tile_x, right_tile_y;
-			u_tiling_view_origin(1, tile_columns, (uint32_t)sbs_eye_w, (uint32_t)sbs_eye_h,
-			                     &right_tile_x, &right_tile_y);
-			VkImageBlit sbs_right_blit = {
-			    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, sbs_right_array, 1},
-			    .srcOffsets = {{sbs_right_off_x, r_src_top, 0},
-			                   {sbs_right_off_x + sbs_eye_w, r_src_bot, 1}},
-			    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-			    .dstOffsets = {{(int32_t)right_tile_x, (int32_t)right_tile_y, 0},
-			                   {(int32_t)(right_tile_x + sbs_eye_w), (int32_t)(right_tile_y + sbs_eye_h), 1}},
-			};
-			vk->vkCmdBlitImage(cmd, sbs_src_right, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			                   mc->session_render.flip_sbs_image,
-			                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			                   1, &sbs_right_blit, VK_FILTER_NEAREST);
-
-			// Post-barriers: sources → original layout, atlas → SHADER_READ_ONLY
-			uint32_t sbs_post_count = sbs_same_src ? 2 : 3;
-			VkImageMemoryBarrier sbs_post[3] = {
-			    {
-			        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-			        .dstAccessMask = 0,
-			        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			        .newLayout = sbs_src_old_layout,
-			        .image = sbs_src_left,
-			        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, sbs_left_array, 1},
-			    },
-			    {
-			        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-			        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-			        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			        .image = mc->session_render.flip_sbs_image,
-			        .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
-			    },
-			};
-			if (!sbs_same_src) {
-				sbs_post[2] = (VkImageMemoryBarrier){
+			// Post-barriers: unique sources → original layout, atlas → SHADER_READ_ONLY
+			VkImageMemoryBarrier post_barriers[XRT_MAX_VIEWS + 1];
+			uint32_t post_count = 0;
+			for (uint32_t u = 0; u < unique_count; u++) {
+				post_barriers[post_count++] = (VkImageMemoryBarrier){
 				    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
 				    .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
 				    .dstAccessMask = 0,
 				    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-				    .newLayout = sbs_src_old_layout,
-				    .image = sbs_src_right,
-				    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, sbs_right_array, 1},
+				    .newLayout = blit_src_old_layout,
+				    .image = unique_sources[u],
+				    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, unique_arrays[u], 1},
 				};
 			}
+			post_barriers[post_count++] = (VkImageMemoryBarrier){
+			    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+			    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+			    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			    .image = mc->session_render.flip_sbs_image,
+			    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+			};
 			vk->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
 			                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL,
-			                         sbs_post_count, sbs_post);
+			                         post_count, post_barriers);
 
 			// Pre-weave barrier: target → COLOR_ATTACHMENT_OPTIMAL
 			VkImageMemoryBarrier pre_weave = {
@@ -2576,8 +2556,8 @@ render_session_to_own_target(struct multi_compositor *mc, struct vk_bundle *vk, 
 			    mc->session_render.display_processor, cmd,
 			    (VkImage_XDP)mc->session_render.flip_sbs_image, // atlas image (for copy/blit)
 			    mc->session_render.flip_sbs_view,  // atlas view (tiled views)
-			    (uint32_t)sbs_eye_w,               // per-view width
-			    (uint32_t)sbs_eye_h,               // per-view height
+			    (uint32_t)blit_eye_w,              // per-view width
+			    (uint32_t)blit_eye_h,              // per-view height
 			    tile_columns,                       // tile layout columns
 			    tile_rows,                          // tile layout rows
 			    (VkFormat_XDP)imageFormat,
