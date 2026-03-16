@@ -798,9 +798,22 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		xrt_display_processor_d3d11_get_predicted_eye_positions(c->display_processor, &eye_pos);
 	}
 	if (!eye_pos.valid) {
-		eye_pos.count = 2;
-		eye_pos.eyes[0] = {-0.032f, 0.0f, 0.6f};
-		eye_pos.eyes[1] = { 0.032f, 0.0f, 0.6f};
+		// Use view_count from the active rendering mode for the fallback
+		uint32_t fallback_count = 2;
+		if (c->xdev != NULL && c->xdev->hmd != NULL) {
+			uint32_t idx = c->xdev->hmd->active_rendering_mode_index;
+			if (idx < c->xdev->rendering_mode_count) {
+				fallback_count = c->xdev->rendering_modes[idx].view_count;
+			}
+		}
+		if (fallback_count == 1) {
+			eye_pos.count = 1;
+			eye_pos.eyes[0] = {0.0f, 0.0f, 0.6f};
+		} else {
+			eye_pos.count = 2;
+			eye_pos.eyes[0] = {-0.032f, 0.0f, 0.6f};
+			eye_pos.eyes[1] = { 0.032f, 0.0f, 0.6f};
+		}
 	}
 
 	// Extract stereo pair for renderer (display processor still needs L/R)
