@@ -227,7 +227,10 @@ leia_dp_d3d12_process_atlas(struct xrt_display_processor_d3d12 *xdp,
 		cmd->SetGraphicsRootDescriptorTable(
 		    0, ldp->blit_srv_heap->GetGPUDescriptorHandleForHeapStart());
 
-		// Compute UV scale: map [0,1] to first tile in atlas
+		// Compute UV scale: sample the content region of the atlas.
+		// In 2D mode, the compositor renderer expands the mono viewport
+		// to fill the atlas (up to target dimensions), so the content
+		// occupies min(target, atlas) — not just view_width x view_height.
 		uint32_t atlas_w = tile_columns * view_width;
 		uint32_t atlas_h = tile_rows * view_height;
 		{
@@ -235,8 +238,10 @@ leia_dp_d3d12_process_atlas(struct xrt_display_processor_d3d12 *xdp,
 			atlas_w = static_cast<uint32_t>(desc.Width);
 			atlas_h = static_cast<uint32_t>(desc.Height);
 		}
-		float u_scale = (atlas_w > 0) ? (float)view_width / (float)atlas_w : 1.0f;
-		float v_scale = (atlas_h > 0) ? (float)view_height / (float)atlas_h : 1.0f;
+		uint32_t content_w = (target_width < atlas_w) ? target_width : atlas_w;
+		uint32_t content_h = (target_height < atlas_h) ? target_height : atlas_h;
+		float u_scale = (atlas_w > 0) ? (float)content_w / (float)atlas_w : 1.0f;
+		float v_scale = (atlas_h > 0) ? (float)content_h / (float)atlas_h : 1.0f;
 		uint32_t constants[4];
 		memcpy(&constants[0], &u_scale, sizeof(float));
 		memcpy(&constants[1], &v_scale, sizeof(float));
