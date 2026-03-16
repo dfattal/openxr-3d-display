@@ -1228,7 +1228,7 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 	c->own_window = nullptr;
 	c->owns_window = false;
 	c->app_hwnd = nullptr;
-	c->has_output_rect = false;
+	c->canvas = {};
 	c->hardware_display_3d = true;
 	c->last_3d_mode_index = 1;
 
@@ -1617,7 +1617,11 @@ comp_d3d11_compositor_set_output_rect(struct xrt_compositor *xc,
                                        uint32_t w, uint32_t h)
 {
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
-	c->canvas = (struct u_canvas_rect){.valid = true, .x = x, .y = y, .w = w, .h = h};
+	c->canvas.valid = true;
+	c->canvas.x = x;
+	c->canvas.y = y;
+	c->canvas.w = w;
+	c->canvas.h = h;
 }
 
 extern "C" bool
