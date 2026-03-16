@@ -213,10 +213,15 @@ leia_dp_d3d11_process_atlas(struct xrt_display_processor_d3d11 *xdp,
 			}
 		}
 
-		// UV scale: map [0,1] output to the first tile in the atlas
+		// UV scale: sample the content region of the atlas.
+		// In 2D mode, the compositor renderer expands the mono viewport
+		// to fill the atlas (up to target dimensions), so the content
+		// occupies min(target, atlas) — not just view_width x view_height.
+		uint32_t content_w = (target_width < atlas_w) ? target_width : atlas_w;
+		uint32_t content_h = (target_height < atlas_h) ? target_height : atlas_h;
 		struct { float u_scale; float v_scale; float pad0; float pad1; } cb_data;
-		cb_data.u_scale = (atlas_w > 0) ? (float)view_width / (float)atlas_w : 1.0f;
-		cb_data.v_scale = (atlas_h > 0) ? (float)view_height / (float)atlas_h : 1.0f;
+		cb_data.u_scale = (atlas_w > 0) ? (float)content_w / (float)atlas_w : 1.0f;
+		cb_data.v_scale = (atlas_h > 0) ? (float)content_h / (float)atlas_h : 1.0f;
 		cb_data.pad0 = 0.0f;
 		cb_data.pad1 = 0.0f;
 		ctx->UpdateSubresource(ldp->blit_cb, 0, NULL, &cb_data, 0, 0);
