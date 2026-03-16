@@ -156,7 +156,7 @@ The shared texture infrastructure already exists:
 2. **Platform-native multi compositor** -- D3D11 on Windows, Metal on macOS. Imports shared textures, renders 3D spatial scene with Level 2 Kooima, sends to weaver.
 3. **Eye position transform** -- runtime transforms raw eye positions into each window's local coordinate frame before providing to apps.
 4. **Spatial layout engine** -- position/orient window quads in 3D space relative to the display surface.
-5. **Input routing** -- gaze ray hit-test against window quads in 3D, route input to focused window.
+5. **Input routing** -- mouse ray hit-test against window quads in 3D (cyclopean eye through cursor on display), route input to focused window.
 6. **Window management protocol** -- OpenXR extension or IPC API for the shell (#44) to set window poses.
 7. **IPC/service mode** -- already exists (`src/xrt/ipc/`, 39 files), allows multiple app processes to connect to a single runtime.
 
