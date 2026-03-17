@@ -178,7 +178,7 @@ struct comp_d3d12_renderer
 	uint32_t tile_columns;
 	uint32_t tile_rows;
 
-	//! Actual atlas texture height (may be max of view_height and target_height).
+	//! Actual atlas texture height (tile_rows * view_height).
 	uint32_t texture_height;
 };
 
@@ -209,7 +209,7 @@ create_atlas_texture(struct comp_d3d12_renderer *r, ID3D12Device *device, uint32
 	D3D12_RESOURCE_DESC res_desc = {};
 	res_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 	res_desc.Width = r->tile_columns * width; // Atlas: tile_columns views across
-	res_desc.Height = r->tile_rows * height; // Atlas: tile_rows views tall
+	res_desc.Height = r->tile_rows * r->view_height; // Atlas: tile_rows views tall
 	res_desc.DepthOrArraySize = 1;
 	res_desc.MipLevels = 1;
 	res_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -448,11 +448,9 @@ comp_d3d12_renderer_create(struct comp_d3d12_compositor *c,
 		r->tile_rows = 1;
 	}
 
-	// Texture height must accommodate tile_rows * view_height for
-	// multi-row layouts, and at least target_height for mono fallback.
-	uint32_t atlas_h = r->tile_rows * view_height;
-	uint32_t min_h = (target_height > atlas_h) ? target_height : atlas_h;
-	r->texture_height = (min_h > view_height) ? min_h : view_height;
+	// Atlas height is exactly tile_rows * view_height — no target_height
+	// inflation, which would corrupt weaver UV mapping in 3D mode.
+	r->texture_height = r->tile_rows * view_height;
 
 	r->rtv_descriptor_size = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	r->srv_descriptor_size = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -487,7 +485,7 @@ comp_d3d12_renderer_create(struct comp_d3d12_compositor *c,
 	}
 
 	// Create stereo texture
-	xrt_result_t xret = create_atlas_texture(r, device, view_width, r->texture_height);
+	xrt_result_t xret = create_atlas_texture(r, device, view_width, view_height);
 	if (xret != XRT_SUCCESS) {
 		r->srv_heap->Release();
 		r->rtv_heap->Release();
@@ -927,12 +925,21 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 				        tile_x, tile_y, renderer->view_width, renderer->view_height);
 			}
 
+			// In mono/2D mode, clamp viewport to window dims (matching D3D11)
+			uint32_t vp_w = renderer->view_width;
+			uint32_t vp_h = renderer->view_height;
+			if (!hardware_display_3d) {
+				uint32_t atlas_w = renderer->tile_columns * renderer->view_width;
+				if (target_width < atlas_w) vp_w = target_width;
+				if (target_height < renderer->texture_height) vp_h = target_height;
+			}
+
 			// Set viewport and scissor to the tile rectangle
 			D3D12_VIEWPORT vp = {};
 			vp.TopLeftX = static_cast<float>(tile_x);
 			vp.TopLeftY = static_cast<float>(tile_y);
-			vp.Width = static_cast<float>(renderer->view_width);
-			vp.Height = static_cast<float>(renderer->view_height);
+			vp.Width = static_cast<float>(vp_w);
+			vp.Height = static_cast<float>(vp_h);
 			vp.MinDepth = 0.0f;
 			vp.MaxDepth = 1.0f;
 			cmd_list->RSSetViewports(1, &vp);
@@ -940,8 +947,8 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 			D3D12_RECT scissor = {};
 			scissor.left = tile_x;
 			scissor.top = tile_y;
-			scissor.right = tile_x + renderer->view_width;
-			scissor.bottom = tile_y + renderer->view_height;
+			scissor.right = tile_x + vp_w;
+			scissor.bottom = tile_y + vp_h;
 			cmd_list->RSSetScissorRects(1, &scissor);
 
 			// Bind SRV and root constants, draw fullscreen quad
@@ -956,12 +963,14 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 
 				vp.TopLeftX = static_cast<float>(dup_x);
 				vp.TopLeftY = static_cast<float>(dup_y);
+				vp.Width = static_cast<float>(vp_w);
+				vp.Height = static_cast<float>(vp_h);
 				cmd_list->RSSetViewports(1, &vp);
 
 				scissor.left = dup_x;
 				scissor.top = dup_y;
-				scissor.right = dup_x + renderer->view_width;
-				scissor.bottom = dup_y + renderer->view_height;
+				scissor.right = dup_x + vp_w;
+				scissor.bottom = dup_y + vp_h;
 				cmd_list->RSSetScissorRects(1, &scissor);
 
 				cmd_list->DrawInstanced(4, 1, 0, 0);
@@ -1068,9 +1077,7 @@ comp_d3d12_renderer_resize(struct comp_d3d12_renderer *renderer,
 		new_view_height = 64;
 	}
 
-	uint32_t atlas_h = renderer->tile_rows * new_view_height;
-	uint32_t min_h = (new_target_height > atlas_h) ? new_target_height : atlas_h;
-	uint32_t new_texture_height = (min_h > new_view_height) ? min_h : new_view_height;
+	uint32_t new_texture_height = renderer->tile_rows * new_view_height;
 
 	if (new_view_width == renderer->view_width &&
 	    new_view_height == renderer->view_height &&
@@ -1095,5 +1102,5 @@ comp_d3d12_renderer_resize(struct comp_d3d12_renderer *renderer,
 
 	// Recreate atlas texture with new dimensions
 	auto internals = get_internals(renderer->c);
-	return create_atlas_texture(renderer, internals->device, new_view_width, new_texture_height);
+	return create_atlas_texture(renderer, internals->device, new_view_width, new_view_height);
 }
