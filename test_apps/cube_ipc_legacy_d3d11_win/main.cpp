@@ -34,6 +34,7 @@
 #include "xr_session.h"
 
 #include <chrono>
+#include <cstdlib>
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
@@ -81,7 +82,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Force IPC mode — this app simulates a sandboxed/containerized client
     // (like Chrome WebXR) that must communicate via IPC to displayxr-service.
     // The runtime's hybrid mode checks XRT_FORCE_MODE before sandbox detection.
-    SetEnvironmentVariableA("XRT_FORCE_MODE", "ipc");
+    // Must use _putenv_s (CRT env) not SetEnvironmentVariableA (Win32 env),
+    // because the runtime reads via getenv() which uses the CRT copy.
+    _putenv_s("XRT_FORCE_MODE", "ipc");
 
     // Initialize logging
     if (!InitializeLogging(APP_NAME)) {
