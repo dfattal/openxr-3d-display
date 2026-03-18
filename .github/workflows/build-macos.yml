@@ -1,8 +1,11 @@
-name: Build macOS
+name: Build macOS (DISABLED)
 
 on:
   push:
     branches: [main, lightweight-runtime-ci]
+
+# Temporarily disabled to save CI minutes — building locally instead
+if: false
   pull_request:
 
 env:
