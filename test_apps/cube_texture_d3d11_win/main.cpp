@@ -120,6 +120,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_windowWidth = LOWORD(lParam);
             g_windowHeight = HIWORD(lParam);
             g_resizeNeeded = true;
+            // Update canvas immediately so the compositor/DP resize before next render
+            if (g_windowWidth > 0 && g_windowHeight > 0) {
+                g_canvasW = g_windowWidth / 2;
+                g_canvasH = g_windowHeight / 2;
+                if (g_xr && g_xr->pfnSetSharedTextureOutputRectEXT && g_xr->session != XR_NULL_HANDLE) {
+                    g_xr->pfnSetSharedTextureOutputRectEXT(g_xr->session,
+                        (int32_t)(g_windowWidth / 4), (int32_t)(g_windowHeight / 4),
+                        g_canvasW, g_canvasH);
+                }
+            }
         }
         return 0;
     case WM_ENTERSIZEMOVE:
@@ -692,7 +702,7 @@ static void RenderOneFrame(RenderState& rs) {
             }
 
             // Resize app swap chain if window size changed
-            if (g_resizeNeeded && !g_inSizeMove && rs.appSwapchain) {
+            if (g_resizeNeeded && rs.appSwapchain) {
                 g_resizeNeeded = false;
                 rs.appBackBufferRTV.Reset();
                 HRESULT hr = rs.appSwapchain->ResizeBuffers(0, g_windowWidth, g_windowHeight,
