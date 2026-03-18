@@ -4,8 +4,6 @@ on:
   push:
     branches: [main, lightweight-runtime-ci]
 
-# Temporarily disabled to save CI minutes — building locally instead
-if: false
   pull_request:
 
 env:
@@ -14,6 +12,8 @@ env:
 
 jobs:
   build:
+    # Temporarily disabled to save CI minutes — building locally instead
+    if: false
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
