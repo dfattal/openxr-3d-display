@@ -496,15 +496,61 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                         glDisable(GL_DEPTH_TEST);
                                         glDisable(GL_SCISSOR_TEST);
                                         glDisable(GL_CULL_FACE);
-                                        glUseProgram_(diag_prog);
-                                        glBindVertexArray_(diag_vao);
-                                        glDrawArrays(GL_TRIANGLES, 0, 3);
-                                        GLenum derr = glGetError();
+
                                         if (diag_frame < 5) {
-                                            uint8_t px[4] = {0};
-                                            glReadPixels(tileW/2, tileH/2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
-                                            LOG_INFO("DIAG-DRAW[%d]: after triangle px=(%u,%u,%u,%u) err=0x%x",
-                                                     diag_frame, px[0], px[1], px[2], px[3], derr);
+                                            // Test A: inline shader + inline VAO (known working)
+                                            glUseProgram_(diag_prog);
+                                            glBindVertexArray_(diag_vao);
+                                            glDrawArrays(GL_TRIANGLES, 0, 3);
+                                            uint8_t pxA[4] = {0};
+                                            glReadPixels(tileW/2, tileH/2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pxA);
+
+                                            // Clear back to blue for next test
+                                            glClearColor(0.05f, 0.05f, 0.25f, 1.0f);
+                                            glClear(GL_COLOR_BUFFER_BIT);
+
+                                            // Test B: gl_renderer's cubeProgram + gl_renderer's cubeVAO
+                                            glUseProgram_(glRenderer.cubeProgram);
+                                            glBindVertexArray_(glRenderer.cubeVAO);
+                                            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_SHORT, 0);
+                                            GLenum errB = glGetError();
+                                            uint8_t pxB[4] = {0};
+                                            glReadPixels(tileW/2, tileH/2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pxB);
+
+                                            // Clear back to blue for next test
+                                            glClearColor(0.05f, 0.05f, 0.25f, 1.0f);
+                                            glClear(GL_COLOR_BUFFER_BIT);
+
+                                            // Test C: inline shader + gl_renderer's cubeVAO
+                                            glUseProgram_(diag_prog);
+                                            glBindVertexArray_(glRenderer.cubeVAO);
+                                            glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_SHORT, 0);
+                                            GLenum errC = glGetError();
+                                            uint8_t pxC[4] = {0};
+                                            glReadPixels(tileW/2, tileH/2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pxC);
+
+                                            // Query gl_renderer object IDs and state
+                                            GLint boundProg = 0, boundVAO = 0, boundEBO = 0;
+                                            glBindVertexArray_(glRenderer.cubeVAO);
+                                            glGetIntegerv(GL_CURRENT_PROGRAM, &boundProg);
+                                            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &boundVAO);
+                                            glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &boundEBO);
+
+                                            LOG_INFO("DIAG-MIX[%d]: A(inline)=(%u,%u,%u,%u) "
+                                                     "B(renderer prog+vao)=(%u,%u,%u,%u)/err=0x%x "
+                                                     "C(inline+renderer vao)=(%u,%u,%u,%u)/err=0x%x "
+                                                     "prog=%u vao=%u ebo=%u boundVAO=%d boundEBO=%d",
+                                                     diag_frame,
+                                                     pxA[0], pxA[1], pxA[2], pxA[3],
+                                                     pxB[0], pxB[1], pxB[2], pxB[3], errB,
+                                                     pxC[0], pxC[1], pxC[2], pxC[3], errC,
+                                                     glRenderer.cubeProgram, glRenderer.cubeVAO,
+                                                     glRenderer.cubeEBO, boundVAO, boundEBO);
+                                        } else {
+                                            // After first 5 frames, just draw inline triangle
+                                            glUseProgram_(diag_prog);
+                                            glBindVertexArray_(diag_vao);
+                                            glDrawArrays(GL_TRIANGLES, 0, 3);
                                         }
                                         glBindVertexArray_(0);
                                         glUseProgram_(0);
