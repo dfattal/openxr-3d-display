@@ -893,11 +893,12 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 				        (void *)src_resource, img_index, (void *)xscn);
 			}
 
-			// Transition swapchain image: RENDER_TARGET → PIXEL_SHADER_RESOURCE
+			// Transition swapchain image: COMMON → PIXEL_SHADER_RESOURCE
+			// The app leaves the resource in COMMON after rendering.
 			D3D12_RESOURCE_BARRIER src_barrier = {};
 			src_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 			src_barrier.Transition.pResource = src_resource;
-			src_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			src_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
 			src_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			src_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 			cmd_list->ResourceBarrier(1, &src_barrier);
@@ -1018,9 +1019,9 @@ comp_d3d12_renderer_draw(struct comp_d3d12_renderer *renderer,
 				cmd_list->DrawInstanced(4, 1, 0, 0);
 			}
 
-			// Transition swapchain image back: PIXEL_SHADER_RESOURCE → RENDER_TARGET
+			// Transition swapchain image back: PIXEL_SHADER_RESOURCE → COMMON
 			src_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-			src_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			src_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
 			cmd_list->ResourceBarrier(1, &src_barrier);
 		}
 	}
