@@ -321,6 +321,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         LOG_INFO("Enumerated %u OpenGL swapchain images", count);
     }
 
+    // DIAGNOSTIC + FIX: ensure app's GL context is current before creating
+    // GL resources (VAOs, shaders, etc.). The compositor may have left its own
+    // context current after xrCreateSession/xrCreateSwapchain.
+    {
+        HGLRC curCtx = wglGetCurrentContext();
+        HDC curDC = wglGetCurrentDC();
+        LOG_INFO("PRE-INIT GL context: cur=%p (app=%p) dc=%p (app=%p) %s",
+                 (void*)curCtx, (void*)hGLRC, (void*)curDC, (void*)hDC,
+                 (curCtx == hGLRC) ? "MATCH" : "MISMATCH - forcing restore!");
+        if (curCtx != hGLRC) {
+            wglMakeCurrent(hDC, hGLRC);
+            LOG_INFO("Restored app GL context: %p on dc %p", (void*)hGLRC, (void*)hDC);
+        }
+    }
+
     // Initialize GL renderer (shaders, geometry)
     GLRenderer glRenderer = {};
     if (!InitializeGLRenderer(glRenderer)) {
@@ -433,6 +448,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                     tileW, tileH,
                                     viewMatrix, projMatrix,
                                     1.0f);
+
+                                // DIAGNOSTIC: overwrite eye 0 with green to test if
+                                // FBO draws work at all (separate from VAO/shader draw)
+                                if (eye == 0) {
+                                    static int green_test = 0;
+                                    if (green_test < 30) {
+                                        glBindFramebuffer_(GL_FRAMEBUFFER, glRenderer.fbos[imageIndex]);
+                                        glViewport(tileX * tileW, tileY * tileH, tileW, tileH);
+                                        glScissor(tileX * tileW, tileY * tileH, tileW, tileH);
+                                        glEnable(GL_SCISSOR_TEST);
+                                        glClearColor(0.0f, 1.0f, 0.0f, 1.0f); // GREEN
+                                        glClear(GL_COLOR_BUFFER_BIT);
+                                        glBindFramebuffer_(GL_FRAMEBUFFER, 0);
+                                        green_test++;
+                                    }
+                                }
 
                                 // Set up projection view for this eye
                                 projectionViews[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
