@@ -955,6 +955,15 @@ void RenderScene(
         cmdList->DrawInstanced(renderer.gridVertexCount, 1, 0, 0);
     }
 
+    // DIAGNOSTIC: Green square at center to verify command list executes past draws
+    {
+        float greenColor[4] = {0.0f, 1.0f, 0.0f, 1.0f};
+        uint32_t cx = viewportX + width / 2 - 50;
+        uint32_t cy = viewportY + height / 2 - 50;
+        D3D12_RECT greenRect = { (LONG)cx, (LONG)cy, (LONG)(cx + 100), (LONG)(cy + 100) };
+        cmdList->ClearRenderTargetView(rtvHandle, greenColor, 1, &greenRect);
+    }
+
     // Transition render target back
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
