@@ -435,16 +435,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                     viewMatrix, projMatrix,
                                     1.0f, 1.6f, -2.0f, 0.3f);
 
-                                // One-shot: log stereo separation
+                                // One-shot: log stereo — raw eye pos vs view matrix
                                 {
                                     static int stereo_log = 0;
                                     if (stereo_log < 4) {
-                                        XMFLOAT4X4 vm;
+                                        XMFLOAT4X4 vm, pm;
                                         XMStoreFloat4x4(&vm, viewMatrix);
-                                        LOG_INFO("STEREO eye=%u viewX=%.6f tile=(%u,%u)+(%u,%u) rect=(%d,%d)+(%d,%d)",
-                                                 eye, vm._41, tileX, tileY, tileW, tileH,
-                                                 (int)(tileX * tileW), (int)(tileY * tileH),
-                                                 (int)tileW, (int)tileH);
+                                        XMStoreFloat4x4(&pm, projMatrix);
+                                        LOG_INFO("STEREO eye=%u rawEye=(%.4f,%.4f,%.4f) "
+                                                 "viewRow3=(%.6f,%.6f,%.6f) proj31=%.6f "
+                                                 "fov=(%.4f,%.4f,%.4f,%.4f)",
+                                                 eye,
+                                                 xr.eyePositions[eye][0], xr.eyePositions[eye][1], xr.eyePositions[eye][2],
+                                                 vm._41, vm._42, vm._43,
+                                                 pm._31,
+                                                 rawViews[eye].fov.angleLeft, rawViews[eye].fov.angleRight,
+                                                 rawViews[eye].fov.angleUp, rawViews[eye].fov.angleDown);
                                         stereo_log++;
                                     }
                                 }
