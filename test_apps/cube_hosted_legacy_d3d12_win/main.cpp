@@ -251,18 +251,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                 XMMATRIX viewMatrix = xr.viewMatrices[eye];
                                 XMMATRIX projMatrix = xr.projMatrices[eye];
 
-                                // XR LOCAL space origin is at the floor. The D3D12 renderer
-                                // hardcodes the cube at (0, 0.03, 0). Apply a world offset
-                                // to place it at eye level 2m forward: (0, 1.6, -2.0),
-                                // matching the D3D11 hosted legacy app's cube placement.
-                                XMMATRIX worldOffset = XMMatrixTranslation(0.0f, 1.57f, -2.0f);
-                                XMMATRIX adjustedView = worldOffset * viewMatrix;
-
+                                // 0.3m cube at eye level (y=1.6m), 2m in front (z=-2m)
+                                // Matches D3D11 hosted legacy app placement
                                 RenderScene(renderer, swapchainTexture, (int)imageIndex,
                                     tileX * tileW, tileY * tileH,
                                     tileW, tileH,
-                                    adjustedView, projMatrix,
-                                    1.0f, eye == 0);
+                                    viewMatrix, projMatrix,
+                                    1.0f, eye == 0,
+                                    1.6f, -2.0f, 0.3f);
 
                                 projectionViews[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
                                 projectionViews[eye].subImage.swapchain = xr.swapchain.swapchain;
