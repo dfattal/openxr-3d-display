@@ -822,7 +822,10 @@ void RenderScene(
     const XMMATRIX& viewMatrix,
     const XMMATRIX& projMatrix,
     float zoomScale,
-    bool clear
+    bool clear,
+    float cubeHeight,
+    float cubeZ,
+    float cubeSize
 ) {
     HRESULT hr;
 
@@ -899,13 +902,11 @@ void RenderScene(
     // cancel the effect. Keeps the viewport center fixed on screen.
     XMMATRIX zoom = XMMatrixScaling(zoomScale, zoomScale, 1.0f);
 
-    // Draw cube - base rests on grid at y=0
+    // Draw cube
     {
-        const float cubeSize = 0.06f;
-        const float cubeHeight = cubeSize / 2.0f;
         XMMATRIX cubeScale = XMMatrixScaling(cubeSize, cubeSize, cubeSize);
         XMMATRIX cubeRot = XMMatrixRotationY(renderer.cubeRotation);
-        XMMATRIX cubeTrans = XMMatrixTranslation(0.0f, cubeHeight, 0.0f);
+        XMMATRIX cubeTrans = XMMatrixTranslation(0.0f, cubeHeight, cubeZ);
         XMMATRIX cubeWVP = cubeRot * cubeScale * cubeTrans * viewMatrix * zoom * projMatrix;
 
         // Diagnostic: log cube clip-space position (first 3 frames)

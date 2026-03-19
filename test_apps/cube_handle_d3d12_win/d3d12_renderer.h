@@ -102,7 +102,10 @@ void RenderScene(
     const DirectX::XMMATRIX& viewMatrix,
     const DirectX::XMMATRIX& projMatrix,
     float zoomScale = 1.0f,
-    bool clear = true
+    bool clear = true,
+    float cubeHeight = 0.03f,
+    float cubeZ = 0.0f,
+    float cubeSize = 0.06f
 );
 
 // Wait for GPU to finish
