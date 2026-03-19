@@ -908,6 +908,26 @@ void RenderScene(
         XMMATRIX cubeTrans = XMMatrixTranslation(0.0f, cubeHeight, 0.0f);
         XMMATRIX cubeWVP = cubeRot * cubeScale * cubeTrans * viewMatrix * zoom * projMatrix;
 
+        // Diagnostic: log cube clip-space position (first 3 frames)
+        if (renderDiag) {
+            XMVECTOR cubeCenter = XMVector4Transform(
+                XMVectorSet(0.0f, cubeHeight, 0.0f, 1.0f),
+                viewMatrix * zoom * projMatrix);
+            XMFLOAT4 cc;
+            XMStoreFloat4(&cc, cubeCenter);
+            XMFLOAT4X4 vm, pm;
+            XMStoreFloat4x4(&vm, viewMatrix);
+            XMStoreFloat4x4(&pm, projMatrix);
+            LOG_INFO("RenderScene eye: cubeClip=(%.3f,%.3f,%.3f,%.3f) ndc=(%.3f,%.3f,%.3f) "
+                     "view[3]=(%.3f,%.3f,%.3f) proj[0][0]=%.3f proj[1][1]=%.3f",
+                     cc.x, cc.y, cc.z, cc.w,
+                     cc.w != 0 ? cc.x/cc.w : 999.f,
+                     cc.w != 0 ? cc.y/cc.w : 999.f,
+                     cc.w != 0 ? cc.z/cc.w : 999.f,
+                     vm._41, vm._42, vm._43,
+                     pm._11, pm._22);
+        }
+
         D3D12ConstantBuffer cb;
         XMStoreFloat4x4(&cb.worldViewProj, cubeWVP);
         cb.color = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
