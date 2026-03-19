@@ -1395,28 +1395,6 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 		}
 
-		// Cache eye positions AFTER process_atlas (which updates the SR weaver's
-		// eye tracker). xrLocateViews calls get_predicted_eye_positions BEFORE
-		// layer_commit, so it needs cached data from the previous frame.
-		if (c->display_processor != NULL) {
-			struct xrt_eye_positions fresh_eyes = {0};
-			bool fresh_ok = xrt_display_processor_gl_get_predicted_eye_positions(
-			        c->display_processor, &fresh_eyes);
-			static int cache_log = 0;
-			if (cache_log < 5) {
-				U_LOG_W("EYE-CACHE[%d]: ok=%d valid=%d count=%d "
-				        "e0=(%.4f,%.4f,%.4f) e1=(%.4f,%.4f,%.4f)",
-				        cache_log, fresh_ok, fresh_eyes.valid, fresh_eyes.count,
-				        fresh_eyes.eyes[0].x, fresh_eyes.eyes[0].y, fresh_eyes.eyes[0].z,
-				        fresh_eyes.eyes[1].x, fresh_eyes.eyes[1].y, fresh_eyes.eyes[1].z);
-				cache_log++;
-			}
-			if (fresh_ok && fresh_eyes.valid) {
-				c->cached_eye_pos = fresh_eyes;
-				c->have_cached_eye_pos = true;
-			}
-		}
-
 		// HUD overlay (post-weave, before swap)
 		if (c->owns_window) {
 			gl_compositor_render_hud(c, dt, present_w, present_h);
@@ -1433,6 +1411,28 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 #elif defined(__APPLE__)
 		comp_gl_window_macos_swap_buffers(c->macos_window);
 #endif
+	}
+
+	// Cache eye positions AFTER process_atlas (which updates the SR weaver's
+	// eye tracker). xrLocateViews calls get_predicted_eye_positions BEFORE
+	// layer_commit, so it needs cached data from the previous frame.
+	if (c->display_processor != NULL) {
+		struct xrt_eye_positions fresh_eyes = {0};
+		bool fresh_ok = xrt_display_processor_gl_get_predicted_eye_positions(
+		        c->display_processor, &fresh_eyes);
+		static int cache_log = 0;
+		if (cache_log < 5) {
+			U_LOG_W("EYE-CACHE[%d]: ok=%d valid=%d count=%d "
+			        "e0=(%.4f,%.4f,%.4f) e1=(%.4f,%.4f,%.4f)",
+			        cache_log, fresh_ok, fresh_eyes.valid, fresh_eyes.count,
+			        fresh_eyes.eyes[0].x, fresh_eyes.eyes[0].y, fresh_eyes.eyes[0].z,
+			        fresh_eyes.eyes[1].x, fresh_eyes.eyes[1].y, fresh_eyes.eyes[1].z);
+			cache_log++;
+		}
+		if (fresh_ok && fresh_eyes.valid) {
+			c->cached_eye_pos = fresh_eyes;
+			c->have_cached_eye_pos = true;
+		}
 	}
 
 	glBindVertexArray(0);
@@ -1821,24 +1821,24 @@ comp_gl_compositor_get_predicted_eye_positions(struct xrt_compositor *xc,
 
 	struct comp_gl_compositor *c = gl_comp(xc);
 
-	// Return cached eye positions from last layer_commit (AFTER process_atlas).
-	// The SR GL weaver only has real eye tracking data after process_atlas runs.
-	// xrLocateViews is called BEFORE layer_commit, so the cache provides
-	// one-frame-delayed tracking (same latency as D3D11/D3D12/VK).
-	if (c->have_cached_eye_pos) {
-		*out_eye_pos = c->cached_eye_pos;
-		// Safety net: if both eyes have identical X (no stereo separation),
-		// return false so the state tracker uses the nominal IPD fallback.
-		if (out_eye_pos->count >= 2 &&
-		    fabsf(out_eye_pos->eyes[0].x - out_eye_pos->eyes[1].x) < 0.001f) {
-			return false;
+	// Simple live query — same as D3D11/D3D12/VK compositors.
+	if (c->display_processor != NULL) {
+		bool ok = xrt_display_processor_gl_get_predicted_eye_positions(
+		    c->display_processor, out_eye_pos);
+		static int eye_log = 0;
+		if (eye_log < 10) {
+			U_LOG_W("GL-EYE-QUERY[%d]: ok=%d valid=%d count=%d "
+			        "e0=(%.4f,%.4f,%.4f) e1=(%.4f,%.4f,%.4f)",
+			        eye_log, ok, out_eye_pos->valid, out_eye_pos->count,
+			        out_eye_pos->eyes[0].x, out_eye_pos->eyes[0].y, out_eye_pos->eyes[0].z,
+			        out_eye_pos->eyes[1].x, out_eye_pos->eyes[1].y, out_eye_pos->eyes[1].z);
+			eye_log++;
 		}
-		return true;
+		if (ok && out_eye_pos->valid) {
+			return true;
+		}
 	}
 
-	// First frame: no cache yet. Return false to trigger nominal IPD
-	// fallback in the state tracker (the live DP query would return
-	// nominal defaults without stereo separation before process_atlas).
 	return false;
 }
 
