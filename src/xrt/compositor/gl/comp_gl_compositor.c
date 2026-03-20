@@ -2128,9 +2128,17 @@ comp_gl_compositor_create(struct xrt_device *xdev,
 #endif
 
 	// Create display processor via factory.
+	// For hosted apps (no external window), use the compositor's own window
+	// so the SR SDK GL weaver gets a valid HWND.
 	if (dp_factory_gl != NULL) {
+		void *dp_window = window_handle;
+#ifdef XRT_OS_WINDOWS
+		if (dp_window == NULL && c->hwnd != NULL) {
+			dp_window = (void *)c->hwnd;
+		}
+#endif
 		xrt_dp_factory_gl_fn_t factory = (xrt_dp_factory_gl_fn_t)dp_factory_gl;
-		xrt_result_t dp_ret = factory(window_handle, &c->display_processor);
+		xrt_result_t dp_ret = factory(dp_window, &c->display_processor);
 		if (dp_ret == XRT_SUCCESS && c->display_processor != NULL) {
 			U_LOG_W("GL compositor: display processor created via factory");
 		} else {
