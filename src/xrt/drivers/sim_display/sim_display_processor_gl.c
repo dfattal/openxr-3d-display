@@ -222,8 +222,12 @@ sim_dp_gl_process_atlas(struct xrt_display_processor_gl *xdp,
 	struct sim_display_processor_gl *sdp = sim_dp_gl(xdp);
 	(void)format;
 
-	// Read the current mode (may change at runtime via 1/2/3 keys)
+	// Read the current mode (may change at runtime via 1/2/3 keys).
+	// Single-view input forces passthrough — stereo shaders need ≥2 views.
 	enum sim_display_output_mode mode = sim_display_get_output_mode();
+	if (tile_columns * tile_rows <= 1) {
+		mode = SIM_DISPLAY_OUTPUT_PASSTHROUGH;
+	}
 	GLuint active_program = sdp->programs[mode];
 	if (active_program == 0) {
 		return;

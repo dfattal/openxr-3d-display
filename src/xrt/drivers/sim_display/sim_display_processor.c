@@ -106,8 +106,12 @@ sim_dp_process_atlas(struct xrt_display_processor *xdp,
 	struct sim_display_processor *sdp = sim_display_processor(xdp);
 	struct vk_bundle *vk = sdp->vk;
 
-	// Read the current mode (may change at runtime via 1/2/3 keys)
+	// Read the current mode (may change at runtime via 1/2/3 keys).
+	// Single-view input forces passthrough — stereo shaders need ≥2 views.
 	enum sim_display_output_mode mode = sim_display_get_output_mode();
+	if (tile_columns * tile_rows <= 1) {
+		mode = SIM_DISPLAY_OUTPUT_PASSTHROUGH;
+	}
 	VkPipeline active_pipeline = sdp->pipelines[mode];
 
 	if (vk == NULL || active_pipeline == VK_NULL_HANDLE) {
