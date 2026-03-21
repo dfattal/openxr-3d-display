@@ -405,6 +405,13 @@ Key design points:
   `tile_rows == 1`).  How each vendor achieves this is implementation-defined —
   shader pipeline, native blit API, or weaver passthrough are all valid approaches.
   The spec mandates correct output, not a specific mechanism.
+- **Atlas dimension guarantee**: The atlas texture passed to `process_atlas()` is
+  **guaranteed to be exactly** `tile_columns * view_width × tile_rows * view_height`
+  in size. Vendors should use `1.0 / tile_columns` and `1.0 / tile_rows` for UV
+  scaling — no need to query actual texture dimensions. The tiling layout matches
+  the mode definition: if a mode declares `tile_columns=2, tile_rows=1`, the atlas
+  will be SBS. This is a compositor responsibility (crop-blit); DP implementations
+  need not handle oversized or mismatched textures.
 
 **Helper functions** for safe calling:
 

@@ -8,10 +8,10 @@
  * The display processor owns the leiasr_d3d11 handle — it creates it
  * via the factory function and destroys it on cleanup.
  *
- * The SR SDK weaver expects side-by-side (SBS) stereo input. When the
- * compositor's atlas uses a different tiling layout (e.g. vertical stacking
- * with tile_columns=1, tile_rows=2), this DP rearranges the atlas into
- * SBS format via CopySubresourceRegion before passing to the weaver.
+ * The SR SDK weaver expects side-by-side (SBS) stereo input. The Leia
+ * device defines its 3D mode as tile_columns=2, tile_rows=1, so the
+ * compositor always delivers SBS. The compositor crop-blit guarantees
+ * the atlas texture dimensions match exactly 2*view_width x view_height.
  *
  * @author David Fattal
  * @ingroup drv_leia
@@ -70,15 +70,7 @@ struct leia_display_processor_d3d11_impl
 	struct xrt_display_processor_d3d11 base;
 	struct leiasr_d3d11 *leiasr; //!< Owned — destroyed in leia_dp_d3d11_destroy.
 
-	//! @name SBS staging resources for non-SBS atlas layouts
-	//! @{
-	ID3D11Device *device;              //!< Cached device reference (not owned).
-	ID3D11Texture2D *sbs_texture;      //!< Staging SBS texture (lazy-created).
-	ID3D11ShaderResourceView *sbs_srv; //!< SRV for sbs_texture.
-	uint32_t sbs_width;                //!< Current staging texture width.
-	uint32_t sbs_height;               //!< Current staging texture height.
-	DXGI_FORMAT sbs_format;            //!< Current staging texture format.
-	//! @}
+	ID3D11Device *device;              //!< Cached device reference (not owned, for blit init).
 
 	//! @name 2D blit shader resources (passthrough stretch-blit)
 	//! @{
@@ -95,72 +87,6 @@ static inline struct leia_display_processor_d3d11_impl *
 leia_dp_d3d11(struct xrt_display_processor_d3d11 *xdp)
 {
 	return (struct leia_display_processor_d3d11_impl *)xdp;
-}
-
-
-/*!
- * Ensure the SBS staging texture exists with the right dimensions/format.
- * Returns true if the staging texture is ready to use.
- */
-static bool
-ensure_sbs_staging(struct leia_display_processor_d3d11_impl *ldp,
-                   uint32_t view_width,
-                   uint32_t view_height,
-                   DXGI_FORMAT format)
-{
-	uint32_t sbs_w = 2 * view_width;
-	uint32_t sbs_h = view_height;
-
-	if (ldp->sbs_texture != NULL && ldp->sbs_width == sbs_w &&
-	    ldp->sbs_height == sbs_h && ldp->sbs_format == format) {
-		return true;
-	}
-
-	// Release old resources
-	if (ldp->sbs_srv != NULL) {
-		ldp->sbs_srv->Release();
-		ldp->sbs_srv = NULL;
-	}
-	if (ldp->sbs_texture != NULL) {
-		ldp->sbs_texture->Release();
-		ldp->sbs_texture = NULL;
-	}
-
-	if (ldp->device == NULL) {
-		return false;
-	}
-
-	D3D11_TEXTURE2D_DESC desc = {};
-	desc.Width = sbs_w;
-	desc.Height = sbs_h;
-	desc.MipLevels = 1;
-	desc.ArraySize = 1;
-	desc.Format = format;
-	desc.SampleDesc.Count = 1;
-	desc.Usage = D3D11_USAGE_DEFAULT;
-	desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-	HRESULT hr = ldp->device->CreateTexture2D(&desc, NULL, &ldp->sbs_texture);
-	if (FAILED(hr)) {
-		U_LOG_E("Leia D3D11 DP: failed to create SBS staging texture (%ux%u): 0x%08x",
-		        sbs_w, sbs_h, (unsigned)hr);
-		return false;
-	}
-
-	hr = ldp->device->CreateShaderResourceView(ldp->sbs_texture, NULL, &ldp->sbs_srv);
-	if (FAILED(hr)) {
-		U_LOG_E("Leia D3D11 DP: failed to create SBS staging SRV: 0x%08x", (unsigned)hr);
-		ldp->sbs_texture->Release();
-		ldp->sbs_texture = NULL;
-		return false;
-	}
-
-	ldp->sbs_width = sbs_w;
-	ldp->sbs_height = sbs_h;
-	ldp->sbs_format = format;
-
-	U_LOG_I("Leia D3D11 DP: created SBS staging texture %ux%u", sbs_w, sbs_h);
-	return true;
 }
 
 
@@ -193,30 +119,10 @@ leia_dp_d3d11_process_atlas(struct xrt_display_processor_d3d11 *xdp,
 
 		ID3D11ShaderResourceView *srv = static_cast<ID3D11ShaderResourceView *>(atlas_srv);
 
-		// Get actual atlas texture dimensions for correct UV scaling
+		// Atlas is guaranteed content-sized by compositor crop-blit.
+		// In 2D mode, content occupies min(target, atlas) of the atlas.
 		uint32_t atlas_w = tile_columns * view_width;
 		uint32_t atlas_h = tile_rows * view_height;
-		{
-			ID3D11Resource *res = NULL;
-			srv->GetResource(&res);
-			if (res != NULL) {
-				ID3D11Texture2D *tex = NULL;
-				if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D),
-				                                  reinterpret_cast<void **>(&tex)))) {
-					D3D11_TEXTURE2D_DESC desc;
-					tex->GetDesc(&desc);
-					atlas_w = desc.Width;
-					atlas_h = desc.Height;
-					tex->Release();
-				}
-				res->Release();
-			}
-		}
-
-		// UV scale: sample the content region of the atlas.
-		// In 2D mode, the compositor renderer expands the mono viewport
-		// to fill the atlas (up to target dimensions), so the content
-		// occupies min(target, atlas) — not just view_width x view_height.
 		uint32_t content_w = (target_width < atlas_w) ? target_width : atlas_w;
 		uint32_t content_h = (target_height < atlas_h) ? target_height : atlas_h;
 		struct { float u_scale; float v_scale; float pad0; float pad1; } cb_data;
@@ -251,75 +157,9 @@ leia_dp_d3d11_process_atlas(struct xrt_display_processor_d3d11 *xdp,
 		return;
 	}
 
-	void *weaver_srv = atlas_srv;
-	uint32_t weaver_view_width = view_width;
-
-	// Check if the atlas texture matches the expected SBS dimensions.
-	// The SR SDK weaver assumes the SBS texture is exactly 2*view_width x view_height.
-	// When the atlas is oversized (e.g. legacy apps render at compromise scale into
-	// a full-native-height atlas), we must copy to a correctly-sized staging texture.
-	bool needs_staging = (tile_columns != 2 || tile_rows != 1);
-	if (!needs_staging) {
-		// Atlas is SBS-shaped, but check if texture is oversized
-		ID3D11Resource *atlas_res = NULL;
-		static_cast<ID3D11ShaderResourceView *>(atlas_srv)->GetResource(&atlas_res);
-		if (atlas_res != NULL) {
-			ID3D11Texture2D *atlas_tex = NULL;
-			if (SUCCEEDED(atlas_res->QueryInterface(__uuidof(ID3D11Texture2D),
-			                                        reinterpret_cast<void **>(&atlas_tex)))) {
-				D3D11_TEXTURE2D_DESC desc;
-				atlas_tex->GetDesc(&desc);
-				if (desc.Width != 2 * view_width || desc.Height != view_height) {
-					needs_staging = true;
-					static bool logged = false;
-					if (!logged) {
-						U_LOG_W("Leia D3D11 DP: atlas %ux%u != expected SBS %ux%u, using staging copy",
-						        desc.Width, desc.Height, 2 * view_width, view_height);
-						logged = true;
-					}
-				}
-				atlas_tex->Release();
-			}
-			atlas_res->Release();
-		}
-	}
-
-	if (needs_staging) {
-		DXGI_FORMAT dxgi_format = static_cast<DXGI_FORMAT>(format);
-		if (!ensure_sbs_staging(ldp, view_width, view_height, dxgi_format)) {
-			// Fallback: pass atlas as-is (will look wrong but won't crash)
-			goto do_weave;
-		}
-
-		// Get the atlas texture resource from the SRV
-		ID3D11Resource *atlas_resource = NULL;
-		static_cast<ID3D11ShaderResourceView *>(atlas_srv)->GetResource(&atlas_resource);
-
-		// Copy each view from tiled position to SBS position
-		for (uint32_t i = 0; i < 2; i++) {
-			uint32_t src_x = (i % tile_columns) * view_width;
-			uint32_t src_y = (i / tile_columns) * view_height;
-			uint32_t dst_x = i * view_width;
-
-			D3D11_BOX src_box;
-			src_box.left = src_x;
-			src_box.top = src_y;
-			src_box.front = 0;
-			src_box.right = src_x + view_width;
-			src_box.bottom = src_y + view_height;
-			src_box.back = 1;
-
-			ctx->CopySubresourceRegion(ldp->sbs_texture, 0, dst_x, 0, 0,
-			                           atlas_resource, 0, &src_box);
-		}
-
-		atlas_resource->Release();
-		weaver_srv = ldp->sbs_srv;
-	}
-
-do_weave:
-	// Set input texture for weaving
-	leiasr_d3d11_set_input_texture(ldp->leiasr, weaver_srv, view_width, view_height, format);
+	// Atlas is guaranteed content-sized SBS (2*view_width x view_height)
+	// by compositor crop-blit. Pass directly to weaver.
+	leiasr_d3d11_set_input_texture(ldp->leiasr, atlas_srv, view_width, view_height, format);
 
 	D3D11_VIEWPORT viewport = {};
 	viewport.TopLeftX = 0.0f;
@@ -429,13 +269,6 @@ leia_dp_d3d11_destroy(struct xrt_display_processor_d3d11 *xdp)
 	}
 	if (ldp->blit_cb != NULL) {
 		ldp->blit_cb->Release();
-	}
-
-	if (ldp->sbs_srv != NULL) {
-		ldp->sbs_srv->Release();
-	}
-	if (ldp->sbs_texture != NULL) {
-		ldp->sbs_texture->Release();
 	}
 
 	if (ldp->leiasr != NULL) {
