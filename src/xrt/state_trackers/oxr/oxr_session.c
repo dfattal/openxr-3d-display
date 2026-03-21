@@ -1227,6 +1227,29 @@ oxr_session_locate_views(struct oxr_logger *log,
 			}
 		}
 
+		// Legacy apps in 2D mode: override both eye positions to center.
+		// The compositor crops to the left view, so it must be rendered
+		// from center eye (matching the 2D mode's single-view spec).
+		if (have_eye_positions && eye_count >= 2 &&
+		    sess->sys->xsysc != NULL &&
+		    sess->sys->xsysc->info.legacy_app_tile_scaling) {
+			struct xrt_device *head_dev = GET_XDEV_BY_ROLE(sess->sys, head);
+			if (head_dev != NULL && head_dev->hmd != NULL) {
+				uint32_t midx = head_dev->hmd->active_rendering_mode_index;
+				if (midx < head_dev->rendering_mode_count &&
+				    head_dev->rendering_modes[midx].view_count == 1) {
+					struct xrt_eye_position center = {
+					    (adj_eyes[0].x + adj_eyes[1].x) * 0.5f,
+					    (adj_eyes[0].y + adj_eyes[1].y) * 0.5f,
+					    (adj_eyes[0].z + adj_eyes[1].z) * 0.5f,
+					};
+					for (uint32_t ei = 0; ei < eye_count; ei++) {
+						adj_eyes[ei] = center;
+					}
+				}
+			}
+		}
+
 		if (have_eye_positions) {
 			float screen_width_m = 0.0f;
 			float screen_height_m = 0.0f;

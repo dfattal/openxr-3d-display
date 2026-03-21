@@ -365,9 +365,15 @@ qwerty_process_macos(struct xrt_device **xdevs,
 
 		case kVK_ANSI_V:
 			if (qsys->hmd_focused) {
-				// HMD focused: cycle through rendering modes (unified)
-				if (is_down && ![event isARepeat])
+				// HMD focused: toggle 2D/3D AND cycle rendering mode.
+				// The compositor processes toggle first (all apps), then
+				// mode cycling (extension apps only — gated by legacy flag).
+				// Legacy apps: only the toggle fires (2D/3D).
+				// Extension apps: mode cycling overrides the toggle.
+				if (is_down && ![event isARepeat]) {
+					qwerty_toggle_display_mode(qsys);
 					qwerty_set_rendering_mode(qsys, qsys->rendering_mode + 1);
+				}
 			} else {
 				// Controller focused: thumbstick click
 				for (int i = 0; i < target_count; i++) {

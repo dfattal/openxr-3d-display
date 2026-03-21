@@ -227,8 +227,12 @@ sim_dp_d3d12_process_atlas(struct xrt_display_processor_d3d12 *xdp,
 		return;
 	}
 
-	// Read the current mode (may change at runtime via 1/2/3 keys)
+	// Read the current mode (may change at runtime via 1/2/3 keys).
+	// Single-view input forces passthrough — stereo shaders need ≥2 views.
 	enum sim_display_output_mode mode = sim_display_get_output_mode();
+	if (tile_columns * tile_rows <= 1) {
+		mode = SIM_DISPLAY_OUTPUT_PASSTHROUGH;
+	}
 	ID3D12PipelineState *active_pso = sdp->psos[mode];
 	if (active_pso == nullptr) {
 		return;
