@@ -8,10 +8,10 @@
  * The display processor owns the leiasr_gl handle — it creates it
  * via the factory function and destroys it on cleanup.
  *
- * The SR SDK weaver expects side-by-side (SBS) stereo input. When the
- * compositor's atlas uses a different tiling layout (e.g. vertical stacking
- * with tile_columns=1, tile_rows=2), this DP rearranges the atlas into
- * SBS format via glCopyImageSubData before passing to the weaver.
+ * The SR SDK weaver expects side-by-side (SBS) stereo input. The Leia
+ * device defines its 3D mode as tile_columns=2, tile_rows=1, so the
+ * compositor always delivers SBS. The compositor crop-blit guarantees
+ * the atlas texture dimensions match exactly 2*view_width x view_height.
  *
  * @author David Fattal
  * @ingroup drv_leia
@@ -38,14 +38,6 @@ struct leia_display_processor_gl_impl
 	struct xrt_display_processor_gl base;
 	struct leiasr_gl *leiasr; //!< Owned — destroyed in leia_dp_gl_destroy.
 
-	//! @name SBS staging resources for non-SBS atlas layouts
-	//! @{
-	GLuint sbs_texture;    //!< Staging SBS texture (lazy-created).
-	uint32_t sbs_width;    //!< Current staging texture width.
-	uint32_t sbs_height;   //!< Current staging texture height.
-	GLenum sbs_format;     //!< Current staging texture format.
-	//! @}
-
 	GLuint read_fbo;     //!< Cached read FBO for 2D blit path.
 	uint32_t view_count; //!< Active mode view count (1=2D, 2=stereo).
 };
@@ -54,42 +46,6 @@ static inline struct leia_display_processor_gl_impl *
 leia_dp_gl(struct xrt_display_processor_gl *xdp)
 {
 	return (struct leia_display_processor_gl_impl *)xdp;
-}
-
-
-/*!
- * Ensure the SBS staging texture exists with the right dimensions/format.
- */
-static bool
-ensure_sbs_staging_gl(struct leia_display_processor_gl_impl *ldp,
-                      uint32_t view_width,
-                      uint32_t view_height,
-                      GLenum format)
-{
-	uint32_t sbs_w = 2 * view_width;
-	uint32_t sbs_h = view_height;
-
-	if (ldp->sbs_texture != 0 && ldp->sbs_width == sbs_w &&
-	    ldp->sbs_height == sbs_h && ldp->sbs_format == format) {
-		return true;
-	}
-
-	if (ldp->sbs_texture != 0) {
-		glDeleteTextures(1, &ldp->sbs_texture);
-		ldp->sbs_texture = 0;
-	}
-
-	glGenTextures(1, &ldp->sbs_texture);
-	glBindTexture(GL_TEXTURE_2D, ldp->sbs_texture);
-	glTexStorage2D(GL_TEXTURE_2D, 1, format, sbs_w, sbs_h);
-	glBindTexture(GL_TEXTURE_2D, 0);
-
-	ldp->sbs_width = sbs_w;
-	ldp->sbs_height = sbs_h;
-	ldp->sbs_format = format;
-
-	U_LOG_I("Leia GL DP: created SBS staging texture %ux%u", sbs_w, sbs_h);
-	return true;
 }
 
 
@@ -131,35 +87,9 @@ leia_dp_gl_process_atlas(struct xrt_display_processor_gl *xdp,
 		return;
 	}
 
-	uint32_t weaver_texture = atlas_texture;
-
-	// If atlas is already SBS (tile_columns=2, tile_rows=1), pass directly.
-	// Otherwise, rearrange to SBS via glCopyImageSubData.
-	if (tile_columns != 2 || tile_rows != 1) {
-		GLenum gl_format = static_cast<GLenum>(format);
-		if (!ensure_sbs_staging_gl(ldp, view_width, view_height, gl_format)) {
-			goto do_weave;
-		}
-
-		// Copy each view from tiled position to SBS position
-		for (uint32_t i = 0; i < 2; i++) {
-			uint32_t src_x = (i % tile_columns) * view_width;
-			uint32_t src_y = (i / tile_columns) * view_height;
-			uint32_t dst_x = i * view_width;
-
-			glCopyImageSubData(atlas_texture, GL_TEXTURE_2D, 0,
-			                   src_x, src_y, 0,
-			                   ldp->sbs_texture, GL_TEXTURE_2D, 0,
-			                   dst_x, 0, 0,
-			                   view_width, view_height, 1);
-		}
-
-		weaver_texture = ldp->sbs_texture;
-	}
-
-do_weave:
-	// Set input texture for weaving
-	leiasr_gl_set_input_texture(ldp->leiasr, weaver_texture, view_width, view_height, format);
+	// Atlas is guaranteed content-sized SBS (2*view_width x view_height)
+	// by compositor crop-blit. Pass directly to weaver.
+	leiasr_gl_set_input_texture(ldp->leiasr, atlas_texture, view_width, view_height, format);
 
 	// Restore target viewport — SR weaver reads glViewport at weave() time,
 	// but set_input_texture may have reset it to input dimensions.
@@ -252,9 +182,6 @@ leia_dp_gl_destroy(struct xrt_display_processor_gl *xdp)
 
 	if (ldp->read_fbo != 0) {
 		glDeleteFramebuffers(1, &ldp->read_fbo);
-	}
-	if (ldp->sbs_texture != 0) {
-		glDeleteTextures(1, &ldp->sbs_texture);
 	}
 
 	if (ldp->leiasr != NULL) {

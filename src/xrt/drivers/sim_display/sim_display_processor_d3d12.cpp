@@ -266,17 +266,9 @@ sim_dp_d3d12_process_atlas(struct xrt_display_processor_d3d12 *xdp,
 	srv_handle.ptr = atlas_srv_gpu_handle;
 	cmd_list->SetGraphicsRootDescriptorTable(0, srv_handle);
 
-	// Compute UV scale from view/atlas dimensions (not 1/tile_columns)
-	// so mapping is correct when atlas is larger than the tiled region.
-	uint32_t atlas_w = tile_columns * view_width;
-	uint32_t atlas_h = tile_rows * view_height;
-	if (atlas_res != nullptr) {
-		D3D12_RESOURCE_DESC desc = atlas_res->GetDesc();
-		atlas_w = static_cast<uint32_t>(desc.Width);
-		atlas_h = static_cast<uint32_t>(desc.Height);
-	}
-	float tile_cols_inv = (atlas_w > 0) ? (static_cast<float>(view_width) / static_cast<float>(atlas_w)) : 0.5f;
-	float tile_rows_inv = (atlas_h > 0) ? (static_cast<float>(view_height) / static_cast<float>(atlas_h)) : 1.0f;
+	// Atlas is guaranteed content-sized by compositor crop-blit.
+	float tile_cols_inv = (tile_columns > 0) ? (1.0f / static_cast<float>(tile_columns)) : 0.5f;
+	float tile_rows_inv = (tile_rows > 0) ? (1.0f / static_cast<float>(tile_rows)) : 1.0f;
 	float tile_cols_f = static_cast<float>(tile_columns);
 	float tile_rows_f = static_cast<float>(tile_rows);
 	uint32_t tile_constants[4];
