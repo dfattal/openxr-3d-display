@@ -240,30 +240,11 @@ sim_dp_d3d11_process_atlas(struct xrt_display_processor_d3d11 *xdp,
 		return;
 	}
 
-	// Compute UV scale from view/atlas dimensions (not 1/tile_columns)
-	// so mapping is correct when atlas is larger than the tiled region.
-	uint32_t atlas_w = tile_columns * view_width;
-	uint32_t atlas_h = tile_rows * view_height;
-	{
-		ID3D11Resource *res = nullptr;
-		srv->GetResource(&res);
-		if (res != nullptr) {
-			ID3D11Texture2D *tex = nullptr;
-			if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void **>(&tex)))) {
-				D3D11_TEXTURE2D_DESC desc;
-				tex->GetDesc(&desc);
-				atlas_w = desc.Width;
-				atlas_h = desc.Height;
-				tex->Release();
-			}
-			res->Release();
-		}
-	}
-
-	// Update tile parameter constant buffer
+	// Update tile parameter constant buffer.
+	// Atlas is guaranteed content-sized by compositor crop-blit.
 	struct tile_params_cb tile_data = {};
-	tile_data.tile_cols_inv = (atlas_w > 0) ? (static_cast<float>(view_width) / static_cast<float>(atlas_w)) : 0.5f;
-	tile_data.tile_rows_inv = (atlas_h > 0) ? (static_cast<float>(view_height) / static_cast<float>(atlas_h)) : 1.0f;
+	tile_data.tile_cols_inv = (tile_columns > 0) ? (1.0f / static_cast<float>(tile_columns)) : 0.5f;
+	tile_data.tile_rows_inv = (tile_rows > 0) ? (1.0f / static_cast<float>(tile_rows)) : 1.0f;
 	tile_data.tile_cols = static_cast<float>(tile_columns);
 	tile_data.tile_rows = static_cast<float>(tile_rows);
 	ctx->UpdateSubresource(sdp->tile_cb, 0, nullptr, &tile_data, 0, 0);

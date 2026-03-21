@@ -234,13 +234,10 @@ sim_dp_metal_process_atlas(struct xrt_display_processor_metal *xdp,
 	}
 
 	// Prepare tile layout constants for the fragment shader.
-	// Use view_width/atlas_width (not 1/tile_columns) so UV mapping is
-	// correct when the atlas texture is larger than the tiled region.
-	uint32_t atlas_w = (uint32_t)atlas_tex.width;
-	uint32_t atlas_h = (uint32_t)atlas_tex.height;
+	// Atlas is guaranteed content-sized by compositor crop-blit.
 	struct tile_params tp = {
-	    .tile_cols_inv = (atlas_w > 0) ? ((float)view_width / (float)atlas_w) : 0.5f,
-	    .tile_rows_inv = (atlas_h > 0) ? ((float)view_height / (float)atlas_h) : 1.0f,
+	    .tile_cols_inv = (tile_columns > 0) ? (1.0f / (float)tile_columns) : 0.5f,
+	    .tile_rows_inv = (tile_rows > 0) ? (1.0f / (float)tile_rows) : 1.0f,
 	    .tile_cols = (float)tile_columns,
 	    .tile_rows = (float)tile_rows,
 	};

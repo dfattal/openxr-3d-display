@@ -31,6 +31,7 @@ This document defines what each architectural layer owns and what must not cross
 - Graphics API-specific swapchain creation (both app swapchain and target swapchain) and image management
 - Layer accumulation and atlas rendering (tile all views into one texture)
 - Display processor instantiation via factory from `xrt_system_compositor_info`
+- Crops atlas to content dimensions before calling DP (`tile_columns * view_width × tile_rows * view_height`)
 - Calls `xdp->process_atlas()` to transform atlas → display output
 - Eye position pass-through from display processor to OXR
 - Window management (uses app-provided handle or creates own)
@@ -49,7 +50,7 @@ This document defines what each architectural layer owns and what must not cross
 
 Implementations live in `src/xrt/drivers/` (vendor-specific) or `src/xrt/compositor/` (generic).
 
-- `process_atlas()` — transform tiled atlas to display-specific output for all advertised modes (interlacing, SBS, anaglyph, and 2D passthrough)
+- `process_atlas()` — transform tiled atlas to display-specific output for all advertised modes (interlacing, SBS, anaglyph, and 2D passthrough). Receives atlas texture with dimensions exactly matching the mode's tile layout — no need to handle oversized or mismatched textures
 - `get_predicted_eye_positions()` — N-view eye positions from vendor SDK
 - `request_display_mode()` — hardware 2D/3D switching
 - `get_display_dimensions()` — physical size for Kooima FOV

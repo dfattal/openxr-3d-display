@@ -237,13 +237,9 @@ sim_dp_gl_process_atlas(struct xrt_display_processor_gl *xdp,
 	GLint loc = glGetUniformLocation(active_program, "u_texture");
 	glUniform1i(loc, 0);
 
-	// Compute UV scale from view/atlas dimensions (not 1/tile_columns)
-	// so mapping is correct when atlas is larger than the tiled region.
-	GLint atlas_w = 0, atlas_h = 0;
-	glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &atlas_w);
-	glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &atlas_h);
-	float tile_cols_inv = (atlas_w > 0) ? ((float)view_width / (float)atlas_w) : (1.0f / (float)tile_columns);
-	float tile_rows_inv = (atlas_h > 0) ? ((float)view_height / (float)atlas_h) : (1.0f / (float)tile_rows);
+	// Atlas is guaranteed content-sized by compositor crop-blit.
+	float tile_cols_inv = (tile_columns > 0) ? (1.0f / (float)tile_columns) : 0.5f;
+	float tile_rows_inv = (tile_rows > 0) ? (1.0f / (float)tile_rows) : 1.0f;
 	GLint loc_cols = glGetUniformLocation(active_program, "u_tile_cols_inv");
 	GLint loc_rows = glGetUniformLocation(active_program, "u_tile_rows_inv");
 	GLint loc_tc = glGetUniformLocation(active_program, "u_tile_cols");

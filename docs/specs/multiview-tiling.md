@@ -259,6 +259,10 @@ The display processor (DP) has **no knowledge of swapchain dimensions** — it e
 
 This crop step is performed lazily — the intermediate texture is only created when content dims differ from atlas dims, and is recreated when content dims change (e.g., on mode switch).
 
+### DP-side dimension guarantee
+
+Because the compositor crops before calling the DP, **the atlas texture dimensions always match `tile_columns * view_width × tile_rows * view_height` exactly**. DP implementations can use `1.0 / tile_columns` and `1.0 / tile_rows` for UV scaling — there is no need to query actual texture dimensions or handle oversized textures.
+
 ### Why the DP can't just be told the content region
 
 The DP's `process_atlas()` already receives `view_width`, `view_height`, `tile_columns`, `tile_rows` — but many DP implementations (e.g., LeiaSR weaver) use the **texture dimensions** to set up their internal rendering pipeline. If the texture is larger than the content, the DP samples padding/garbage from the unused region.

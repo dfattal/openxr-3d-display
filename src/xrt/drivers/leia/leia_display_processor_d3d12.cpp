@@ -8,10 +8,10 @@
  * The display processor owns the leiasr_d3d12 handle — it creates it
  * via the factory function and destroys it on cleanup.
  *
- * The SR SDK weaver expects side-by-side (SBS) stereo input. When the
- * compositor's atlas uses a different tiling layout (e.g. vertical stacking
- * with tile_columns=1, tile_rows=2), this DP rearranges the atlas into
- * SBS format via CopyTextureRegion before passing to the weaver.
+ * The SR SDK weaver expects side-by-side (SBS) stereo input. The Leia
+ * device defines its 3D mode as tile_columns=2, tile_rows=1, so the
+ * compositor always delivers SBS. The compositor crop-blit guarantees
+ * the atlas texture dimensions match exactly 2*view_width x view_height.
  *
  * @author David Fattal
  * @ingroup drv_leia
@@ -70,14 +70,7 @@ struct leia_display_processor_d3d12_impl
 	struct xrt_display_processor_d3d12 base;
 	struct leiasr_d3d12 *leiasr; //!< Owned — destroyed in leia_dp_d3d12_destroy.
 
-	//! @name SBS staging resources for non-SBS atlas layouts
-	//! @{
-	ID3D12Device *device;              //!< Cached device reference (not owned).
-	ID3D12Resource *sbs_texture;       //!< Staging SBS texture (lazy-created).
-	uint32_t sbs_width;                //!< Current staging texture width.
-	uint32_t sbs_height;               //!< Current staging texture height.
-	DXGI_FORMAT sbs_format;            //!< Current staging texture format.
-	//! @}
+	ID3D12Device *device;              //!< Cached device reference (not owned, for blit init).
 
 	//! @name 2D blit pipeline resources (passthrough stretch-blit)
 	//! @{
@@ -94,66 +87,6 @@ static inline struct leia_display_processor_d3d12_impl *
 leia_dp_d3d12(struct xrt_display_processor_d3d12 *xdp)
 {
 	return (struct leia_display_processor_d3d12_impl *)xdp;
-}
-
-
-/*!
- * Ensure the SBS staging texture exists with the right dimensions/format.
- */
-static bool
-ensure_sbs_staging_d3d12(struct leia_display_processor_d3d12_impl *ldp,
-                         uint32_t view_width,
-                         uint32_t view_height,
-                         DXGI_FORMAT format)
-{
-	uint32_t sbs_w = 2 * view_width;
-	uint32_t sbs_h = view_height;
-
-	if (ldp->sbs_texture != NULL && ldp->sbs_width == sbs_w &&
-	    ldp->sbs_height == sbs_h && ldp->sbs_format == format) {
-		return true;
-	}
-
-	if (ldp->sbs_texture != NULL) {
-		ldp->sbs_texture->Release();
-		ldp->sbs_texture = NULL;
-	}
-
-	if (ldp->device == NULL) {
-		return false;
-	}
-
-	D3D12_RESOURCE_DESC desc = {};
-	desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-	desc.Width = sbs_w;
-	desc.Height = sbs_h;
-	desc.DepthOrArraySize = 1;
-	desc.MipLevels = 1;
-	desc.Format = format;
-	desc.SampleDesc.Count = 1;
-	desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-	desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-	D3D12_HEAP_PROPERTIES heap = {};
-	heap.Type = D3D12_HEAP_TYPE_DEFAULT;
-
-	HRESULT hr = ldp->device->CreateCommittedResource(
-	    &heap, D3D12_HEAP_FLAG_NONE, &desc,
-	    D3D12_RESOURCE_STATE_COPY_DEST, NULL,
-	    IID_PPV_ARGS(&ldp->sbs_texture));
-
-	if (FAILED(hr)) {
-		U_LOG_E("Leia D3D12 DP: failed to create SBS staging texture (%ux%u): 0x%08x",
-		        sbs_w, sbs_h, (unsigned)hr);
-		return false;
-	}
-
-	ldp->sbs_width = sbs_w;
-	ldp->sbs_height = sbs_h;
-	ldp->sbs_format = format;
-
-	U_LOG_I("Leia D3D12 DP: created SBS staging texture %ux%u", sbs_w, sbs_h);
-	return true;
 }
 
 
@@ -227,17 +160,10 @@ leia_dp_d3d12_process_atlas(struct xrt_display_processor_d3d12 *xdp,
 		cmd->SetGraphicsRootDescriptorTable(
 		    0, ldp->blit_srv_heap->GetGPUDescriptorHandleForHeapStart());
 
-		// Compute UV scale: sample the content region of the atlas.
-		// In 2D mode, the compositor renderer expands the mono viewport
-		// to fill the atlas (up to target dimensions), so the content
-		// occupies min(target, atlas) — not just view_width x view_height.
+		// Atlas is guaranteed content-sized by compositor crop-blit.
+		// In 2D mode, content occupies min(target, atlas) of the atlas.
 		uint32_t atlas_w = tile_columns * view_width;
 		uint32_t atlas_h = tile_rows * view_height;
-		{
-			D3D12_RESOURCE_DESC desc = atlas_res->GetDesc();
-			atlas_w = static_cast<uint32_t>(desc.Width);
-			atlas_h = static_cast<uint32_t>(desc.Height);
-		}
 		uint32_t content_w = (target_width < atlas_w) ? target_width : atlas_w;
 		uint32_t content_h = (target_height < atlas_h) ? target_height : atlas_h;
 		float u_scale = (atlas_w > 0) ? (float)content_w / (float)atlas_w : 1.0f;
@@ -259,79 +185,14 @@ leia_dp_d3d12_process_atlas(struct xrt_display_processor_d3d12 *xdp,
 	(void)atlas_srv_gpu_handle;
 	(void)target_rtv_cpu_handle;
 
-	void *weaver_resource = atlas_texture_resource;
-
-	// If atlas is already SBS (tile_columns=2, tile_rows=1), pass directly.
-	// Otherwise, rearrange to SBS via CopyTextureRegion.
-	if (tile_columns != 2 || tile_rows != 1) {
-		DXGI_FORMAT dxgi_format = static_cast<DXGI_FORMAT>(format);
-		if (!ensure_sbs_staging_d3d12(ldp, view_width, view_height, dxgi_format) ||
-		    atlas_texture_resource == NULL) {
-			goto do_weave;
-		}
-
-		ID3D12GraphicsCommandList *cmd = static_cast<ID3D12GraphicsCommandList *>(d3d12_command_list);
-
-		// Copy each view from tiled position to SBS position
-		for (uint32_t i = 0; i < 2; i++) {
-			uint32_t src_x = (i % tile_columns) * view_width;
-			uint32_t src_y = (i / tile_columns) * view_height;
-			uint32_t dst_x = i * view_width;
-
-			D3D12_TEXTURE_COPY_LOCATION dst_loc = {};
-			dst_loc.pResource = ldp->sbs_texture;
-			dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-			dst_loc.SubresourceIndex = 0;
-
-			D3D12_TEXTURE_COPY_LOCATION src_loc = {};
-			src_loc.pResource = static_cast<ID3D12Resource *>(atlas_texture_resource);
-			src_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-			src_loc.SubresourceIndex = 0;
-
-			D3D12_BOX src_box;
-			src_box.left = src_x;
-			src_box.top = src_y;
-			src_box.front = 0;
-			src_box.right = src_x + view_width;
-			src_box.bottom = src_y + view_height;
-			src_box.back = 1;
-
-			cmd->CopyTextureRegion(&dst_loc, dst_x, 0, 0, &src_loc, &src_box);
-		}
-
-		// Transition SBS texture to shader resource for weaver to read
-		D3D12_RESOURCE_BARRIER barrier = {};
-		barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-		barrier.Transition.pResource = ldp->sbs_texture;
-		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-		barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-		cmd->ResourceBarrier(1, &barrier);
-
-		weaver_resource = ldp->sbs_texture;
-	}
-
-do_weave:
-	if (weaver_resource != NULL) {
-		leiasr_d3d12_set_input_texture(ldp->leiasr, weaver_resource,
+	// Atlas is guaranteed content-sized SBS (2*view_width x view_height)
+	// by compositor crop-blit. Pass directly to weaver.
+	if (atlas_texture_resource != NULL) {
+		leiasr_d3d12_set_input_texture(ldp->leiasr, atlas_texture_resource,
 		                               view_width, view_height, format);
 	}
 
 	leiasr_d3d12_weave(ldp->leiasr, d3d12_command_list, target_width, target_height);
-
-	// Transition SBS texture back to copy dest for next frame
-	if (tile_columns != 2 || tile_rows != 1) {
-		if (ldp->sbs_texture != NULL) {
-			ID3D12GraphicsCommandList *cmd = static_cast<ID3D12GraphicsCommandList *>(d3d12_command_list);
-			D3D12_RESOURCE_BARRIER barrier = {};
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Transition.pResource = ldp->sbs_texture;
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-			cmd->ResourceBarrier(1, &barrier);
-		}
-	}
 }
 
 static void
@@ -493,10 +354,6 @@ leia_dp_d3d12_destroy(struct xrt_display_processor_d3d12 *xdp)
 	}
 	if (ldp->blit_srv_heap != NULL) {
 		ldp->blit_srv_heap->Release();
-	}
-
-	if (ldp->sbs_texture != NULL) {
-		ldp->sbs_texture->Release();
 	}
 
 	if (ldp->leiasr != NULL) {
