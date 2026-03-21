@@ -1230,6 +1230,7 @@ oxr_session_locate_views(struct oxr_logger *log,
 		if (have_eye_positions) {
 			float screen_width_m = 0.0f;
 			float screen_height_m = 0.0f;
+			float vs = 1.0f; // viewport scale for non-fullscreen correction
 
 			struct xrt_window_metrics wm = {0};
 			bool have_wm = oxr_session_get_window_metrics(sess, &wm);
@@ -1238,7 +1239,7 @@ oxr_session_locate_views(struct oxr_logger *log,
 				// SRHydra viewport scale formula
 				float min_disp = fminf(wm.display_width_m, wm.display_height_m);
 				float min_win  = fminf(wm.window_width_m, wm.window_height_m);
-				float vs = min_disp / min_win;
+				vs = min_disp / min_win;
 
 				screen_width_m  = wm.window_width_m * vs;
 				screen_height_m = wm.window_height_m * vs;
@@ -1302,7 +1303,7 @@ oxr_session_locate_views(struct oxr_logger *log,
 					if (have_view_state && !sess->has_external_window) {
 						dt.ipd_factor = view_state.disp_spread_factor;
 						dt.parallax_factor = view_state.disp_parallax_factor;
-						dt.perspective_factor = 1.0f;
+						dt.perspective_factor = vs;
 						dt.virtual_display_height = view_state.disp_vHeight;
 					} else {
 						dt.virtual_display_height = screen_height_m; // identity m2v

@@ -2776,7 +2776,7 @@ int main() {
                                 Display3DTunables tunables;
                                 tunables.ipd_factor = g_input.viewParams.ipdFactor;
                                 tunables.parallax_factor = g_input.viewParams.parallaxFactor;
-                                tunables.perspective_factor = g_input.viewParams.perspectiveFactor;
+                                tunables.perspective_factor = g_input.viewParams.perspectiveFactor * vs;
                                 tunables.virtual_display_height = g_input.viewParams.virtualDisplayHeight / g_input.viewParams.scaleFactor;
 
                                 display3d_compute_views(

@@ -405,7 +405,7 @@ static void RenderThreadFunc(
                                 Display3DTunables tunables;
                                 tunables.ipd_factor = inputSnapshot.viewParams.ipdFactor;
                                 tunables.parallax_factor = inputSnapshot.viewParams.parallaxFactor;
-                                tunables.perspective_factor = inputSnapshot.viewParams.perspectiveFactor;
+                                tunables.perspective_factor = inputSnapshot.viewParams.perspectiveFactor * vs;
                                 tunables.virtual_display_height = inputSnapshot.viewParams.virtualDisplayHeight / inputSnapshot.viewParams.scaleFactor;
 
                                 display3d_compute_views(

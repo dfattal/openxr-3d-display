@@ -400,7 +400,7 @@ static void RenderOneFrame(RenderState& rs) {
                             Display3DTunables tunables;
                             tunables.ipd_factor = g_inputState.viewParams.ipdFactor;
                             tunables.parallax_factor = g_inputState.viewParams.parallaxFactor;
-                            tunables.perspective_factor = g_inputState.viewParams.perspectiveFactor;
+                            tunables.perspective_factor = g_inputState.viewParams.perspectiveFactor * vs;
                             tunables.virtual_display_height = g_inputState.viewParams.virtualDisplayHeight / g_inputState.viewParams.scaleFactor;
 
                             display3d_compute_views(
