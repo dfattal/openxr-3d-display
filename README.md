@@ -15,7 +15,7 @@ App (any graphics API)
         |
    +----+-----+--------+--------+
    |    |     |        |        |
- D3D11 D3D12 Vulkan  Metal   OpenGL   <-- native compositors
+ D3D11 D3D12 Vulkan  Metal   OpenGL   ← native compositors
    |    |     |        |        |
    Display Processor (LeiaSR / sim_display)
         |
@@ -73,25 +73,16 @@ XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json ./build/test_apps/cube_handle_
 - [Kooima Projection](docs/architecture/kooima-projection.md) — stereo math and projection pipelines
 - [Separation of Concerns](docs/architecture/separation-of-concerns.md) — layer boundaries
 
-## Unity Plugin
+## Related Repos
 
-The **DisplayXR** Unity plugin lives in a separate repository:
-[**dfattal/unity-3d-display**](https://github.com/dfattal/unity-3d-display)
-
-Install via Unity Package Manager with the git URL:
-```
-https://github.com/dfattal/unity-3d-display.git
-```
-
-The plugin intercepts Unity's OpenXR pipeline to provide Kooima asymmetric frustum projection for stereo rendering on 3D displays. It has no source dependency on this runtime — install the runtime separately and point `XR_RUNTIME_JSON` to it.
-
-## Branch Structure
-
-| Branch | Purpose |
-|--------|---------|
-| `main` | Active development — submit PRs here |
-| `legacy-monado-ci` | Full Monado codebase (34 VR drivers, Vulkan server compositor) — archived reference |
-| `upstream-monado` | Tracks upstream [Monado](https://gitlab.freedesktop.org/monado/monado) (locked, read-only) |
+| Repo | Description |
+|------|-------------|
+| [displayxr-unity](https://github.com/DisplayXR/displayxr-unity) | Unity engine plugin (UPM package) |
+| [displayxr-unreal](https://github.com/DisplayXR/displayxr-unreal) | Unreal Engine plugin |
+| [displayxr-extensions](https://github.com/DisplayXR/displayxr-extensions) | OpenXR extension specs and headers |
+| [kooima-projection](https://github.com/DisplayXR/kooima-projection) | Off-axis frustum projection math library |
+| [displayxr-demos](https://github.com/DisplayXR/displayxr-demos) | Demo applications |
+| [displayxr-shell](https://github.com/DisplayXR/displayxr-shell) | Spatial shell / 3D window manager |
 
 ## Contributing
 
@@ -99,8 +90,4 @@ We welcome contributions! See the [contributing guide](docs/guides/contributing.
 
 ## License
 
-This project is licensed under the [ISC License](LICENSE), the same as upstream Monado.
-
-## Acknowledgments
-
-Built on [Monado](https://monado.freedesktop.org/) by [Collabora](https://www.collabora.com/) and the open-source XR community. Leia SR SDK integration by [Leia Inc.](https://www.leiainc.com/)
+Boost Software License 1.0
