@@ -1,4 +1,4 @@
-// Copyright 2025, Leia Inc.
+// Copyright 2025-2026, Leia Inc.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
