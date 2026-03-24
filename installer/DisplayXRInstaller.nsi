@@ -53,8 +53,9 @@ ShowUninstDetails show
 ; Interface Settings
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "${SOURCE_DIR}\doc\displayxr.ico"
-!define MUI_UNICON "${SOURCE_DIR}\doc\displayxr.ico"
+; White icon so the installer .exe is visible in dark mode Explorer/taskbar
+!define MUI_ICON "${SOURCE_DIR}\doc\displayxr_white.ico"
+!define MUI_UNICON "${SOURCE_DIR}\doc\displayxr_white.ico"
 
 ;--------------------------------
 ; Pages
