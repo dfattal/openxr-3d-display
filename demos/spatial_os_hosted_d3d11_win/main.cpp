@@ -396,7 +396,8 @@ static void RenderOneFrame(RenderState& rs) {
                     if (AcquireSwapchainImage(xr, imageIndex)) {
                         ID3D11Texture2D* swapchainTexture = (*rs.swapchainImages)[imageIndex].texture;
                         ID3D11RenderTargetView* rtv = nullptr;
-                        CreateRenderTargetView(renderer, swapchainTexture, &rtv);
+                        CreateRenderTargetView(renderer, swapchainTexture,
+                            static_cast<DXGI_FORMAT>(xr.swapchain.format), &rtv);
 
                         float clearColor[4] = {0.08f, 0.08f, 0.12f, 1.0f};
                         renderer.context->ClearRenderTargetView(rtv, clearColor);
