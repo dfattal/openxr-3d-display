@@ -569,12 +569,23 @@ comp_d3d11_swapchain_wait_gpu_complete(struct xrt_swapchain *xsc, uint32_t timeo
 {
 	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 
-	// Fast path: ID3D11Fence + Win32 auto-reset event (D3D11.4 / Windows 10+).
+	// Fast path: ID3D11Fence (D3D11.4 / Windows 10+).
 	// The fence was signaled in barrier_image(TO_COMP) after Flush(), so waiting
 	// here guarantees all GPU commands up to xrReleaseSwapchainImage are done.
+	//
+	// We check GetCompletedValue() first because the auto-reset event can fire
+	// and reset between barrier_image and here (GPU is fast, ~1ms; CPU overhead
+	// to reach layer_commit may be <1ms). If the event already auto-reset,
+	// WaitForSingleObject would block for the full timeout_ms (100ms → ~10fps).
+	// GetCompletedValue() avoids that race for the common case where the GPU
+	// has already finished by the time layer_commit runs.
 	if (sc->release_fence != nullptr && sc->release_event != nullptr &&
 	    sc->release_fence_value > 0) {
-		WaitForSingleObject(sc->release_event, timeout_ms);
+		if (sc->release_fence->GetCompletedValue() < sc->release_fence_value) {
+			// GPU hasn't finished yet — event is still pending, safe to wait.
+			WaitForSingleObject(sc->release_event, timeout_ms);
+		}
+		// Either GetCompletedValue confirmed done, or WaitForSingleObject returned.
 		return;
 	}
 
