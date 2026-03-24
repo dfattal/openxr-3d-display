@@ -244,6 +244,55 @@ d3d11_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
+	// DIAGNOSTIC (issue #91): CPU readback of center pixel at release time.
+	// If the pixel is non-black here, Unity DID render to the texture.
+	// If black, Unity never wrote to it.
+	{
+		static uint32_t readback_count = 0;
+		if (readback_count < 6 && sc->images[index] != nullptr && sc->c != nullptr) {
+			readback_count++;
+			auto internals = get_internals(sc->c);
+
+			D3D11_TEXTURE2D_DESC desc;
+			sc->images[index]->GetDesc(&desc);
+
+			// Create a 1x1 staging texture for CPU readback
+			D3D11_TEXTURE2D_DESC staging_desc = {};
+			staging_desc.Width = 1;
+			staging_desc.Height = 1;
+			staging_desc.MipLevels = 1;
+			staging_desc.ArraySize = 1;
+			staging_desc.Format = desc.Format;
+			staging_desc.SampleDesc.Count = 1;
+			staging_desc.Usage = D3D11_USAGE_STAGING;
+			staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+			ID3D11Texture2D *staging = nullptr;
+			HRESULT hr = internals->device->CreateTexture2D(&staging_desc, nullptr, &staging);
+			if (SUCCEEDED(hr) && staging != nullptr) {
+				// Copy center pixel from swapchain texture to staging
+				uint32_t cx = desc.Width / 2;
+				uint32_t cy = desc.Height / 2;
+				D3D11_BOX box = {cx, cy, 0, cx + 1, cy + 1, 1};
+				internals->context->CopySubresourceRegion(staging, 0, 0, 0, 0,
+				                                          sc->images[index], 0, &box);
+
+				D3D11_MAPPED_SUBRESOURCE mapped;
+				hr = internals->context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped);
+				if (SUCCEEDED(hr)) {
+					uint8_t *pixel = static_cast<uint8_t *>(mapped.pData);
+					U_LOG_W("[diag#91] release_image sc=%p idx=%u center_pixel=(%u,%u,%u,%u) "
+					        "tex=%ux%u fmt=%d",
+					        (void *)xsc, index,
+					        pixel[0], pixel[1], pixel[2], pixel[3],
+					        desc.Width, desc.Height, (int)desc.Format);
+					internals->context->Unmap(staging, 0);
+				}
+				staging->Release();
+			}
+		}
+	}
+
 	// Track the last released index for round-robin acquisition
 	sc->last_released_index = index;
 	sc->waited_index = -1;
