@@ -44,6 +44,20 @@ Per-client compositors keep the app-facing half (swapchain management, layer com
 
 Single-app fast path (direct in-process) is preserved — no regression.
 
+### Repo boundary
+
+The multi compositor is **runtime infrastructure**, not shell code. It lives in `displayxr-runtime` (public) because:
+- It's the server-side IPC component — any IPC app (cube_ipc, Chrome WebXR) needs it
+- It extends `d3d11_service` and is tightly coupled to `xrt_compositor.h`, `proto.json`, the IPC server, and the DP vtable
+- It's pure mechanism: shared texture import, Kooima projection, display processing
+
+The shell is a privileged IPC client that sends window poses and receives hit-test results — it never touches the compositor directly.
+
+| Repo | Content | Principle |
+|------|---------|-----------|
+| `displayxr-runtime` (public) | Multi compositor, IPC protocol, hit-test API, shared texture import | Mechanism |
+| `displayxr-shell` (private) | Scene graph, window chrome, launcher, layout presets, persistence | Policy / UX |
+
 ### Kooima simplification
 
 Multi compositor window is always full-screen = physical display size:
