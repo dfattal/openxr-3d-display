@@ -133,13 +133,16 @@ The two concepts are inseparable: window-space layers only make sense when there
 
 ```c
 typedef struct XrWin32WindowBindingCreateInfoEXT {
-    XrStructureType             type;           // Must be XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT
-    const void* XR_MAY_ALIAS    next;           // Pointer to next structure in chain
-    void*                       windowHandle;   // HWND of the target window (Windows)
+    XrStructureType             type;                  // Must be XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT
+    const void* XR_MAY_ALIAS    next;                  // Pointer to next structure in chain
+    void*                       windowHandle;          // HWND of the app's window, or NULL
+    PFN_xrReadbackCallback      readbackCallback;      // Offscreen readback callback, or NULL
+    void*                       readbackUserdata;      // Passed to readbackCallback
+    void*                       sharedTextureHandle;   // Shared D3D11/D3D12 texture HANDLE, or NULL
 } XrWin32WindowBindingCreateInfoEXT;
 ```
 
-**Chaining:** This structure is placed in the `next` chain of `XrSessionCreateInfo`.
+**Chaining:** This structure is placed in the `next` chain of `XrSessionCreateInfo` (via the graphics binding's `next` pointer).
 
 **Fields:**
 
@@ -147,17 +150,24 @@ typedef struct XrWin32WindowBindingCreateInfoEXT {
 |-------|-------------|
 | `type` | Must be `XR_TYPE_WIN32_WINDOW_BINDING_CREATE_INFO_EXT` |
 | `next` | `NULL` or pointer to next structure in chain |
-| `windowHandle` | Platform window handle. On Windows, cast from `HWND`. Must be a valid window that remains alive for the session's lifetime. |
+| `windowHandle` | App's window handle (`HWND`). **Required for all modes that need correct interlacing** — the display processor uses it to determine screen-space position (see [§2.4](#24-the-phase-alignment-problem)). Must remain valid for the session's lifetime. |
+| `readbackCallback` | If non-NULL, the runtime delivers composited RGBA pixels via this callback each frame (CPU offscreen mode). |
+| `readbackUserdata` | Opaque pointer passed to `readbackCallback`. |
+| `sharedTextureHandle` | Shared D3D11/D3D12 texture `HANDLE` for zero-copy GPU texture sharing. If non-NULL, the runtime composites into this shared texture instead of rendering to a window. |
 
-**Semantics:**
+**Three Modes:**
 
-- When present and `windowHandle` is non-NULL, the runtime renders into the specified window. The application owns the window and is responsible for its lifecycle, message pump, and input handling.
-- The runtime creates its graphics resources (swapchain, weaver) bound to this window.
-- The application must not destroy the window before calling `xrDestroySession`.
+| Mode | `windowHandle` | `sharedTextureHandle` | App class | Behavior |
+|------|:-:|:-:|---|---|
+| **Handle** | HWND | NULL | `_handle` | Runtime renders directly into the app's window |
+| **Texture** | HWND | HANDLE | `_texture` | Runtime composites into the shared texture. The HWND is still required — the display processor needs it for screen-space position tracking and phase alignment. The app blits the shared texture into its window. |
+| **Offscreen** | NULL | NULL | — | `readbackCallback` receives composited pixels. No window, no phase alignment. |
+
+> **Important for `_texture` apps:** You **must** provide a valid `windowHandle` even though the runtime renders into the shared texture, not the window. Without the HWND, the display processor cannot compute correct interlacing alignment (see [§2.4](#24-the-phase-alignment-problem)). Additionally, call `xrSetSharedTextureOutputRectEXT` (see [§3.5](#35-xrsetsharedtextureoutputrectext)) to tell the runtime where within the window the 3D canvas appears.
 
 **Fallback when absent:**
 
-When this structure is not in the chain (or `windowHandle` is NULL), the runtime falls back to its default behavior: creating its own window in fullscreen mode. Existing applications work without modification.
+When this structure is not in the `next` chain, the runtime falls back to its default behavior: creating its own window (`_hosted` mode). Existing OpenXR applications work without modification.
 
 ### 3.3 XrCompositionLayerWindowSpaceEXT
 
