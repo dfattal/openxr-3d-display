@@ -178,7 +178,9 @@ cbuffer LayerCB : register(b0)
     float4 color_bias;
 };
 
-Texture2D layer_tex : register(t0);
+// Per-slice SRVs (TEXTURE2DARRAY ArraySize=1): always sample at array index 0
+// since the correct slice is already selected by which SRV is bound.
+Texture2DArray layer_tex : register(t0);
 SamplerState layer_samp : register(s0);
 
 struct VS_OUTPUT
@@ -189,7 +191,7 @@ struct VS_OUTPUT
 
 float4 PSMain(VS_OUTPUT input) : SV_Target
 {
-    float4 color = layer_tex.Sample(layer_samp, input.uv);
+    float4 color = layer_tex.Sample(layer_samp, float3(input.uv, 0.0));
     color = color * color_scale + color_bias;
     return color;
 }
@@ -253,7 +255,9 @@ cbuffer LayerCB : register(b0)
     float4 color_bias;
 };
 
-Texture2D layer_tex : register(t0);
+// Per-slice SRVs (TEXTURE2DARRAY ArraySize=1): always sample at array index 0
+// since the correct slice is already selected by which SRV is bound.
+Texture2DArray layer_tex : register(t0);
 SamplerState layer_samp : register(s0);
 
 struct VS_OUTPUT
@@ -264,7 +268,7 @@ struct VS_OUTPUT
 
 float4 PSMain(VS_OUTPUT input) : SV_Target
 {
-    float4 color = layer_tex.Sample(layer_samp, input.uv);
+    float4 color = layer_tex.Sample(layer_samp, float3(input.uv, 0.0));
     color = color * color_scale + color_bias;
     return color;
 }
@@ -543,10 +547,11 @@ render_projection_layer(struct comp_d3d11_renderer *r,
 	// Get the image index from the layer data
 	struct xrt_layer_projection_view_data *view_data = &layer->data.proj.v[view_index];
 	uint32_t image_index = view_data->sub.image_index;
+	uint32_t array_index = view_data->sub.array_index;
 
-	// Get the D3D11 swapchain's SRV for this image
+	// Get the per-slice SRV (handles stereo texture arrays: array_index 0=left, 1=right)
 	ID3D11ShaderResourceView *srv = static_cast<ID3D11ShaderResourceView *>(
-	    comp_d3d11_swapchain_get_srv(xsc, image_index));
+	    comp_d3d11_swapchain_get_srv(xsc, image_index, array_index));
 	if (srv == nullptr) {
 		U_LOG_W("render_projection_layer: SRV is null for swapchain image %u", image_index);
 		return;
@@ -701,10 +706,11 @@ render_quad_layer(struct comp_d3d11_renderer *r,
 	}
 
 	uint32_t image_index = q->sub.image_index;
+	uint32_t array_index = q->sub.array_index;
 
-	// Get the D3D11 swapchain's SRV for this image
+	// Get the per-slice SRV for this image
 	ID3D11ShaderResourceView *srv = static_cast<ID3D11ShaderResourceView *>(
-	    comp_d3d11_swapchain_get_srv(xsc, image_index));
+	    comp_d3d11_swapchain_get_srv(xsc, image_index, array_index));
 	if (srv == nullptr) {
 		return;
 	}
@@ -801,10 +807,11 @@ render_window_space_layer(struct comp_d3d11_renderer *r,
 	}
 
 	uint32_t image_index = ws->sub.image_index;
+	uint32_t array_index = ws->sub.array_index;
 
-	// Get the D3D11 swapchain's SRV for this image
+	// Get the per-slice SRV for this image
 	ID3D11ShaderResourceView *srv = static_cast<ID3D11ShaderResourceView *>(
-	    comp_d3d11_swapchain_get_srv(xsc, image_index));
+	    comp_d3d11_swapchain_get_srv(xsc, image_index, array_index));
 	if (srv == nullptr) {
 		return;
 	}

@@ -1028,7 +1028,7 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 							rhs_arr[v] = layer->data.proj.v[v].sub.rect.extent.h;
 						}
 						if (u_tiling_can_zero_copy(vc, rxs, rys, rws, rhs_arr, sw, sh, mode)) {
-							zc_srv = comp_d3d11_swapchain_get_srv(layer->sc_array[0], img_idx);
+							zc_srv = comp_d3d11_swapchain_get_srv(layer->sc_array[0], img_idx, 0);
 							if (zc_srv != nullptr)
 								zero_copy = true;
 						}
