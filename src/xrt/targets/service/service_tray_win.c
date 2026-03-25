@@ -11,8 +11,8 @@
 #include <windows.h>
 #include <shellapi.h>
 
-#define IDI_DISPLAYXR_ICON_BLACK 101
-#define IDI_DISPLAYXR_ICON_WHITE 102
+#define IDI_DISPLAYXR_ICON_WHITE 101
+#define IDI_DISPLAYXR_ICON_BLACK 102
 #define WM_TRAYICON              (WM_APP + 1)
 #define IDM_EXIT                 1001
 

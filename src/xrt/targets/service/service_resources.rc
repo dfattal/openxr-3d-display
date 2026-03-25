@@ -6,7 +6,7 @@
 #include <windows.h>
 
 // Application icons (used for system tray)
-// 101 = black on transparent (for light taskbar)
-// 102 = white on transparent (for dark taskbar)
-101 ICON "../../../../doc/displayxr.ico"
-102 ICON "../../../../doc/displayxr_white.ico"
+// 101 = white on transparent (default — visible in dark Explorer and dark taskbar)
+// 102 = black on transparent (for light taskbar, loaded at runtime by theme detection)
+101 ICON "../../../../doc/displayxr_white.ico"
+102 ICON "../../../../doc/displayxr.ico"
