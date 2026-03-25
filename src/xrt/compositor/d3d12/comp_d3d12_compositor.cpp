@@ -108,7 +108,12 @@ struct comp_d3d12_compositor
 	struct comp_settings settings;
 
 	//! Window handle (either from app or self-created).
+	//! NULL in shared texture mode — compositor doesn't own a swapchain.
 	HWND hwnd;
+
+	//! App HWND for position tracking in shared texture mode.
+	//! The display processor uses this for weaver alignment.
+	HWND app_hwnd;
 
 	//! Self-created window (NULL if app provided window).
 	struct comp_d3d11_window *own_window;
@@ -1537,13 +1542,20 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 	c->smoothed_frame_time_ms = 16.67f;
 
 	// Handle window
-	if (hwnd != nullptr) {
+	c->app_hwnd = nullptr;
+	if (shared_texture_handle != nullptr) {
+		// Shared texture mode: compositor doesn't own a swapchain.
+		// Store app HWND separately for display processor position tracking.
+		c->hwnd = nullptr;
+		if (hwnd != nullptr) {
+			c->app_hwnd = static_cast<HWND>(hwnd);
+			U_LOG_I("Shared texture mode with app HWND for position tracking: %p", hwnd);
+		} else {
+			U_LOG_I("Shared texture mode (offscreen) — no window");
+		}
+	} else if (hwnd != nullptr) {
 		c->hwnd = static_cast<HWND>(hwnd);
 		U_LOG_I("Using app-provided window handle: %p", hwnd);
-	} else if (shared_texture_handle != nullptr) {
-		// Offscreen shared texture mode — no window needed
-		c->hwnd = nullptr;
-		U_LOG_I("Shared texture mode (offscreen) — no window");
 	} else {
 		uint32_t win_w = xdev->hmd->screens[0].w_pixels;
 		uint32_t win_h = xdev->hmd->screens[0].h_pixels;
@@ -1665,9 +1677,9 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 	// need a swapchain when we have a window, even with a display processor.
 	// Skip only for shared texture offscreen mode (no window to present to).
 	xrt_result_t xret;
-	if (c->has_shared_texture && c->hwnd == nullptr) {
+	if (c->has_shared_texture) {
 		c->target = nullptr;
-		U_LOG_I("Skipping DXGI swapchain (shared texture offscreen mode, no window)");
+		U_LOG_I("Skipping DXGI swapchain (shared texture mode — compositor renders to shared texture)");
 	} else if (c->hwnd != nullptr) {
 		xret = comp_d3d12_target_create(c, c->hwnd,
 		                                              c->settings.preferred.width,
@@ -1693,7 +1705,8 @@ comp_d3d12_compositor_create(struct xrt_device *xdev,
 	// Create display processor via factory
 	if (dp_factory_d3d12 != NULL) {
 		auto factory = (xrt_dp_factory_d3d12_fn_t)dp_factory_d3d12;
-		xrt_result_t dp_ret = factory(c->device, c->command_queue, c->hwnd, &c->display_processor);
+		HWND dp_hwnd = c->hwnd != nullptr ? c->hwnd : c->app_hwnd;
+		xrt_result_t dp_ret = factory(c->device, c->command_queue, dp_hwnd, &c->display_processor);
 		if (dp_ret != XRT_SUCCESS) {
 			U_LOG_W("D3D12 display processor factory failed (error %d), continuing without", (int)dp_ret);
 			c->display_processor = nullptr;
