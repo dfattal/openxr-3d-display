@@ -9,6 +9,7 @@
 
 #include "comp_d3d11_swapchain.h"
 #include "comp_d3d11_compositor.h"
+#include "d3d/d3d_dxgi_formats.h"
 
 #include "xrt/xrt_handles.h"
 
@@ -28,6 +29,12 @@
 #define MAX_SWAPCHAIN_IMAGES 8
 
 /*!
+ * Maximum number of array slices per swapchain image.
+ * Unity single-pass instanced stereo uses ArraySize=2.
+ */
+#define MAX_ARRAY_SLICES 8
+
+/*!
  * D3D11 swapchain structure.
  */
 struct comp_d3d11_swapchain
@@ -41,14 +48,19 @@ struct comp_d3d11_swapchain
 	//! D3D11 textures.
 	ID3D11Texture2D *images[MAX_SWAPCHAIN_IMAGES];
 
-	//! Shader resource views for each image.
-	ID3D11ShaderResourceView *srvs[MAX_SWAPCHAIN_IMAGES];
+	//! Per-image, per-slice SRVs (TEXTURE2DARRAY with ArraySize=1 per slice).
+	//! For ArraySize=1 swapchains, only [i][0] is used.
+	//! For stereo (ArraySize=2), [i][0]=left eye, [i][1]=right eye.
+	ID3D11ShaderResourceView *srvs[MAX_SWAPCHAIN_IMAGES][MAX_ARRAY_SLICES];
 
 	//! Render target views for each image.
 	ID3D11RenderTargetView *rtvs[MAX_SWAPCHAIN_IMAGES];
 
 	//! Number of images.
 	uint32_t image_count;
+
+	//! Number of array slices (texture ArraySize).
+	uint32_t array_count;
 
 	//! Creation info.
 	struct xrt_swapchain_create_info info;
@@ -264,8 +276,10 @@ d3d11_swapchain_destroy(struct xrt_swapchain *xsc)
 		if (sc->rtvs[i] != nullptr) {
 			sc->rtvs[i]->Release();
 		}
-		if (sc->srvs[i] != nullptr) {
-			sc->srvs[i]->Release();
+		for (uint32_t s = 0; s < sc->array_count && s < MAX_ARRAY_SLICES; s++) {
+			if (sc->srvs[i][s] != nullptr) {
+				sc->srvs[i][s]->Release();
+			}
 		}
 		if (sc->images[i] != nullptr) {
 			sc->images[i]->Release();
@@ -308,6 +322,7 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
 	sc->c = c;
 	sc->info = *info;
 	sc->image_count = image_count;
+	sc->array_count = info->array_size > 0 ? info->array_size : 1;
 	sc->acquired_index = -1;
 	sc->waited_index = -1;
 	sc->last_released_index = image_count - 1; // Start so first acquire returns index 0
@@ -398,18 +413,24 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
 		}
 	}
 
-	// Color textures use typed format so Unity can call CreateRenderTargetView(tex, nullptr, &rtv)
-	// without specifying an explicit format. TYPELESS color breaks Unity (vertex/geometry
-	// corruption) and is not needed — typed color + D3D11_BIND_RENDER_TARGET is legal in D3D11.
-	// (Only depth textures need TYPELESS, and only when SRV is also required — handled above.)
+	// Color textures use TYPELESS so Unity (and other apps) can create typed views with any
+	// format variant from the same family (e.g. UNORM and UNORM_SRGB on the same texture).
+	// Without TYPELESS, Unity fails to create its SRGB RTV on a plain UNORM texture → black screen.
+	if (!is_depth) {
+		DXGI_FORMAT typeless = d3d_dxgi_format_to_typeless_dxgi(dxgi_format);
+		if (typeless != dxgi_format) {
+			texture_format = typeless;
+			// srv_format and rtv_format stay as the original typed format
+		}
+	}
 
 	// Create textures
 	D3D11_TEXTURE2D_DESC texDesc = {};
 	texDesc.Width = info->width;
 	texDesc.Height = info->height;
 	texDesc.MipLevels = info->mip_count > 0 ? info->mip_count : 1;
-	texDesc.ArraySize = info->array_size > 0 ? info->array_size : 1;
-	texDesc.Format = texture_format; // TYPELESS for both depth and color textures
+	texDesc.ArraySize = sc->array_count;
+	texDesc.Format = texture_format;
 	texDesc.SampleDesc.Count = info->sample_count > 0 ? info->sample_count : 1;
 	texDesc.SampleDesc.Quality = 0;
 	texDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -425,24 +446,25 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
 			return XRT_ERROR_D3D;
 		}
 
-		// Create SRV if it's a shader resource
+		// Create one SRV per array slice so the compositor shader (Texture2DArray) can
+		// sample the correct eye without mismatching resource dimensions.
+		// Each SRV is TEXTURE2DARRAY with ArraySize=1 pointing at its specific slice.
 		if (bind_flags & D3D11_BIND_SHADER_RESOURCE) {
-			D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-			srvDesc.Format = srv_format; // Use pre-computed SRV format (handles depth formats)
-
-			if (texDesc.ArraySize > 1) {
+			for (uint32_t s = 0; s < sc->array_count && s < MAX_ARRAY_SLICES; s++) {
+				D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+				srvDesc.Format = srv_format;
 				srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+				srvDesc.Texture2DArray.MostDetailedMip = 0;
 				srvDesc.Texture2DArray.MipLevels = texDesc.MipLevels;
-				srvDesc.Texture2DArray.ArraySize = texDesc.ArraySize;
-			} else {
-				srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-				srvDesc.Texture2D.MipLevels = texDesc.MipLevels;
-			}
+				srvDesc.Texture2DArray.FirstArraySlice = s;
+				srvDesc.Texture2DArray.ArraySize = 1;
 
-			hr = internals->device->CreateShaderResourceView(sc->images[i], &srvDesc, &sc->srvs[i]);
-			if (FAILED(hr)) {
-				U_LOG_W("Failed to create SRV for swapchain texture %u: 0x%08x", i, hr);
-				// Non-fatal, continue without SRV
+				hr = internals->device->CreateShaderResourceView(
+				    sc->images[i], &srvDesc, &sc->srvs[i][s]);
+				if (FAILED(hr)) {
+					U_LOG_W("Failed to create SRV for image %u slice %u: 0x%08x",
+					        i, s, hr);
+				}
 			}
 		}
 
@@ -489,22 +511,23 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
 }
 
 /*!
- * Get the SRV for a swapchain image.
+ * Get the per-slice SRV for a swapchain image.
  *
- * @param xsc The swapchain.
- * @param index Image index.
+ * @param xsc         The swapchain.
+ * @param index       Image index (triple-buffering index).
+ * @param array_index Array slice index (0 = left eye, 1 = right eye for stereo).
  * @return The SRV or nullptr.
  */
 extern "C" void *
-comp_d3d11_swapchain_get_srv(struct xrt_swapchain *xsc, uint32_t index)
+comp_d3d11_swapchain_get_srv(struct xrt_swapchain *xsc, uint32_t index, uint32_t array_index)
 {
 	struct comp_d3d11_swapchain *sc = d3d11_sc(xsc);
 
-	if (index >= sc->image_count) {
+	if (index >= sc->image_count || array_index >= MAX_ARRAY_SLICES) {
 		return nullptr;
 	}
 
-	return sc->srvs[index];
+	return sc->srvs[index][array_index];
 }
 
 /*!

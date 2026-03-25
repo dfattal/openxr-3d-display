@@ -39,16 +39,20 @@ comp_d3d11_swapchain_create(struct comp_d3d11_compositor *c,
                             struct xrt_swapchain **out_xsc);
 
 /*!
- * Get the shader resource view for a swapchain image.
+ * Get the per-slice shader resource view for a swapchain image.
  *
- * @param xsc The swapchain.
- * @param index Image index.
+ * Each array slice has its own SRV (TEXTURE2DARRAY with ArraySize=1).
+ * For mono swapchains use array_index=0; for stereo, 0=left 1=right.
+ *
+ * @param xsc         The swapchain.
+ * @param index       Image index (triple-buffering index).
+ * @param array_index Array slice index.
  * @return The SRV as void pointer, or NULL if not available.
  *
  * @ingroup comp_d3d11
  */
 void *
-comp_d3d11_swapchain_get_srv(struct xrt_swapchain *xsc, uint32_t index);
+comp_d3d11_swapchain_get_srv(struct xrt_swapchain *xsc, uint32_t index, uint32_t array_index);
 
 /*!
  * Get the render target view for a swapchain image.
