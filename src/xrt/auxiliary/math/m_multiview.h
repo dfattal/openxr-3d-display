@@ -15,7 +15,7 @@
  *
  * Both paths share view spread/parallax factor processing.
  *
- * See also: docs/architecture/stereo3d-math.md for full pipeline derivation.
+ * See also: docs/architecture/kooima-projection.md for full pipeline derivation.
  *
  * @author David Fattal
  * @ingroup aux_math
