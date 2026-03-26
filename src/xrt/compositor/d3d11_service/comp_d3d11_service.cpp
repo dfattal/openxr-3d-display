@@ -2933,6 +2933,19 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			                     sys->view_width, sys->view_height,
 			                     &tile_x, &tile_y);
 
+			// Clamp source region to fit atlas tile (#102): when the IPC
+			// client's swapchain is larger than the resized atlas tile,
+			// crop the source to prevent overflow into adjacent tiles.
+			float tile_w = static_cast<float>(sys->view_width);
+			float tile_h = static_cast<float>(sys->view_height);
+			if (src_w > tile_w || src_h > tile_h) {
+				float scale_x = (src_w > tile_w) ? tile_w / src_w : 1.0f;
+				float scale_y = (src_h > tile_h) ? tile_h / src_h : 1.0f;
+				float scale = (scale_x < scale_y) ? scale_x : scale_y;
+				src_w *= scale;
+				src_h *= scale;
+			}
+
 			if (view_is_srgb[eye] && sys->blit_vs && view_scs[eye]->images[view_img_indices[eye]].srv) {
 				wil::com_ptr<ID3D11ShaderResourceView> srgb_srv;
 				D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -2983,9 +2996,12 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		} // !zero_copy
 
 		// Track actual content dimensions from submitted rects (may differ from
-		// sys->view_width/height for legacy apps that render at compromise scale)
+		// sys->view_width/height for legacy apps that render at compromise scale).
+		// Clamp to atlas tile dims in case client swapchain > atlas (#102).
 		content_view_w = static_cast<uint32_t>(layer->data.proj.v[0].sub.rect.extent.w);
 		content_view_h = static_cast<uint32_t>(layer->data.proj.v[0].sub.rect.extent.h);
+		if (content_view_w > sys->view_width) content_view_w = sys->view_width;
+		if (content_view_h > sys->view_height) content_view_h = sys->view_height;
 
 		// Release KeyedMutex after reading
 		for (uint32_t eye = 0; eye < proj_view_count; eye++) {
