@@ -215,11 +215,18 @@ leiasr_d3d11_create(double max_time,
 		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
-	// Create D3D11 weaver (SR SDK installs its WndProc via SetWindowLongPtr)
+	// Create D3D11 weaver (SR SDK installs its WndProc via SetWindowLongPtr).
+	// Set DPI awareness so the SDK sees physical pixels when it queries the
+	// HWND. See LeiaInc/LeiaSR@a8a9fb9 for the pattern.
+	DPI_AWARENESS_CONTEXT oldDpiCtx =
+	    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	WeaverErrorCode result = SR::CreateDX11Weaver(sr->context,
 	                                               sr->d3d11_context,
 	                                               static_cast<HWND>(hwnd),
 	                                               &sr->weaver);
+	if (oldDpiCtx != NULL) {
+		SetThreadDpiAwarenessContext(oldDpiCtx);
+	}
 	if (result != WeaverErrorCode::WeaverSuccess) {
 		U_LOG_E("Failed to create SR D3D11 weaver: %d", (int)result);
 		SR::SRContext::deleteSRContext(sr->context);
@@ -313,9 +320,15 @@ leiasr_d3d11_weave(struct leiasr_d3d11 *leiasr)
 		return;
 	}
 
-	// The weaver writes to the currently bound render target
-	// Make sure OMSetRenderTargets and RSSetViewports have been called
+	// The weaver writes to the currently bound render target.
+	// Make sure OMSetRenderTargets and RSSetViewports have been called.
+	// Set DPI awareness so any internal GetClientRect returns physical pixels.
+	DPI_AWARENESS_CONTEXT oldDpiCtx =
+	    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	leiasr->weaver->weave();
+	if (oldDpiCtx != NULL) {
+		SetThreadDpiAwarenessContext(oldDpiCtx);
+	}
 }
 
 /*!
