@@ -476,9 +476,15 @@ leiasr_log_window_diagnostics(struct leiasr *leiasr, void *windowHandle)
 
 	HWND hwnd = (HWND)windowHandle;
 
-	// Get window client area in screen coordinates
+	// Get window client area in screen coordinates.
+	// Set DPI awareness so GetClientRect returns physical pixels.
+	DPI_AWARENESS_CONTEXT oldDpiCtx =
+	    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	RECT clientRect;
 	GetClientRect(hwnd, &clientRect);
+	if (oldDpiCtx != NULL) {
+		SetThreadDpiAwarenessContext(oldDpiCtx);
+	}
 	POINT clientTopLeft = {clientRect.left, clientRect.top};
 	POINT clientBottomRight = {clientRect.right, clientRect.bottom};
 	ClientToScreen(hwnd, &clientTopLeft);
@@ -600,9 +606,16 @@ leiasr_get_window_metrics(struct leiasr *leiasr,
 		return false;
 	}
 
-	// Get window client rect
+	// Get window client rect.
+	// Set DPI awareness so GetClientRect returns physical pixels.
+	DPI_AWARENESS_CONTEXT oldDpiCtx =
+	    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	RECT rect;
-	if (!GetClientRect(leiasr->windowHandle, &rect)) {
+	BOOL gcr_ok = GetClientRect(leiasr->windowHandle, &rect);
+	if (oldDpiCtx != NULL) {
+		SetThreadDpiAwarenessContext(oldDpiCtx);
+	}
+	if (!gcr_ok) {
 		return false;
 	}
 	uint32_t win_px_w = static_cast<uint32_t>(rect.right - rect.left);
