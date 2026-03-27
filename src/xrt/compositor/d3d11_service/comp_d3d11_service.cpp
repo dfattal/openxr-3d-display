@@ -419,6 +419,14 @@ sync_tile_layout(struct d3d11_service_system *sys)
 			}
 		}
 	}
+
+	// Keep view_width/height consistent with tile layout and atlas dims.
+	// This is needed because tile_columns/rows change on 2D/3D toggle
+	// (e.g. 2→1 columns) but the atlas size stays the same.
+	if (sys->display_width > 0 && sys->display_height > 0) {
+		sys->view_width = sys->display_width / sys->tile_columns;
+		sys->view_height = sys->display_height / sys->tile_rows;
+	}
 }
 
 /*!
