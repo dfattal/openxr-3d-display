@@ -1193,6 +1193,21 @@ d3d12_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 			D3D12_RECT scissor = {0, 0, static_cast<LONG>(dp_target_w), static_cast<LONG>(dp_target_h)};
 			c->cmd_list->RSSetScissorRects(1, &scissor);
 
+			static uint32_t pa_log = 0;
+			if (pa_log < 5) {
+				D3D12_RESOURCE_DESC st_desc2 = c->shared_texture->GetDesc();
+				U_LOG_W("process_atlas: view=%ux%u tiles=%ux%u dp_target=%ux%u "
+				        "canvas=(%d,%d %ux%u) shared_tex=%llux%u",
+				        view_width, view_height, tile_columns, tile_rows,
+				        dp_target_w, dp_target_h,
+				        c->canvas.valid ? c->canvas.x : -1,
+				        c->canvas.valid ? c->canvas.y : -1,
+				        c->canvas.valid ? c->canvas.w : 0,
+				        c->canvas.valid ? c->canvas.h : 0,
+				        (unsigned long long)st_desc2.Width, st_desc2.Height);
+				pa_log++;
+			}
+
 			xrt_display_processor_d3d12_process_atlas(
 			    c->display_processor,
 			    c->cmd_list,
