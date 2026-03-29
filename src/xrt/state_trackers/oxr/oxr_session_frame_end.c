@@ -1942,42 +1942,18 @@ oxr_session_frame_end(struct oxr_logger *log, struct oxr_session *sess, const Xr
 	xret = xrt_comp_layer_begin(xc, &data);
 	OXR_CHECK_XRET(log, sess, xret, xrt_comp_layer_begin);
 
-	{
-		static int trace_count = 0;
-		if (trace_count < 3) {
-			U_LOG_W("FRAME-END-LOOP[%d]: layerCount=%u", trace_count++, frameEndInfo->layerCount);
-		}
-	}
-
 	for (uint32_t i = 0; i < frameEndInfo->layerCount; i++) {
 		const XrCompositionLayerBaseHeader *layer = frameEndInfo->layers[i];
 		assert(layer != NULL);
-
-		{
-			static int trace_count = 0;
-			if (trace_count < 6) {
-				U_LOG_W("FRAME-END-LAYER[%d]: i=%u type=0x%x", trace_count++, i, (unsigned)layer->type);
-			}
-		}
 
 		switch (layer->type) {
 		case XR_TYPE_COMPOSITION_LAYER_PROJECTION:
 			submit_projection_layer(sess, xc, log, (XrCompositionLayerProjection *)layer, xdev, &inv_offset,
 			                        frameEndInfo->displayTime, xrt_display_time_ns);
-			{
-				static int t = 0;
-				if (t < 3) U_LOG_W("FRAME-END-LAYER: projection done (i=%u)", i);
-				t++;
-			}
 			break;
 		case XR_TYPE_COMPOSITION_LAYER_QUAD:
 			submit_quad_layer(sess, xc, log, (XrCompositionLayerQuad *)layer, xdev, &inv_offset,
 			                  frameEndInfo->displayTime, xrt_display_time_ns);
-			{
-				static int t = 0;
-				if (t < 3) U_LOG_W("FRAME-END-LAYER: quad done (i=%u)", i);
-				t++;
-			}
 			break;
 		case XR_TYPE_COMPOSITION_LAYER_CUBE_KHR:
 			submit_cube_layer(sess, xc, log, (XrCompositionLayerCubeKHR *)layer, xdev, &inv_offset,
@@ -2002,34 +1978,12 @@ oxr_session_frame_end(struct oxr_logger *log, struct oxr_session *sess, const Xr
 		case XR_TYPE_COMPOSITION_LAYER_WINDOW_SPACE_EXT:
 			submit_window_space_layer(sess, xc, log, (XrCompositionLayerWindowSpaceEXT *)layer, xdev,
 			                          &inv_offset, frameEndInfo->displayTime, xrt_display_time_ns);
-			{
-				static int t = 0;
-				if (t < 3) U_LOG_W("FRAME-END-LAYER: window_space done (i=%u)", i);
-				t++;
-			}
 			break;
 		default: assert(false && "invalid layer type");
 		}
 	}
 
-	{
-		static int trace_count = 0;
-		if (trace_count < 3) {
-			U_LOG_W("FRAME-END[%d]: about to call layer_commit (xc=%p layer_commit=%p layers=%u)",
-			        trace_count++, (void *)xc, (void *)(xc ? xc->layer_commit : NULL),
-			        frameEndInfo->layerCount);
-		}
-	}
-
 	xret = xrt_comp_layer_commit(xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
-
-	{
-		static int trace_count = 0;
-		if (trace_count < 3) {
-			U_LOG_W("FRAME-END[%d]: layer_commit returned %d", trace_count++, (int)xret);
-		}
-	}
-
 	OXR_CHECK_XRET(log, sess, xret, xrt_comp_layer_commit);
 
 	sess->frame_id.begun = -1;

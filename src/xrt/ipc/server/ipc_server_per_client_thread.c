@@ -398,8 +398,6 @@ client_loop(volatile struct ipc_client_state *ics)
 
 	IPC_INFO(ics->server, "Client connected");
 
-	uint32_t ipc_msg_count = 0;
-
 	while (ics->server->running) {
 		uint8_t buf[IPC_BUF_SIZE] = {0};
 		DWORD len = 0;
@@ -415,19 +413,9 @@ client_loop(volatile struct ipc_client_state *ics)
 		 */
 		bret = ReadFile(ics->imc.ipc_handle, buf, sizeof(buf), &len, NULL);
 		if (!bret) {
-			// Log the last command we were waiting for
-			IPC_WARN(ics->server, "IPC-READ: pipe broke after %u messages", ipc_msg_count);
 			pipe_print_get_last_error(ics, "ReadFile");
 			IPC_ERROR(ics->server, "ReadFile failed, disconnecting client.");
 			break;
-		}
-
-		// Log every message with command ID
-		{
-			ipc_command_t cmd = *(ipc_command_t *)buf;
-			// Log all messages (only 38 total before pipe breaks)
-			IPC_WARN(ics->server, "IPC-READ[%u]: cmd=%u len=%u", ipc_msg_count, (unsigned)cmd, (unsigned)len);
-			ipc_msg_count++;
 		}
 
 		// All commands are at least 4 bytes.
