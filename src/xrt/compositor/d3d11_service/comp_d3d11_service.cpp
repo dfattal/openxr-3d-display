@@ -395,6 +395,9 @@ struct d3d11_multi_client_slot
 	//! The per-client compositor that owns the atlas.
 	struct d3d11_service_compositor *compositor;
 
+	//! App's HWND (from XR_EXT_win32_window_binding). Shell can resize via SetWindowPos.
+	HWND app_hwnd;
+
 	//! Virtual window position in 3D space (identity = centered on display).
 	struct xrt_pose window_pose;
 
@@ -2789,8 +2792,16 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 
 	U_LOG_W("Multi-comp: creating output window and resources");
 
-	// Create window
-	xrt_result_t wret = comp_d3d11_window_create(sys->output_width, sys->output_height, &mc->window);
+	// Create window at display native resolution (not atlas size).
+	// The window goes fullscreen on the Leia display; using native res avoids
+	// the DP dim mismatch teardown/recreate path.
+	uint32_t win_w = sys->base.info.display_pixel_width;
+	uint32_t win_h = sys->base.info.display_pixel_height;
+	if (win_w == 0 || win_h == 0) {
+		win_w = sys->output_width;
+		win_h = sys->output_height;
+	}
+	xrt_result_t wret = comp_d3d11_window_create(win_w, win_h, &mc->window);
 	if (wret != XRT_SUCCESS || mc->window == nullptr) {
 		U_LOG_E("Multi-comp: failed to create window");
 		return XRT_ERROR_D3D11;
@@ -2982,6 +2993,33 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		U_LOG_W("Multi-comp: window closed - dismissing");
 		mc->window_dismissed = true;
 		return;
+	}
+
+	// TAB: cycle focus (ready for multi-window, no-op with single client)
+	if (GetAsyncKeyState(VK_TAB) & 1) {
+		if (mc->client_count > 0) {
+			mc->focused_slot = (mc->focused_slot + 1) % D3D11_MULTI_MAX_CLIENTS;
+			// Find next active slot
+			for (int i = 0; i < D3D11_MULTI_MAX_CLIENTS; i++) {
+				if (mc->clients[mc->focused_slot].active) break;
+				mc->focused_slot = (mc->focused_slot + 1) % D3D11_MULTI_MAX_CLIENTS;
+			}
+			U_LOG_W("Multi-comp: TAB → focused slot %d", mc->focused_slot);
+		}
+	}
+
+	// DELETE: close focused client
+	if (GetAsyncKeyState(VK_DELETE) & 1) {
+		if (mc->focused_slot >= 0 && mc->focused_slot < D3D11_MULTI_MAX_CLIENTS &&
+		    mc->clients[mc->focused_slot].active) {
+			struct d3d11_service_compositor *fc = mc->clients[mc->focused_slot].compositor;
+			if (fc != nullptr && fc->xses != nullptr) {
+				union xrt_session_event xse = XRT_STRUCT_INIT;
+				xse.type = XRT_SESSION_EVENT_EXIT_REQUEST;
+				xrt_session_event_sink_push(fc->xses, &xse);
+				U_LOG_W("Multi-comp: DELETE → exit request for slot %d", mc->focused_slot);
+			}
+		}
 	}
 
 	// Handle swap chain resize
@@ -3986,6 +4024,20 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 			fini_client_render_resources(&c->render);
 			delete c;
 			return XRT_ERROR_D3D11;
+		}
+
+		// Store app's HWND and resize it to fill the display.
+		// The app receives WM_SIZE, updates its Kooima, and renders at the new size.
+		HWND app_hwnd = (HWND)external_hwnd;
+		sys->multi_comp->clients[slot].app_hwnd = app_hwnd;
+		if (app_hwnd != nullptr) {
+			uint32_t disp_px_w = sys->base.info.display_pixel_width;
+			uint32_t disp_px_h = sys->base.info.display_pixel_height;
+			if (disp_px_w > 0 && disp_px_h > 0) {
+				SetWindowPos(app_hwnd, NULL, 0, 0, (int)disp_px_w, (int)disp_px_h,
+				             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+				U_LOG_W("Shell: resized app HWND %p to %ux%u (display native)", app_hwnd, disp_px_w, disp_px_h);
+			}
 		}
 	}
 
