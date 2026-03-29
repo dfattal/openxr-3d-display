@@ -53,7 +53,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <assert.h>
 
 // Vendor-neutral display metric types (eye positions, window metrics, Kooima FOV)

@@ -3030,162 +3030,20 @@ multi_compositor_render(struct d3d11_service_system *sys)
 	(void)display_w_m;
 	(void)display_h_m;
 
-	// Clear combined atlas
-	float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-	sys->context->ClearRenderTargetView(mc->combined_atlas_rtv.get(), clear_color);
-
-	// Bind combined atlas as render target
-	ID3D11RenderTargetView *rtvs[] = {mc->combined_atlas_rtv.get()};
-	sys->context->OMSetRenderTargets(1, rtvs, nullptr);
-
-	// Set up rendering state
-	sys->context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-	sys->context->IASetInputLayout(nullptr);
-	sys->context->RSSetState(sys->rasterizer_state.get());
-	sys->context->OMSetDepthStencilState(sys->depth_disabled.get(), 0);
-
-	// Determine view count from tile layout
-	uint32_t view_count = sys->tile_columns * sys->tile_rows;
-	if (view_count > XRT_MAX_VIEWS) {
-		view_count = XRT_MAX_VIEWS;
-	}
-	if (view_count == 0) {
-		view_count = 1;
-	}
-
-	// For each view (L/R eye): render all client quads
-	for (uint32_t view_idx = 0; view_idx < view_count; view_idx++) {
-		// Set viewport for this view tile
-		uint32_t tile_x = 0, tile_y = 0;
-		u_tiling_view_origin(view_idx, sys->tile_columns,
-		                     sys->view_width, sys->view_height,
-		                     &tile_x, &tile_y);
-
-		D3D11_VIEWPORT vp = {};
-		vp.TopLeftX = (float)tile_x;
-		vp.TopLeftY = (float)tile_y;
-		vp.Width = (float)sys->view_width;
-		vp.Height = (float)sys->view_height;
-		vp.MaxDepth = 1.0f;
-		sys->context->RSSetViewports(1, &vp);
-
-		// Eye position for this view
-		struct xrt_eye_position ep = (view_idx < eye_pos.count)
-		                                 ? eye_pos.eyes[view_idx]
-		                                 : eye_pos.eyes[eye_pos.count - 1];
-		struct xrt_vec3 eye = {ep.x, ep.y, ep.z};
-
-		// For each active client: render their atlas as a textured quad
-		for (int s = 0; s < D3D11_MULTI_MAX_CLIENTS; s++) {
-			if (!mc->clients[s].active) {
-				continue;
-			}
-			struct d3d11_service_compositor *cc = mc->clients[s].compositor;
-			if (cc == nullptr || !cc->render.atlas_srv) {
-				continue;
-			}
-
-			// --- Window-Relative Level 2 Kooima MVP ---
-			//
-			// Each virtual window gets its own asymmetric Kooima frustum:
-			// 1. Eye offset relative to window center (not display center)
-			// 2. Kooima projection uses window dimensions (not full display)
-			// 3. Model matrix places the quad at window_pose on the display
-			//
-			// This produces correct parallax for each window independently,
-			// even when windows are off-center or smaller than the display.
-
-			float win_w_m = mc->clients[s].window_width_m;
-			float win_h_m = mc->clients[s].window_height_m;
-
-			// Window center in display space (from window_pose position)
-			struct xrt_vec3 win_center = mc->clients[s].window_pose.position;
-
-			// Eye position relative to window center
-			// (Kooima expects eye relative to screen center)
-			struct xrt_vec3 eye_window = {
-			    eye.x - win_center.x,
-			    eye.y - win_center.y,
-			    eye.z - win_center.z,
-			};
-
-			// Kooima projection from eye to this virtual window
-			struct xrt_matrix_4x4 proj_mat;
-			display3d_compute_projection(eye_window, win_w_m, win_h_m,
-			                             0.01f, 100.0f, (float *)&proj_mat);
-
-			// View matrix from eye position (identity orientation)
-			struct xrt_pose eye_pose = XRT_POSE_IDENTITY;
-			eye_pose.position = eye;
-			struct xrt_matrix_4x4 view_mat;
-			math_matrix_4x4_view_from_pose(&eye_pose, &view_mat);
-
-			// Model matrix: position + scale of virtual window
-			// Y negated to cancel shader's pos.y = -pos.y
-			struct xrt_vec3 scale = {
-			    win_w_m,
-			    -win_h_m,
-			    1.0f,
-			};
-			struct xrt_matrix_4x4 model_mat;
-			math_matrix_4x4_model(&mc->clients[s].window_pose, &scale, &model_mat);
-
-			// MVP = proj * view * model
-			struct xrt_matrix_4x4 mv, mvp;
-			math_matrix_4x4_multiply(&view_mat, &model_mat, &mv);
-			math_matrix_4x4_multiply(&proj_mat, &mv, &mvp);
-
-			// UV post_transform: select this view's tile from client atlas
-			float tile_u_scale = 1.0f / (float)sys->tile_columns;
-			float tile_v_scale = 1.0f / (float)sys->tile_rows;
-			uint32_t col = view_idx % sys->tile_columns;
-			uint32_t row = view_idx / sys->tile_columns;
-			float tile_u_offset = (float)col * tile_u_scale;
-
-			// Fill quad constants
-			QuadLayerConstants constants = {};
-			std::memcpy(constants.mvp, &mvp, sizeof(constants.mvp));
-
-			// V flip: start at bottom (1.0), scale negative
-			constants.post_transform[0] = tile_u_offset;
-			constants.post_transform[1] = 1.0f;
-			constants.post_transform[2] = tile_u_scale;
-			constants.post_transform[3] = -tile_v_scale;
-
-			constants.color_scale[0] = 1.0f;
-			constants.color_scale[1] = 1.0f;
-			constants.color_scale[2] = 1.0f;
-			constants.color_scale[3] = 1.0f;
-
-			// Update constant buffer
-			D3D11_MAPPED_SUBRESOURCE mapped;
-			sys->context->Map(sys->layer_constant_buffer.get(), 0,
-			                  D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-			std::memcpy(mapped.pData, &constants, sizeof(constants));
-			sys->context->Unmap(sys->layer_constant_buffer.get(), 0);
-
-			// Bind shaders and client atlas
-			sys->context->VSSetShader(sys->quad_vs.get(), nullptr, 0);
-			sys->context->PSSetShader(sys->quad_ps.get(), nullptr, 0);
-			ID3D11Buffer *cbs[] = {sys->layer_constant_buffer.get()};
-			sys->context->VSSetConstantBuffers(0, 1, cbs);
-			sys->context->PSSetConstantBuffers(0, 1, cbs);
-			ID3D11ShaderResourceView *srv = cc->render.atlas_srv.get();
-			sys->context->PSSetShaderResources(0, 1, &srv);
-			ID3D11SamplerState *samp[] = {sys->sampler_linear.get()};
-			sys->context->PSSetSamplers(0, 1, samp);
-
-			// Opaque blend (Phase 0A: single client fills full display)
-			float blend_factor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-			sys->context->OMSetBlendState(sys->blend_opaque.get(), blend_factor, 0xFFFFFFFF);
-
-			// Draw quad (4 vertices, triangle strip)
-			sys->context->Draw(4, 0);
-
-			// Unbind SRV to avoid resource hazards
-			ID3D11ShaderResourceView *null_srv = nullptr;
-			sys->context->PSSetShaderResources(0, 1, &null_srv);
+	// Phase 0A/0B: single client fills full display.
+	// Copy the client's atlas directly to the combined atlas (same dimensions).
+	// This bypasses Level 2 Kooima quad rendering which will be needed for
+	// Phase 0C+ when multiple windows are positioned independently.
+	for (int s = 0; s < D3D11_MULTI_MAX_CLIENTS; s++) {
+		if (!mc->clients[s].active) {
+			continue;
 		}
+		struct d3d11_service_compositor *cc = mc->clients[s].compositor;
+		if (cc == nullptr || !cc->render.atlas_texture) {
+			continue;
+		}
+		sys->context->CopyResource(mc->combined_atlas.get(), cc->render.atlas_texture.get());
+		break; // Phase 0A/0B: only one client
 	}
 
 	// Run DP on combined atlas → back buffer
@@ -3237,15 +3095,6 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 {
 	struct d3d11_service_compositor *c = d3d11_service_compositor_from_xrt(xc);
 	struct d3d11_service_system *sys = c->sys;
-
-	// One-shot trace
-	{
-		static int trace_count = 0;
-		if (trace_count < 3) {
-			U_LOG_W("LAYER-COMMIT[%d]: ENTER shell=%d layers=%u", trace_count++,
-			        sys->shell_mode, c->layer_accum.layer_count);
-		}
-	}
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
