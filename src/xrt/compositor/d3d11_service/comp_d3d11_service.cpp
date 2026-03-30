@@ -4696,11 +4696,16 @@ comp_d3d11_service_get_window_metrics(struct xrt_system_compositor *xsysc,
 bool
 comp_d3d11_service_owns_window(struct xrt_system_compositor *xsysc)
 {
-	// NOTE: With per-client windows, this function now applies to the default
-	// behavior. IPC clients (no external_window_handle) always get Monado windows.
-	// Native compositor clients can provide their own via XR_EXT_win32_window_binding.
-	// For IPC path (which calls this), we always create windows, so return true.
-	(void)xsysc;
+	// Shell mode: per-client compositors don't own windows (multi-comp does).
+	// The shell app provides its own HWND and does its own Kooima projection.
+	// Returning false ensures the IPC view pose path uses the display-centric
+	// Kooima with real DP eye tracking, not the camera-centric qwerty path.
+	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
+	if (sys->shell_mode) {
+		return false;
+	}
+
+	// Non-shell IPC clients always get Monado-owned windows.
 	return true;
 }
 
