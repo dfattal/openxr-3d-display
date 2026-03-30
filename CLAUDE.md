@@ -80,11 +80,22 @@ This is a fork of **Monado**, an open source OpenXR runtime for VR/AR devices. T
 ```
 Builds the runtime, OpenXR loader, and test apps. The Vulkan compositor will fail at runtime with `VK_ERROR_EXTENSION_NOT_PRESENT` (MoltenVK limitation, not a build issue).
 
-### Windows CI Build (Primary)
+### Local Windows Build
+```bat
+local_build.bat all        REM Full build (generate + runtime + installer + test apps)
+local_build.bat build      REM Runtime only (fastest iteration)
+local_build.bat test-apps  REM Test apps only (uses existing runtime build)
+local_build.bat generate   REM CMake generate only
+```
+Downloads all dependencies on first run (SR SDK, vcpkg, OpenXR loader). Requires VS 2022 with C++ workload, Ninja, Vulkan SDK, and GitHub CLI. Outputs to `_package/` (runtime) and `test_apps/*/build/` (test apps).
+
+**When on a Windows machine with a Leia SR display, prefer local builds over CI** — iterate faster with `local_build.bat build` and test directly.
+
+### CI Build (Remote)
 ```bash
 /ci-monitor "your commit message"
 ```
-Commits, pushes, monitors GitHub Actions (Windows + macOS), auto-fixes common build errors.
+Commits, pushes, monitors GitHub Actions (Windows + macOS), auto-fixes common build errors. Use when not on a local dev machine or for final validation before merge.
 
 ### Standard CMake Build
 ```bash
