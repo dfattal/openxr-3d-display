@@ -398,6 +398,10 @@ struct d3d11_multi_client_slot
 	//! App's HWND (from XR_EXT_win32_window_binding). Shell can resize via SetWindowPos.
 	HWND app_hwnd;
 
+	//! Actual rendered content dimensions per view (from last layer_commit).
+	uint32_t content_view_w;
+	uint32_t content_view_h;
+
 	//! Virtual window position in 3D space (identity = centered on display).
 	struct xrt_pose window_pose;
 
@@ -431,6 +435,12 @@ struct d3d11_multi_compositor
 
 	//! Display processor (single, shared).
 	struct xrt_display_processor_d3d11 *display_processor;
+
+	//! Crop texture for DP input (content-sized, lazily created).
+	wil::com_ptr<ID3D11Texture2D> crop_texture;
+	wil::com_ptr<ID3D11ShaderResourceView> crop_srv;
+	uint32_t crop_width;
+	uint32_t crop_height;
 
 	//! Per-client slots.
 	struct d3d11_multi_client_slot clients[D3D11_MULTI_MAX_CLIENTS];
@@ -1364,10 +1374,17 @@ init_client_render_resources(struct d3d11_service_system *sys,
 
 	// Shell mode: only create atlas texture. No window, swap chain, or DP.
 	// The multi-compositor owns those shared resources.
+	// Atlas sized to native display (app HWND is fullscreen, renders at native * scale).
 	if (sys->shell_mode) {
+		uint32_t atlas_w = sys->base.info.display_pixel_width;
+		uint32_t atlas_h = sys->base.info.display_pixel_height;
+		if (atlas_w == 0 || atlas_h == 0) {
+			atlas_w = sys->display_width;
+			atlas_h = sys->display_height;
+		}
 		D3D11_TEXTURE2D_DESC atlas_desc = {};
-		atlas_desc.Width = sys->display_width;
-		atlas_desc.Height = sys->display_height;
+		atlas_desc.Width = atlas_w;
+		atlas_desc.Height = atlas_h;
 		atlas_desc.MipLevels = 1;
 		atlas_desc.ArraySize = 1;
 		atlas_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -1384,7 +1401,7 @@ init_client_render_resources(struct d3d11_service_system *sys,
 		sys->device->CreateRenderTargetView(res->atlas_texture.get(), nullptr, res->atlas_rtv.put());
 
 		U_LOG_W("Shell mode: created atlas-only resources for client (%ux%u)",
-		        sys->display_width, sys->display_height);
+		        atlas_w, atlas_h);
 		return XRT_SUCCESS;
 	}
 
@@ -2850,11 +2867,17 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 		sys->device->CreateRenderTargetView(bb.get(), nullptr, mc->back_buffer_rtv.put());
 	}
 
-	// Combined atlas texture (same dims as per-client atlas)
+	// Combined atlas texture (native display size to hold fullscreen app content)
 	{
+		uint32_t ca_w = sys->base.info.display_pixel_width;
+		uint32_t ca_h = sys->base.info.display_pixel_height;
+		if (ca_w == 0 || ca_h == 0) {
+			ca_w = sys->display_width;
+			ca_h = sys->display_height;
+		}
 		D3D11_TEXTURE2D_DESC atlas_desc = {};
-		atlas_desc.Width = sys->display_width;
-		atlas_desc.Height = sys->display_height;
+		atlas_desc.Width = ca_w;
+		atlas_desc.Height = ca_h;
 		atlas_desc.MipLevels = 1;
 		atlas_desc.ArraySize = 1;
 		atlas_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -2871,7 +2894,9 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 		sys->device->CreateRenderTargetView(mc->combined_atlas.get(), nullptr, mc->combined_atlas_rtv.put());
 	}
 
-	U_LOG_W("Multi-comp: combined atlas %ux%u", sys->display_width, sys->display_height);
+	U_LOG_W("Multi-comp: combined atlas %ux%u",
+	        sys->base.info.display_pixel_width > 0 ? sys->base.info.display_pixel_width : sys->display_width,
+	        sys->base.info.display_pixel_height > 0 ? sys->base.info.display_pixel_height : sys->display_height);
 
 	// Create display processor via factory
 	if (sys->base.info.dp_factory_d3d11 != NULL) {
@@ -3068,10 +3093,10 @@ multi_compositor_render(struct d3d11_service_system *sys)
 	(void)display_w_m;
 	(void)display_h_m;
 
-	// Phase 0A/0B: single client fills full display.
-	// Copy the client's atlas directly to the combined atlas (same dimensions).
-	// This bypasses Level 2 Kooima quad rendering which will be needed for
-	// Phase 0C+ when multiple windows are positioned independently.
+	// Phase 0C: single client fills full display.
+	// Copy client atlas → combined atlas, crop to content dims, send to DP.
+	uint32_t dp_view_w = sys->view_width;
+	uint32_t dp_view_h = sys->view_height;
 	for (int s = 0; s < D3D11_MULTI_MAX_CLIENTS; s++) {
 		if (!mc->clients[s].active) {
 			continue;
@@ -3081,11 +3106,74 @@ multi_compositor_render(struct d3d11_service_system *sys)
 			continue;
 		}
 		sys->context->CopyResource(mc->combined_atlas.get(), cc->render.atlas_texture.get());
-		break; // Phase 0A/0B: only one client
+		// Use actual content dimensions for DP input
+		if (mc->clients[s].content_view_w > 0 && mc->clients[s].content_view_h > 0) {
+			dp_view_w = mc->clients[s].content_view_w;
+			dp_view_h = mc->clients[s].content_view_h;
+		}
+		break; // Phase 0C: only one client for now
 	}
 
-	// Run DP on combined atlas → back buffer
-	if (mc->display_processor != nullptr && mc->combined_atlas_srv && mc->back_buffer_rtv) {
+	// Crop combined atlas to content dims before DP (same pattern as standalone compositor).
+	// The DP expects a content-sized texture, not the full native-res atlas.
+	ID3D11ShaderResourceView *dp_input_srv = mc->combined_atlas_srv.get();
+	uint32_t content_w = sys->tile_columns * dp_view_w;
+	uint32_t content_h = sys->tile_rows * dp_view_h;
+
+	// Get combined atlas actual dimensions
+	uint32_t atlas_w = sys->base.info.display_pixel_width;
+	uint32_t atlas_h = sys->base.info.display_pixel_height;
+	if (atlas_w == 0) atlas_w = sys->display_width;
+	if (atlas_h == 0) atlas_h = sys->display_height;
+
+	if (content_w != atlas_w || content_h != atlas_h) {
+		// Lazy (re)create crop texture
+		if (mc->crop_width != content_w || mc->crop_height != content_h) {
+			mc->crop_srv.reset();
+			mc->crop_texture.reset();
+			D3D11_TEXTURE2D_DESC crop_desc = {};
+			crop_desc.Width = content_w;
+			crop_desc.Height = content_h;
+			crop_desc.MipLevels = 1;
+			crop_desc.ArraySize = 1;
+			crop_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			crop_desc.SampleDesc.Count = 1;
+			crop_desc.Usage = D3D11_USAGE_DEFAULT;
+			crop_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+			HRESULT chr = sys->device->CreateTexture2D(&crop_desc, nullptr, mc->crop_texture.put());
+			if (SUCCEEDED(chr)) {
+				sys->device->CreateShaderResourceView(mc->crop_texture.get(), nullptr, mc->crop_srv.put());
+				mc->crop_width = content_w;
+				mc->crop_height = content_h;
+				U_LOG_W("Multi-comp: created crop texture %ux%u (view=%ux%u)", content_w, content_h, dp_view_w, dp_view_h);
+			}
+		}
+		if (mc->crop_texture) {
+			// Copy each view's content region from combined atlas to crop texture
+			uint32_t num_views = sys->tile_columns * sys->tile_rows;
+			for (uint32_t v = 0; v < num_views && v < XRT_MAX_VIEWS; v++) {
+				uint32_t src_col = v % sys->tile_columns;
+				uint32_t src_row = v / sys->tile_columns;
+				uint32_t dst_col = src_col;
+				uint32_t dst_row = src_row;
+				D3D11_BOX box = {};
+				box.left = src_col * dp_view_w;
+				box.top = src_row * dp_view_h;
+				box.right = box.left + dp_view_w;
+				box.bottom = box.top + dp_view_h;
+				box.front = 0;
+				box.back = 1;
+				sys->context->CopySubresourceRegion(
+				    mc->crop_texture.get(), 0,
+				    dst_col * dp_view_w, dst_row * dp_view_h, 0,
+				    mc->combined_atlas.get(), 0, &box);
+			}
+			dp_input_srv = mc->crop_srv.get();
+		}
+	}
+
+	// Run DP on cropped atlas → back buffer
+	if (mc->display_processor != nullptr && dp_input_srv && mc->back_buffer_rtv) {
 		ID3D11RenderTargetView *out_rtvs[] = {mc->back_buffer_rtv.get()};
 		sys->context->OMSetRenderTargets(1, out_rtvs, nullptr);
 
@@ -3105,8 +3193,8 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		}
 
 		xrt_display_processor_d3d11_process_atlas(
-		    mc->display_processor, sys->context.get(), mc->combined_atlas_srv.get(),
-		    sys->view_width, sys->view_height, sys->tile_columns, sys->tile_rows,
+		    mc->display_processor, sys->context.get(), dp_input_srv,
+		    dp_view_w, dp_view_h, sys->tile_columns, sys->tile_rows,
 		    DXGI_FORMAT_R8G8B8A8_UNORM, bb_w, bb_h,
 		    0, 0, 0, 0);
 	} else if (mc->back_buffer_rtv && mc->combined_atlas) {
@@ -3591,17 +3679,21 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			float src_w = static_cast<float>(layer->data.proj.v[eye].sub.rect.extent.w);
 			float src_h = static_cast<float>(layer->data.proj.v[eye].sub.rect.extent.h);
 
+			// In shell mode, use actual content dims for tile layout (atlas is native-sized).
+			// In non-shell mode, use sys->view_width/height (atlas is DP-sized).
+			uint32_t layout_vw = sys->shell_mode ? static_cast<uint32_t>(src_w) : sys->view_width;
+			uint32_t layout_vh = sys->shell_mode ? static_cast<uint32_t>(src_h) : sys->view_height;
 			uint32_t tile_x, tile_y;
 			u_tiling_view_origin(eye, sys->tile_columns,
-			                     sys->view_width, sys->view_height,
+			                     layout_vw, layout_vh,
 			                     &tile_x, &tile_y);
 
 			// When client swapchain > atlas tile (window resized smaller),
 			// scale source to fit tile. Otherwise use 1:1 placement and
 			// let the crop-blit handle any excess (#102).
-			float tile_w = static_cast<float>(sys->view_width);
-			float tile_h = static_cast<float>(sys->view_height);
-			bool needs_scale = (src_w > tile_w || src_h > tile_h);
+			float tile_w = static_cast<float>(layout_vw);
+			float tile_h = static_cast<float>(layout_vh);
+			bool needs_scale = !sys->shell_mode && (src_w > tile_w || src_h > tile_h);
 			float dst_w = needs_scale ? tile_w : 0.0f;
 			float dst_h = needs_scale ? tile_h : 0.0f;
 
@@ -3659,11 +3751,26 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 		// Track actual content dimensions from submitted rects (may differ from
 		// sys->view_width/height for legacy apps that render at compromise scale).
-		// Clamp to atlas tile dims in case client swapchain > atlas (#102).
 		content_view_w = static_cast<uint32_t>(layer->data.proj.v[0].sub.rect.extent.w);
 		content_view_h = static_cast<uint32_t>(layer->data.proj.v[0].sub.rect.extent.h);
-		if (content_view_w > sys->view_width) content_view_w = sys->view_width;
-		if (content_view_h > sys->view_height) content_view_h = sys->view_height;
+		if (!sys->shell_mode) {
+			// Clamp to atlas tile dims in case client swapchain > atlas (#102).
+			// In shell mode, atlas is native-display-sized so no clamping needed.
+			if (content_view_w > sys->view_width) content_view_w = sys->view_width;
+			if (content_view_h > sys->view_height) content_view_h = sys->view_height;
+		}
+
+		// Store content dims on multi-comp slot for multi_compositor_render
+		if (sys->shell_mode && sys->multi_comp != nullptr) {
+			for (int s = 0; s < D3D11_MULTI_MAX_CLIENTS; s++) {
+				if (sys->multi_comp->clients[s].active &&
+				    sys->multi_comp->clients[s].compositor == c) {
+					sys->multi_comp->clients[s].content_view_w = content_view_w;
+					sys->multi_comp->clients[s].content_view_h = content_view_h;
+					break;
+				}
+			}
+		}
 
 		// Release KeyedMutex after reading
 		for (uint32_t eye = 0; eye < proj_view_count; eye++) {

@@ -2540,12 +2540,18 @@ oxr_session_create(struct oxr_logger *log,
 		if (shell_session != NULL && strcmp(shell_session, "1") == 0 &&
 		    xsi.external_window_handle != NULL && sys->xsysc != NULL) {
 			HWND hwnd = (HWND)xsi.external_window_handle;
+			// Shell fullscreen: resize HWND to native display resolution.
+			// This gives the app correct Kooima projection (physical window matches display)
+			// and correct swapchain/viewport sizing for the display.
 			uint32_t disp_px_w = sys->xsysc->info.display_pixel_width;
 			uint32_t disp_px_h = sys->xsysc->info.display_pixel_height;
 			if (disp_px_w > 0 && disp_px_h > 0) {
+				// Make borderless so client area = exact display size.
+				// The app uses client area for Kooima and viewport sizing.
+				SetWindowLongPtr(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
 				SetWindowPos(hwnd, NULL, 0, 0, (int)disp_px_w, (int)disp_px_h,
-				             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-				U_LOG_W("Shell session: resized app HWND %p to %ux%u (display native)",
+				             SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+				U_LOG_W("Shell session: resized app HWND %p to %ux%u borderless (display native)",
 				        hwnd, disp_px_w, disp_px_h);
 			}
 		}

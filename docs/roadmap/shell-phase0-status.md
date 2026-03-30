@@ -1,6 +1,6 @@
 # Shell Phase 0 — Implementation Status
 
-Last updated: 2026-03-29 (branch `feature/shell-phase0-ci`)
+Last updated: 2026-03-30 (branch `feature/shell-phase0-ci`)
 
 ## What Works
 
@@ -17,92 +17,96 @@ Last updated: 2026-03-29 (branch `feature/shell-phase0-ci`)
 - App's HWND flows through IPC to server via `xrt_session_info.external_window_handle`
 - Identity pose fallback for ext_win apps when relation_flags=0 on early IPC frames
 
-### Phase 0C: HWND resize (IN PROGRESS)
-- Multi-comp window created at display native resolution (3840x2160 for Leia)
-- TAB key cycles focused_slot, DELETE sends EXIT_REQUEST to focused client
-- Client-side HWND resize via SetWindowPos in oxr_session_create (before IPC call)
-- **CURRENTLY BUILDING** — client-side resize approach to avoid cross-process deadlock
+### Phase 0C: Rendering pipeline (DONE — rendering correct, eye tracking pending)
+- App HWND resized to native display (3840×2160) borderless for correct Kooima projection
+- Shell-mode client atlas + combined atlas sized to native display resolution
+- Tile positions in `compositor_layer_commit` use actual content view dimensions (not `sys->view_width`)
+- Multi-comp crops combined atlas to content dims before DP (3840×1080 for 2×1 SBS)
+- DP receives correct per-view dimensions (1920×1080 per eye for current Leia display)
+- Window-space layers handled in IPC server (NULL vtable guard — no crash, silently skipped)
+- TAB cycles focused slot, DELETE sends EXIT_REQUEST to focused client
+
+**Visual result:** Cube renders centered, correct proportions, correct 3D weaving on Leia display.
 
 ## Known Issues / Lessons Learned
+
+### HWND must be borderless for shell fullscreen
+The app computes Kooima screen corners from `g_windowWidth × pxSizeX`. If the HWND has title bar/borders, client area < outer size, causing view rects smaller than expected (e.g., 1904×1036 instead of 1920×1080). Fix: strip window style to `WS_POPUP | WS_VISIBLE` before resizing.
+
+### Atlas tile positions must use content dimensions in shell mode
+The `compositor_layer_commit` blit loop computes tile positions via `u_tiling_view_origin(eye, tile_columns, sys->view_width, ...)`. In shell mode, `sys->view_width` (960) is the DP's internal resolution, not the app's rendered view width (1920). Using 960 causes views to overlap. Fix: use actual content view width from projection layer submission.
+
+### Shell-mode atlas must be native-display-sized
+The app HWND is fullscreen → swapchain is 3840×2160 → view rects are 1920×1080. The per-client atlas and combined atlas must be large enough to hold these without clipping. Sized to `display_pixel_width × display_pixel_height`.
 
 ### Cross-process SetWindowPos deadlocks
 **Problem:** SetWindowPos on a cross-process HWND sends synchronous WM messages. If called from the IPC handler thread (server-side), the client thread is blocked waiting for the IPC response and can't process WM → deadlock.
 
-**Tried and failed:**
-1. SetWindowPos in `system_create_native_compositor` (server-side during session_create) → deadlock
-2. Deferred SetWindowPos in `multi_compositor_render` (server-side during layer_commit) → same deadlock (layer_commit runs on IPC handler thread)
-
-**Solution:** Resize the HWND CLIENT-SIDE in `oxr_session_create`, before the IPC `session_create` call. At that point the client's main thread is running and processes WM_SIZE immediately.
+**Solution:** Resize the HWND CLIENT-SIDE in `oxr_session_create`, before the IPC `session_create` call.
 
 ### IPC layer_window_space was missing
-**Root cause of original "app crashes in xrEndFrame":** The IPC client compositor (`ipc_client_compositor.c`) had no `layer_window_space` vtable entry. When the cube_handle app submitted a window_space layer (HUD), the D3D11 client compositor forwarded to the IPC compositor which had NULL → crash → pipe break.
-
-**Fix:** Added `ipc_compositor_layer_window_space` using the existing `handle_layer` pattern (commit `e8244c9cc`).
+The IPC server handler had no case for `XRT_LAYER_WINDOW_SPACE` (type 8). Added handler with NULL vtable guard — silently skips if compositor doesn't implement it.
 
 ### HWND hiding approaches that don't work
-DXGI flip-model `Present()` blocks when the window is hidden, cloaked, or off-screen:
-- `ShowWindow(SW_HIDE)` → Present blocks
-- `SetWindowPos(-32000, -32000)` → Present blocks
-- `DwmSetWindowAttribute(DWMWA_CLOAK)` → Present blocks
-- `SetWindowPos(1x1)` → not tested but likely blocks
-
-**Solution:** Don't hide the HWND. The shell's multi-comp window is fullscreen and naturally occludes app windows. When shell is dismissed, apps continue in their own windows.
+DXGI flip-model `Present()` blocks when the window is hidden, cloaked, or off-screen. **Solution:** Don't hide the HWND. Shell window naturally occludes app windows.
 
 ### DP factory timing
-`sys->base.info.dp_factory_d3d11` is NULL during `comp_d3d11_service_create_system()`. Set by target builder AFTER. Must create DP lazily — `multi_compositor_ensure_output()` is called on first client connect (after target builder ran).
+`sys->base.info.dp_factory_d3d11` is NULL during `comp_d3d11_service_create_system()`. Set by target builder AFTER. Must create DP lazily in `multi_compositor_ensure_output()`.
 
-### Multi-comp rendering
-Currently Phase 0A/0B: single client, atlas copy only. Level 2 Kooima quad rendering was implemented but had aspect ratio issues — replaced with simple `CopyResource` for now. Quad rendering needed for Phase 0C.2 (multi-window).
+### Eye tracking not yet wired to app (Phase 0C.3)
+The DP has live eye positions (visible in server log: `IPC eye positions: L=(-0.062,0.072,0.597)`), and the weaver uses them for correct interlacing. But the IPC view pose path returns identity poses to the client → app's Kooima doesn't respond to head movement. Next task.
 
 ## Architecture
 
 ```
 App (handle app)
-  creates HWND → runtime resizes to display native (client-side, before IPC)
+  creates HWND → runtime makes borderless + resizes to display native (client-side)
   passes HWND via XR_EXT_win32_window_binding
   DISPLAYXR_SHELL_SESSION=1 → forces IPC mode
-  renders to IPC swapchain (shared GPU texture)
+  renders to IPC swapchain (shared GPU texture, 3840×2160)
+  view rects: (0,0,1920,1080) and (1920,0,1920,1080) for 2×1 SBS with scale 0.5
   ↓
 IPC named pipe (Windows MESSAGE mode)
   ↓
 Service (displayxr-service --shell)
-  d3d11_service_compositor per client (atlas-only, no window/DP)
-  compositor_layer_commit → renders layers to per-client atlas
-  → multi_compositor_render → copies atlas to combined atlas → DP weaves → present
+  d3d11_service_compositor per client (atlas-only at native res, no window/DP)
+  compositor_layer_commit → copies views to atlas using content-sized tile layout
+  → multi_compositor_render → crops atlas to content dims (3840×1080) → DP weaves → present
 ```
 
 ## Key Files
 
 | File | Role |
 |------|------|
-| `src/xrt/compositor/d3d11_service/comp_d3d11_service.cpp` | Multi-comp struct, render, client slots, lifecycle |
-| `src/xrt/state_trackers/oxr/oxr_session.c` | Client-side HWND resize, shell session detection |
+| `src/xrt/compositor/d3d11_service/comp_d3d11_service.cpp` | Multi-comp struct, render, client slots, lifecycle, atlas crop |
+| `src/xrt/state_trackers/oxr/oxr_session.c` | Client-side HWND borderless resize, shell session detection |
 | `src/xrt/auxiliary/util/u_sandbox.c` | `DISPLAYXR_SHELL_SESSION` env var check |
 | `src/xrt/ipc/client/ipc_client_compositor.c` | IPC layer functions incl. `layer_window_space` |
-| `src/xrt/ipc/server/ipc_server_handler.c` | Server-side view pose computation for shell mode |
-| `src/xrt/targets/service/main.c` | `--shell` flag parsing |
+| `src/xrt/ipc/server/ipc_server_handler.c` | Server-side view pose computation, window_space layer handler |
 | `src/xrt/ipc/server/ipc_server_process.c` | Shell mode propagation to system compositor |
+| `src/xrt/targets/service/main.c` | `--shell` flag parsing |
 
 ## Test Procedure
 
 ```bash
 # Terminal 1: start service
-displayxr-service.exe --shell
+_package\bin\displayxr-service.exe --shell
 
-# Terminal 2: launch app
+# Terminal 2: launch app (set XR_RUNTIME_JSON for local dev builds)
+set XR_RUNTIME_JSON=build\Release\openxr_displayxr-dev.json
 set DISPLAYXR_SHELL_SESSION=1
-cube_handle_d3d11_win.exe
+test_apps\cube_handle_d3d11_win\build\cube_handle_d3d11_win.exe
 ```
 
-Expected: app's HWND resized to 3840x2160, cube renders in shell window with correct weaving.
+Expected: Cube renders centered with correct proportions and 3D weaving.
 Logs: `%LOCALAPPDATA%\DisplayXR\*.log`
 
 ## What's Next
 
-### Phase 0C remaining
-- Verify client-side HWND resize works (current build)
-- If aspect ratio still wrong: check atlas dims vs app render dims
-- Multi-window layout (deferred to Phase 0C.2)
+### Phase 0C.3: Live eye tracking for shell apps
+- Wire DP eye positions through IPC `xrLocateViews` path
+- App's Kooima projection should respond to head movement
+- Server has eye data (from DP), needs to flow into view poses returned to client
 
 ### Phase 0D: Input forwarding
 - Shell forwards keyboard/mouse from multi-comp window to focused app's HWND via PostMessage

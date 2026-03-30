@@ -1552,6 +1552,31 @@ _update_passthrough_layer(struct xrt_compositor *xc,
 }
 
 static bool
+_update_window_space_layer(struct xrt_compositor *xc,
+                           volatile struct ipc_client_state *ics,
+                           volatile struct ipc_layer_entry *layer,
+                           uint32_t i)
+{
+	// Window-space layers are silently skipped if the compositor doesn't implement them.
+	// The D3D11 service compositor accumulates them but doesn't render them yet (Phase 0D).
+	if (xc->layer_window_space == NULL) {
+		return true;
+	}
+
+	struct xrt_device *xdev;
+	struct xrt_swapchain *xcs;
+	struct xrt_layer_data *data;
+
+	if (!do_single(xc, ics, layer, i, "window_space", &xdev, &xcs, &data)) {
+		return false;
+	}
+
+	xrt_comp_layer_window_space(xc, xdev, xcs, data);
+
+	return true;
+}
+
+static bool
 _update_layers(volatile struct ipc_client_state *ics, struct xrt_compositor *xc, struct ipc_layer_slot *slot)
 {
 	IPC_TRACE_MARKER();
@@ -1597,6 +1622,11 @@ _update_layers(volatile struct ipc_client_state *ics, struct xrt_compositor *xc,
 			break;
 		case XRT_LAYER_PASSTHROUGH:
 			if (!_update_passthrough_layer(xc, ics, layer, i)) {
+				return false;
+			}
+			break;
+		case XRT_LAYER_WINDOW_SPACE:
+			if (!_update_window_space_layer(xc, ics, layer, i)) {
 				return false;
 			}
 			break;
