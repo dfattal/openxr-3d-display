@@ -331,10 +331,15 @@ ipc_try_get_sr_view_poses(struct ipc_server *s,
 		log_counter = 0;
 		float left_h = (out_fovs[0].angle_right - out_fovs[0].angle_left) * 180.0f / 3.14159265f;
 		float left_v = (out_fovs[0].angle_up - out_fovs[0].angle_down) * 180.0f / 3.14159265f;
-		IPC_WARN(s, "IPC SR: mode=%s display=(%.2f,%.2f,%.2f) FOV H=%.1f° V=%.1f°",
-		         (have_stereo_state && stereo_state.camera_mode) ? "camera" : "display",
+		IPC_WARN(s, "IPC SR: mode=%s display=(%.2f,%.2f,%.2f) FOV H=%.1f° V=%.1f°"
+		         " pose[0]=(%.3f,%.3f,%.3f) pose[1]=(%.3f,%.3f,%.3f) owns_win=%d",
+		         (have_stereo_state && stereo_state.camera_mode && compositor_owns_window)
+		             ? "camera" : "display",
 		         display_pos.x, display_pos.y, display_pos.z,
-		         left_h, left_v);
+		         left_h, left_v,
+		         out_poses[0].position.x, out_poses[0].position.y, out_poses[0].position.z,
+		         out_poses[1].position.x, out_poses[1].position.y, out_poses[1].position.z,
+		         compositor_owns_window);
 	}
 
 	return true;
