@@ -314,27 +314,26 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_KEYUP:
 	case WM_SYSKEYDOWN:
 	case WM_SYSKEYUP: {
-		// Shell input forwarding: forward non-shell keys to focused app's HWND
+		// Shell input forwarding: all keys go to BOTH qwerty and the app.
+		// Qwerty processes first (mode toggles, camera controls), then
+		// the key is forwarded to the focused app's HWND.
 		HWND fwd = (HWND)InterlockedCompareExchangePointer((volatile PVOID *)&w->input_forward_hwnd, NULL, NULL);
 		if (fwd != NULL) {
-			if (is_shell_reserved_key(wParam)) {
-				// Shell-reserved key → pass to qwerty as normal
+			// Process qwerty first (V toggle, WASD, etc.)
 #ifdef XRT_BUILD_DRIVER_QWERTY
-				if (w->qwerty_enabled && w->xsysd != NULL) {
-					bool handled = false;
-					qwerty_process_win32(w->xsysd->xdevs, w->xsysd->xdev_count,
-					                     message, wParam, lParam, &handled);
-					if (handled) {
-						return 0;
-					}
-				}
+			if (w->qwerty_enabled && w->xsysd != NULL) {
+				bool handled = false;
+				qwerty_process_win32(w->xsysd->xdevs, w->xsysd->xdev_count,
+				                     message, wParam, lParam, &handled);
+			}
 #endif
-			} else {
-				// App key → forward to focused app's HWND
-				PostMessage(fwd, message, wParam, lParam);
+			if (is_shell_reserved_key(wParam)) {
+				// Shell-only keys (ESC, TAB, DELETE) → don't forward to app
 				return 0;
 			}
-			break;
+			// Forward to app's HWND
+			PostMessage(fwd, message, wParam, lParam);
+			return 0;
 		}
 
 		// Normal mode (no forwarding): pass all keys to qwerty
