@@ -89,7 +89,7 @@ scripts\build_windows.bat generate   REM CMake generate only
 ```
 Downloads all dependencies on first run (SR SDK, vcpkg, OpenXR loader). Requires VS 2022 with C++ workload, Ninja, Vulkan SDK, and GitHub CLI. Outputs to `_package/` (runtime) and `test_apps/*/build/` (test apps).
 
-**When on a Windows machine with a Leia SR display, prefer local builds over CI** — iterate faster with `scripts\build_windows.bat build` and test directly.
+**When on a Windows machine with a Leia SR display, prefer local builds over CI** — iterate faster with `scripts\build_windows.bat build` and test directly. Run scripts are generated in `_package/` (see Windows Test App section below).
 
 ### CI Build (Remote)
 ```bash
@@ -232,6 +232,29 @@ Copy binaries to `_package/DisplayXR-macOS/bin/`. Run scripts exec from `$DIR/bi
 | cube_hosted_metal_macos | `test_apps/cube_hosted_metal_macos/build/cube_hosted_metal_macos` | `_package/.../bin/cube_hosted_metal_macos` | `run_cube_hosted_metal.sh` |
 | cube_hosted_legacy_metal_macos | `test_apps/cube_hosted_legacy_metal_macos/build/cube_hosted_legacy_metal_macos` | `_package/.../bin/cube_hosted_legacy_metal_macos` | `run_cube_hosted_legacy_metal.sh` |
 | gaussian_splatting_handle_vk_macos | `demos/gaussian_splatting_handle_vk_macos/build/gaussian_splatting_handle_vk_macos` | `_package/.../bin/gaussian_splatting_handle_vk_macos` | `run_gaussian_splatting_handle_vk.sh` |
+
+## Windows Test App Local Builds
+
+`scripts\build_windows.bat test-apps` builds test apps and generates run scripts in `_package/`. Each run script sets `XR_RUNTIME_JSON` to the dev build so the installed runtime (from CI) is not used.
+
+**Standalone apps:**
+
+| Test App | Run Script |
+|----------|------------|
+| cube_handle_d3d11_win | `_package\run_cube_handle_d3d11_win.bat` |
+| cube_hosted_d3d11_win | `_package\run_cube_hosted_d3d11_win.bat` |
+| cube_handle_d3d12_win | `_package\run_cube_handle_d3d12_win.bat` |
+| cube_handle_gl_win | `_package\run_cube_handle_gl_win.bat` |
+| cube_handle_vk_win | `_package\run_cube_handle_vk_win.bat` |
+
+**Shell mode (two terminals):**
+
+| Terminal | Script | Description |
+|----------|--------|-------------|
+| 1 | `_package\run_shell_service.bat` | Starts `displayxr-service --shell` |
+| 2 | `_package\run_shell_app.bat` | Launches cube_handle_d3d11_win with `DISPLAYXR_SHELL_SESSION=1` |
+
+`run_shell_app.bat` accepts an optional exe path argument to launch a different app in shell mode.
 
 ## Documentation
 
