@@ -23,6 +23,16 @@ When an app runs inside the shell:
 
 4. **The app is notified of mode changes via events** — the server writes `active_rendering_mode_index` to IPC shared memory. The client reads it per-frame, and the OXR session poll pushes `XrEventDataRenderingModeChanged` to the app's event queue. The app then adapts (1 view for 2D, 2 views for 3D, etc.).
 
+## Key Routing
+
+In the shell window's WndProc, **all keys go to both qwerty and the app**:
+
+1. Qwerty processes first (V toggles mode, WASD moves camera, etc.)
+2. Shell-reserved keys (ESC, TAB, DELETE) stop here — not forwarded to app
+3. All other keys are forwarded to the focused app's HWND via `PostMessage`
+
+This ensures the shell's qwerty handler sees every keypress for mode/camera control, while apps still receive all non-shell keys for their own use.
+
 ## Consequences
 
 ### Positive
