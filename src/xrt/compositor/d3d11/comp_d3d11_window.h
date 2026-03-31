@@ -167,6 +167,23 @@ void
 comp_d3d11_window_set_system_devices(struct comp_d3d11_window *window,
                                       struct xrt_system_devices *xsysd);
 
+/*!
+ * Set the target HWND for input forwarding (shell mode).
+ *
+ * When set to a non-NULL value, the window enters shell input-forwarding mode:
+ * - Shell-reserved keys (ESC, V, P, 1/2/3, SPACE) go to qwerty as before
+ * - All other keyboard input is forwarded to the target HWND via PostMessage
+ * - Mouse events are forwarded to the target HWND (1:1 coordinate mapping)
+ * - TAB and DELETE are consumed by the shell (not forwarded)
+ *
+ * When set to NULL, normal qwerty handling resumes.
+ *
+ * @param window The window object
+ * @param hwnd   The focused app's HWND (NULL to disable forwarding)
+ */
+void
+comp_d3d11_window_set_input_forward_hwnd(struct comp_d3d11_window *window, void *hwnd);
+
 #ifdef __cplusplus
 }
 #endif

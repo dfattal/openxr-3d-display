@@ -2700,6 +2700,26 @@ service_crop_atlas_for_dp(struct d3d11_service_system *sys,
  */
 
 /*!
+ * Update the multi-comp window's input forwarding target to the focused app's HWND.
+ * Called whenever focused_slot changes (TAB, register, unregister).
+ */
+static void
+multi_compositor_update_input_forward(struct d3d11_multi_compositor *mc)
+{
+	if (mc == nullptr || mc->window == nullptr) {
+		return;
+	}
+
+	HWND target = NULL;
+	if (mc->focused_slot >= 0 && mc->focused_slot < D3D11_MULTI_MAX_CLIENTS &&
+	    mc->clients[mc->focused_slot].active) {
+		target = mc->clients[mc->focused_slot].app_hwnd;
+	}
+
+	comp_d3d11_window_set_input_forward_hwnd(mc->window, (void *)target);
+}
+
+/*!
  * Register a per-client compositor with the multi-compositor.
  * Returns slot index, or -1 if full.
  */
@@ -2723,6 +2743,7 @@ multi_compositor_register_client(struct d3d11_service_system *sys, struct d3d11_
 				mc->focused_slot = i;
 			}
 			U_LOG_W("Multi-comp: registered client in slot %d (total=%u)", i, mc->client_count);
+			multi_compositor_update_input_forward(mc);
 			return i;
 		}
 	}
@@ -2747,6 +2768,7 @@ multi_compositor_unregister_client(struct d3d11_service_system *sys, struct d3d1
 			mc->client_count--;
 			if (mc->focused_slot == i) {
 				mc->focused_slot = -1;
+				multi_compositor_update_input_forward(mc);
 			}
 			U_LOG_W("Multi-comp: unregistered client from slot %d (total=%u)", i, mc->client_count);
 			break;
@@ -3030,6 +3052,7 @@ multi_compositor_render(struct d3d11_service_system *sys)
 				mc->focused_slot = (mc->focused_slot + 1) % D3D11_MULTI_MAX_CLIENTS;
 			}
 			U_LOG_W("Multi-comp: TAB → focused slot %d", mc->focused_slot);
+			multi_compositor_update_input_forward(mc);
 		}
 	}
 
@@ -4137,6 +4160,10 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 		// HWND resize is done CLIENT-SIDE in oxr_session_create (before the IPC call)
 		// because cross-process SetWindowPos deadlocks when called from the IPC handler.
 		sys->multi_comp->clients[slot].app_hwnd = (HWND)external_hwnd;
+
+		// Update input forwarding now that app_hwnd is stored
+		// (register_client may have set focused_slot before app_hwnd was available)
+		multi_compositor_update_input_forward(sys->multi_comp);
 	}
 
 	// Set up compositor vtable

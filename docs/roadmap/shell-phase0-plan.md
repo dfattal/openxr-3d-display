@@ -72,11 +72,11 @@ The key insight: **develop with handle apps first** (they already work), then ad
 
 **Goal:** Shell forwards keyboard/mouse to focused app's hidden HWND.
 
-| Task | Description |
-|------|-------------|
-| 0D.1 | Shell captures keyboard from multi-comp window, `PostMessage(focused_hwnd, WM_KEYDOWN, ...)`. |
-| 0D.2 | Mouse coordinate mapping: 3D hit-test UV → HWND client pixels → `PostMessage(WM_MOUSEMOVE, ...)`. |
-| 0D.3 | WASD/mouse in focused app moves app's camera (app handles it via its own WndProc). |
+| Task | Description | Status |
+|------|-------------|--------|
+| 0D.1 | Shell captures keyboard from multi-comp window, `PostMessage(focused_hwnd, WM_KEYDOWN, ...)`. | ✅ Done |
+| 0D.2 | Mouse coordinate mapping: 1:1 for fullscreen → `PostMessage(WM_MOUSEMOVE, ...)`. | ✅ Done |
+| 0D.3 | WASD/mouse in focused app moves app's camera (app handles it via its own WndProc). | ✅ Done |
 
 **Test:** Focus cube app → WASD moves camera within cube scene → works identically to standalone.
 
