@@ -269,6 +269,9 @@ struct ipc_shared_memory
 		uint32_t view_count;
 		enum xrt_blend_mode blend_modes[XRT_MAX_DEVICE_BLEND_MODES];
 		uint32_t blend_mode_count;
+		uint32_t rendering_mode_count;
+		struct xrt_rendering_mode rendering_modes[XRT_MAX_RENDERING_MODES];
+		uint32_t active_rendering_mode_index;
 	} hmd;
 
 	struct xrt_input inputs[IPC_SHARED_MAX_INPUTS];

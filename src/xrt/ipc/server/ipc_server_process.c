@@ -420,6 +420,16 @@ init_shm(struct ipc_server *s, volatile struct ipc_client_state *cs)
 	}
 	ism->hmd.blend_mode_count = s->xsysd->static_roles.head->hmd->blend_mode_count;
 
+	// Sync rendering modes to shared memory (for IPC clients to detect mode changes)
+	{
+		struct xrt_device *head = s->xsysd->static_roles.head;
+		ism->hmd.rendering_mode_count = head->rendering_mode_count;
+		for (uint32_t i = 0; i < head->rendering_mode_count && i < XRT_MAX_RENDERING_MODES; i++) {
+			ism->hmd.rendering_modes[i] = head->rendering_modes[i];
+		}
+		ism->hmd.active_rendering_mode_index = head->hmd->active_rendering_mode_index;
+	}
+
 	// Finally tell the client how many devices we have.
 	ism->isdev_count = count;
 
@@ -537,6 +547,17 @@ main_loop(struct ipc_server *s)
 #else
 		os_nanosleep(U_TIME_1S_IN_NS / 20);
 #endif
+
+		// Sync active rendering mode index to all clients' shared memory
+		if (s->xsysd != NULL && s->xsysd->static_roles.head != NULL &&
+		    s->xsysd->static_roles.head->hmd != NULL) {
+			uint32_t mode_idx = s->xsysd->static_roles.head->hmd->active_rendering_mode_index;
+			for (uint32_t ci = 0; ci < IPC_MAX_CLIENTS; ci++) {
+				if (s->isms[ci] != NULL) {
+					s->isms[ci]->hmd.active_rendering_mode_index = mode_idx;
+				}
+			}
+		}
 
 		// Check polling.
 		ipc_server_mainloop_poll(s, &s->ml);

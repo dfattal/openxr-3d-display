@@ -34,6 +34,14 @@ Last updated: 2026-03-30 (branch `feature/shell-phase0-ci`)
 - Client bypasses T_base_head transform for ext_win IPC sessions (avoids -1.6m Y offset)
 - Nominal eye override (`have_eye_override`) gated by `have_eyes` — only fires for standalone apps with local tracking, not IPC shell sessions where server provides tracked poses
 
+### 2D/3D mode switching (DONE)
+- Rendering modes + `active_rendering_mode_index` synced to IPC shared memory
+- Server writes to shared memory at startup and per-tick (main loop)
+- Client HMD reads `active_rendering_mode_index` from shared memory in `update_inputs`
+- OXR session poll detects mode change, pushes `XrEventDataRenderingModeChanged` to app
+- V key toggle uses multi-comp's DP (not per-client DP which is NULL in shell mode)
+- `sync_tile_layout` + `hardware_display_3d` updated immediately on toggle
+
 ## Known Issues / Lessons Learned
 
 ### HWND must be borderless for shell fullscreen
@@ -64,6 +72,12 @@ DXGI flip-model `Present()` blocks when the window is hidden, cloaked, or off-sc
 
 ### T_base_head offset breaks shell IPC view poses
 The standard `oxr_session_locate_views` applies `T_base_head` (which includes qwerty's Y=1.6m world position). For shell IPC sessions, the server already returns display-relative poses — applying T_base_head adds a spurious -1.6m Y offset, placing the eye below the screen. Fix: skip T_base_head for `has_external_window && !have_eyes && !have_eye_override`.
+
+### Shell mode V key must use multi-comp DP for display mode switch
+The V key toggle code checked `c->render.display_processor` which is NULL in shell mode (per-client compositors have no DP). The multi-comp owns the DP. Fix: check `sys->multi_comp->display_processor` when `sys->shell_mode` is true.
+
+### Rendering modes must be in IPC shared memory
+IPC clients couldn't see server-side mode changes because `rendering_modes[]` and `active_rendering_mode_index` weren't in shared memory. Fix: add them to `ipc_shared_memory::hmd`, sync at startup + per-tick, read in client's `update_inputs`.
 
 ## Architecture
 
