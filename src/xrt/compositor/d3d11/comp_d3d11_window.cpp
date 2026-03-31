@@ -117,10 +117,37 @@ struct comp_d3d11_window
 
 	//! True if qwerty input is enabled (checked once at startup from QWERTY_ENABLE env var)
 	bool qwerty_enabled;
+
+	//! Target HWND for input forwarding in shell mode (NULL = disabled).
+	//! When set, non-shell keyboard and mouse input is forwarded to this HWND.
+	volatile HWND input_forward_hwnd;
 };
 
 // Forward declarations
 static void set_fullscreen(HWND hWnd, bool fullscreen);
+
+/*!
+ * Check if a virtual key code is reserved for shell controls.
+ * These keys are NOT forwarded to the focused app in shell mode.
+ */
+static bool
+is_shell_reserved_key(WPARAM vk)
+{
+	switch (vk) {
+	case VK_ESCAPE: // Close shell window
+	case VK_TAB:    // Cycle focus (handled by GetAsyncKeyState in render loop)
+	case VK_DELETE: // Close focused app (handled by GetAsyncKeyState in render loop)
+	case 'V':       // Toggle 2D/3D display mode (qwerty)
+	case 'P':       // Toggle camera mode (qwerty)
+	case '1':       // Rendering mode (qwerty)
+	case '2':
+	case '3':
+	case VK_SPACE:  // Reset view state (qwerty)
+		return true;
+	default:
+		return false;
+	}
+}
 
 /*!
  * Monitor enumeration callback.
@@ -284,14 +311,35 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			U_LOG_W("D3D11 window: F11 toggled to %s mode", fs ? "fullscreen" : "windowed");
 			return 0;
 		}
-		// Forward to qwerty driver if enabled (fall through to WM_KEYUP case)
-		// (1/2/3 rendering mode keys are handled by qwerty driver and polled in layer_commit)
-		// FALLTHROUGH
+		// FALLTHROUGH to WM_KEYUP/SYSKEYDOWN/SYSKEYUP
 	case WM_KEYUP:
 	case WM_SYSKEYDOWN:
-	case WM_SYSKEYUP:
+	case WM_SYSKEYUP: {
+		// Shell input forwarding: forward non-shell keys to focused app's HWND
+		HWND fwd = (HWND)InterlockedCompareExchangePointer((volatile PVOID *)&w->input_forward_hwnd, NULL, NULL);
+		if (fwd != NULL) {
+			if (is_shell_reserved_key(wParam)) {
+				// Shell-reserved key → pass to qwerty as normal
 #ifdef XRT_BUILD_DRIVER_QWERTY
-		// Forward keyboard input to qwerty driver
+				if (w->qwerty_enabled && w->xsysd != NULL) {
+					bool handled = false;
+					qwerty_process_win32(w->xsysd->xdevs, w->xsysd->xdev_count,
+					                     message, wParam, lParam, &handled);
+					if (handled) {
+						return 0;
+					}
+				}
+#endif
+			} else {
+				// App key → forward to focused app's HWND
+				PostMessage(fwd, message, wParam, lParam);
+				return 0;
+			}
+			break;
+		}
+
+		// Normal mode (no forwarding): pass all keys to qwerty
+#ifdef XRT_BUILD_DRIVER_QWERTY
 		if (w->qwerty_enabled && w->xsysd != NULL) {
 			bool handled = false;
 			qwerty_process_win32(w->xsysd->xdevs, w->xsysd->xdev_count,
@@ -303,9 +351,9 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 #else
 		U_LOG_W("D3D11 window: XRT_BUILD_DRIVER_QWERTY not defined!");
 #endif
-		break;
+	} break;
 
-	// Mouse input for qwerty driver
+	// Mouse input: forward to app in shell mode, or to qwerty in normal mode
 	case WM_LBUTTONDOWN:
 	case WM_LBUTTONUP:
 	case WM_RBUTTONDOWN:
@@ -313,7 +361,14 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_MBUTTONDOWN:
 	case WM_MBUTTONUP:
 	case WM_MOUSEMOVE:
-	case WM_MOUSEWHEEL:
+	case WM_MOUSEWHEEL: {
+		HWND fwd = (HWND)InterlockedCompareExchangePointer((volatile PVOID *)&w->input_forward_hwnd, NULL, NULL);
+		if (fwd != NULL) {
+			// Shell mode: forward mouse to focused app's HWND (1:1 for fullscreen)
+			PostMessage(fwd, message, wParam, lParam);
+			return 0;
+		}
+		// Normal mode: pass to qwerty driver
 #ifdef XRT_BUILD_DRIVER_QWERTY
 		if (w->qwerty_enabled && w->xsysd != NULL) {
 			bool handled = false;
@@ -322,7 +377,7 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			// Don't consume mouse events - let them propagate for other uses
 		}
 #endif
-		break;
+	} break;
 
 	case WM_SIZE:
 		if (wParam != SIZE_MINIMIZED) {
@@ -685,5 +740,21 @@ comp_d3d11_window_set_system_devices(struct comp_d3d11_window *window,
 		U_LOG_W("D3D11 window: xsysd has %u devices", (unsigned)xsysd->xdev_count);
 		U_LOG_W("D3D11 window: System devices set - QWERTY input active");
 		U_LOG_W("D3D11 window: Controls: WASDQE=move, Arrows=rotate, RightClick+Drag=look, Shift=sprint");
+	}
+}
+
+extern "C" void
+comp_d3d11_window_set_input_forward_hwnd(struct comp_d3d11_window *window, void *hwnd)
+{
+	if (window == NULL) {
+		return;
+	}
+
+	InterlockedExchangePointer((volatile PVOID *)&window->input_forward_hwnd, (PVOID)hwnd);
+
+	if (hwnd != NULL) {
+		U_LOG_W("D3D11 window: input forwarding enabled → HWND=%p", hwnd);
+	} else {
+		U_LOG_W("D3D11 window: input forwarding disabled");
 	}
 }

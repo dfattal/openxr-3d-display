@@ -112,10 +112,17 @@ Run scripts set `XR_RUNTIME_JSON` to the dev build automatically (required to by
 Expected: Cube renders centered with correct proportions, 3D weaving, and head tracking (scene responds to head movement after ~3 second face tracking warmup).
 Logs: `%LOCALAPPDATA%\DisplayXR\*.log`
 
+### Phase 0D: Input forwarding (DONE)
+- `comp_d3d11_window` gains `input_forward_hwnd` — volatile HWND set by multi-comp service
+- Shell-reserved keys (ESC, V, P, 1/2/3, SPACE) → qwerty driver (shell controls)
+- TAB, DELETE → consumed by shell (GetAsyncKeyState in render loop)
+- All other keyboard input → `PostMessage(focused_hwnd, WM_KEYDOWN/WM_KEYUP, ...)`
+- Mouse events (move, buttons, wheel) → `PostMessage(focused_hwnd, ...)` with 1:1 coordinate mapping
+- Multi-comp service updates forwarding target on focus change (TAB cycle, client register/unregister)
+- App's own WndProc receives forwarded input and handles it normally (WASD camera, mouse look, etc.)
+
+**Test:** Shell window → WASD moves cube camera, right-click-drag rotates view — identical to standalone.
+
 ## What's Next
 
-### Phase 0D: Input forwarding
-- 0D.1: Shell captures keyboard from multi-comp window, `PostMessage(focused_hwnd, WM_KEYDOWN, ...)`
-- 0D.2: Mouse coordinate mapping: 3D hit-test UV → HWND client pixels → `PostMessage(WM_MOUSEMOVE, ...)`
-- 0D.3: WASD/mouse in focused app moves app's camera (app handles it via its own WndProc)
-- Test: Focus cube app → WASD moves camera within cube scene → works identically to standalone
+### Phase 0E: TBD
