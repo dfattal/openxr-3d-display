@@ -3457,10 +3457,19 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 					head->hmd->active_rendering_mode_index = sys->last_3d_mode_index;
 				}
 			}
-			if (c->render.display_processor != nullptr) {
-				xrt_display_processor_d3d11_request_display_mode(
-				    c->render.display_processor, !force_2d);
+			// Switch display mode on the active DP.
+			// In shell mode, the multi-comp owns the DP (per-client has none).
+			struct xrt_display_processor_d3d11 *dp = nullptr;
+			if (sys->shell_mode && sys->multi_comp != nullptr) {
+				dp = sys->multi_comp->display_processor;
+			} else if (c->render.display_processor != nullptr) {
+				dp = c->render.display_processor;
 			}
+			if (dp != nullptr) {
+				xrt_display_processor_d3d11_request_display_mode(dp, !force_2d);
+			}
+			sync_tile_layout(sys);
+			sys->hardware_display_3d = !force_2d;
 		}
 
 		// Rendering mode change from qwerty 1/2/3 keys (disabled for legacy apps).

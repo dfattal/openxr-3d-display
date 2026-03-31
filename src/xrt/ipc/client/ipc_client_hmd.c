@@ -128,6 +128,22 @@ out:
  */
 
 static xrt_result_t
+ipc_client_hmd_update_inputs(struct xrt_device *xdev)
+{
+	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
+
+	// Sync active rendering mode from shared memory (server updates on V key)
+	if (xdev->hmd != NULL) {
+		xdev->hmd->active_rendering_mode_index =
+		    ich->ipc_c->ism->hmd.active_rendering_mode_index;
+	}
+
+	// Call the base update_inputs (IPC call to server)
+	xrt_result_t xret = ipc_call_device_update_input(ich->ipc_c, ich->device_id);
+	IPC_CHK_ALWAYS_RET(ich->ipc_c, xret, "ipc_call_device_update_input");
+}
+
+static xrt_result_t
 ipc_client_hmd_get_view_poses(struct xrt_device *xdev,
                               const struct xrt_vec3 *default_eye_relation,
                               int64_t at_timestamp_ns,
@@ -320,6 +336,7 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *
 	ipc_client_xdev_init(ich, ipc_c, xtrack, device_id);
 
 	// Fill in needed HMD functions, and destroy.
+	ich->base.update_inputs = ipc_client_hmd_update_inputs;
 	ich->base.get_view_poses = ipc_client_hmd_get_view_poses;
 	ich->base.compute_distortion = ipc_client_hmd_compute_distortion;
 	ich->base.is_form_factor_available = ipc_client_hmd_is_form_factor_available;
@@ -340,6 +357,13 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *
 		ich->base.hmd->views[i].display.w_pixels = ipc_c->ism->hmd.views[i].display.w_pixels;
 		ich->base.hmd->views[i].display.h_pixels = ipc_c->ism->hmd.views[i].display.h_pixels;
 	}
+
+	// Setup rendering modes (for shell mode 2D/3D switching via V key).
+	ich->base.rendering_mode_count = ism->hmd.rendering_mode_count;
+	for (uint32_t i = 0; i < ism->hmd.rendering_mode_count && i < XRT_MAX_RENDERING_MODES; i++) {
+		ich->base.rendering_modes[i] = ism->hmd.rendering_modes[i];
+	}
+	ich->base.hmd->active_rendering_mode_index = ism->hmd.active_rendering_mode_index;
 
 	// Distortion information, fills in xdev->compute_distortion().
 	u_distortion_mesh_set_none(&ich->base);
