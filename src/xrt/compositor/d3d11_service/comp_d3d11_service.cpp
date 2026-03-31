@@ -409,6 +409,15 @@ struct d3d11_multi_client_slot
 	float window_width_m;
 	float window_height_m;
 
+	//! Window rect in display pixels (where this app renders in the combined atlas).
+	uint32_t window_rect_x;
+	uint32_t window_rect_y;
+	uint32_t window_rect_w;
+	uint32_t window_rect_h;
+
+	//! True when the HWND needs to be resized to match window_rect (one-shot).
+	bool hwnd_resize_pending;
+
 	//! True when this slot has an active client.
 	bool active;
 };
@@ -2738,6 +2747,18 @@ multi_compositor_register_client(struct d3d11_service_system *sys, struct d3d11_
 			mc->clients[i].window_pose = XRT_POSE_IDENTITY;
 			mc->clients[i].window_width_m = sys->base.info.display_width_m;
 			mc->clients[i].window_height_m = sys->base.info.display_height_m;
+
+			// Set window rect in display pixels (5%, 5%, 40%, 40% of native)
+			uint32_t disp_w = sys->base.info.display_pixel_width;
+			uint32_t disp_h = sys->base.info.display_pixel_height;
+			if (disp_w == 0) disp_w = 3840;
+			if (disp_h == 0) disp_h = 2160;
+			mc->clients[i].window_rect_x = disp_w * 5 / 100;
+			mc->clients[i].window_rect_y = disp_h * 5 / 100;
+			mc->clients[i].window_rect_w = disp_w * 40 / 100;
+			mc->clients[i].window_rect_h = disp_h * 40 / 100;
+			mc->clients[i].hwnd_resize_pending = true;
+
 			mc->client_count++;
 			if (mc->focused_slot < 0) {
 				mc->focused_slot = i;
@@ -3039,6 +3060,10 @@ multi_compositor_render(struct d3d11_service_system *sys)
 	if (mc->window != nullptr && !comp_d3d11_window_is_valid(mc->window)) {
 		U_LOG_W("Multi-comp: window closed - dismissing");
 		mc->window_dismissed = true;
+		// Switch display back to 2D (lens off) on dismiss
+		if (mc->display_processor != nullptr) {
+			xrt_display_processor_d3d11_request_display_mode(mc->display_processor, false);
+		}
 		return;
 	}
 
@@ -3116,7 +3141,43 @@ multi_compositor_render(struct d3d11_service_system *sys)
 	(void)display_w_m;
 	(void)display_h_m;
 
-	// Phase 0C: single client fills full display.
+	// Deferred HWND resize: resize app windows to their assigned sub-rects.
+	// Uses SWP_ASYNCWINDOWPOS to avoid cross-process deadlock.
+	for (int s = 0; s < D3D11_MULTI_MAX_CLIENTS; s++) {
+		if (mc->clients[s].active && mc->clients[s].hwnd_resize_pending &&
+		    mc->clients[s].app_hwnd != NULL) {
+			// HWND = visual 3D window size. App uses this for Kooima
+			// (physical screen dims) and render resolution (HWND * scale).
+			// Position at display center so eye offsets come from xrLocateViews.
+			uint32_t hwnd_w = mc->clients[s].window_rect_w;
+			uint32_t hwnd_h = mc->clients[s].window_rect_h;
+			// Center on display
+			uint32_t disp_w = sys->base.info.display_pixel_width;
+			uint32_t disp_h = sys->base.info.display_pixel_height;
+			if (disp_w == 0) disp_w = 3840;
+			if (disp_h == 0) disp_h = 2160;
+			int hwnd_x = ((int)disp_w - (int)hwnd_w) / 2;
+			int hwnd_y = ((int)disp_h - (int)hwnd_h) / 2;
+			SetWindowPos(mc->clients[s].app_hwnd, NULL,
+			             hwnd_x, hwnd_y,
+			             (int)hwnd_w, (int)hwnd_h,
+			             SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+			mc->clients[s].hwnd_resize_pending = false;
+			U_LOG_W("Multi-comp: resized app HWND %p to pos=(%d,%d) size=%ux%u (centered, visual rect=%u,%u,%u,%u)",
+			        (void*)mc->clients[s].app_hwnd,
+			        hwnd_x, hwnd_y, hwnd_w, hwnd_h,
+			        mc->clients[s].window_rect_x, mc->clients[s].window_rect_y,
+			        mc->clients[s].window_rect_w, mc->clients[s].window_rect_h);
+		}
+	}
+
+	// Clear combined atlas to dark gray background each frame.
+	// Prevents stale images after app close and provides background for windowed rendering.
+	{
+		float bg_color[4] = {0.102f, 0.102f, 0.102f, 1.0f}; // #1a1a1a
+		sys->context->ClearRenderTargetView(mc->combined_atlas_rtv.get(), bg_color);
+	}
+
 	// Copy client atlas → combined atlas, crop to content dims, send to DP.
 	uint32_t dp_view_w = sys->view_width;
 	uint32_t dp_view_h = sys->view_height;
@@ -3128,18 +3189,118 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		if (cc == nullptr || !cc->render.atlas_texture) {
 			continue;
 		}
-		sys->context->CopyResource(mc->combined_atlas.get(), cc->render.atlas_texture.get());
-		// Use actual content dimensions for DP input
-		if (mc->clients[s].content_view_w > 0 && mc->clients[s].content_view_h > 0) {
-			dp_view_w = mc->clients[s].content_view_w;
-			dp_view_h = mc->clients[s].content_view_h;
+		// Copy client atlas content to the sub-rect position in combined atlas.
+		// The client rendered into view rects matching its HWND size (resized to sub-rect).
+		uint32_t dst_x = mc->clients[s].window_rect_x;
+		uint32_t dst_y = mc->clients[s].window_rect_y;
+		uint32_t cvw = mc->clients[s].content_view_w;
+		uint32_t cvh = mc->clients[s].content_view_h;
+		if (cvw == 0 || cvh == 0) {
+			cvw = dp_view_w;
+			cvh = dp_view_h;
 		}
-		break; // Phase 0C: only one client for now
+
+		// Blit each view from client atlas → combined atlas with scaling.
+		// For SBS: each half of the combined atlas = one eye's full display view.
+		// The app renders at (HWND * scale) but the window occupies a larger area
+		// in the atlas, so we scale up via shader blit.
+		uint32_t ca_w = sys->base.info.display_pixel_width;
+		uint32_t ca_h = sys->base.info.display_pixel_height;
+		if (ca_w == 0) ca_w = 3840;
+		if (ca_h == 0) ca_h = 2160;
+		uint32_t half_w = ca_w / sys->tile_columns;
+		uint32_t half_h = ca_h / sys->tile_rows;
+
+		// Window rect as fraction of display → position within each eye's half
+		float win_frac_x = (float)dst_x / ca_w;
+		float win_frac_y = (float)dst_y / ca_h;
+		float win_frac_w = (float)mc->clients[s].window_rect_w / ca_w;
+		float win_frac_h = (float)mc->clients[s].window_rect_h / ca_h;
+
+		// Get client atlas dimensions for SRV
+		D3D11_TEXTURE2D_DESC client_atlas_desc = {};
+		cc->render.atlas_texture->GetDesc(&client_atlas_desc);
+
+		// Shader blit each view from client atlas → combined atlas with scaling.
+		// The blit constant buffer defines source UV rect and dest pixel rect.
+		uint32_t num_views = sys->tile_columns * sys->tile_rows;
+		for (uint32_t v = 0; v < num_views && v < XRT_MAX_VIEWS; v++) {
+			uint32_t src_col = v % sys->tile_columns;
+			uint32_t src_row = v / sys->tile_columns;
+
+			// Source rect (pixels in client atlas)
+			float src_px_x = static_cast<float>(src_col * cvw);
+			float src_px_y = static_cast<float>(src_row * cvh);
+
+			// Destination rect (pixels in combined atlas)
+			float dest_px_x = src_col * half_w + win_frac_x * half_w;
+			float dest_px_y = src_row * half_h + win_frac_y * half_h;
+			float dest_px_w = win_frac_w * half_w;
+			float dest_px_h = win_frac_h * half_h;
+
+			// Update constant buffer
+			D3D11_MAPPED_SUBRESOURCE mapped;
+			HRESULT hr = sys->context->Map(sys->blit_constant_buffer.get(), 0,
+			                                D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+			if (FAILED(hr)) continue;
+			BlitConstants *cb = static_cast<BlitConstants *>(mapped.pData);
+			cb->src_rect[0] = src_px_x;
+			cb->src_rect[1] = src_px_y;
+			cb->src_rect[2] = static_cast<float>(cvw);
+			cb->src_rect[3] = static_cast<float>(cvh);
+			cb->dst_offset[0] = dest_px_x;
+			cb->dst_offset[1] = dest_px_y;
+			cb->src_size[0] = static_cast<float>(client_atlas_desc.Width);
+			cb->src_size[1] = static_cast<float>(client_atlas_desc.Height);
+			cb->dst_size[0] = static_cast<float>(ca_w);
+			cb->dst_size[1] = static_cast<float>(ca_h);
+			cb->convert_srgb = 0.0f;
+			cb->padding = 0.0f;
+			cb->dst_rect_wh[0] = dest_px_w;
+			cb->dst_rect_wh[1] = dest_px_h;
+			cb->padding2[0] = 0.0f;
+			cb->padding2[1] = 0.0f;
+			sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
+
+			// Pipeline setup
+			sys->context->VSSetShader(sys->blit_vs.get(), nullptr, 0);
+			sys->context->PSSetShader(sys->blit_ps.get(), nullptr, 0);
+			sys->context->VSSetConstantBuffers(0, 1, sys->blit_constant_buffer.addressof());
+			sys->context->PSSetConstantBuffers(0, 1, sys->blit_constant_buffer.addressof());
+			ID3D11ShaderResourceView *srv = cc->render.atlas_srv.get();
+			sys->context->PSSetShaderResources(0, 1, &srv);
+			sys->context->PSSetSamplers(0, 1, sys->sampler_linear.addressof());
+
+			// Render to combined atlas
+			ID3D11RenderTargetView *ca_rtvs[] = {mc->combined_atlas_rtv.get()};
+			sys->context->OMSetRenderTargets(1, ca_rtvs, nullptr);
+			D3D11_VIEWPORT vp = {};
+			vp.Width = static_cast<float>(ca_w);
+			vp.Height = static_cast<float>(ca_h);
+			vp.MaxDepth = 1.0f;
+			sys->context->RSSetViewports(1, &vp);
+			sys->context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+			sys->context->IASetInputLayout(nullptr);
+			sys->context->RSSetState(sys->rasterizer_state.get());
+			sys->context->OMSetDepthStencilState(sys->depth_disabled.get(), 0);
+
+			sys->context->Draw(4, 0);
+		}
+		break; // Phase 0C.2: single client for now
 	}
 
-	// Crop combined atlas to content dims before DP (same pattern as standalone compositor).
-	// The DP expects a content-sized texture, not the full native-res atlas.
+	// Send full combined atlas to DP — content is placed at sub-rect positions,
+	// background is dark gray. The DP interlaces the entire image.
+	// View width/height = full atlas divided by tile layout (not sub-rect).
 	ID3D11ShaderResourceView *dp_input_srv = mc->combined_atlas_srv.get();
+	{
+		uint32_t aw = sys->base.info.display_pixel_width;
+		uint32_t ah = sys->base.info.display_pixel_height;
+		if (aw == 0) aw = sys->display_width;
+		if (ah == 0) ah = sys->display_height;
+		dp_view_w = aw / sys->tile_columns;
+		dp_view_h = ah / sys->tile_rows;
+	}
 	uint32_t content_w = sys->tile_columns * dp_view_w;
 	uint32_t content_h = sys->tile_rows * dp_view_h;
 
