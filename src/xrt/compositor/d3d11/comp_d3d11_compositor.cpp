@@ -967,6 +967,11 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 				if (c->canvas.valid) {
 					u_tiling_compute_canvas_view(mode, c->canvas.w, c->canvas.h,
 					                             &new_vw, &new_vh);
+				} else if (!c->owns_window && tgt_width > 0 && tgt_height > 0) {
+					// Handle app: window may differ from display size,
+					// derive view dims from actual window client area.
+					u_tiling_compute_canvas_view(mode, tgt_width, tgt_height,
+					                             &new_vw, &new_vh);
 				}
 				uint32_t cur_vw, cur_vh;
 				comp_d3d11_renderer_get_view_dimensions(c->renderer, &cur_vw, &cur_vh);

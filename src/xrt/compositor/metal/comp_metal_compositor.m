@@ -1340,6 +1340,13 @@ metal_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 				if (c->canvas.valid) {
 					u_tiling_compute_canvas_view(mode, c->canvas.w, c->canvas.h,
 					                             &c->view_width, &c->view_height);
+				} else if (!c->owns_window && output_texture != nil) {
+					// Handle app: window may differ from display size,
+					// derive view dims from actual drawable backing size.
+					u_tiling_compute_canvas_view(mode,
+					                             (uint32_t)output_texture.width,
+					                             (uint32_t)output_texture.height,
+					                             &c->view_width, &c->view_height);
 				}
 			}
 		}
