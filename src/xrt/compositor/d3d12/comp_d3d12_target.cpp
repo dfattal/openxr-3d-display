@@ -140,7 +140,7 @@ child_window_thread_func(LPVOID param)
 	ensure_child_window_class_registered();
 
 	ctx->child_hwnd = CreateWindowExW(
-	    0, CHILD_WINDOW_CLASS, L"",
+	    WS_EX_NOPARENTNOTIFY, CHILD_WINDOW_CLASS, L"",
 	    WS_CHILD | WS_VISIBLE,
 	    0, 0, (int)ctx->width, (int)ctx->height,
 	    ctx->parent_hwnd, NULL, GetModuleHandleW(NULL), NULL);
@@ -189,7 +189,35 @@ create_child_window_threaded(HWND parent, uint32_t width, uint32_t height)
 		return nullptr;
 	}
 
-	DWORD wait = WaitForSingleObject(ctx->ready_event, 5000);
+	// Wait for the child window thread, but pump sent messages.
+	// CreateWindowExW(WS_CHILD) on the child thread sends WM_PARENTNOTIFY
+	// to the parent's thread (this thread) via SendMessage. If we block
+	// with WaitForSingleObject, that SendMessage deadlocks.
+	// MsgWaitForMultipleObjects + QS_SENDMESSAGE lets us process it.
+	DWORD wait;
+	DWORD deadline = GetTickCount() + 5000;
+	for (;;) {
+		DWORD remaining = deadline - GetTickCount();
+		if ((int)remaining <= 0) {
+			wait = WAIT_TIMEOUT;
+			break;
+		}
+		wait = MsgWaitForMultipleObjects(1, &ctx->ready_event, FALSE, remaining, QS_SENDMESSAGE);
+		if (wait == WAIT_OBJECT_0) {
+			break; // Event signaled — child window created
+		}
+		if (wait == WAIT_OBJECT_0 + 1) {
+			// Sent message pending — dispatch it and loop
+			MSG msg;
+			while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE)) {
+				TranslateMessage(&msg);
+				DispatchMessageW(&msg);
+			}
+			continue;
+		}
+		// Timeout or error
+		break;
+	}
 	CloseHandle(ctx->ready_event);
 	ctx->ready_event = NULL;
 
