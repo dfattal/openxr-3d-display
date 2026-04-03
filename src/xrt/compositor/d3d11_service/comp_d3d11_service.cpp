@@ -2875,12 +2875,19 @@ multi_compositor_update_input_forward(struct d3d11_multi_compositor *mc)
 	comp_d3d11_window_set_input_forward(mc->window, (void *)target, rx, ry, rw, rh);
 }
 
-// Forward declaration — defined in the external API section below.
+// Forward declarations — defined in the external API section below.
 static void
 slot_pose_to_pixel_rect(const struct d3d11_service_system *sys,
                         const struct d3d11_multi_client_slot *slot,
                         int32_t *out_x, int32_t *out_y,
                         int32_t *out_w, int32_t *out_h);
+
+static void
+slot_pose_to_pixel_rect_for_eye(const struct d3d11_service_system *sys,
+                                const struct d3d11_multi_client_slot *slot,
+                                float eye_x, float eye_y, float eye_z,
+                                int32_t *out_x, int32_t *out_y,
+                                int32_t *out_w, int32_t *out_h);
 
 /*!
  * Register a per-client compositor with the multi-compositor.
@@ -3980,13 +3987,29 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		}
 	}
 
-	// Scroll wheel: resize focused window (~5% per notch).
+	// Scroll wheel: Shift+Scroll = Z-depth, plain scroll = resize.
 	if (mc->window != nullptr && mc->focused_slot >= 0) {
 		int32_t scroll = comp_d3d11_window_consume_scroll(mc->window);
 		if (scroll != 0) {
 			int s = mc->focused_slot;
 			if (s >= 0 && s < D3D11_MULTI_MAX_CLIENTS && mc->clients[s].active) {
-				// WHEEL_DELTA (120) = one notch = ~5% size change
+				bool shift_held = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+				if (shift_held) {
+					// Shift+Scroll: move window in Z (~2mm per notch)
+					float dz = (float)scroll / (120.0f * 500.0f); // ~0.002m per notch
+					float new_z = mc->clients[s].window_pose.position.z + dz;
+					if (new_z < -0.05f) new_z = -0.05f;
+					if (new_z >  0.05f) new_z =  0.05f;
+					mc->clients[s].window_pose.position.z = new_z;
+
+					slot_pose_to_pixel_rect(sys, &mc->clients[s],
+					                        &mc->clients[s].window_rect_x,
+					                        &mc->clients[s].window_rect_y,
+					                        &mc->clients[s].window_rect_w,
+					                        &mc->clients[s].window_rect_h);
+					U_LOG_I("Multi-comp: Shift+Scroll Z depth slot %d → Z=%.3fm", s, new_z);
+				} else {
+				// Plain scroll: resize (~5% per notch)
 				float factor = 1.0f + (float)scroll / (120.0f * 20.0f); // 5% per notch
 				if (factor < 0.5f) factor = 0.5f;
 				if (factor > 2.0f) factor = 2.0f;
@@ -3995,7 +4018,6 @@ multi_compositor_render(struct d3d11_service_system *sys)
 				float new_h = mc->clients[s].window_height_m * factor;
 
 				// Clamp to minimum 2cm and maximum 80% of display
-				// (100% would fill the entire SBS half, leaving no room for other windows)
 				float min_dim = 0.02f;
 				float max_w = sys->base.info.display_width_m * 0.8f;
 				float max_h = sys->base.info.display_height_m * 0.8f;
@@ -4018,7 +4040,30 @@ multi_compositor_render(struct d3d11_service_system *sys)
 
 				mc->clients[s].hwnd_resize_pending = true;
 				multi_compositor_update_input_forward(mc);
+				} // end else (plain scroll resize)
 			}
+		}
+	}
+
+	// [ / ] keys: step Z depth ±5mm for focused window.
+	if (mc->focused_slot >= 0 && mc->focused_slot < D3D11_MULTI_MAX_CLIENTS &&
+	    mc->clients[mc->focused_slot].active) {
+		float z_step = 0.0f;
+		if (GetAsyncKeyState(VK_OEM_4) & 1) z_step = -0.005f;  // [ = back
+		if (GetAsyncKeyState(VK_OEM_6) & 1) z_step =  0.005f;  // ] = forward
+		if (z_step != 0.0f) {
+			int s = mc->focused_slot;
+			float new_z = mc->clients[s].window_pose.position.z + z_step;
+			if (new_z < -0.05f) new_z = -0.05f;
+			if (new_z >  0.05f) new_z =  0.05f;
+			mc->clients[s].window_pose.position.z = new_z;
+
+			slot_pose_to_pixel_rect(sys, &mc->clients[s],
+			                        &mc->clients[s].window_rect_x,
+			                        &mc->clients[s].window_rect_y,
+			                        &mc->clients[s].window_rect_w,
+			                        &mc->clients[s].window_rect_h);
+			U_LOG_I("Multi-comp: [/] Z depth slot %d → Z=%.3fm", s, new_z);
 		}
 	}
 
@@ -4128,10 +4173,7 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		if (cc == nullptr || !cc->render.atlas_texture || !cc->render.atlas_srv) {
 			continue;
 		}
-		// Copy client atlas content to the sub-rect position in combined atlas.
-		// The client rendered into view rects matching its HWND size (resized to sub-rect).
-		int32_t dst_x = mc->clients[s].window_rect_x;
-		uint32_t dst_y = mc->clients[s].window_rect_y;
+		// Client content dimensions (source texture size, same for both eyes).
 		uint32_t cvw = mc->clients[s].content_view_w;
 		uint32_t cvh = mc->clients[s].content_view_h;
 		if (cvw == 0 || cvh == 0) {
@@ -4139,10 +4181,7 @@ multi_compositor_render(struct d3d11_service_system *sys)
 			cvh = dp_view_h;
 		}
 
-		// Blit each view from client atlas → combined atlas with scaling.
-		// For SBS: each half of the combined atlas = one eye's full display view.
-		// The app renders at (HWND * scale) but the window occupies a larger area
-		// in the atlas, so we scale up via shader blit.
+		// Combined atlas dimensions.
 		uint32_t ca_w = sys->base.info.display_pixel_width;
 		uint32_t ca_h = sys->base.info.display_pixel_height;
 		if (ca_w == 0) ca_w = 3840;
@@ -4150,11 +4189,17 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		uint32_t half_w = ca_w / sys->tile_columns;
 		uint32_t half_h = ca_h / sys->tile_rows;
 
-		// Window rect as fraction of display → position within each eye's half
-		float win_frac_x = (float)dst_x / (float)ca_w;
-		float win_frac_y = (float)dst_y / (float)ca_h;
-		float win_frac_w = (float)mc->clients[s].window_rect_w / (float)ca_w;
-		float win_frac_h = (float)mc->clients[s].window_rect_h / ca_h;
+		// Per-eye projected pixel rects (parallax shift for windows at Z != 0).
+		// Each eye sees the window at a different position on the display plane,
+		// creating stereo depth on the lenticular display.
+		int32_t eye_rect_x[2], eye_rect_y[2], eye_rect_w[2], eye_rect_h[2];
+		for (int eye = 0; eye < 2; eye++) {
+			int ei = (eye < (int)eye_pos.count) ? eye : 0;
+			slot_pose_to_pixel_rect_for_eye(sys, &mc->clients[s],
+			    eye_pos.eyes[ei].x, eye_pos.eyes[ei].y, eye_pos.eyes[ei].z,
+			    &eye_rect_x[eye], &eye_rect_y[eye],
+			    &eye_rect_w[eye], &eye_rect_h[eye]);
+		}
 
 		// Get client atlas dimensions for SRV
 		D3D11_TEXTURE2D_DESC client_atlas_desc = {};
@@ -4171,7 +4216,12 @@ multi_compositor_render(struct d3d11_service_system *sys)
 			float src_px_x = static_cast<float>(src_col * cvw);
 			float src_px_y = static_cast<float>(src_row * cvh);
 
-			// Destination rect (pixels in combined atlas)
+			// Per-eye destination rect (parallax-shifted for Z != 0)
+			int eye_idx = (src_col < 2) ? (int)src_col : 0;
+			float win_frac_x = (float)eye_rect_x[eye_idx] / (float)ca_w;
+			float win_frac_y = (float)eye_rect_y[eye_idx] / (float)ca_h;
+			float win_frac_w = (float)eye_rect_w[eye_idx] / (float)ca_w;
+			float win_frac_h = (float)eye_rect_h[eye_idx] / (float)ca_h;
 			float dest_px_x = src_col * half_w + win_frac_x * half_w;
 			float dest_px_y = src_row * half_h + win_frac_y * half_h;
 			float dest_px_w = win_frac_w * half_w;
@@ -4238,17 +4288,20 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		// Draw title bar for this slot (inside render_order loop for correct z-order)
 		{
 			float tb_h_frac = (float)TITLE_BAR_HEIGHT_PX / (float)ca_h;
-			float tb_fy = win_frac_y - tb_h_frac;
-			// No clamping — scissor clips overflow uniformly
-			float actual_tb_h_frac = win_frac_y - tb_fy;
-			if (actual_tb_h_frac > 0.0f) {
+			if (tb_h_frac > 0.0f) {
 				for (uint32_t v2 = 0; v2 < num_views && v2 < XRT_MAX_VIEWS; v2++) {
 					uint32_t col2 = v2 % sys->tile_columns;
 					uint32_t row2 = v2 / sys->tile_columns;
-					float tox = col2 * half_w + win_frac_x * half_w;
+					// Per-eye window frac (parallax for Z != 0)
+					int eye_idx2 = (col2 < 2) ? (int)col2 : 0;
+					float wfx = (float)eye_rect_x[eye_idx2] / (float)ca_w;
+					float wfy = (float)eye_rect_y[eye_idx2] / (float)ca_h;
+					float wfw = (float)eye_rect_w[eye_idx2] / (float)ca_w;
+					float tb_fy = wfy - tb_h_frac;
+					float tox = col2 * half_w + wfx * half_w;
 					float toy = row2 * half_h + tb_fy * half_h;
-					float tow = win_frac_w * half_w;
-					float toh = actual_tb_h_frac * half_h;
+					float tow = wfw * half_w;
+					float toh = tb_h_frac * half_h;
 
 					// Scissor rect clips to tile bounds — uniform overflow on all edges.
 					D3D11_RECT tb_scissor;
@@ -4439,14 +4492,15 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		uint32_t half_w = ca_w / sys->tile_columns;
 		uint32_t half_h = ca_h / sys->tile_rows;
 
-		// Border encompasses title bar + content area (no clamping — scissor clips)
-		int32_t border_y = (int32_t)mc->clients[mc->focused_slot].window_rect_y - TITLE_BAR_HEIGHT_PX;
-		uint32_t border_h = mc->clients[mc->focused_slot].window_rect_h +
-		                     (mc->clients[mc->focused_slot].window_rect_y - (uint32_t)border_y);
-		float fx = (float)mc->clients[mc->focused_slot].window_rect_x / ca_w;
-		float fy = (float)border_y / ca_h;
-		float fw = (float)mc->clients[mc->focused_slot].window_rect_w / ca_w;
-		float fh = (float)border_h / ca_h;
+		// Per-eye projected rects for focused slot (parallax for Z != 0)
+		int32_t fb_eye_x[2], fb_eye_y[2], fb_eye_w[2], fb_eye_h[2];
+		for (int eye = 0; eye < 2; eye++) {
+			int ei = (eye < (int)eye_pos.count) ? eye : 0;
+			slot_pose_to_pixel_rect_for_eye(sys, &mc->clients[mc->focused_slot],
+			    eye_pos.eyes[ei].x, eye_pos.eyes[ei].y, eye_pos.eyes[ei].z,
+			    &fb_eye_x[eye], &fb_eye_y[eye],
+			    &fb_eye_w[eye], &fb_eye_h[eye]);
+		}
 		float bw = 3.0f; // border width in pixels
 
 		// Set up pipeline for solid-color draw (use blit shader with special flag)
@@ -4467,6 +4521,14 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		for (uint32_t v = 0; v < nv && v < XRT_MAX_VIEWS; v++) {
 			uint32_t col = v % sys->tile_columns;
 			uint32_t row = v / sys->tile_columns;
+			// Per-eye border rect (parallax for Z != 0)
+			int fb_eye_idx = (col < 2) ? (int)col : 0;
+			int32_t border_y = fb_eye_y[fb_eye_idx] - TITLE_BAR_HEIGHT_PX;
+			int32_t border_h = fb_eye_h[fb_eye_idx] + (fb_eye_y[fb_eye_idx] - border_y);
+			float fx = (float)fb_eye_x[fb_eye_idx] / ca_w;
+			float fy = (float)border_y / ca_h;
+			float fw = (float)fb_eye_w[fb_eye_idx] / ca_w;
+			float fh = (float)border_h / ca_h;
 			float ox = col * half_w + fx * half_w;
 			float oy = row * half_h + fy * half_h;
 			float ew = fw * half_w;
@@ -6372,6 +6434,70 @@ slot_pose_to_pixel_rect(const struct d3d11_service_system *sys,
 	// No clamping — windows can overflow off-screen (standard Windows behavior).
 	// The mouse can't leave the screen, guaranteeing a visible portion.
 	// The blit code clips to the visible area.
+	*out_x = (int32_t)(center_px_x - (float)w_px / 2.0f + 0.5f);
+	*out_y = (int32_t)(center_px_y - (float)h_px / 2.0f + 0.5f);
+	*out_w = w_px;
+	*out_h = h_px;
+}
+
+/*!
+ * Project a window's pixel rect through an eye position to the display plane (Z=0).
+ *
+ * For Z=0 windows, identical to slot_pose_to_pixel_rect().
+ * For Z != 0, computes parallax-shifted position and scale per-eye.
+ * Used for per-eye rendering in SBS atlas (left/right halves get different rects).
+ *
+ * Math: project window center through eye onto Z=0 plane.
+ *   scale = eye_z / (eye_z - win_z)     — closer windows appear larger
+ *   proj_x = eye_x + scale * (win_x - eye_x)  — parallax shift
+ */
+static void
+slot_pose_to_pixel_rect_for_eye(const struct d3d11_service_system *sys,
+                                const struct d3d11_multi_client_slot *slot,
+                                float eye_x, float eye_y, float eye_z,
+                                int32_t *out_x, int32_t *out_y,
+                                int32_t *out_w, int32_t *out_h)
+{
+	float disp_w_m = sys->base.info.display_width_m;
+	float disp_h_m = sys->base.info.display_height_m;
+	uint32_t disp_px_w = sys->base.info.display_pixel_width;
+	uint32_t disp_px_h = sys->base.info.display_pixel_height;
+
+	if (disp_w_m <= 0.0f || disp_h_m <= 0.0f || disp_px_w == 0 || disp_px_h == 0) {
+		disp_px_w = 3840;
+		disp_px_h = 2160;
+		disp_w_m = 0.700f;
+		disp_h_m = 0.394f;
+	}
+
+	float px_per_m_x = (float)disp_px_w / disp_w_m;
+	float px_per_m_y = (float)disp_px_h / disp_h_m;
+
+	float wx = slot->window_pose.position.x;
+	float wy = slot->window_pose.position.y;
+	float wz = slot->window_pose.position.z;
+	float w_m = slot->window_width_m;
+	float h_m = slot->window_height_m;
+
+	// Project through eye to display plane (Z=0) for non-zero window Z
+	if (fabsf(wz) > 0.0001f && eye_z > 0.01f) {
+		float denom = eye_z - wz;
+		if (fabsf(denom) < 0.001f) {
+			denom = (denom >= 0.0f) ? 0.001f : -0.001f;
+		}
+		float scale = eye_z / denom;
+		wx = eye_x + scale * (wx - eye_x);
+		wy = eye_y + scale * (wy - eye_y);
+		w_m *= scale;
+		h_m *= scale;
+	}
+
+	int32_t w_px = (int32_t)(w_m * px_per_m_x + 0.5f);
+	int32_t h_px = (int32_t)(h_m * px_per_m_y + 0.5f);
+
+	float center_px_x = (float)disp_px_w / 2.0f + wx * px_per_m_x;
+	float center_px_y = (float)disp_px_h / 2.0f - wy * px_per_m_y;
+
 	*out_x = (int32_t)(center_px_x - (float)w_px / 2.0f + 0.5f);
 	*out_y = (int32_t)(center_px_y - (float)h_px / 2.0f + 0.5f);
 	*out_w = w_px;
