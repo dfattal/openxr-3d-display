@@ -589,6 +589,10 @@ main(int argc, char *argv[])
 
 	int save_counter = 0; // Save every 5 seconds (10 polls * 500ms)
 
+	// Client ID → numbered name mapping (for persistence with duplicate app names)
+	static struct { uint32_t id; char name[128]; } client_names[MAX_SAVED_WINDOWS];
+	static int client_name_count = 0;
+
 	// Poll loop
 	while (g_running) {
 		// Apply pending poses when new clients appear
@@ -604,8 +608,10 @@ main(int argc, char *argv[])
 			}
 		}
 
-		// Detect new clients and restore saved poses from config
+		// Detect new clients and restore saved poses from config.
+		// Use numbered names for duplicate apps (AppName, AppName-2, etc.)
 		{
+
 			struct ipc_client_list clients;
 			xrt_result_t r = ipc_call_system_get_clients(&ipc_c, &clients);
 			if (r == XRT_SUCCESS) {
@@ -618,11 +624,39 @@ main(int argc, char *argv[])
 						}
 					}
 					if (is_new && clients.ids[c] != 0) {
-						// Get app name
 						struct ipc_app_state ias;
 						xrt_result_t ir = ipc_call_system_get_client_info(&ipc_c, clients.ids[c], &ias);
 						if (ir == XRT_SUCCESS && ias.info.application_name[0] != '\0') {
-							struct saved_window *sw = shell_config_find(&config, ias.info.application_name);
+							// Count existing instances to generate numbered name
+							int instance = 1;
+							for (int cn = 0; cn < client_name_count; cn++) {
+								// Strip " (N)" suffix if present
+								char existing_base[128];
+								snprintf(existing_base, sizeof(existing_base), "%s", client_names[cn].name);
+								char *paren = strrchr(existing_base, '(');
+								if (paren && paren > existing_base && *(paren - 1) == ' ')
+									*(paren - 1) = '\0';
+								if (strcmp(existing_base, ias.info.application_name) == 0)
+									instance++;
+							}
+
+							char numbered_name[128];
+							if (instance > 1)
+								snprintf(numbered_name, sizeof(numbered_name), "%s (%d)",
+								         ias.info.application_name, instance);
+							else
+								snprintf(numbered_name, sizeof(numbered_name), "%s",
+								         ias.info.application_name);
+
+							// Track client_id → numbered_name mapping
+							if (client_name_count < MAX_SAVED_WINDOWS) {
+								client_names[client_name_count].id = clients.ids[c];
+								snprintf(client_names[client_name_count].name, 128, "%s", numbered_name);
+								client_name_count++;
+							}
+
+							// Restore saved pose if available
+							struct saved_window *sw = shell_config_find(&config, numbered_name);
 							if (sw && sw->width_m > 0 && sw->height_m > 0) {
 								struct xrt_pose pose = XRT_POSE_IDENTITY;
 								pose.position.x = sw->x;
@@ -630,7 +664,7 @@ main(int argc, char *argv[])
 								pose.position.z = sw->z;
 								ipc_call_shell_set_window_pose(&ipc_c, clients.ids[c],
 								                                &pose, sw->width_m, sw->height_m);
-								P("  Restored pose for '%s' from config\n", ias.info.application_name);
+								P("  Restored pose for '%s' from config\n", numbered_name);
 							}
 						}
 					}
@@ -649,19 +683,24 @@ main(int argc, char *argv[])
 			xrt_result_t r = ipc_call_system_get_clients(&ipc_c, &clients);
 			if (r == XRT_SUCCESS) {
 				for (uint32_t c = 0; c < clients.id_count; c++) {
-					struct ipc_app_state ias;
-					if (ipc_call_system_get_client_info(&ipc_c, clients.ids[c], &ias) != XRT_SUCCESS)
-						continue;
-					if (ias.info.application_name[0] == '\0') continue;
+					// Look up numbered name from our mapping
+					const char *save_name = NULL;
+					for (int cn = 0; cn < client_name_count; cn++) {
+						if (client_names[cn].id == clients.ids[c]) {
+							save_name = client_names[cn].name;
+							break;
+						}
+					}
+					if (!save_name) continue;
 
 					struct xrt_pose pose;
 					float w, h;
 					if (ipc_call_shell_get_window_pose(&ipc_c, clients.ids[c],
 					                                    &pose, &w, &h) == XRT_SUCCESS) {
-						struct saved_window *sw = shell_config_find(&config, ias.info.application_name);
+						struct saved_window *sw = shell_config_find(&config, save_name);
 						if (!sw || sw->x != pose.position.x || sw->y != pose.position.y ||
 						    sw->width_m != w || sw->height_m != h) {
-							shell_config_update(&config, ias.info.application_name,
+							shell_config_update(&config, save_name,
 							                    pose.position.x, pose.position.y, pose.position.z,
 							                    w, h);
 							changed = true;
