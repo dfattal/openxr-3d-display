@@ -185,6 +185,14 @@ struct comp_d3d11_compositor
 	float legacy_view_scale_x;
 	float legacy_view_scale_y;
 
+	//! Lazily allocated HWND-sized intermediate texture for weaving in shared
+	//! texture mode. The weaver requires backbuffer == HWND size, but the shared
+	//! texture is display-sized (worst case). We weave into this intermediate,
+	//! then copy the canvas region to the shared texture at (0,0).
+	ID3D11Texture2D *weave_intermediate;
+	ID3D11RenderTargetView *weave_intermediate_rtv;
+	uint32_t weave_intermediate_w, weave_intermediate_h;
+
 	//! Lazily allocated intermediate texture for cropping atlas to content dims
 	//! before passing to display processor. NULL when not needed (zero-copy case).
 	ID3D11Texture2D *dp_input_texture;
@@ -1160,25 +1168,93 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 			uint32_t content_h = tile_rows * view_height;
 			atlas_srv = d3d11_crop_atlas_for_dp(c, atlas_srv, content_w, content_h);
 
-			D3D11_TEXTURE2D_DESC st_desc;
-			c->shared_texture->GetDesc(&st_desc);
+			// Get HWND client area — the weaver requires backbuffer == HWND size.
+			HWND weave_hwnd = c->app_hwnd != nullptr ? c->app_hwnd : c->hwnd;
+			RECT client_rect = {};
+			uint32_t hwnd_w = 0, hwnd_h = 0;
+			if (weave_hwnd != nullptr && GetClientRect(weave_hwnd, &client_rect)) {
+				hwnd_w = (uint32_t)(client_rect.right - client_rect.left);
+				hwnd_h = (uint32_t)(client_rect.bottom - client_rect.top);
+			}
 
-			// Pass actual shared texture dimensions to the DP. The DP uses
-			// canvas offset/size to set a viewport sub-rect within the shared
-			// texture for correct interlacing phase alignment.
-			uint32_t dp_target_w = st_desc.Width;
-			uint32_t dp_target_h = st_desc.Height;
+			bool use_intermediate = c->canvas.valid && c->canvas.w > 0 &&
+			                        c->canvas.h > 0 && hwnd_w > 0 && hwnd_h > 0;
 
-			// Bind shared texture as render target for the weaver
-			c->context->OMSetRenderTargets(1, &c->shared_rtv, nullptr);
+			if (use_intermediate) {
+				// Lazily (re)create HWND-sized intermediate texture.
+				// The weaver requires backbuffer == HWND, but the shared texture
+				// is display-sized. Weave into this intermediate, then copy the
+				// canvas region to the shared texture at (0,0).
+				if (c->weave_intermediate == nullptr ||
+				    c->weave_intermediate_w != hwnd_w ||
+				    c->weave_intermediate_h != hwnd_h) {
+					if (c->weave_intermediate_rtv != nullptr) {
+						c->weave_intermediate_rtv->Release();
+						c->weave_intermediate_rtv = nullptr;
+					}
+					if (c->weave_intermediate != nullptr) {
+						c->weave_intermediate->Release();
+						c->weave_intermediate = nullptr;
+					}
 
-			xrt_display_processor_d3d11_process_atlas(
-			    c->display_processor, c->context, atlas_srv, view_width, view_height,
-			    tile_columns, tile_rows, DXGI_FORMAT_R8G8B8A8_UNORM, dp_target_w, dp_target_h,
-			    c->canvas.valid ? c->canvas.x : 0,
-			    c->canvas.valid ? c->canvas.y : 0,
-			    c->canvas.valid ? c->canvas.w : 0,
-			    c->canvas.valid ? c->canvas.h : 0);
+					D3D11_TEXTURE2D_DESC desc = {};
+					desc.Width = hwnd_w;
+					desc.Height = hwnd_h;
+					desc.MipLevels = 1;
+					desc.ArraySize = 1;
+					desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+					desc.SampleDesc.Count = 1;
+					desc.Usage = D3D11_USAGE_DEFAULT;
+					desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+
+					HRESULT hr = c->device->CreateTexture2D(&desc, nullptr, &c->weave_intermediate);
+					if (SUCCEEDED(hr)) {
+						c->device->CreateRenderTargetView(c->weave_intermediate, nullptr,
+						                                  &c->weave_intermediate_rtv);
+						c->weave_intermediate_w = hwnd_w;
+						c->weave_intermediate_h = hwnd_h;
+						U_LOG_W("Created HWND-sized weave intermediate: %ux%u", hwnd_w, hwnd_h);
+					} else {
+						U_LOG_E("Failed to create weave intermediate: 0x%08x", (unsigned)hr);
+						use_intermediate = false;
+					}
+				}
+			}
+
+			if (use_intermediate && c->weave_intermediate_rtv != nullptr) {
+				// Weave into HWND-sized intermediate with viewport sub-rect
+				c->context->OMSetRenderTargets(1, &c->weave_intermediate_rtv, nullptr);
+
+				xrt_display_processor_d3d11_process_atlas(
+				    c->display_processor, c->context, atlas_srv, view_width, view_height,
+				    tile_columns, tile_rows, DXGI_FORMAT_R8G8B8A8_UNORM, hwnd_w, hwnd_h,
+				    c->canvas.x, c->canvas.y, c->canvas.w, c->canvas.h);
+
+				// Copy canvas region from intermediate to shared texture at (0,0)
+				D3D11_BOX src_box = {};
+				src_box.left = (UINT)c->canvas.x;
+				src_box.top = (UINT)c->canvas.y;
+				src_box.right = (UINT)(c->canvas.x + c->canvas.w);
+				src_box.bottom = (UINT)(c->canvas.y + c->canvas.h);
+				src_box.front = 0;
+				src_box.back = 1;
+				c->context->CopySubresourceRegion(
+				    c->shared_texture, 0, 0, 0, 0,
+				    c->weave_intermediate, 0, &src_box);
+			} else {
+				// No canvas or no HWND — weave directly into shared texture
+				D3D11_TEXTURE2D_DESC st_desc;
+				c->shared_texture->GetDesc(&st_desc);
+				uint32_t dp_target_w = st_desc.Width;
+				uint32_t dp_target_h = st_desc.Height;
+
+				c->context->OMSetRenderTargets(1, &c->shared_rtv, nullptr);
+
+				xrt_display_processor_d3d11_process_atlas(
+				    c->display_processor, c->context, atlas_srv, view_width, view_height,
+				    tile_columns, tile_rows, DXGI_FORMAT_R8G8B8A8_UNORM, dp_target_w, dp_target_h,
+				    0, 0, 0, 0);
+			}
 			weaving_done = true;
 		}
 
@@ -1315,6 +1391,16 @@ d3d11_compositor_destroy(struct xrt_compositor *xc)
 		c->hud_texture = nullptr;
 	}
 	u_hud_destroy(&c->hud);
+
+	// Destroy weave intermediate texture
+	if (c->weave_intermediate_rtv != nullptr) {
+		c->weave_intermediate_rtv->Release();
+		c->weave_intermediate_rtv = nullptr;
+	}
+	if (c->weave_intermediate != nullptr) {
+		c->weave_intermediate->Release();
+		c->weave_intermediate = nullptr;
+	}
 
 	// Destroy DP input crop texture
 	if (c->dp_input_srv != nullptr) {
