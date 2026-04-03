@@ -430,8 +430,9 @@ ui_dpi_scale(HWND hwnd, uint32_t display_pixel_height)
 #define TITLE_BAR_HEIGHT_PX ((int)(UI_BASE_TITLE_BAR_H * UI_SCALE))
 #define CLOSE_BTN_WIDTH_PX  ((int)(UI_BASE_CLOSE_BTN_W * UI_SCALE))
 #define TASKBAR_HEIGHT_PX   ((int)(UI_BASE_TASKBAR_H * UI_SCALE))
-#define GLYPH_W             ((int)(UI_BASE_GLYPH_W * UI_SCALE))
-#define GLYPH_H             ((int)(UI_BASE_GLYPH_H * UI_SCALE))
+// Glyphs at 2x base size (16x32) for readability on high-res displays
+#define GLYPH_W             (UI_BASE_GLYPH_W * 2)
+#define GLYPH_H             (UI_BASE_GLYPH_H * 2)
 #define RESIZE_ZONE_PX      ((int)(UI_BASE_RESIZE_ZONE * UI_SCALE))
 
 /*!
@@ -457,10 +458,11 @@ struct d3d11_multi_client_slot
 	float window_height_m;
 
 	//! Window rect in display pixels (where this app renders in the combined atlas).
-	uint32_t window_rect_x;
-	uint32_t window_rect_y;
-	uint32_t window_rect_w;
-	uint32_t window_rect_h;
+	//! x/y can be negative (window partially off-screen). w/h are always positive.
+	int32_t window_rect_x;
+	int32_t window_rect_y;
+	int32_t window_rect_w;
+	int32_t window_rect_h;
 
 	//! True when the HWND needs to be resized to match window_rect (one-shot).
 	bool hwnd_resize_pending;
@@ -947,6 +949,7 @@ create_layer_resources(struct d3d11_service_system *sys)
 	raster_desc.CullMode = D3D11_CULL_NONE;
 	raster_desc.FrontCounterClockwise = FALSE;
 	raster_desc.DepthClipEnable = TRUE;
+	raster_desc.ScissorEnable = TRUE; // Enabled for per-tile clipping
 
 	hr = sys->device->CreateRasterizerState(&raster_desc, sys->rasterizer_state.put());
 	if (FAILED(hr)) {
@@ -2858,8 +2861,8 @@ multi_compositor_update_input_forward(struct d3d11_multi_compositor *mc)
 static void
 slot_pose_to_pixel_rect(const struct d3d11_service_system *sys,
                         const struct d3d11_multi_client_slot *slot,
-                        uint32_t *out_x, uint32_t *out_y,
-                        uint32_t *out_w, uint32_t *out_h);
+                        int32_t *out_x, int32_t *out_y,
+                        int32_t *out_w, int32_t *out_h);
 
 /*!
  * Register a per-client compositor with the multi-compositor.
@@ -4030,7 +4033,7 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		}
 		// Copy client atlas content to the sub-rect position in combined atlas.
 		// The client rendered into view rects matching its HWND size (resized to sub-rect).
-		uint32_t dst_x = mc->clients[s].window_rect_x;
+		int32_t dst_x = mc->clients[s].window_rect_x;
 		uint32_t dst_y = mc->clients[s].window_rect_y;
 		uint32_t cvw = mc->clients[s].content_view_w;
 		uint32_t cvh = mc->clients[s].content_view_h;
@@ -4051,9 +4054,9 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		uint32_t half_h = ca_h / sys->tile_rows;
 
 		// Window rect as fraction of display → position within each eye's half
-		float win_frac_x = (float)dst_x / ca_w;
-		float win_frac_y = (float)dst_y / ca_h;
-		float win_frac_w = (float)mc->clients[s].window_rect_w / ca_w;
+		float win_frac_x = (float)dst_x / (float)ca_w;
+		float win_frac_y = (float)dst_y / (float)ca_h;
+		float win_frac_w = (float)mc->clients[s].window_rect_w / (float)ca_w;
 		float win_frac_h = (float)mc->clients[s].window_rect_h / ca_h;
 
 		// Get client atlas dimensions for SRV
@@ -4077,14 +4080,14 @@ multi_compositor_render(struct d3d11_service_system *sys)
 			float dest_px_w = win_frac_w * half_w;
 			float dest_px_h = win_frac_h * half_h;
 
-			// Clamp destination to stay within this SBS half (prevent cross-eye bleed)
-			float half_right = (src_col + 1) * half_w;
-			float half_bottom = (src_row + 1) * half_h;
-			if (dest_px_x + dest_px_w > half_right)
-				dest_px_w = half_right - dest_px_x;
-			if (dest_px_y + dest_px_h > half_bottom)
-				dest_px_h = half_bottom - dest_px_y;
-			if (dest_px_w <= 0.0f || dest_px_h <= 0.0f) continue;
+			// Set scissor rect to this tile's bounds — GPU clips overflow uniformly
+			// on all edges. No manual source/dest clipping needed.
+			D3D11_RECT scissor;
+			scissor.left = (LONG)(src_col * half_w);
+			scissor.top = (LONG)(src_row * half_h);
+			scissor.right = (LONG)((src_col + 1) * half_w);
+			scissor.bottom = (LONG)((src_row + 1) * half_h);
+			sys->context->RSSetScissorRects(1, &scissor);
 
 			// Update constant buffer
 			D3D11_MAPPED_SUBRESOURCE mapped;
@@ -4139,7 +4142,7 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		{
 			float tb_h_frac = (float)TITLE_BAR_HEIGHT_PX / (float)ca_h;
 			float tb_fy = win_frac_y - tb_h_frac;
-			if (tb_fy < 0.0f) tb_fy = 0.0f;
+			// No clamping — scissor clips overflow uniformly
 			float actual_tb_h_frac = win_frac_y - tb_fy;
 			if (actual_tb_h_frac > 0.0f) {
 				for (uint32_t v2 = 0; v2 < num_views && v2 < XRT_MAX_VIEWS; v2++) {
@@ -4150,8 +4153,13 @@ multi_compositor_render(struct d3d11_service_system *sys)
 					float tow = win_frac_w * half_w;
 					float toh = actual_tb_h_frac * half_h;
 
-					float t_half_right = (float)((col2 + 1) * half_w);
-					if (tox + tow > t_half_right) continue;
+					// Scissor rect clips to tile bounds — uniform overflow on all edges.
+					D3D11_RECT tb_scissor;
+					tb_scissor.left = (LONG)(col2 * half_w);
+					tb_scissor.top = (LONG)(row2 * half_h);
+					tb_scissor.right = (LONG)((col2 + 1) * half_w);
+					tb_scissor.bottom = (LONG)((row2 + 1) * half_h);
+					sys->context->RSSetScissorRects(1, &tb_scissor);
 
 					// Pipeline (opaque solid color)
 					sys->context->VSSetShader(sys->blit_vs.get(), nullptr, 0);
@@ -4328,9 +4336,8 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		uint32_t half_w = ca_w / sys->tile_columns;
 		uint32_t half_h = ca_h / sys->tile_rows;
 
-		// Border encompasses title bar + content area
+		// Border encompasses title bar + content area (no clamping — scissor clips)
 		int32_t border_y = (int32_t)mc->clients[mc->focused_slot].window_rect_y - TITLE_BAR_HEIGHT_PX;
-		if (border_y < 0) border_y = 0;
 		uint32_t border_h = mc->clients[mc->focused_slot].window_rect_h +
 		                     (mc->clients[mc->focused_slot].window_rect_y - (uint32_t)border_y);
 		float fx = (float)mc->clients[mc->focused_slot].window_rect_x / ca_w;
@@ -4362,7 +4369,15 @@ multi_compositor_render(struct d3d11_service_system *sys)
 			float ew = fw * half_w;
 			float eh = fh * half_h;
 
-			// 4 border rects: top, bottom, left, right
+			// Scissor rect clips to tile bounds — uniform overflow on all edges.
+			D3D11_RECT border_scissor;
+			border_scissor.left = (LONG)(col * half_w);
+			border_scissor.top = (LONG)(row * half_h);
+			border_scissor.right = (LONG)((col + 1) * half_w);
+			border_scissor.bottom = (LONG)((row + 1) * half_h);
+			sys->context->RSSetScissorRects(1, &border_scissor);
+
+			// 4 border rects (scissor clips overflow on all edges)
 			struct { float x, y, w, h; } edges[4] = {
 				{ox,          oy,          ew,  bw},          // top
 				{ox,          oy + eh - bw, ew, bw},          // bottom
@@ -4398,6 +4413,16 @@ multi_compositor_render(struct d3d11_service_system *sys)
 				sys->context->Draw(4, 0);
 			}
 		}
+	}
+
+	// Reset scissor to full atlas for non-tiled draws (taskbar, DP processing)
+	{
+		uint32_t full_w = sys->base.info.display_pixel_width;
+		uint32_t full_h = sys->base.info.display_pixel_height;
+		if (full_w == 0) full_w = 3840;
+		if (full_h == 0) full_h = 2160;
+		D3D11_RECT full_scissor = {0, 0, (LONG)full_w, (LONG)full_h};
+		sys->context->RSSetScissorRects(1, &full_scissor);
 	}
 
 	// Draw taskbar at bottom if any windows are minimized
@@ -5596,20 +5621,53 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 		// because cross-process SetWindowPos deadlocks when called from the IPC handler.
 		sys->multi_comp->clients[slot].app_hwnd = (HWND)external_hwnd;
 
-		// Get app name from HWND title for title bar display
-		if (external_hwnd != 0) {
-			int len = GetWindowTextA((HWND)external_hwnd,
-			                         sys->multi_comp->clients[slot].app_name,
-			                         sizeof(sys->multi_comp->clients[slot].app_name));
-			if (len <= 0) {
+		// Get app name from HWND title for title bar display.
+		// If another slot already has the same name, append "-2", "-3", etc.
+		{
+			char base_name[128] = {0};
+			if (external_hwnd != 0) {
+				int len = GetWindowTextA((HWND)external_hwnd, base_name, sizeof(base_name));
+				if (len <= 0) {
+					snprintf(base_name, sizeof(base_name), "App %d", slot);
+				}
+			} else {
+				snprintf(base_name, sizeof(base_name), "App %d", slot);
+			}
+
+			// Replace non-ASCII characters with '-' (bitmap font only supports 0x20-0x7E)
+			for (char *p = base_name; *p; p++) {
+				if ((unsigned char)*p < 0x20 || (unsigned char)*p > 0x7E) *p = '-';
+			}
+			// Truncate at first " - " separator (strip compositor/subtitle info)
+			char *sep = strstr(base_name, " - ");
+			if (sep) *sep = '\0';
+
+			// Count existing instances with the same base name.
+			// Existing names may be "AppName" or "AppName (N)" format.
+			int instance = 1;
+			for (int i = 0; i < D3D11_MULTI_MAX_CLIENTS; i++) {
+				if (i == slot || !sys->multi_comp->clients[i].active) continue;
+				char existing_base[128];
+				snprintf(existing_base, sizeof(existing_base), "%s", sys->multi_comp->clients[i].app_name);
+				// Strip " (N)" suffix if present
+				char *paren = strrchr(existing_base, '(');
+				if (paren && paren > existing_base && *(paren - 1) == ' ') {
+					*(paren - 1) = '\0';
+				}
+				if (strcmp(existing_base, base_name) == 0) {
+					instance++;
+				}
+			}
+
+			if (instance > 1) {
 				snprintf(sys->multi_comp->clients[slot].app_name,
 				         sizeof(sys->multi_comp->clients[slot].app_name),
-				         "App %d", slot);
+				         "%s (%d)", base_name, instance);
+			} else {
+				snprintf(sys->multi_comp->clients[slot].app_name,
+				         sizeof(sys->multi_comp->clients[slot].app_name),
+				         "%s", base_name);
 			}
-		} else {
-			snprintf(sys->multi_comp->clients[slot].app_name,
-			         sizeof(sys->multi_comp->clients[slot].app_name),
-			         "App %d", slot);
 		}
 
 		// Update input forwarding now that app_hwnd is stored
@@ -6184,8 +6242,8 @@ comp_d3d11_service_get_window_metrics(struct xrt_system_compositor *xsysc,
 static void
 slot_pose_to_pixel_rect(const struct d3d11_service_system *sys,
                         const struct d3d11_multi_client_slot *slot,
-                        uint32_t *out_x, uint32_t *out_y,
-                        uint32_t *out_w, uint32_t *out_h)
+                        int32_t *out_x, int32_t *out_y,
+                        int32_t *out_w, int32_t *out_h)
 {
 	float disp_w_m = sys->base.info.display_width_m;
 	float disp_h_m = sys->base.info.display_height_m;
@@ -6193,7 +6251,6 @@ slot_pose_to_pixel_rect(const struct d3d11_service_system *sys,
 	uint32_t disp_px_h = sys->base.info.display_pixel_height;
 
 	if (disp_w_m <= 0.0f || disp_h_m <= 0.0f || disp_px_w == 0 || disp_px_h == 0) {
-		// Fallback: use defaults
 		disp_px_w = 3840;
 		disp_px_h = 2160;
 		disp_w_m = 0.700f;
@@ -6203,28 +6260,17 @@ slot_pose_to_pixel_rect(const struct d3d11_service_system *sys,
 	float px_per_m_x = (float)disp_px_w / disp_w_m;
 	float px_per_m_y = (float)disp_px_h / disp_h_m;
 
-	// Window size in pixels
-	uint32_t w_px = (uint32_t)(slot->window_width_m * px_per_m_x + 0.5f);
-	uint32_t h_px = (uint32_t)(slot->window_height_m * px_per_m_y + 0.5f);
+	int32_t w_px = (int32_t)(slot->window_width_m * px_per_m_x + 0.5f);
+	int32_t h_px = (int32_t)(slot->window_height_m * px_per_m_y + 0.5f);
 
-	// Window center in pixels from display top-left
-	// pose.position.x: meters from display center, +X right
-	// pose.position.y: meters from display center, +Y up (flip for pixel Y)
 	float center_px_x = (float)disp_px_w / 2.0f + slot->window_pose.position.x * px_per_m_x;
 	float center_px_y = (float)disp_px_h / 2.0f - slot->window_pose.position.y * px_per_m_y;
 
-	// Top-left corner
-	int32_t x = (int32_t)(center_px_x - (float)w_px / 2.0f + 0.5f);
-	int32_t y = (int32_t)(center_px_y - (float)h_px / 2.0f + 0.5f);
-
-	// Clamp to display bounds
-	if (x < 0) x = 0;
-	if (y < 0) y = 0;
-	if ((uint32_t)x + w_px > disp_px_w) w_px = disp_px_w - (uint32_t)x;
-	if ((uint32_t)y + h_px > disp_px_h) h_px = disp_px_h - (uint32_t)y;
-
-	*out_x = (uint32_t)x;
-	*out_y = (uint32_t)y;
+	// No clamping — windows can overflow off-screen (standard Windows behavior).
+	// The mouse can't leave the screen, guaranteeing a visible portion.
+	// The blit code clips to the visible area.
+	*out_x = (int32_t)(center_px_x - (float)w_px / 2.0f + 0.5f);
+	*out_y = (int32_t)(center_px_y - (float)h_px / 2.0f + 0.5f);
 	*out_w = w_px;
 	*out_h = h_px;
 }
