@@ -12,7 +12,7 @@ Phase 3 (3D window positioning) is complete and merged to main. Shell mode works
 |-----|-----------|-------|-----|
 | D3D11 (1-4 apps) | ✅ Stable | — | — |
 | Vulkan | ⚠️ Partial | Swapchain creation fixed, but app crashes before rendering | 3B.1: Size check fixed. VK image import from D3D11 NT handle may produce unusable images. |
-| D3D12 | ❌ | `XR_ERROR_RUNTIME_FAILURE` in swapchain import | D3D12 client can't import D3D11 NT handles — needs cross-API import path |
+| D3D12 | ✅ Working | Restructured to server-creates-swapchain + OpenSharedHandle import | 3B.2: Done |
 | OpenGL | ✅ Working | WGL_NV_DX_interop2 staging texture + Y-flip in multi-comp | 3B.3: Done |
 
 ## Phase 3B Progress
@@ -34,8 +34,8 @@ Phase 3 (3D window positioning) is complete and merged to main. Shell mode works
 |------|--------|-------|
 | Strip XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT in service | ✅ | Stripped in `compositor_create_swapchain` via local_info copy |
 | Strip XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT in D3D12 client | ✅ | Stripped in `comp_d3d12_client.cpp` — Unity apps no longer rejected |
-| Test: single D3D12 app in shell | ❌ | `XR_ERROR_RUNTIME_FAILURE` — D3D12 client can't import D3D11 NT handles via `OpenSharedHandle`. The D3D12 client import path (like GL) needs cross-API support. |
-| Test: Unity D3D12 app in shell | | Blocked by above |
+| Test: single D3D12 app in shell | ✅ | `cube_handle_d3d12_win.exe` renders correctly — cube visible, right-side up |
+| Test: Unity D3D12 app in shell | | Needs testing |
 
 ### 3B.3: Fix GL client import (WGL_NV_DX_interop)
 **Status:** Done (code complete, needs runtime test)
