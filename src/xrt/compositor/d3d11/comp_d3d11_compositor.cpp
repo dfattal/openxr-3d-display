@@ -193,12 +193,9 @@ struct comp_d3d11_compositor
 	ID3D11RenderTargetView *weave_intermediate_rtv;
 	uint32_t weave_intermediate_w, weave_intermediate_h;
 
-	//! Debounce for intermediate texture resize. During drag-resize,
-	//! the SR weaver reinitializes on every setInputViewTexture dimension
-	//! change, which can put it in a bad state. Only recreate the intermediate
-	//! after the HWND size has been stable for a few frames.
-	uint32_t weave_pending_w, weave_pending_h;
-	uint32_t weave_stable_frames;
+	//! True once the weave intermediate has been created. It is never
+	//! resized — the SR weaver cannot handle backbuffer changes mid-session.
+	bool weave_intermediate_created;
 
 	//! Lazily allocated intermediate texture for cropping atlas to content dims
 	//! before passing to display processor. NULL when not needed (zero-copy case).
@@ -980,14 +977,14 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 				uint32_t new_vw = mode->view_width_pixels;
 				uint32_t new_vh = mode->view_height_pixels;
 				if (c->canvas.valid) {
-					// In shared texture mode during resize, use the
-					// stable intermediate dimensions to avoid rapid
-					// renderer resizes that break the SR weaver.
+					// Use the fixed intermediate dimensions for view
+					// computation when available. The intermediate never
+					// resizes, so view dims stay constant — preventing
+					// setInputViewTexture dimension changes that break
+					// the SR weaver.
 					uint32_t canvas_for_view_w = c->canvas.w;
 					uint32_t canvas_for_view_h = c->canvas.h;
-					if (c->weave_intermediate != nullptr &&
-					    c->weave_stable_frames < 3) {
-						// Size is still changing — derive from stable intermediate
+					if (c->weave_intermediate_created) {
 						canvas_for_view_w = c->weave_intermediate_w / 2;
 						canvas_for_view_h = c->weave_intermediate_h / 2;
 					}
@@ -1198,81 +1195,42 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 			bool use_intermediate = c->canvas.valid && c->canvas.w > 0 &&
 			                        c->canvas.h > 0 && hwnd_w > 0 && hwnd_h > 0;
 
+			if (use_intermediate && !c->weave_intermediate_created) {
+				// Create intermediate once at the initial HWND size and never
+				// resize it. The SR weaver cannot handle backbuffer dimension
+				// changes mid-session (setInputViewTexture with new dims puts
+				// the weaver in a bad state). By keeping the intermediate fixed,
+				// the weaver's state stays stable across window resizes.
+				// The proportional canvas scaling below handles the mismatch
+				// between the fixed intermediate and the current HWND size.
+				D3D11_TEXTURE2D_DESC desc = {};
+				desc.Width = hwnd_w;
+				desc.Height = hwnd_h;
+				desc.MipLevels = 1;
+				desc.ArraySize = 1;
+				desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+				desc.SampleDesc.Count = 1;
+				desc.Usage = D3D11_USAGE_DEFAULT;
+				desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+
+				HRESULT hr = c->device->CreateTexture2D(&desc, nullptr, &c->weave_intermediate);
+				if (SUCCEEDED(hr)) {
+					c->device->CreateRenderTargetView(c->weave_intermediate, nullptr,
+					                                  &c->weave_intermediate_rtv);
+					c->weave_intermediate_w = hwnd_w;
+					c->weave_intermediate_h = hwnd_h;
+					c->weave_intermediate_created = true;
+					U_LOG_W("Created fixed weave intermediate: %ux%u (will not resize)", hwnd_w, hwnd_h);
+				} else {
+					U_LOG_E("Failed to create weave intermediate: 0x%08x", (unsigned)hr);
+					use_intermediate = false;
+				}
+			}
+
 			if (use_intermediate) {
-				// Debounce: during drag-resize, the HWND size changes every
-				// frame. Recreating the intermediate (and thus changing the
-				// weaver's input dims) each frame causes the SR weaver to
-				// reinitialize repeatedly, putting it in a bad state. Track
-				// a pending size and only apply when stable for 3 frames.
-				if (hwnd_w != c->weave_pending_w || hwnd_h != c->weave_pending_h) {
-					c->weave_pending_w = hwnd_w;
-					c->weave_pending_h = hwnd_h;
-					c->weave_stable_frames = 0;
-				} else if (c->weave_stable_frames < 100) {
-					c->weave_stable_frames++;
-				}
-
-				// Determine the size to actually use for the intermediate
-				uint32_t use_w = hwnd_w, use_h = hwnd_h;
-				if (c->weave_intermediate != nullptr &&
-				    (c->weave_intermediate_w != hwnd_w || c->weave_intermediate_h != hwnd_h) &&
-				    c->weave_stable_frames < 3) {
-					// Size is still changing — keep using old intermediate
-					use_w = c->weave_intermediate_w;
-					use_h = c->weave_intermediate_h;
-				}
-
-				// Create or recreate intermediate at the target size
-				if (c->weave_intermediate == nullptr ||
-				    c->weave_intermediate_w != use_w ||
-				    c->weave_intermediate_h != use_h) {
-					if (c->weave_intermediate_rtv != nullptr) {
-						c->weave_intermediate_rtv->Release();
-						c->weave_intermediate_rtv = nullptr;
-					}
-					if (c->weave_intermediate != nullptr) {
-						c->weave_intermediate->Release();
-						c->weave_intermediate = nullptr;
-					}
-
-					D3D11_TEXTURE2D_DESC desc = {};
-					desc.Width = use_w;
-					desc.Height = use_h;
-					desc.MipLevels = 1;
-					desc.ArraySize = 1;
-					desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-					desc.SampleDesc.Count = 1;
-					desc.Usage = D3D11_USAGE_DEFAULT;
-					desc.BindFlags = D3D11_BIND_RENDER_TARGET;
-
-					HRESULT hr = c->device->CreateTexture2D(&desc, nullptr, &c->weave_intermediate);
-					if (SUCCEEDED(hr)) {
-						c->device->CreateRenderTargetView(c->weave_intermediate, nullptr,
-						                                  &c->weave_intermediate_rtv);
-						c->weave_intermediate_w = use_w;
-						c->weave_intermediate_h = use_h;
-						U_LOG_W("Created HWND-sized weave intermediate: %ux%u", use_w, use_h);
-
-						// Force phase re-snap: the weaver's WndProc hook
-						// snapped the window position for the OLD canvas
-						// offset. After resize, the canvas offset changed,
-						// so the combined (window_pos + canvas_offset) is
-						// no longer phase-aligned. Nudge the window to
-						// trigger WM_WINDOWPOSCHANGING → re-snap.
-						if (weave_hwnd != nullptr) {
-							RECT wr;
-							GetWindowRect(weave_hwnd, &wr);
-							SetWindowPos(weave_hwnd, NULL,
-							             wr.left, wr.top, 0, 0,
-							             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-						}
-					} else {
-						U_LOG_E("Failed to create weave intermediate: 0x%08x", (unsigned)hr);
-						use_intermediate = false;
-					}
-				}
-				hwnd_w = use_w;
-				hwnd_h = use_h;
+				// Use the fixed intermediate dimensions
+				hwnd_w = c->weave_intermediate_w;
+				hwnd_h = c->weave_intermediate_h;
 			}
 
 			if (use_intermediate && c->weave_intermediate_rtv != nullptr) {
