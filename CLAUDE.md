@@ -135,6 +135,44 @@ git push displayxr main          # ensure main is up to date
 
 CI only runs on dfattal (guarded by `github.repository` check in workflows). The public repo shows "skipped" for CI jobs — this is expected. Never push untested commits directly to displayxr. Always validate via `/ci-monitor` first.
 
+### Repository Structure
+
+| Repo | Visibility | Contents |
+|------|-----------|----------|
+| `dfattal/openxr-3d-display` | **Private** (dev) | Runtime + shell source, all dev issues, CI builds |
+| `DisplayXR/displayxr-runtime` | Public | Public mirror of runtime (push via `displayxr` remote) |
+| `DisplayXR/displayxr-shell` | Private | Shell repo (post-migration, currently empty) |
+| `DisplayXR/displayxr-shell-releases` | Public | Binary-only shell releases, user-facing bug reports |
+
+Shell code currently lives in this repo at `src/xrt/targets/shell/`. Migration to `displayxr-shell` is tracked by #120, pending SDK export (#118).
+
+### Issue Management
+
+**All dev issues go to `dfattal/openxr-3d-display`** — both runtime and shell. Use the `shell` label to distinguish shell-specific issues.
+
+| Where | What | Who |
+|-------|------|-----|
+| `dfattal/openxr-3d-display` | All dev issues (bugs, tasks, implementation) | Developers |
+| `DisplayXR/displayxr-runtime` | Curated public milestones only (~5-10 issues) | Public / OEMs |
+| `DisplayXR/displayxr-shell-releases` | User-facing shell bug reports | Shell users |
+
+**Rules:**
+- Never dual-create issues across repos. One source of truth per issue.
+- Create dev issues on `dfattal/openxr-3d-display` only.
+- Update public milestone issues on `DisplayXR/displayxr-runtime` at major milestones, don't create new ones for subtasks.
+- If a user files a bug on `displayxr-shell-releases`, triage it and create a dev issue on the private repo if actionable.
+- After shell migration: shell dev issues move to `DisplayXR/displayxr-shell`. Runtime dev issues stay on `dfattal/openxr-3d-display`.
+
+### Public ↔ Private Issue Cross-Reference
+
+| `DisplayXR/displayxr-runtime` | `dfattal/openxr-3d-display` | Topic |
+|-------------------------------|----------------------------|-------|
+| #1 | #43 | Spatial OS / multi-compositor |
+| #2 | #44 | 3D Shell |
+| #3 | #118 | Runtime SDK export |
+| #4 | #120 | Shell repo migration |
+| #5 | #119 | Shell Phase 4: Spatial Companion |
+
 ## Architecture
 
 ### Source Tree Structure (`src/xrt/`)

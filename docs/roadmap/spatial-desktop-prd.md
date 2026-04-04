@@ -167,6 +167,38 @@ The shell is the first visible deliverable of the spatial OS, but the spatial OS
 
 > **Terminology note:** "Spatial OS" is an internal vision label for the full platform stack. Externally, lead with **DisplayXR runtime** (open, developer-facing) and **3D Shell** (closed, user-facing). The term "OS" can sound overreaching since the platform is built on top of Windows/macOS, not a new kernel.
 
+### 5.3 Repository Structure and Distribution
+
+The platform is split across three repositories, reflecting the open runtime / proprietary shell boundary:
+
+| Repo | Visibility | Contents | Distribution |
+|------|-----------|----------|-------------|
+| `displayxr-runtime` | **Public** | Runtime, OpenXR loader, multi-compositor, capture mechanism, SDK (headers + libs) | Public GitHub releases |
+| `displayxr-shell` | **Private** | Shell source: launcher, window adoption, layout policy, persistence, spatial companion UX | CI builds only |
+| `displayxr-shell-releases` | **Public** | Binary-only shell releases (exe + changelog) | Public GitHub releases |
+
+**Design principles:**
+- **Runtime has standalone value** — any OpenXR app works without the shell installed. Single-app mode, kiosk mode, and third-party shells are all valid use cases.
+- **Shell is independently installable** — users download the runtime and shell separately. The shell finds the runtime service via named pipe; no path or install dependency.
+- **SDK enables third-party shells** — the runtime exports IPC client headers and static libraries. OEMs or third-party developers can build their own shell against the same stable IPC protocol.
+- **Capture mechanism lives in the runtime** — `Windows.Graphics.Capture` sessions run server-side (same D3D11 device as multi-compositor). The shell tells the runtime which HWNDs to capture via IPC; the runtime handles GPU work. This preserves the "shell owns policy, runtime owns mechanism" boundary.
+
+**Shell build dependency:** The shell links against the runtime's SDK export (`ipc_client.lib`, `ipc_shared.lib`, `aux_util.lib` + headers). Shell's CMake uses `find_package(DisplayXRSDK)` pointing at an installed runtime `_package/`.
+
+**Version compatibility:** Shell releases declare a minimum runtime version. Shell checks runtime version on IPC connect and warns if outdated.
+
+### 5.4 Issue Management
+
+All development issues live on the private dev repo (`dfattal/openxr-3d-display`). The public runtime repo (`DisplayXR/displayxr-runtime`) carries only curated milestone-level tracking issues for third-party visibility. User-facing shell bug reports go to `DisplayXR/displayxr-shell-releases`.
+
+| Repo | Issue type | Volume |
+|------|-----------|--------|
+| `dfattal/openxr-3d-display` (private) | All dev issues — runtime and shell. `shell` label for shell-specific. | ~100+ |
+| `DisplayXR/displayxr-runtime` (public) | Curated milestones only | ~5-10 |
+| `DisplayXR/displayxr-shell-releases` (public) | User-facing bug reports | As needed |
+
+Issues are never dual-created. After shell migration, shell dev issues move to `DisplayXR/displayxr-shell` (private).
+
 ---
 
 ## 6. Future Direction: 3D Capture (Phase 2+)
