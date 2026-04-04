@@ -6859,6 +6859,18 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 		return XRT_ERROR_VULKAN;  // Generic graphics error
 	}
 
+	// Enable D3D11 multithread protection: multiple IPC client threads + render thread
+	// all share the same device. Without this, 3+ simultaneous clients crash (#108).
+	{
+		wil::com_ptr<ID3D11Multithread> mt;
+		if (device_base.try_query_to(mt.put())) {
+			mt->SetMultithreadProtected(TRUE);
+			U_LOG_W("D3D11 multithread protection enabled");
+		} else {
+			U_LOG_W("D3D11 multithread protection not available");
+		}
+	}
+
 	// Get ID3D11Device5 and ID3D11DeviceContext4 for shared resource support
 	if (!device_base.try_query_to(sys->device.put())) {
 		U_LOG_E("Device doesn't support ID3D11Device5");
