@@ -320,18 +320,64 @@ With 10 windows (5 captured + 5 OpenXR), total compositor overhead is ~6ms — w
 | Windows 10 2004+ | Required | For programmatic `GraphicsCaptureItem` creation |
 | D3D11 multithread protection | Complete (#108) | Required for concurrent capture + IPC clients |
 
-## Files (Key Reference)
+## Repository Split
+
+Phase 4 is the natural point where the shell moves to its own private repo. The code divides cleanly:
+
+### `displayxr-runtime` (public) — mechanism
+
+| File | New work |
+|------|----------|
+| `compositor/d3d11_service/comp_d3d11_service.cpp` | Virtual client slots for captured windows, capture session management |
+| `compositor/d3d11_service/comp_d3d11_service.h` | Public API: `add_capture_client()`, `remove_capture_client()`, `get_client_type()` |
+| `compositor/d3d11_service/d3d11_capture.cpp` | **New:** `Windows.Graphics.Capture` wrapper (C++/WinRT), runs server-side |
+| `compositor/d3d11/comp_d3d11_window.cpp` | System tray support for shell window |
+| `ipc/server/ipc_server_handler.c` | Handlers: `shell_deactivate`, `shell_add_capture_client`, `shell_remove_capture_client` |
+| `ipc/shared/proto.json` | New IPC messages for capture and deactivation |
+| CMake install | SDK export: headers → `include/displayxr/`, libs → `lib/`, cmake config |
+
+### `displayxr-shell` (private) — policy
+
+| File | Description |
+|------|-------------|
+| `src/main.c` | Migrated from `targets/shell/main.c`. Window enumeration, adoption, lifecycle, hotkey listener |
+| `src/window_adoption.c` | **New:** `EnumWindows` + classification (2D vs 3D), state snapshot, dynamic tracking |
+| `src/launcher.c` | **New:** Registered apps config, launcher panel, app type auto-detection |
+| `config/registered_apps.json` | Default app registry |
+| `CMakeLists.txt` | `find_package(DisplayXRSDK)` → links `ipc_client` statically |
+
+### `displayxr-shell-releases` (public) — distribution
+
+Binary-only releases. Shell exe + changelog + minimum runtime version.
+
+### Build and CI Pipeline
+
+```
+displayxr-runtime CI
+  ├── Build runtime + SDK
+  ├── cmake --install → _package/ (bin/ + lib/ + include/)
+  └── Publish: "DisplayXR" artifact (bin/ + dll)
+       + "DisplayXR-SDK" artifact (include/ + lib/ + cmake config)
+
+displayxr-shell CI
+  ├── Download "DisplayXR-SDK" artifact (or latest runtime release)
+  ├── DISPLAYXR_SDK_PATH=./sdk cmake ..
+  ├── Build displayxr-shell.exe
+  └── Publish to displayxr-shell-releases (tagged release)
+```
+
+Runtime and shell are independently installable. Users download each separately. The shell finds the service via named pipe — no path dependency on the runtime install location.
+
+## Files (Key Reference — Runtime Repo)
 
 | File | Role |
 |------|------|
 | `src/xrt/compositor/d3d11_service/comp_d3d11_service.cpp` | Multi-comp: extend slot model for virtual clients, capture integration |
 | `src/xrt/compositor/d3d11_service/comp_d3d11_service.h` | Public API: add capture client management |
-| `src/xrt/compositor/d3d11/comp_d3d11_window.cpp` | Window WndProc: hotkey handler, system tray |
+| `src/xrt/compositor/d3d11_service/d3d11_capture.cpp` | **New:** Windows.Graphics.Capture wrapper (C++/WinRT) |
+| `src/xrt/compositor/d3d11/comp_d3d11_window.cpp` | Window WndProc: system tray |
 | `src/xrt/ipc/server/ipc_server_handler.c` | IPC handlers: shell_deactivate, add/remove capture client |
 | `src/xrt/ipc/shared/proto.json` | IPC protocol: new capture client messages |
-| `src/xrt/targets/shell/main.c` | Shell app: window enumeration, adoption, lifecycle, launcher |
-| `src/xrt/targets/shell/capture.cpp` | **New:** Windows.Graphics.Capture wrapper (C++/WinRT) |
-| `src/xrt/targets/shell/launcher.c` | **New:** App launcher panel, registered apps config |
 
 ## Test Procedure
 
