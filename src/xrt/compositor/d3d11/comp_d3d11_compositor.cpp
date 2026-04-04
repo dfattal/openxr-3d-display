@@ -1252,6 +1252,20 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 						c->weave_intermediate_w = use_w;
 						c->weave_intermediate_h = use_h;
 						U_LOG_W("Created HWND-sized weave intermediate: %ux%u", use_w, use_h);
+
+						// Force phase re-snap: the weaver's WndProc hook
+						// snapped the window position for the OLD canvas
+						// offset. After resize, the canvas offset changed,
+						// so the combined (window_pos + canvas_offset) is
+						// no longer phase-aligned. Nudge the window to
+						// trigger WM_WINDOWPOSCHANGING → re-snap.
+						if (weave_hwnd != nullptr) {
+							RECT wr;
+							GetWindowRect(weave_hwnd, &wr);
+							SetWindowPos(weave_hwnd, NULL,
+							             wr.left, wr.top, 0, 0,
+							             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+						}
 					} else {
 						U_LOG_E("Failed to create weave intermediate: 0x%08x", (unsigned)hr);
 						use_intermediate = false;
