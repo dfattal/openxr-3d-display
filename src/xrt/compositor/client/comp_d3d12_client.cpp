@@ -496,24 +496,42 @@ try {
 	auto &data = sc->data;
 	std::uint64_t image_mem_size = 0;
 
-	// Allocate images
-	xret = xrt::auxiliary::d3d::d3d12::allocateSharedImages( //
-	    *(c->device),                                        //
-	    xinfo,                                               //
-	    image_count,                                         //
-	    data->images,                                        //
-	    data->handles,                                       //
-	    image_mem_size);                                     //
+	// Ask the service to create the swapchain (server-creates-swapchain model).
+	// The D3D11 service creates shared textures with NT handles that D3D12 can import.
+	D3D_INFO(c, "Requesting server to create swapchain (server-creates-swapchain model)");
+	xrt_swapchain *xsc_raw = nullptr;
+	xret = xrt_comp_create_swapchain(&c->xcn->base, &vkinfo, &xsc_raw);
 	if (xret != XRT_SUCCESS) {
+		D3D_ERROR(c, "Service failed to create swapchain: %d", xret);
 		return xret;
 	}
+	sc->xsc.reset(xsc_raw);
+
+	// Get handles from service-created swapchain
+	struct xrt_swapchain_native *xscn = (struct xrt_swapchain_native *)sc->xsc.get();
+	image_count = xscn->base.image_count;
+	D3D_INFO(c, "Service created swapchain with %u images", image_count);
 
 	data->app_images.reserve(image_count);
 
-	// Import from the handles for the app.
+	// Import server-provided NT handles into D3D12 via OpenSharedHandle
 	for (uint32_t i = 0; i < image_count; ++i) {
-		wil::com_ptr<ID3D12Resource> image =
-		    xrt::auxiliary::d3d::d3d12::importImage(*(c->device), data->handles[i].get());
+		HANDLE handle = (HANDLE)xscn->images[i].handle;
+
+		// Clear DXGI marker bit if set during IPC transfer
+		if ((size_t)handle & 1) {
+			handle = (HANDLE)((size_t)handle & ~1);
+		}
+
+		D3D_INFO(c, "Importing server texture [%u]: handle=%p", i, handle);
+
+		wil::com_ptr<ID3D12Resource> image;
+		try {
+			image = xrt::auxiliary::d3d::d3d12::importImage(*(c->device), handle);
+		} catch (wil::ResultException const &e) {
+			D3D_ERROR(c, "Failed to import D3D11 texture [%u] into D3D12: %s", i, e.what());
+			return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+		}
 
 		// Put the image where the OpenXR state tracker can get it
 		sc->base.images[i] = image.get();
@@ -523,7 +541,6 @@ try {
 	}
 
 	D3D12_RESOURCE_STATES appResourceState = d3d_convert_usage_bits_to_d3d12_app_resource_state(xinfo.bits);
-	/// @todo No idea if this is right, might depend on whether it's the compute or graphics compositor!
 	D3D12_RESOURCE_STATES compositorResourceState = D3D12_RESOURCE_STATE_COMMON;
 
 	data->appResourceState = appResourceState;
@@ -536,7 +553,7 @@ try {
 		data->commandsToApp.reserve(image_count);
 		data->commandsToCompositor.reserve(image_count);
 
-		// Make the command lists to transition images
+		// Make the command lists to transition imported images
 		for (uint32_t i = 0; i < image_count; ++i) {
 			wil::com_ptr<ID3D12CommandList> commandsToApp;
 			wil::com_ptr<ID3D12CommandList> commandsToCompositor;
@@ -545,7 +562,7 @@ try {
 			HRESULT hr = xrt::auxiliary::d3d::d3d12::createCommandLists( //
 			    *(c->device),                                            // device
 			    *(c->command_allocator),                                 // command_allocator
-			    *(data->images[i]),                                      // resource
+			    *(data->app_images[i]),                                  // resource
 			    xinfo.bits,                                              // bits
 			    commandsToApp,                                           // out_acquire_command_list
 			    commandsToCompositor);                                   // out_release_command_list
@@ -561,85 +578,7 @@ try {
 		}
 	}
 
-
-	/*
-	 * There is a bug in nvidia systems where D3D12 and Vulkan disagree on the memory layout
-	 * of smaller images, this causes the native compositor to not display these swapchains
-	 * correctly.
-	 *
-	 * The workaround for this is to create a second set of images for use in the native
-	 * compositor and copy the contents from the app image into the compositor image every
-	 * time the swapchain is released by the app.
-	 *
-	 * @todo: check if AMD and Intel platforms have this issue as well.
-	 */
-	bool fixWidth = info->width < 256 && !isPowerOfTwo(info->width);
-	bool fixHeight = info->height < 256 && !isPowerOfTwo(info->height);
-	bool compositorNeedsCopy = debug_get_bool_option_compositor_copy() && (fixWidth || fixHeight);
-
-	if (compositorNeedsCopy) {
-		// These bits doesn't matter for D3D12, just set it to something.
-		xinfo.bits = XRT_SWAPCHAIN_USAGE_SAMPLED;
-
-		if (fixWidth) {
-			vkinfo.width = xinfo.width = nextPowerOfTwo(info->width);
-		}
-		if (fixHeight) {
-			vkinfo.height = xinfo.height = nextPowerOfTwo(info->height);
-		}
-
-		sc->comp_uv_scale = xrt_vec2{
-		    (float)info->width / xinfo.width,
-		    (float)info->height / xinfo.height,
-		};
-
-		// Allocate compositor images
-		xret = xrt::auxiliary::d3d::d3d12::allocateSharedImages( //
-		    *(c->device),                                        // device
-		    xinfo,                                               // xsci
-		    image_count,                                         // image_count
-		    data->comp_images,                                   // out_images
-		    data->comp_handles,                                  // out_handles
-		    image_mem_size);                                     // out_image_mem_size (in bytes)
-		if (xret != XRT_SUCCESS) {
-			return xret;
-		}
-
-		// Create copy command lists
-		for (uint32_t i = 0; i < image_count; ++i) {
-			wil::com_ptr<ID3D12CommandList> copyCommandList;
-
-			D3D_INFO(c, "Creating copy-to-compositor command list for image %" PRId32, i);
-			HRESULT hr = xrt::auxiliary::d3d::d3d12::createCommandListImageCopy( //
-			    *(c->device),                                                    // device
-			    *(c->command_allocator),                                         // command_allocator
-			    *(data->images[i]),                                              // resource_src
-			    *(data->comp_images[i]),                                         // resource_dst
-			    appResourceState,                                                // src_resource_state
-			    compositorResourceState,                                         // dst_resource_state
-			    copyCommandList);                                                // out_copy_command_list
-			if (!SUCCEEDED(hr)) {
-				char buf[kErrorBufSize];
-				formatMessage(hr, buf);
-				D3D_ERROR(c, "Error creating command list: %s", buf);
-				return XRT_ERROR_D3D12;
-			}
-			data->comp_copy_commands.emplace_back(std::move(copyCommandList));
-		}
-	}
-
-	std::vector<wil::unique_handle> &handles = compositorNeedsCopy ? data->comp_handles : data->handles;
-
-	// Import into the native compositor, to create the corresponding swapchain which we wrap.
-	xret = xrt::compositor::client::importFromHandleDuplicates(*(c->xcn), handles, vkinfo, image_mem_size, true,
-	                                                           sc->xsc);
-	if (xret != XRT_SUCCESS) {
-		D3D_ERROR(c, "Error importing D3D swapchain into native compositor");
-		return xret;
-	}
-
-	// app_images do not inherit the initial state of images, so
-	// transition all app images from _COMMON to the correct state
+	// Transition imported images from COMMON to app resource state
 	{
 		D3D12_RESOURCE_BARRIER barrier{};
 		barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -665,9 +604,8 @@ try {
 		c->app_queue->ExecuteCommandLists((UINT)commandLists.size(), commandLists.data());
 	}
 
-	auto release_image_fn = compositorNeedsCopy //
-	                            ? client_d3d12_swapchain_release_image_copy
-	                            : client_d3d12_swapchain_release_image;
+	// Server-creates-swapchain: no compositor copy needed
+	auto release_image_fn = client_d3d12_swapchain_release_image;
 
 	sc->base.base.destroy = client_d3d12_swapchain_destroy;
 	sc->base.base.acquire_image = client_d3d12_swapchain_acquire_image;
