@@ -4948,8 +4948,18 @@ multi_compositor_render(struct d3d11_service_system *sys)
 						float content_local_y = hit.local_y_m - title_h_m;
 						float win_w = mc->clients[hit_slot].window_width_m;
 						float win_h = mc->clients[hit_slot].window_height_m;
-						int app_x = (int)(content_local_x / win_w * (float)mc->clients[hit_slot].window_rect_w);
-						int app_y = (int)(content_local_y / win_h * (float)mc->clients[hit_slot].window_rect_h);
+
+						// Use actual HWND client size for coordinate mapping.
+						// For capture clients, the HWND size differs from window_rect.
+						RECT target_cr;
+						GetClientRect(mc->clients[hit_slot].app_hwnd, &target_cr);
+						int target_w = target_cr.right - target_cr.left;
+						int target_h = target_cr.bottom - target_cr.top;
+						if (target_w <= 0) target_w = (int)mc->clients[hit_slot].window_rect_w;
+						if (target_h <= 0) target_h = (int)mc->clients[hit_slot].window_rect_h;
+
+						int app_x = (int)(content_local_x / win_w * (float)target_w);
+						int app_y = (int)(content_local_y / win_h * (float)target_h);
 						LPARAM lp = MAKELPARAM(app_x, app_y);
 						PostMessage(mc->clients[hit_slot].app_hwnd, WM_MOUSEMOVE, 0, lp);
 						PostMessage(mc->clients[hit_slot].app_hwnd, WM_LBUTTONDOWN,
