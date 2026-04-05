@@ -1802,31 +1802,32 @@ the property) silently ignore the call — graceful degradation.
 | 7 | 2026-03-04 | David Fattal | Vendor-specific display rendering mode control: `xrRequestDisplayRenderingModeEXT(session, modeIndex)` for switching between vendor-defined rendering variations (e.g., SBS stereo, anaglyph, lenticular). Mode 0 = standard (always available), mode 1+ = vendor-defined. Dispatches through `xrt_device_set_property`; no-op if driver doesn't support it. |
 | 8 | 2026-03-06 | David Fattal | Removed `XR_REFERENCE_SPACE_TYPE_DISPLAY_EXT`. In RAW mode, `xrLocateViews` returns screen-centered eye positions regardless of the reference space parameter — a dedicated DISPLAY space is unnecessary. Applications use LOCAL space for both view location and layer submission. |
 | 10 | 2026-03-12 | David Fattal | Removed `supportsDisplayModeSwitch` (derivable from mode enumeration), renamed `display3D` to `hardwareDisplay3D`, deprecated `xrRequestDisplayModeEXT` in favor of unified `xrRequestDisplayRenderingModeEXT`, added rendering mode and hardware display state change events (`XrEventDataRenderingModeChangedEXT`, `XrEventDataHardwareDisplayStateChangedEXT`). |
+| 11 | 2026-03-20 | David Fattal | Added per-mode tile layout fields to `XrDisplayRenderingModeInfoEXT`: `tileColumns`, `tileRows`, `viewWidthPixels`, `viewHeightPixels`. Enables runtime to describe atlas layout for multi-view rendering modes (e.g., 2x2 quad). |
+| 12 | 2026-03-28 | David Fattal | Moved `hardwareDisplay3D` from `XrDisplayInfoEXT` to `XrEventDataHardwareDisplayStateChangedEXT` (event-only). Hardware 3D state is now purely event-driven — apps track state via events rather than polling a field. **Header frozen at v12.** |
 
 ---
 
 ## Appendix A: Reference Implementation
 
-A complete reference implementation is available in the CNSDK-OpenXR repository:
+A complete reference implementation is available in the [DisplayXR runtime](https://github.com/DisplayXR/displayxr-runtime):
 
 | Component | Location |
 |---|---|
-| Extension headers | `src/external/openxr_includes/openxr/XR_EXT_win32_window_binding.h` |
-| | `src/external/openxr_includes/openxr/XR_EXT_display_info.h` |
+| Extension headers | `src/external/openxr_includes/openxr/XR_EXT_display_info.h` |
+| | `src/external/openxr_includes/openxr/XR_EXT_win32_window_binding.h` |
+| | `src/external/openxr_includes/openxr/XR_EXT_cocoa_window_binding.h` |
 | Runtime: display info query | `src/xrt/state_trackers/oxr/oxr_system.c` |
-| Runtime: session creation | `src/xrt/state_trackers/oxr/oxr_session.c` |
-| Runtime: CNSDK integration | `src/xrt/compositor/main/comp_renderer.c` |
-| Runtime: LeiaSR integration | `src/xrt/drivers/leiasr/` |
+| Runtime: session + view locate | `src/xrt/state_trackers/oxr/oxr_session.c` |
+| Runtime: events | `src/xrt/state_trackers/oxr/oxr_event.c` |
+| Runtime: Kooima math | `src/xrt/auxiliary/math/m_display3d_view.h` |
+| Display processor interface | `src/xrt/include/xrt/xrt_display_processor.h` |
+| LeiaSR vendor integration | `src/xrt/drivers/leia/` |
+| Simulator driver | `src/xrt/drivers/sim_display/` |
 | D3D11 test application (Win32) | `test_apps/cube_handle_d3d11_win/` |
-| OpenGL test application (Win32) | `test_apps/cube_handle_gl_win/` |
+| Metal test application (macOS) | `test_apps/cube_handle_metal_macos/` |
 | Common Kooima projection | `test_apps/common/xr_session_common.cpp` |
 
-The runtime is based on Monado (open-source OpenXR runtime) with platform-specific SDK
-integration:
-- **Windows**: LeiaSR (Simulated Reality) SDK for eye tracking, light field interlacing,
-  and switchable lens control.
-- **Android**: CNSDK (Leia SDK) for eye tracking, Vulkan interlacing, and backlight
-  control.
+The runtime is based on Monado (open-source OpenXR runtime) with native compositors per graphics API (D3D11, D3D12, Metal, OpenGL, Vulkan). Vendor display processing is abstracted via the `xrt_display_processor` interface — see `docs/guides/vendor-integration.md`.
 
 ## Appendix B: Glossary
 
@@ -1842,6 +1843,6 @@ integration:
 | **Screen-centered coordinates** | The coordinate frame used by RAW mode eye positions: origin at the physical display center, +X right, +Y up, +Z toward the viewer. Implicit in the returned `XrView.pose.position` — no dedicated reference space needed. |
 | **Nominal viewer position** | A static, design-time expectation of the viewer's position relative to the display. Not tracked; defines the apex of the canonical display pyramid. |
 | **Disparity** | Horizontal shift between left and right eye images, measured as a fraction of window width. Controls perceived depth of window-space layers. |
-| **Display mode** | The operational mode of a tracked 3D display: 2D (standard flat panel) or 3D (light field interlacing active). Controlled via `xrRequestDisplayModeEXT`. |
+| **Display mode** | The operational mode of a tracked 3D display: 2D (standard flat panel) or 3D (light field interlacing active). Historically controlled via `xrRequestDisplayModeEXT` (deprecated in v10). New apps use `xrRequestDisplayRenderingModeEXT` which provides unified control over both 2D/3D switching and vendor-specific rendering variations. |
 | **Display rendering mode** | A vendor-specific rendering variation within 3D mode (e.g., SBS stereo, anaglyph, lenticular). Controlled via `xrRequestDisplayRenderingModeEXT`. Mode 0 is standard; higher indices are vendor-defined. |
 | **Surface binding** | A platform-specific mechanism for the application to provide its own rendering surface to the runtime (`HWND` on Win32; `ANativeWindow*` + Java `Surface` + screen position on Android). |
