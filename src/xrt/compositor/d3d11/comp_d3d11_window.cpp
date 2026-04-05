@@ -441,9 +441,27 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				// Only forward if inside the focused window's rect
 				if (shell_x >= rx && shell_x < rx + rw &&
 				    shell_y >= ry && shell_y < ry + rh) {
-					// Remap to app-window client coords (offset only, no scale)
-					int app_x = shell_x - rx;
-					int app_y = shell_y - ry;
+					// Remap to app-window client coords.
+					// Scale if target HWND is a different size than the
+					// virtual rect (e.g., captured 2D windows).
+					RECT target_cr;
+					GetClientRect(fwd, &target_cr);
+					int target_w = target_cr.right - target_cr.left;
+					int target_h = target_cr.bottom - target_cr.top;
+
+					int rel_x = shell_x - rx;
+					int rel_y = shell_y - ry;
+					int app_x, app_y;
+					if (target_w > 0 && target_h > 0 &&
+					    (target_w != rw || target_h != rh)) {
+						// Scale: virtual rect → actual HWND client area
+						app_x = (int)((float)rel_x * (float)target_w / (float)rw);
+						app_y = (int)((float)rel_y * (float)target_h / (float)rh);
+					} else {
+						// Same size — offset only (IPC apps)
+						app_x = rel_x;
+						app_y = rel_y;
+					}
 					PostMessage(fwd, message, wParam, MAKELPARAM(app_x, app_y));
 				}
 			} else {
