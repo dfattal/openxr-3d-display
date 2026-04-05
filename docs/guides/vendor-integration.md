@@ -147,7 +147,7 @@ The runtime exposes three custom extensions that surface vendor data to
 applications.  The vendor provides the underlying data; the runtime maps it
 onto the OpenXR API.
 
-### 3.1 `XR_EXT_display_info` (v7)
+### 3.1 `XR_EXT_display_info` (v12 — header frozen)
 
 **Header:** `src/external/openxr_includes/openxr/XR_EXT_display_info.h`
 
@@ -167,34 +167,34 @@ typedef struct XrDisplayInfoEXT {
 } XrDisplayInfoEXT;
 ```
 
-> **Note:** `hardwareDisplay3D` was moved to `XrDisplayRenderingModeInfoEXT` (per-mode)
-> in spec version 8. See the header for the current definition.
+> **Note:** `hardwareDisplay3D` was removed from `XrDisplayInfoEXT` in v12.
+> Hardware 3D state is now event-driven via `XrEventDataHardwareDisplayStateChangedEXT`.
 
 **How vendor data reaches this extension:**  The vendor's device driver populates
 `xrt_system_compositor_info` fields at init time:
 - `info.display_width_m` / `info.display_height_m` → `displaySizeMeters`
 - `info.nominal_viewer_x_m` / `_y_m` / `_z_m` → `nominalViewerPositionInDisplaySpace`
 - `info.recommended_view_scale_x` / `_y` → `recommendedViewScale*`
-- `info.hardware_display_3d` → `hardwareDisplay3D`
 
 The runtime reads from `xrt_system_compositor_info` — it never calls vendor SDK
 functions directly.  For example, the Leia driver queries SR SDK during device
 creation and stores the results; sim_display uses env vars and OS display queries.
 
-**2D/3D mode switching:**
+**Rendering mode control (v7+):**
 
 ```c
-typedef enum XrDisplayModeEXT {
-    XR_DISPLAY_MODE_2D_EXT = 0,
-    XR_DISPLAY_MODE_3D_EXT = 1,
-} XrDisplayModeEXT;
-
-XrResult xrRequestDisplayModeEXT(XrSession session, XrDisplayModeEXT displayMode);
+XrResult xrRequestDisplayRenderingModeEXT(XrSession session, uint32_t modeIndex);
+XrResult xrEnumerateDisplayRenderingModesEXT(XrSession session, ...);
 ```
 
-The runtime auto-switches to 3D on `xrBeginSession` and back to 2D on
-`xrEndSession`.  The vendor provides a `request_display_mode(bool enable_3d)`
-function on their SDK wrapper.
+Vendor-defined rendering modes (2D, SBS stereo, lenticular, quad, etc.) are
+enumerated at runtime. Mode 0 = 2D (always available). Each mode specifies
+`viewCount`, `tileColumns`, `tileRows`, `viewWidthPixels`, `viewHeightPixels`
+for atlas layout. Events (`XrEventDataRenderingModeChangedEXT`,
+`XrEventDataHardwareDisplayStateChangedEXT`) notify apps of mode changes.
+
+> **Note:** `xrRequestDisplayModeEXT` (2D/3D only) is deprecated in v10. Use
+> `xrRequestDisplayRenderingModeEXT` for unified mode control.
 
 **RAW mode eye positions**: In RAW mode (`XR_EXT_display_info` enabled),
 `xrLocateViews` returns eye positions in screen-centered coordinates (origin at

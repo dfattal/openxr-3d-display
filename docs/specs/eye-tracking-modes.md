@@ -143,6 +143,8 @@ Vendor sets capability bits in `xrt_system_compositor_info`:
 
 Ideally vendors support **both** modes (bits = 3), giving developers the choice.
 
+**Supporting one mode is valid.** Vendors are not required to implement both MANAGED and MANUAL. If a vendor's SDK only supports managed filtering (e.g., Leia SR), they advertise `supported_eye_tracking_modes = 1` (MANAGED_BIT only). The runtime returns `XR_ERROR_FEATURE_UNSUPPORTED` if an app requests MANUAL on a device that only supports MANAGED. Apps should query `XrEyeTrackingModeCapabilitiesEXT.supportedModes` and adapt accordingly — for example, if only MANAGED is available, the app knows the SDK handles grace periods and should not add its own redundant animations.
+
 ## Non-goals
 
 - No new OpenXR extension functions or structs -- existing API is sufficient
