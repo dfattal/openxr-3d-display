@@ -6,6 +6,7 @@ Build apps for 3D displays using the OpenXR standard.
 
 - **[Getting Started](getting-started/overview.md)** — what is DisplayXR, architecture, sim_display
 - **[Building](getting-started/building.md)** — build instructions for Windows and macOS
+- **[Android Build & Test](getting-started/android-build-guide.md)** — build, deploy, and test on Android (Nubia Pad 2)
 - **[App Classes](getting-started/app-classes.md)** — handle, texture, hosted, IPC — which one to use
 - **[Your First Handle App](getting-started/first-handle-app.md)** — tutorial walkthrough
 
