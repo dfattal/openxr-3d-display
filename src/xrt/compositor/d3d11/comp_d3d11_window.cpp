@@ -482,11 +482,16 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		LONG is_capture = InterlockedCompareExchange(&w->input_forward_is_capture, 0, 0);
 		if (fwd != NULL) {
 			// Shell mode: scroll is reserved for window resize.
-			// Right-click is forwarded to the app (focus change handled in render loop).
 			if (message == WM_MOUSEWHEEL) {
-				// Accumulate scroll delta for the render loop to process
 				short delta = GET_WHEEL_DELTA_WPARAM(wParam);
 				InterlockedExchangeAdd(&w->scroll_accum, (LONG)delta);
+				return 0;
+			}
+
+			// Capture clients are preview-only — don't forward mouse events.
+			// PostMessage(WM_MOUSEMOVE) to the capture HWND causes the OS
+			// cursor to teleport. Input forwarding tracked in #124.
+			if (is_capture) {
 				return 0;
 			}
 
