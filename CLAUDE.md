@@ -13,9 +13,9 @@ See the [milestone tracker](https://github.com/dfattal/openxr-3d-display/milesto
 - **M1: Foundation** — Done. Stripped 34 VR drivers, removed Vulkan server compositor, cleaned CMake, extracted stereo math.
 - **M2: Native Compositors** — Done. D3D11, D3D12, Metal, OpenGL, Vulkan all shipping.
 - **M3: Test Coverage** — #30, #31, #33 open.
-- **M4: Display Extensions** — Next major focus. Lock down extension API surface (#3, #8, #38). #5 closed (superseded by #77).
+- **M4: Display Extensions** — Done. `XR_EXT_display_info` header frozen at v12 (#114 closed). Events (#3), multiview math (#38), eye tracking modes (#81), docs (#66) all complete. Vendor-initiated transition detection (#123) shipped via `get_hardware_3d_state()` DP vtable method. Remaining vendor work (MANUAL eye tracking mode) blocked on Leia SDK.
 - **M5: Interface Standardization** — #45, #46, #47 open.
-- **M6: Spatial Shell** — #43, #44 open. Phase 3B complete: all 4 APIs (D3D11, D3D12, GL, VK) working in shell individually and simultaneously. #116 (multi-client crash) fixed.
+- **M6: Spatial Shell** — #43, #44 open. Phase 3B complete: all 4 APIs (D3D11, D3D12, GL, VK) working in shell individually and simultaneously. #116 (multi-client crash) fixed. Phase 4 (Spatial Companion) planned on `feature/shell-phase4-ci`.
 
 ### Architecture
 
