@@ -839,16 +839,10 @@ main(int argc, char *argv[])
 #endif
 
 #ifdef _WIN32
-	// Auto-adopt desktop windows if no explicit --capture-hwnd args were given.
-	// Wait briefly for multi-compositor to initialize.
-	bool auto_adopt = (capture_count == 0);
+	// Auto-adopt is disabled for now — use --capture-hwnd for explicit 2D windows.
+	// TODO: re-enable with better filtering (skip IDE, shell, system windows).
+	bool auto_adopt = false;
 	DWORD service_pid = find_service_pid();
-	if (auto_adopt) {
-		Sleep(500); // Wait for multi-comp window to appear
-		P("Auto-adopting visible desktop windows...\n");
-		enumerate_and_adopt_windows(&ipc_c, captures, &capture_count, service_pid);
-		P("Adopted %d window(s)\n", capture_count);
-	}
 #else
 	bool auto_adopt = false;
 #endif
