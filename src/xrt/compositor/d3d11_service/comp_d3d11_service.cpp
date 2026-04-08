@@ -3028,6 +3028,17 @@ multi_compositor_update_input_forward(struct d3d11_multi_compositor *mc)
 		is_capture = (mc->clients[mc->focused_slot].client_type == CLIENT_TYPE_CAPTURE);
 	}
 
+	// Inset the forwarding rect by the resize zone width so clicks
+	// on the window edge (for resize) don't get forwarded to the app.
+	// UI_RESIZE_ZONE_M = 0.003m ≈ 17px on a 1920-wide tile. Use 20 for margin.
+	int32_t inset = 20;
+	if (rw > 2 * inset && rh > 2 * inset && !is_capture) {
+		rx += inset;
+		ry += inset;
+		rw -= 2 * inset;
+		rh -= 2 * inset;
+	}
+
 	comp_d3d11_window_set_input_forward(mc->window, (void *)target, rx, ry, rw, rh, is_capture);
 
 	// Track focused capture client (preview only — no foreground/input injection).
