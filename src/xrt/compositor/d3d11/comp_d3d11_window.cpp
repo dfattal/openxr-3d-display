@@ -1108,6 +1108,19 @@ comp_d3d11_window_set_input_suppress(struct comp_d3d11_window *window, bool supp
 {
 	if (window == NULL) return;
 	InterlockedExchange(&window->input_suppress, suppress ? 1 : 0);
+
+	// When suppressing, cancel any in-progress app interaction by sending
+	// a synthetic button-up. This prevents stuck button state in the app
+	// (e.g., rotation continuing after resize because button-down was
+	// forwarded before suppress activated).
+	if (suppress) {
+		window->mouse_press_in_content = false;
+		HWND fwd = (HWND)InterlockedCompareExchangePointer(
+		    (volatile PVOID *)&window->input_forward_hwnd, NULL, NULL);
+		if (fwd != NULL) {
+			PostMessage(fwd, WM_LBUTTONUP, 0, 0);
+		}
+	}
 }
 
 extern "C" int32_t
