@@ -30,7 +30,15 @@ jobs:
           echo "Removed src/xrt/targets/shell/ and CMake reference"
 
       - name: Push to public runtime repo
+        env:
+          DISPLAYXR_TOKEN: ${{ secrets.DISPLAYXR_TOKEN }}
         run: |
+          if [ -z "$DISPLAYXR_TOKEN" ]; then
+            echo "::error::DISPLAYXR_TOKEN secret is empty or not set"
+            exit 1
+          fi
+          echo "Token is set (length: ${#DISPLAYXR_TOKEN})"
+
           git config user.name "DisplayXR Bot"
           git config user.email "noreply@displayxr.org"
 
@@ -39,7 +47,7 @@ jobs:
           git commit -m "Release ${{ github.ref_name }} (shell code excluded)" --allow-empty
 
           # Push to public repo
-          git remote add public https://x-access-token:${{ secrets.DISPLAYXR_TOKEN }}@github.com/DisplayXR/displayxr-runtime.git
+          git remote add public "https://x-access-token:${DISPLAYXR_TOKEN}@github.com/DisplayXR/displayxr-runtime.git"
           git push public HEAD:main --force
 
           # Push the tag
@@ -84,24 +92,27 @@ jobs:
 
     steps:
       - name: Wait for Windows CI build to complete
+        id: wait-build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "Waiting for Build Windows workflow to complete for tag ${{ github.ref_name }}..."
+          RUN_ID=""
           for i in $(seq 1 60); do
-            completed=$(gh run list --repo ${{ github.repository }} --workflow build-windows.yml \
-              --event push --limit 5 --json databaseId,conclusion,headSha \
-              --jq ".[] | select(.headSha == \"${{ github.sha }}\" and .conclusion == \"success\") | .databaseId" 2>/dev/null)
-            if [ -n "$completed" ]; then
-              echo "Build Windows completed successfully: run $completed"
-              echo "RUN_ID=$completed" >> "$GITHUB_ENV"
+            # Find successful build-windows run for this commit
+            RUN_ID=$(gh run list --repo ${{ github.repository }} --workflow build-windows.yml \
+              --event push --limit 10 --json databaseId,conclusion,headSha \
+              --jq "[.[] | select(.headSha == \"${{ github.sha }}\" and .conclusion == \"success\") | .databaseId] | first // empty" 2>/dev/null)
+            if [ -n "$RUN_ID" ]; then
+              echo "Build Windows completed successfully: run $RUN_ID"
+              echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
               break
             fi
             echo "  Attempt $i/60 — waiting 30s..."
             sleep 30
           done
 
-          if [ -z "$completed" ]; then
+          if [ -z "$RUN_ID" ]; then
             echo "::error::Build Windows did not complete successfully within 30 minutes"
             exit 1
           fi
@@ -110,7 +121,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download "$RUN_ID" --repo ${{ github.repository }} --name DisplayXR --dir runtime
+          gh run download "${{ steps.wait-build.outputs.run_id }}" --repo ${{ github.repository }} --name DisplayXR --dir runtime
           echo "Downloaded DisplayXR artifact"
           ls -la runtime/bin/ || echo "No bin directory"
           ls -la runtime/ | head -20
