@@ -60,6 +60,12 @@
 
 	"shell_deactivate": {},
 
+	"shell_get_state": {
+		"out": [
+			{"name": "active", "type": "bool"}
+		]
+	},
+
 	"shell_set_window_pose": {
 		"in": [
 			{"name": "client_id", "type": "uint32_t"},

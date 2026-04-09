@@ -4859,32 +4859,69 @@ multi_compositor_render(struct d3d11_service_system *sys)
 	}
 
 	if (mc->window_dismissed) {
-		// Shell was dismissed (ESC). Don't reopen — stay dismissed.
-		// Send EXIT_REQUEST to all IPC clients so they exit cleanly.
-		// Release all capture clients (captured 2D windows stay alive).
+		// Shell window closed (ESC / close button). Behaves like deactivate:
+		// restore 2D windows, send LOSS_PENDING (not EXIT_REQUEST) to IPC
+		// clients. The shell can re-activate via Ctrl+Space.
 		if (!mc->dismiss_cleanup_done) {
 			mc->dismiss_cleanup_done = true;
+
+			// Stop and restore capture clients (2D windows)
 			for (int i = 0; i < D3D11_MULTI_MAX_CLIENTS; i++) {
-				if (!mc->clients[i].active) continue;
-				if (mc->clients[i].client_type == CLIENT_TYPE_CAPTURE) {
-					multi_compositor_remove_capture_client(sys, i);
-				} else if (mc->clients[i].compositor != nullptr &&
-				           mc->clients[i].compositor->xses != nullptr) {
+				struct d3d11_multi_client_slot *slot = &mc->clients[i];
+				if (!slot->active) continue;
+				if (slot->client_type == CLIENT_TYPE_CAPTURE) {
+					d3d11_capture_stop(slot->capture_ctx);
+					slot->capture_ctx = nullptr;
+					slot->capture_srv = nullptr;
+					slot->capture_texture_last = nullptr;
+					// Restore 2D window to desktop
+					if (slot->app_hwnd != nullptr && IsWindow(slot->app_hwnd)) {
+						SetWindowPlacement(slot->app_hwnd, &slot->saved_placement);
+						SetWindowLongPtr(slot->app_hwnd, GWL_EXSTYLE, slot->saved_exstyle);
+						SetWindowPos(slot->app_hwnd, HWND_TOP, 0, 0, 0, 0,
+						             SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+					}
+					slot->active = false;
+					slot->compositor = nullptr;
+					slot->client_type = CLIENT_TYPE_IPC;
+					mc->client_count--;
+					mc->capture_client_count--;
+				} else if (slot->compositor != nullptr &&
+				           slot->compositor->xses != nullptr) {
+					// Send LOSS_PENDING so apps can recreate in standalone
 					union xrt_session_event xse = XRT_STRUCT_INIT;
-					xse.type = XRT_SESSION_EVENT_EXIT_REQUEST;
-					xrt_session_event_sink_push(mc->clients[i].compositor->xses, &xse);
+					xse.loss_pending.type = XRT_SESSION_EVENT_LOSS_PENDING;
+					xse.loss_pending.loss_time_ns =
+					    (int64_t)os_monotonic_get_ns() + 500000000LL;
+					xrt_session_event_sink_push(slot->compositor->xses, &xse);
 				}
 			}
-			U_LOG_W("Multi-comp: shell dismissed — sent exit to IPC clients, released captures");
+
+			// Stop render thread
+			capture_render_thread_stop(sys);
+
+			// Release DP (display already back to 2D from the window-close handler)
+			if (mc->display_processor != nullptr) {
+				xrt_display_processor_d3d11_destroy(&mc->display_processor);
+			}
+
+			U_LOG_W("Multi-comp: shell dismissed (ESC) — captures restored, LOSS_PENDING sent");
 		}
 		return;
 	}
 
-	// Check window validity
+	// Check window validity — ESC or close button triggers deactivate (suspend),
+	// not the old permanent dismiss. The shell can re-activate via Ctrl+Space.
 	if (mc->window != nullptr && !comp_d3d11_window_is_valid(mc->window)) {
-		U_LOG_W("Multi-comp: window closed - dismissing");
+		U_LOG_W("Multi-comp: window closed (ESC) — deactivating shell");
+		// Set shell_mode flags to false so the shell process detects the change
+		sys->shell_mode = false;
+		sys->base.info.shell_mode = false;
+		// Run the full deactivate path (capture teardown, DP release, etc.)
+		// We need to recreate the window on resume since it was destroyed by ESC,
+		// so use the dismissed path which ensure_shell_window handles.
 		mc->window_dismissed = true;
-		// Switch display back to 2D (lens off) on dismiss
+		// Switch display back to 2D (lens off)
 		if (mc->display_processor != nullptr) {
 			xrt_display_processor_d3d11_request_display_mode(mc->display_processor, false);
 		}
