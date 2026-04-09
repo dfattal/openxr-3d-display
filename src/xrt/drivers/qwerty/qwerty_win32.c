@@ -495,15 +495,9 @@ qwerty_process_win32(struct xrt_device **xdevs,
 				qwerty_reset_view_state(qsys);
 			break;
 
-		// ESC key to close window
+		// ESC: no-op in shell mode. Shell lifecycle is controlled by
+		// Ctrl+Space (system hotkey) and the tray icon, not ESC.
 		case VK_ESCAPE:
-			if (is_keydown) {
-				U_LOG_W("QWERTY Win32: ESC pressed - closing window");
-				HWND hwnd = GetActiveWindow();
-				if (hwnd != NULL) {
-					PostMessageW(hwnd, WM_CLOSE, 0, 0);
-				}
-			}
 			break;
 
 		default:

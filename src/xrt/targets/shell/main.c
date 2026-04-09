@@ -1350,16 +1350,36 @@ main(int argc, char *argv[])
 					} else {
 						P("Activating shell...\n");
 						xret = ipc_call_shell_activate(&ipc_c);
+
+						// If IPC pipe is dead (service exited), reconnect.
+						// The IPC client lib auto-starts the service.
 						if (xret != XRT_SUCCESS) {
-							PE("Warning: shell_activate failed\n");
+							P("Reconnecting to service...\n");
+							ipc_client_connection_fini(&ipc_c);
+							memset(&ipc_c, 0, sizeof(ipc_c));
+							for (int attempt = 0; attempt < 10; attempt++) {
+								xret = ipc_client_connection_init(
+								    &ipc_c, U_LOGGING_WARN, &info);
+								if (xret == XRT_SUCCESS) break;
+								Sleep(1000);
+							}
+							if (xret == XRT_SUCCESS) {
+								xret = ipc_call_shell_activate(&ipc_c);
+								service_pid = find_service_pid();
+							}
+							if (xret != XRT_SUCCESS) {
+								PE("Failed to reconnect to service.\n");
+								continue;
+							}
 						}
 
-						// Re-adopt desktop windows via auto-enumerate
-						enumerate_and_adopt_windows(&ipc_c, captures, &capture_count, service_pid);
+						// Already-running IPC apps (OpenXR handle apps) are
+						// automatically picked up by the multi-comp on their
+						// next layer_commit. No need to enumerate 2D windows.
 
 						g_shell_active = true;
 						tray_update_tooltip(true);
-						P("Shell activated — %d capture(s) adopted.\n", capture_count);
+						P("Shell activated.\n");
 					}
 				} else if (msg.message == WM_HOTKEY && msg.wParam == HOTKEY_LAUNCH) {
 					// --- Ctrl+L: Launch registered app ---
@@ -1462,6 +1482,21 @@ main(int argc, char *argv[])
 		print_clients(&ipc_c, prev_ids, &prev_count);
 
 #ifdef _WIN32
+		// Detect server-side deactivation (ESC closed the compositor window).
+		// The compositor sets shell_mode=false — sync our state.
+		if (g_shell_active) {
+			bool server_active = false;
+			if (ipc_call_shell_get_state(&ipc_c, &server_active) == XRT_SUCCESS) {
+				if (!server_active) {
+					P("Shell deactivated by compositor (ESC) — returning to tray.\n");
+					capture_count = 0;
+					client_name_count = 0;
+					g_shell_active = false;
+					tray_update_tooltip(false);
+				}
+			}
+		}
+
 		// Dynamic window tracking: detect new/closed windows every ~1 second
 		if (auto_adopt) {
 			adopt_counter++;

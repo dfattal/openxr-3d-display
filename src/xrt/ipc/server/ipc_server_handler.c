@@ -1999,6 +1999,14 @@ ipc_handle_shell_deactivate(volatile struct ipc_client_state *_ics)
 }
 
 xrt_result_t
+ipc_handle_shell_get_state(volatile struct ipc_client_state *_ics, bool *out_active)
+{
+	struct ipc_server *s = _ics->server;
+	*out_active = s->shell_mode;
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
 ipc_handle_shell_set_window_pose(volatile struct ipc_client_state *_ics,
                                   uint32_t client_id,
                                   const struct xrt_pose *pose,
