@@ -173,24 +173,39 @@ Multi compositor window is always full-screen = physical display size:
 
 | | Task | Size | Repo | Description |
 |---|------|------|------|-------------|
-| [ ] | 4A.1 | L | runtime | `Windows.Graphics.Capture` integration — per-HWND capture delivering `ID3D11Texture2D` frames |
-| [ ] | 4A.2 | M | runtime | Virtual client slots in multi-compositor for captured 2D windows (no OpenXR session) |
-| [ ] | 4A.3 | M | runtime | Mono texture handling — same texture for L/R eye passes, Level 2 Kooima for spatial parallax |
-| [ ] | 4B.1 | M | shell | Window enumeration — `EnumWindows` + filter for visible top-level non-system windows |
-| [ ] | 4B.2 | M | shell | App type classification — cross-reference HWNDs with IPC clients (3D) vs rest (2D capture) |
-| [ ] | 4B.3 | M | shell+runtime | Capture startup — create capture sessions, register virtual clients, assign spatial poses |
-| [ ] | 4B.4 | M | shell | State snapshot — save `WINDOWPLACEMENT`, z-order, style for restore on exit |
-| [ ] | 4C.1 | S | runtime | App type tag in slot model (`CLIENT_TYPE_OPENXR_3D` / `CLIENT_TYPE_CAPTURED_2D`) |
-| [ ] | 4C.2 | M | runtime | Snap-to-focus — focused window animates to Z=0, grows to working size |
-| [ ] | 4C.3 | M | runtime | Auto render mode switch — 2D app focused → 2D mode, 3D app → 3D mode, no focus → 3D |
-| [ ] | 4D.1 | M | runtime | Capture teardown — stop all capture sessions, release virtual client slots |
-| [ ] | 4D.2 | S | shell | 2D window restore — `SetWindowPlacement` with saved snapshot |
-| [ ] | 4D.3 | L | runtime | OpenXR app hot-switch (Phase 1A) — per-client compositor direct/export mode toggle |
-| [ ] | 4D.4 | S | shell | Shell window hide + system tray residence |
-| [ ] | 4E.1 | M | shell | Registered apps config (JSON) + launcher panel |
-| [ ] | 4E.2 | S | shell | Auto-detect app type (IPC connect within 5s → 3D, else → 2D capture) |
+| [x] | 4A.1 | L | runtime | `Windows.Graphics.Capture` integration — per-HWND capture delivering `ID3D11Texture2D` frames |
+| [x] | 4A.2 | M | runtime | Virtual client slots in multi-compositor for captured 2D windows (no OpenXR session) |
+| [x] | 4A.3 | M | runtime | Mono texture handling — same texture for L/R eye passes, Level 2 Kooima for spatial parallax |
+| [x] | 4B.1 | M | shell | Window enumeration — `EnumWindows` + filter for visible top-level non-system windows |
+| [x] | 4B.2 | M | shell | App type classification — cross-reference HWNDs with IPC clients (3D) vs rest (2D capture) |
+| [x] | 4B.3 | M | shell+runtime | Capture startup — create capture sessions, register virtual clients, assign spatial poses |
+| [x] | 4B.4 | M | shell | State snapshot — save `WINDOWPLACEMENT`, z-order, style for restore on exit |
+| [x] | 4B(old-C).1 | S | runtime | App type tag in slot model (`CLIENT_TYPE_OPENXR_3D` / `CLIENT_TYPE_CAPTURED_2D`) |
+| [~] | 4B(old-C).2 | M | runtime | ~~Snap-to-focus~~ — dropped by decision |
+| [x] | 4B(old-C).3 | M | runtime | Auto render mode switch — 2D app focused → 2D mode, 3D app → 3D mode, no focus → 3D |
+| [~] | 4B(old-D/E) | — | — | ~~Input forwarding to WinUI~~ — parked (hard problem) |
 
-**Dependencies:** 4A → 4B → 4C. 4D independent (parallel with 4A). 4E after 4B.
+**Completed:** 4A (capture compositor), 4B (window adoption + auto 2D/3D switch). Input forwarding parked.
+
+### Phase 4C: Graceful Exit + App Launcher
+
+**Full plan:** [shell-phase4c-plan.md](shell-phase4c-plan.md) | **Status:** [shell-phase4c-status.md](shell-phase4c-status.md)
+
+| | Task | Size | Repo | Description |
+|---|------|------|------|-------------|
+| [ ] | 4C.1 | S | runtime | `shell_deactivate` IPC — proto.json + handler |
+| [ ] | 4C.2 | M | runtime | Capture teardown + 2D window restore (`SetWindowPlacement`) |
+| [ ] | 4C.3 | L | runtime | OpenXR app hot-switch (Phase 1A) — `COMP_MODE_DIRECT` / `COMP_MODE_EXPORT` toggle |
+| [ ] | 4C.4 | M | runtime | HWND restore for OpenXR apps (hide ↔ show + style toggle) |
+| [ ] | 4C.5 | S | runtime | Multi-compositor suspend/resume (stop render loop, release/recreate DP) |
+| [ ] | 4C.6 | S | shell | Shell-side deactivate flow (clear capture tracking, re-activate path) |
+| [ ] | 4C.7 | M | shell | System-wide hotkey (`Ctrl+Space` via `RegisterHotKey`) |
+| [ ] | 4C.8 | S | shell | System tray icon (`Shell_NotifyIcon`) |
+| [ ] | 4C.9 | M | shell | Registered apps config (`registered_apps.json`) |
+| [ ] | 4C.10 | M | shell+runtime | App launch from shell (process spawn with correct env vars) |
+| [ ] | 4C.11 | S | shell | Auto-detect app type (IPC connect within 5s → 3D, else → 2D capture) |
+
+**Dependencies:** 4C.1 → 4C.2 → 4C.5 → 4C.4 → 4C.3. 4C.7 → 4C.8 independent. 4C.9 → 4C.10 → 4C.11 independent.
 
 ---
 
