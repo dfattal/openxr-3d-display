@@ -52,6 +52,8 @@
 
 #include <d2d1.h>
 #include <dwrite.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
 
 #include <chrono>
 #include <cstdlib>
@@ -178,6 +180,7 @@ struct d3d11_client_render_resources
 	//! Content-sized crop atlas for DP input (lazy-created when content < atlas)
 	wil::com_ptr<ID3D11Texture2D> crop_texture;
 	wil::com_ptr<ID3D11ShaderResourceView> crop_srv;
+	wil::com_ptr<ID3D11RenderTargetView> crop_rtv; //!< For shader-blit Y-flip path
 	uint32_t crop_width;   //!< Current crop texture width (0 = not created)
 	uint32_t crop_height;  //!< Current crop texture height
 
@@ -2931,19 +2934,23 @@ static ID3D11ShaderResourceView *
 service_crop_atlas_for_dp(struct d3d11_service_system *sys,
                           struct d3d11_client_render_resources *res,
                           uint32_t content_view_w,
-                          uint32_t content_view_h)
+                          uint32_t content_view_h,
+                          bool flip_y)
 {
 	uint32_t expected_w = sys->tile_columns * content_view_w;
 	uint32_t expected_h = sys->tile_rows * content_view_h;
 
-	// Content fills the full atlas — pass directly
-	if (expected_w == sys->display_width && expected_h == sys->display_height) {
+	// Content fills the full atlas — pass directly (only when no flip needed)
+	if (!flip_y && expected_w == sys->display_width && expected_h == sys->display_height) {
 		return res->atlas_srv.get();
 	}
 
-	// Lazy (re)create crop texture at content dimensions
+	// Lazy (re)create crop texture at content dimensions.
+	// When flip_y is needed we must use a shader blit, which requires the
+	// crop texture to be bindable as a render target.
 	if (res->crop_width != expected_w || res->crop_height != expected_h) {
 		res->crop_srv.reset();
+		res->crop_rtv.reset();
 		res->crop_texture.reset();
 
 		D3D11_TEXTURE2D_DESC crop_desc = {};
@@ -2954,13 +2961,15 @@ service_crop_atlas_for_dp(struct d3d11_service_system *sys,
 		crop_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		crop_desc.SampleDesc.Count = 1;
 		crop_desc.Usage = D3D11_USAGE_DEFAULT;
-		crop_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		crop_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
 
 		HRESULT hr = sys->device->CreateTexture2D(
 		    &crop_desc, nullptr, res->crop_texture.put());
 		if (SUCCEEDED(hr)) {
 			sys->device->CreateShaderResourceView(
 			    res->crop_texture.get(), nullptr, res->crop_srv.put());
+			sys->device->CreateRenderTargetView(
+			    res->crop_texture.get(), nullptr, res->crop_rtv.put());
 			res->crop_width = expected_w;
 			res->crop_height = expected_h;
 			U_LOG_I("Crop-blit: created %ux%u staging texture "
@@ -2975,8 +2984,85 @@ service_crop_atlas_for_dp(struct d3d11_service_system *sys,
 		return res->atlas_srv.get(); // fallback
 	}
 
-	// Copy each view's content region from atlas to crop texture
+	// Get atlas dimensions for shader blit src_size
+	D3D11_TEXTURE2D_DESC atlas_desc = {};
+	res->atlas_texture->GetDesc(&atlas_desc);
+	uint32_t src_tex_w = atlas_desc.Width;
+	uint32_t src_tex_h = atlas_desc.Height;
+
 	uint32_t num_views = sys->tile_columns * sys->tile_rows;
+
+	if (flip_y && res->crop_rtv && sys->blit_vs && sys->blit_ps) {
+		// Shader blit path: crop + Y-flip in one pass per view.
+		// Set up pipeline once, then draw N views with different constants.
+		sys->context->VSSetShader(sys->blit_vs.get(), nullptr, 0);
+		sys->context->PSSetShader(sys->blit_ps.get(), nullptr, 0);
+		sys->context->VSSetConstantBuffers(0, 1, sys->blit_constant_buffer.addressof());
+		sys->context->PSSetConstantBuffers(0, 1, sys->blit_constant_buffer.addressof());
+		sys->context->PSSetSamplers(0, 1, sys->sampler_linear.addressof());
+		ID3D11ShaderResourceView *src_srv = res->atlas_srv.get();
+		sys->context->PSSetShaderResources(0, 1, &src_srv);
+
+		ID3D11RenderTargetView *rtvs[] = {res->crop_rtv.get()};
+		sys->context->OMSetRenderTargets(1, rtvs, nullptr);
+		D3D11_VIEWPORT vp = {};
+		vp.Width = (float)expected_w;
+		vp.Height = (float)expected_h;
+		vp.MaxDepth = 1.0f;
+		sys->context->RSSetViewports(1, &vp);
+		sys->context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+		sys->context->IASetInputLayout(nullptr);
+		sys->context->RSSetState(sys->rasterizer_state.get());
+		sys->context->OMSetDepthStencilState(sys->depth_disabled.get(), 0);
+		sys->context->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+
+		for (uint32_t v = 0; v < num_views && v < XRT_MAX_VIEWS; v++) {
+			uint32_t src_tile_x, src_tile_y;
+			u_tiling_view_origin(v, sys->tile_columns,
+			                     sys->view_width, sys->view_height,
+			                     &src_tile_x, &src_tile_y);
+			uint32_t dst_tile_x, dst_tile_y;
+			u_tiling_view_origin(v, sys->tile_columns,
+			                     content_view_w, content_view_h,
+			                     &dst_tile_x, &dst_tile_y);
+
+			D3D11_MAPPED_SUBRESOURCE mapped;
+			HRESULT hr = sys->context->Map(sys->blit_constant_buffer.get(), 0,
+			                                D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+			if (FAILED(hr)) continue;
+			BlitConstants *cb = static_cast<BlitConstants *>(mapped.pData);
+			memset(cb, 0, sizeof(*cb));
+			cb->src_rect[0] = (float)src_tile_x;
+			cb->src_rect[1] = (float)src_tile_y + (float)content_view_h; // bottom (flipped origin)
+			cb->src_rect[2] = (float)content_view_w;
+			cb->src_rect[3] = -(float)content_view_h;                    // negative h = flip
+			cb->dst_offset[0] = (float)dst_tile_x;
+			cb->dst_offset[1] = (float)dst_tile_y;
+			cb->src_size[0] = (float)src_tex_w;
+			cb->src_size[1] = (float)src_tex_h;
+			cb->dst_size[0] = (float)expected_w;
+			cb->dst_size[1] = (float)expected_h;
+			cb->dst_rect_wh[0] = (float)content_view_w;
+			cb->dst_rect_wh[1] = (float)content_view_h;
+			cb->convert_srgb = 0.0f;
+			cb->quad_mode = 0.0f;
+			cb->corner_radius = 0.0f;
+			cb->corner_aspect = 1.0f;
+			cb->edge_feather = 0.0f;
+			cb->glow_intensity = 0.0f;
+			sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
+
+			sys->context->Draw(4, 0);
+		}
+
+		// Unbind the SRV so the crop texture can be used as input next
+		ID3D11ShaderResourceView *null_srv = nullptr;
+		sys->context->PSSetShaderResources(0, 1, &null_srv);
+
+		return res->crop_srv.get();
+	}
+
+	// Non-flip path: copy each view's content region from atlas to crop texture
 	for (uint32_t v = 0; v < num_views && v < XRT_MAX_VIEWS; v++) {
 		uint32_t src_tile_x, src_tile_y;
 		u_tiling_view_origin(v, sys->tile_columns,
@@ -7460,9 +7546,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		}
 		c->render.hwnd = nullptr;
 
-		// Hide the app's HWND — use ShowWindowAsync to avoid deadlock.
-		// Synchronous ShowWindow(SW_HIDE) sends WM to the app's main
-		// thread, which is blocked waiting for this IPC layer_commit to return.
+		// Hide the app's HWND (shell composites the content).
 		if (c->app_hwnd != nullptr && IsWindow(c->app_hwnd)) {
 			ShowWindowAsync(c->app_hwnd, SW_HIDE);
 		}
@@ -7496,13 +7580,17 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		U_LOG_W("Hot-switch: lazy standalone init for HWND=%p", (void *)c->app_hwnd);
 
 		// Show the HWND with ShowWindowAsync to avoid deadlock with the
-		// app's main thread (blocked on this IPC layer_commit).
+		// app's main thread (blocked on this IPC layer_commit). Keep
+		// decorations intact — user wants the standalone window to look
+		// like a normal app window.
 		ShowWindowAsync(c->app_hwnd, SW_SHOWNOACTIVATE);
 
 		c->render.hwnd = c->app_hwnd;
 		c->render.owns_window = false;
 
-		// Swap chain at display-native size (matches DP expectation)
+		// Swap chain at display-native size (matches DP expectation).
+		// The compositor's auto-resize handler will adapt it to the
+		// HWND client rect on the next frame.
 		uint32_t sc_w = sys->base.info.display_pixel_width;
 		uint32_t sc_h = sys->base.info.display_pixel_height;
 		if (sc_w == 0 || sc_h == 0) {
@@ -7523,6 +7611,15 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		    sys->device.get(), c->app_hwnd, &sc_desc,
 		    nullptr, nullptr, c->render.swap_chain.put());
 		if (SUCCEEDED(hr)) {
+			// Reduce DXGI frame latency to 1 — minimizes the queue depth
+			// between Present and DWM cross-process composition. Critical
+			// for smooth drag (otherwise frames are presented at stale
+			// window positions).
+			wil::com_ptr<IDXGIDevice1> dxgi_device;
+			if (SUCCEEDED(sys->device->QueryInterface(IID_PPV_ARGS(dxgi_device.put())))) {
+				dxgi_device->SetMaximumFrameLatency(1);
+			}
+
 			wil::com_ptr<ID3D11Texture2D> bb;
 			c->render.swap_chain->GetBuffer(0, IID_PPV_ARGS(bb.put()));
 			sys->device->CreateRenderTargetView(bb.get(), nullptr, c->render.back_buffer_rtv.put());
@@ -7552,49 +7649,6 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			c->render.smoothed_frame_time_ms = 16.67f;
 			u_hud_create(&c->render.hud, hud_w);
 		}
-
-		// Diagnostic dump: everything the app sees after hot-switch
-		{
-			POINT screen_pos = {0, 0};
-			ClientToScreen(c->app_hwnd, &screen_pos);
-			RECT wr;
-			GetWindowRect(c->app_hwnd, &wr);
-
-			D3D11_TEXTURE2D_DESC atlas_desc = {};
-			if (c->render.atlas_texture) {
-				c->render.atlas_texture->GetDesc(&atlas_desc);
-			}
-
-			uint32_t dp_px_w = 0, dp_px_h = 0;
-			int32_t dp_left = 0, dp_top = 0;
-			if (c->render.display_processor) {
-				xrt_display_processor_d3d11_get_display_pixel_info(
-				    c->render.display_processor, &dp_px_w, &dp_px_h, &dp_left, &dp_top);
-			}
-
-			U_LOG_W("=== HOT-SWITCH DIAGNOSTIC ===");
-			U_LOG_W("  HWND=%p, client_rect=%ux%u, screen_pos=(%d,%d)",
-			        (void *)c->app_hwnd, sc_w, sc_h,
-			        screen_pos.x, screen_pos.y);
-			U_LOG_W("  window_rect=(%d,%d)-(%d,%d) = %dx%d",
-			        wr.left, wr.top, wr.right, wr.bottom,
-			        wr.right - wr.left, wr.bottom - wr.top);
-			U_LOG_W("  atlas_texture=%ux%u",
-			        atlas_desc.Width, atlas_desc.Height);
-			U_LOG_W("  swap_chain=%ux%u (same as client_rect)", sc_w, sc_h);
-			U_LOG_W("  sys view=%ux%u, output=%ux%u, display=%ux%u",
-			        sys->view_width, sys->view_height,
-			        sys->output_width, sys->output_height,
-			        sys->display_width, sys->display_height);
-			U_LOG_W("  DP display_pixel=%ux%u at (%d,%d)",
-			        dp_px_w, dp_px_h, dp_left, dp_top);
-			U_LOG_W("  tile=%ux%u, shell_mode=%d",
-			        sys->tile_columns, sys->tile_rows, sys->shell_mode);
-			U_LOG_W("  display_phys=%.4fx%.4f m",
-			        sys->base.info.display_width_m,
-			        sys->base.info.display_height_m);
-			U_LOG_W("=============================");
-		}
 	}
 
 	// During drag, synchronize with the window thread's WM_PAINT cycle.
@@ -7604,6 +7658,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	    comp_d3d11_window_is_in_size_move(c->render.window)) {
 		comp_d3d11_window_wait_for_paint(c->render.window);
 	}
+
 
 	// Select display processor input: zero-copy from app's swapchain, or atlas.
 	// The DP expects the atlas texture to be exactly content-sized
@@ -7620,7 +7675,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		input_view_h = zc_view_h;
 	} else {
 		// Crop atlas to content dims (mirrors d3d11_crop_atlas_for_dp in in-process path)
-		input_srv = service_crop_atlas_for_dp(sys, &c->render, content_view_w, content_view_h);
+		input_srv = service_crop_atlas_for_dp(sys, &c->render, content_view_w, content_view_h, c->atlas_flip_y);
 		input_view_w = content_view_w;
 		input_view_h = content_view_h;
 	}
@@ -7645,17 +7700,6 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 				bb_texture->GetDesc(&bb_desc);
 				back_buffer_width = bb_desc.Width;
 				back_buffer_height = bb_desc.Height;
-			}
-		}
-
-		// Log DP input dims periodically
-		{
-			static uint32_t dp_log_count = 0;
-			if (dp_log_count++ % 300 == 0) {
-				U_LOG_W("Standalone DP: input_view=%ux%u, back_buffer=%ux%u, tile=%ux%u",
-				        input_view_w, input_view_h,
-				        back_buffer_width, back_buffer_height,
-				        sys->tile_columns, sys->tile_rows);
 			}
 		}
 
@@ -7687,6 +7731,16 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	// Present to display
 	if (c->render.swap_chain) {
 		c->render.swap_chain->Present(1, 0);  // VSync
+		// For cross-process swap chains (post-hot-switch, external HWND),
+		// DwmFlush blocks until the next DWM composition pass — minimizes
+		// the latency between Present and the frame appearing on screen,
+		// which improves drag smoothness. Without it, the IPC response
+		// unblocks the app's modal drag loop while the frame is still
+		// queued for DWM composition, and by the time DWM presents, the
+		// window has moved further, causing visual stutter.
+		if (!c->render.owns_window && c->app_hwnd != nullptr) {
+			DwmFlush();
+		}
 	}
 
 	// Signal WM_PAINT that the frame is done (unblocks modal drag loop)
