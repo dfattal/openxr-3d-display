@@ -4250,6 +4250,47 @@ struct shell_hit_result
 	int edge_flags;      //!< RESIZE_LEFT|RIGHT|TOP|BOTTOM if near edge
 };
 
+static void launcher_set_visible(struct d3d11_service_system *sys,
+                                 struct d3d11_multi_compositor *mc, bool visible);
+
+// Phase 5.13: pop a Win32 context menu at the cursor for a launcher tile.
+// Launch fires the tile like a click; Remove sets hidden_tile_mask so the
+// tile disappears from the grid until the shell re-pushes its registry.
+//
+// TrackPopupMenu only runs on the thread that owns the target window, so
+// we dispatch via comp_d3d11_window_show_launcher_context_menu which
+// SendMessages across to the window thread. The render thread blocks
+// until the user picks or cancels.
+static void
+launcher_show_context_menu(struct d3d11_service_system *sys,
+                           struct d3d11_multi_compositor *mc,
+                           POINT client_pt, int full_idx)
+{
+	(void)client_pt;
+	if (mc == nullptr || mc->window == nullptr) return;
+
+	uint32_t result = comp_d3d11_window_show_launcher_context_menu(mc->window);
+	switch (result) {
+	case LAUNCHER_CTX_MENU_RESULT_LAUNCH:
+		sys->pending_launcher_click_index = full_idx;
+		launcher_set_visible(sys, mc, false);
+		U_LOG_W("Launcher: context menu launch full=%d", full_idx);
+		break;
+	case LAUNCHER_CTX_MENU_RESULT_REMOVE:
+		sys->hidden_tile_mask |= (1ULL << full_idx);
+		U_LOG_W("Launcher: context menu remove full=%d", full_idx);
+		// Launcher stays open so the user can remove more tiles. Clamp
+		// the selection in case we just removed the selected tile from
+		// the compacted visible list — next render re-builds it.
+		if (sys->launcher_selected_index > 0) {
+			sys->launcher_selected_index = 0;
+		}
+		break;
+	default:
+		break;
+	}
+}
+
 // Phase 5.12: toggle launcher visibility AND the window's input-suppress
 // flag in one place. When the launcher is up we want keyboard input to
 // drive the launcher itself (arrows / Enter / Esc) rather than leaking
@@ -5882,6 +5923,28 @@ after_key_shortcuts:
 		bool rmb_just_pressed = rmb_held && !mc->prev_rmb_held;
 		mc->prev_rmb_held = rmb_held;
 
+		// Phase 5.13: launcher RMB context menu. When the launcher is
+		// visible, right-click on a tile pops a Win32 menu with Launch +
+		// Remove (session-only) + Cancel. Branch before the existing
+		// window-drag handling so it doesn't try to start a rotation drag
+		// on a tile. Suppress Launch/Remove visual hit routing to the
+		// window below.
+		if (mc->launcher_visible && rmb_just_pressed) {
+			POINT pt;
+			GetCursorPos(&pt);
+			ScreenToClient(mc->hwnd, &pt);
+			int visible_to_full[IPC_LAUNCHER_MAX_APPS];
+			uint32_t n_visible = launcher_build_visible_list(sys, visible_to_full);
+			int vis_tile = launcher_hit_test(sys, pt, n_visible);
+			if (vis_tile >= 0 && vis_tile < (int)n_visible) {
+				int full_idx = visible_to_full[vis_tile];
+				launcher_show_context_menu(sys, mc, pt, full_idx);
+			}
+			// Eat the RMB regardless of hit so it doesn't start a drag
+			// on a window that might be peeking through the panel.
+			goto after_rmb_handling;
+		}
+
 		if (rmb_held) {
 			if (!mc->title_rmb_drag.active && rmb_just_pressed) {
 				// RMB just pressed — check if on title bar to start rotation drag
@@ -5939,6 +6002,9 @@ after_key_shortcuts:
 				POINT p; GetCursorPos(&p); SetCursorPos(p.x, p.y);
 			}
 		}
+
+	after_rmb_handling:
+		(void)0; // label target for the launcher-visible fast-path above.
 	}
 
 	// Scroll wheel: Shift+Scroll = Z-depth, plain scroll = resize.
