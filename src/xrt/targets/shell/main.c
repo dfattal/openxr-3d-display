@@ -461,19 +461,11 @@ registered_apps_load(void)
 		}
 		fclose(f);
 	} else {
-		P("No registered_apps.json found — seeding defaults.\n");
-		// Minimal first-run defaults. The scanner will populate DisplayXR apps;
-		// we only seed a single 2D fallback so the launcher isn't empty on
-		// systems with no installed sidecars yet.
-#ifdef _WIN32
-		struct registered_app *np = &g_registered_apps[g_registered_app_count++];
-		registered_app_zero(np);
-		snprintf(np->name, sizeof(np->name), "Notepad");
-		snprintf(np->exe_path, sizeof(np->exe_path), "notepad.exe");
-		snprintf(np->type, sizeof(np->type), "2d");
-		snprintf(np->source, sizeof(np->source), "user");
-		snprintf(np->category, sizeof(np->category), "tool");
-#endif
+		P("No registered_apps.json found — starting with empty registry.\n");
+		// Per the spec, the launcher is manifest-gated: only apps with a
+		// .displayxr.json sidecar (or apps the user explicitly adds via
+		// Browse-for-app) appear. No built-in defaults. The scanner runs
+		// next and populates anything it finds.
 	}
 
 	// -------- 2) Drop stale scan entries, re-run scanner, merge. --------
@@ -1749,6 +1741,35 @@ main(int argc, char *argv[])
 					g_shell_active = false;
 					g_launcher_visible = false;
 					tray_update_tooltip(false);
+				}
+			}
+		}
+
+		// Phase 5.10: poll for launcher tile clicks. The service-side
+		// WM_LBUTTONDOWN handler stores a tile index when the user clicks
+		// inside the launcher; we look up the registered app and dispatch
+		// the launch on this side because we own the env vars + CreateProcess
+		// path. The launcher panel was already hidden by the service when
+		// the click landed, so we just need to sync our local state and run
+		// the launch. Only poll while the launcher is actually visible to
+		// keep IPC traffic minimal.
+		if (g_shell_active && g_launcher_visible) {
+			int64_t tile_index = -1;
+			if (ipc_call_shell_poll_launcher_click(&ipc_c, &tile_index) == XRT_SUCCESS &&
+			    tile_index >= 0) {
+				g_launcher_visible = false; // service already hid it
+				if (tile_index < (int64_t)g_registered_app_count) {
+					struct registered_app *rapp = &g_registered_apps[tile_index];
+					P("Launcher: launching tile %lld → '%s'\n",
+					  (long long)tile_index, rapp->name);
+					shell_launch_registered_app(
+					    &ipc_c, rapp,
+					    have_json ? runtime_json : NULL,
+					    apps, &app_count,
+					    captures, &capture_count);
+				} else {
+					PE("Launcher click: tile %lld out of range (count=%d)\n",
+					   (long long)tile_index, g_registered_app_count);
 				}
 			}
 		}
