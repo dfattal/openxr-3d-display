@@ -339,6 +339,13 @@ set_fullscreen(HWND hWnd, bool fullscreen)
 // and mouse forwarding.
 static bool input_is_suppressed(struct comp_d3d11_window *w);
 
+// Phase 5.13: private message ID for "show launcher context menu". Sent by
+// the render thread via comp_d3d11_window_show_launcher_context_menu so the
+// window thread actually runs TrackPopupMenu — that API only works on the
+// thread that owns the target window. Defined up here so both wnd_proc and
+// the exported helper can reference it.
+#define WM_LAUNCHER_CTX_MENU (WM_USER + 110)
+
 /*!
  * Window procedure — runs on the window thread.
  *
@@ -419,6 +426,35 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		break;
+
+	case WM_LAUNCHER_CTX_MENU: {
+		// Phase 5.13: synchronously show the launcher tile context menu
+		// on THIS thread (the window thread). TrackPopupMenu only works
+		// from the thread that owns the target window — calling it from
+		// the render thread silently returns 0. Caller (render thread)
+		// uses SendMessage so we block until the user picks / cancels.
+		HMENU menu = CreatePopupMenu();
+		if (menu == NULL) {
+			return 0;
+		}
+		AppendMenuW(menu, MF_STRING, 1, L"Launch");
+		AppendMenuW(menu, MF_STRING, 2, L"Remove from launcher (this session)");
+		AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+		AppendMenuW(menu, MF_STRING, 3, L"Cancel");
+
+		POINT pt;
+		GetCursorPos(&pt);
+		SetForegroundWindow(hWnd);
+		UINT cmd = TrackPopupMenu(menu,
+		                          TPM_RETURNCMD | TPM_NONOTIFY,
+		                          pt.x, pt.y, 0, hWnd, NULL);
+		DestroyMenu(menu);
+		PostMessageW(hWnd, WM_NULL, 0, 0);
+		// Map to public result codes (1=launch, 2=remove, 0=cancel).
+		if (cmd == 1) return LAUNCHER_CTX_MENU_RESULT_LAUNCH;
+		if (cmd == 2) return LAUNCHER_CTX_MENU_RESULT_REMOVE;
+		return 0;
+	}
 
 	case WM_KEYDOWN:
 		// F11: toggle fullscreen for non-shell (single app) windows.
@@ -1137,6 +1173,14 @@ comp_d3d11_window_set_input_suppress_grace_ms(struct comp_d3d11_window *window, 
 	if (window == NULL) return;
 	LONG until = (LONG)(GetTickCount() + ms);
 	InterlockedExchange(&window->input_suppress_until_tick, until);
+}
+
+extern "C" uint32_t
+comp_d3d11_window_show_launcher_context_menu(struct comp_d3d11_window *window)
+{
+	if (window == NULL || window->hwnd == NULL) return 0;
+	LRESULT r = SendMessageW(window->hwnd, WM_LAUNCHER_CTX_MENU, 0, 0);
+	return (uint32_t)r;
 }
 
 extern "C" void

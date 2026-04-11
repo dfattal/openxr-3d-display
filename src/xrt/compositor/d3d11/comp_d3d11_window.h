@@ -229,6 +229,21 @@ void
 comp_d3d11_window_set_input_suppress_grace_ms(struct comp_d3d11_window *window, uint32_t ms);
 
 /*!
+ * Phase 5.13: show a Win32 popup menu for a launcher tile right-click.
+ * Must be called from the shell's render thread — internally dispatches to
+ * the window thread via SendMessage since TrackPopupMenu only works from
+ * the thread that owns the target window.
+ *
+ * @return one of LAUNCHER_CTX_MENU_RESULT_* (see below), or 0 if no
+ *         selection (cancel).
+ */
+#define LAUNCHER_CTX_MENU_RESULT_LAUNCH 1
+#define LAUNCHER_CTX_MENU_RESULT_REMOVE 2
+
+uint32_t
+comp_d3d11_window_show_launcher_context_menu(struct comp_d3d11_window *window);
+
+/*!
  * Read and reset accumulated scroll wheel delta (for shell window resize).
  *
  * @param window The window object
