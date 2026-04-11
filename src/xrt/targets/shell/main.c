@@ -1735,6 +1735,17 @@ main(int argc, char *argv[])
 					// come in later Phase 5 tasks.
 					if (g_shell_active) {
 						g_launcher_visible = !g_launcher_visible;
+
+						// Phase 5.12: when opening, hand the service process
+						// foreground-activation permission so it can pull its
+						// compositor window into focus. Otherwise keys like
+						// Esc stay routed to whichever app previously had
+						// focus and never reach the compositor WndProc that
+						// the launcher keyboard handler depends on.
+						if (g_launcher_visible && service_pid != 0) {
+							AllowSetForegroundWindow(service_pid);
+						}
+
 						xrt_result_t lret = ipc_call_shell_set_launcher_visible(
 						    &ipc_c, g_launcher_visible);
 						if (lret != XRT_SUCCESS) {
