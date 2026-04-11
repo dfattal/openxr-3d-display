@@ -21,6 +21,8 @@ DisplayXR supports four ways for an application to integrate with the runtime, d
 
 - **Multi-app / shell / WebXR?** The **IPC/Service** path is used internally by the [DisplayXR Shell](https://github.com/DisplayXR/displayxr-shell-releases) and WebXR browsers. Apps don't need to target IPC directly — the shell launches standard handle apps and manages multi-app compositing transparently.
 
+- **Building a WebXR app and want DisplayXR awareness?** WebXR pages automatically run as hosted legacy apps via Chrome's built-in WebXR implementation. To access display info, rendering-mode events, and custom input handling, install the [WebXR Bridge v2](../roadmap/webxr-bridge-v2-plan.md) Chrome extension. The bridge exposes a `session.displayXR` namespace on the standard WebXR session, letting three.js / Babylon / raw WebGL pages adapt to mode changes and own their input.
+
 ## Code Paths
 
 The first three classes all use a native compositor in-process:
