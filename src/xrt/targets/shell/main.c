@@ -24,6 +24,8 @@
 #include "xrt/xrt_defines.h"
 #include "util/u_logging.h"
 
+#include "shell_app_scan.h"
+
 #include <cjson/cJSON.h>
 
 #include <stdio.h>
@@ -244,7 +246,7 @@ shell_config_update(struct shell_config *cfg, const char *app_name,
 	sw->width_m = w; sw->height_m = h;
 }
 
-// --- 4C.9: Registered apps config ---
+// --- 4C.9 / 5.5: Registered apps config ---
 
 #define MAX_REGISTERED_APPS 32
 
@@ -252,7 +254,14 @@ struct registered_app
 {
 	char name[128];
 	char exe_path[MAX_PATH];
-	char type[8]; // "3d", "2d", or "" (unknown)
+	char type[8];          // "3d", "2d", or "" (unknown)
+	char source[8];        // "user" | "scan"  (5.5)
+	char category[32];     // sidecar "category", default "app"
+	char description[256]; // sidecar "description"
+	char display_mode[16]; // sidecar "display_mode", default "auto"
+	char icon_path[MAX_PATH];     // resolved 2D icon (absolute) or ""
+	char icon_3d_path[MAX_PATH];  // resolved SBS icon (absolute) or ""
+	char icon_3d_layout[8];       // "sbs-lr"|"sbs-rl"|"tb"|"bt"|""
 };
 
 static struct registered_app g_registered_apps[MAX_REGISTERED_APPS];
@@ -278,6 +287,113 @@ get_registered_apps_path(char *buf, size_t buf_size)
 #endif
 }
 
+// Case-insensitive exe_path comparison. Normalizes forward slashes to
+// backslashes before comparing so "test_apps/x/build/x.exe" matches
+// "test_apps\x\build\x.exe".
+static bool
+exe_path_equal(const char *a, const char *b)
+{
+	if (a == NULL || b == NULL) return a == b;
+	while (*a && *b) {
+		int ca = (unsigned char)*a;
+		int cb = (unsigned char)*b;
+		if (ca == '/') ca = '\\';
+		if (cb == '/') cb = '\\';
+		if (ca >= 'A' && ca <= 'Z') ca += 32;
+		if (cb >= 'A' && cb <= 'Z') cb += 32;
+		if (ca != cb) return false;
+		a++; b++;
+	}
+	return *a == '\0' && *b == '\0';
+}
+
+// Read a string field from a cJSON object into a fixed buffer. If the field
+// is missing or not a string, dst is left untouched.
+static void
+json_copy_str(char *dst, size_t dst_size, const cJSON *obj, const char *key)
+{
+	const cJSON *j = cJSON_GetObjectItemCaseSensitive(obj, key);
+	if (cJSON_IsString(j) && j->valuestring != NULL) {
+		snprintf(dst, dst_size, "%s", j->valuestring);
+	}
+}
+
+static void
+registered_app_zero(struct registered_app *app)
+{
+	memset(app, 0, sizeof(*app));
+}
+
+// Merge a single scanned app into the in-memory registry. If an existing
+// entry has a matching exe_path it is replaced; otherwise the entry is
+// appended.
+static void
+merge_scanned_app(const struct shell_scanned_app *s)
+{
+	// Replace any existing entry (user or scan) with the same exe_path.
+	for (int i = 0; i < g_registered_app_count; i++) {
+		if (exe_path_equal(g_registered_apps[i].exe_path, s->exe_path)) {
+			struct registered_app *app = &g_registered_apps[i];
+			registered_app_zero(app);
+			snprintf(app->name, sizeof(app->name), "%s", s->name);
+			snprintf(app->exe_path, sizeof(app->exe_path), "%s", s->exe_path);
+			snprintf(app->type, sizeof(app->type), "%s", s->type);
+			snprintf(app->source, sizeof(app->source), "scan");
+			snprintf(app->category, sizeof(app->category), "%s", s->category);
+			snprintf(app->description, sizeof(app->description), "%s", s->description);
+			snprintf(app->display_mode, sizeof(app->display_mode), "%s", s->display_mode);
+			snprintf(app->icon_path, sizeof(app->icon_path), "%s", s->icon_path);
+			snprintf(app->icon_3d_path, sizeof(app->icon_3d_path), "%s", s->icon_3d_path);
+			snprintf(app->icon_3d_layout, sizeof(app->icon_3d_layout), "%s", s->icon_3d_layout);
+			return;
+		}
+	}
+
+	// Append as a new entry.
+	if (g_registered_app_count >= MAX_REGISTERED_APPS) {
+		PE("registry full — dropping scanned app '%s'\n", s->name);
+		return;
+	}
+	struct registered_app *app = &g_registered_apps[g_registered_app_count++];
+	registered_app_zero(app);
+	snprintf(app->name, sizeof(app->name), "%s", s->name);
+	snprintf(app->exe_path, sizeof(app->exe_path), "%s", s->exe_path);
+	snprintf(app->type, sizeof(app->type), "%s", s->type);
+	snprintf(app->source, sizeof(app->source), "scan");
+	snprintf(app->category, sizeof(app->category), "%s", s->category);
+	snprintf(app->description, sizeof(app->description), "%s", s->description);
+	snprintf(app->display_mode, sizeof(app->display_mode), "%s", s->display_mode);
+	snprintf(app->icon_path, sizeof(app->icon_path), "%s", s->icon_path);
+	snprintf(app->icon_3d_path, sizeof(app->icon_3d_path), "%s", s->icon_3d_path);
+	snprintf(app->icon_3d_layout, sizeof(app->icon_3d_layout), "%s", s->icon_3d_layout);
+}
+
+// Remove every entry whose source == "scan". Called before re-running the
+// scanner so stale scan results from previous runs don't linger.
+static void
+drop_scan_entries(void)
+{
+	int dst = 0;
+	for (int i = 0; i < g_registered_app_count; i++) {
+		if (strcmp(g_registered_apps[i].source, "scan") != 0) {
+			if (dst != i) {
+				g_registered_apps[dst] = g_registered_apps[i];
+			}
+			dst++;
+		}
+	}
+	g_registered_app_count = dst;
+}
+
+// Forward declarations — these are called from registered_apps_load but
+// defined later in this file.
+static void
+registered_apps_save(void);
+#ifdef _WIN32
+static void
+get_exe_dir(char *buf, size_t buf_size);
+#endif
+
 static void
 registered_apps_load(void)
 {
@@ -286,101 +402,107 @@ registered_apps_load(void)
 	char path[512];
 	get_registered_apps_path(path, sizeof(path));
 
-	FILE *f = fopen(path, "rb");
-	if (!f) {
-		// First run: create default config
-		P("No registered_apps.json found — creating defaults.\n");
 #ifdef _WIN32
-		{
-			char dir[512];
-			snprintf(dir, sizeof(dir), "%s", path);
-			char *last = strrchr(dir, '\\');
-			if (last) { *last = '\0'; CreateDirectoryA(dir, NULL); }
-		}
-#endif
-		// Add demo entries
-		snprintf(g_registered_apps[0].name, sizeof(g_registered_apps[0].name), "cube_handle_d3d11_win");
-		snprintf(g_registered_apps[0].exe_path, sizeof(g_registered_apps[0].exe_path),
-		         "test_apps\\cube_handle_d3d11_win\\build\\cube_handle_d3d11_win.exe");
-		snprintf(g_registered_apps[0].type, sizeof(g_registered_apps[0].type), "3d");
-
-		snprintf(g_registered_apps[1].name, sizeof(g_registered_apps[1].name), "Notepad");
-		snprintf(g_registered_apps[1].exe_path, sizeof(g_registered_apps[1].exe_path), "notepad.exe");
-		snprintf(g_registered_apps[1].type, sizeof(g_registered_apps[1].type), "2d");
-
-		g_registered_app_count = 2;
-		// Save to disk
-		goto save_and_return;
-	}
-
 	{
+		// Make sure the parent directory exists before we try to write.
+		char dir[512];
+		snprintf(dir, sizeof(dir), "%s", path);
+		char *last = strrchr(dir, '\\');
+		if (last) { *last = '\0'; CreateDirectoryA(dir, NULL); }
+	}
+#endif
+
+	// -------- 1) Load existing JSON, if present. --------
+	FILE *f = fopen(path, "rb");
+	if (f != NULL) {
 		fseek(f, 0, SEEK_END);
 		long len = ftell(f);
 		fseek(f, 0, SEEK_SET);
-		if (len <= 0 || len > 64 * 1024) { fclose(f); return; }
+		if (len > 0 && len <= 256 * 1024) {
+			char *data = (char *)malloc((size_t)len + 1);
+			if (data != NULL) {
+				fread(data, 1, (size_t)len, f);
+				data[len] = '\0';
 
-		char *data = (char *)malloc(len + 1);
-		fread(data, 1, len, f);
-		data[len] = '\0';
+				cJSON *root = cJSON_Parse(data);
+				free(data);
+				if (root && cJSON_IsArray(root)) {
+					cJSON *entry = NULL;
+					cJSON_ArrayForEach(entry, root)
+					{
+						if (g_registered_app_count >= MAX_REGISTERED_APPS) break;
+						struct registered_app *app =
+						    &g_registered_apps[g_registered_app_count];
+						registered_app_zero(app);
+
+						json_copy_str(app->name, sizeof(app->name), entry, "name");
+						json_copy_str(app->exe_path, sizeof(app->exe_path), entry, "exe_path");
+						json_copy_str(app->type, sizeof(app->type), entry, "type");
+						json_copy_str(app->source, sizeof(app->source), entry, "source");
+						json_copy_str(app->category, sizeof(app->category), entry, "category");
+						json_copy_str(app->description, sizeof(app->description), entry, "description");
+						json_copy_str(app->display_mode, sizeof(app->display_mode), entry, "display_mode");
+						json_copy_str(app->icon_path, sizeof(app->icon_path), entry, "icon_path");
+						json_copy_str(app->icon_3d_path, sizeof(app->icon_3d_path), entry, "icon_3d_path");
+						json_copy_str(app->icon_3d_layout, sizeof(app->icon_3d_layout), entry, "icon_3d_layout");
+
+						// Back-compat: a Phase 4C JSON has no `source` field.
+						// Treat pre-existing entries as user-added.
+						if (app->source[0] == '\0') {
+							snprintf(app->source, sizeof(app->source), "user");
+						}
+
+						g_registered_app_count++;
+					}
+				}
+				cJSON_Delete(root);
+			}
+		}
 		fclose(f);
-
-		cJSON *root = cJSON_Parse(data);
-		free(data);
-		if (!root || !cJSON_IsArray(root)) {
-			cJSON_Delete(root);
-			return;
-		}
-
-		cJSON *entry = NULL;
-		cJSON_ArrayForEach(entry, root)
-		{
-			if (g_registered_app_count >= MAX_REGISTERED_APPS) break;
-			struct registered_app *app = &g_registered_apps[g_registered_app_count];
-
-			cJSON *jname = cJSON_GetObjectItemCaseSensitive(entry, "name");
-			cJSON *jpath = cJSON_GetObjectItemCaseSensitive(entry, "exe_path");
-			cJSON *jtype = cJSON_GetObjectItemCaseSensitive(entry, "type");
-
-			if (cJSON_IsString(jname))
-				snprintf(app->name, sizeof(app->name), "%s", jname->valuestring);
-			if (cJSON_IsString(jpath))
-				snprintf(app->exe_path, sizeof(app->exe_path), "%s", jpath->valuestring);
-			if (cJSON_IsString(jtype))
-				snprintf(app->type, sizeof(app->type), "%s", jtype->valuestring);
-
-			g_registered_app_count++;
-		}
-		cJSON_Delete(root);
+	} else {
+		P("No registered_apps.json found — seeding defaults.\n");
+		// Minimal first-run defaults. The scanner will populate DisplayXR apps;
+		// we only seed a single 2D fallback so the launcher isn't empty on
+		// systems with no installed sidecars yet.
+#ifdef _WIN32
+		struct registered_app *np = &g_registered_apps[g_registered_app_count++];
+		registered_app_zero(np);
+		snprintf(np->name, sizeof(np->name), "Notepad");
+		snprintf(np->exe_path, sizeof(np->exe_path), "notepad.exe");
+		snprintf(np->type, sizeof(np->type), "2d");
+		snprintf(np->source, sizeof(np->source), "user");
+		snprintf(np->category, sizeof(np->category), "tool");
+#endif
 	}
 
-	P("Loaded %d registered app(s).\n", g_registered_app_count);
-	return;
+	// -------- 2) Drop stale scan entries, re-run scanner, merge. --------
+	drop_scan_entries();
 
-save_and_return:
-	; // fallthrough to save
+#ifdef _WIN32
 	{
-		char spath[512];
-		get_registered_apps_path(spath, sizeof(spath));
-
-		cJSON *arr = cJSON_CreateArray();
-		for (int i = 0; i < g_registered_app_count; i++) {
-			cJSON *obj = cJSON_CreateObject();
-			cJSON_AddStringToObject(obj, "name", g_registered_apps[i].name);
-			cJSON_AddStringToObject(obj, "exe_path", g_registered_apps[i].exe_path);
-			cJSON_AddStringToObject(obj, "type", g_registered_apps[i].type);
-			cJSON_AddItemToArray(arr, obj);
+		char exe_dir[MAX_PATH] = {0};
+		get_exe_dir(exe_dir, sizeof(exe_dir));
+		size_t edl = strlen(exe_dir);
+		if (edl > 0 && (exe_dir[edl - 1] == '\\' || exe_dir[edl - 1] == '/')) {
+			exe_dir[edl - 1] = '\0';
 		}
-		char *json_str = cJSON_Print(arr);
-		cJSON_Delete(arr);
 
-		FILE *sf = fopen(spath, "wb");
-		if (sf) {
-			fwrite(json_str, 1, strlen(json_str), sf);
-			fclose(sf);
-			P("Created default registered_apps.json with %d entries.\n", g_registered_app_count);
+		struct shell_scanned_app scanned[MAX_REGISTERED_APPS];
+		int n = shell_scan_apps(exe_dir, scanned, MAX_REGISTERED_APPS);
+		for (int i = 0; i < n; i++) {
+			merge_scanned_app(&scanned[i]);
 		}
-		free(json_str);
 	}
+#endif
+
+	P("Registry: %d app(s) after merge.\n", g_registered_app_count);
+	for (int i = 0; i < g_registered_app_count; i++) {
+		P("  [%s] %s  (%s)\n", g_registered_apps[i].source, g_registered_apps[i].name,
+		  g_registered_apps[i].exe_path);
+	}
+
+	// -------- 3) Persist merged registry so users can hand-edit later. --------
+	registered_apps_save();
 }
 
 static void
@@ -392,9 +514,17 @@ registered_apps_save(void)
 	cJSON *arr = cJSON_CreateArray();
 	for (int i = 0; i < g_registered_app_count; i++) {
 		cJSON *obj = cJSON_CreateObject();
-		cJSON_AddStringToObject(obj, "name", g_registered_apps[i].name);
-		cJSON_AddStringToObject(obj, "exe_path", g_registered_apps[i].exe_path);
-		cJSON_AddStringToObject(obj, "type", g_registered_apps[i].type);
+		const struct registered_app *app = &g_registered_apps[i];
+		cJSON_AddStringToObject(obj, "name", app->name);
+		cJSON_AddStringToObject(obj, "exe_path", app->exe_path);
+		cJSON_AddStringToObject(obj, "type", app->type);
+		cJSON_AddStringToObject(obj, "source", app->source[0] ? app->source : "user");
+		if (app->category[0])       cJSON_AddStringToObject(obj, "category", app->category);
+		if (app->description[0])    cJSON_AddStringToObject(obj, "description", app->description);
+		if (app->display_mode[0])   cJSON_AddStringToObject(obj, "display_mode", app->display_mode);
+		if (app->icon_path[0])      cJSON_AddStringToObject(obj, "icon_path", app->icon_path);
+		if (app->icon_3d_path[0])   cJSON_AddStringToObject(obj, "icon_3d_path", app->icon_3d_path);
+		if (app->icon_3d_layout[0]) cJSON_AddStringToObject(obj, "icon_3d_layout", app->icon_3d_layout);
 		cJSON_AddItemToArray(arr, obj);
 	}
 	char *json_str = cJSON_Print(arr);
@@ -918,6 +1048,80 @@ cleanup_closed_captures(struct ipc_connection *ipc_c,
 	}
 }
 
+// --- 5.6: Running-app set (for launcher "running" tag) ---
+
+#define SHELL_RUNNING_NAMES_MAX 32
+
+struct shell_running_set
+{
+	int count;
+	char names[SHELL_RUNNING_NAMES_MAX][128];
+};
+
+/*!
+ * Snapshot the set of application_name strings for every IPC client currently
+ * connected to the service. Used by the launcher to highlight tiles whose app
+ * is already running.
+ *
+ * Wraps ipc_call_system_get_clients + ipc_call_system_get_client_info so the
+ * launcher UI doesn't have to speak IPC directly. Cheap enough to call every
+ * time the launcher opens; not intended for per-frame use.
+ *
+ * On IPC failure, returns an empty set — the launcher should degrade to "no
+ * running apps" rather than failing to open.
+ */
+static void
+shell_get_running_app_set(struct ipc_connection *ipc_c, struct shell_running_set *out)
+{
+	out->count = 0;
+
+	struct ipc_client_list clients;
+	xrt_result_t r = ipc_call_system_get_clients(ipc_c, &clients);
+	if (r != XRT_SUCCESS) {
+		return;
+	}
+
+	for (uint32_t c = 0; c < clients.id_count; c++) {
+		if (clients.ids[c] == 0) continue;
+		if (out->count >= SHELL_RUNNING_NAMES_MAX) break;
+
+		struct ipc_app_state ias;
+		xrt_result_t ir = ipc_call_system_get_client_info(ipc_c, clients.ids[c], &ias);
+		if (ir != XRT_SUCCESS) continue;
+		if (ias.info.application_name[0] == '\0') continue;
+
+		// Deduplicate — two instances of the same app are one tile in the
+		// launcher (for highlight purposes).
+		bool already = false;
+		for (int i = 0; i < out->count; i++) {
+			if (strcmp(out->names[i], ias.info.application_name) == 0) {
+				already = true;
+				break;
+			}
+		}
+		if (already) continue;
+
+		snprintf(out->names[out->count], sizeof(out->names[0]), "%s",
+		         ias.info.application_name);
+		out->count++;
+	}
+}
+
+/*!
+ * True if @p app_name matches any currently-running client in @p set. The
+ * comparison is case-sensitive and expects the application_name as passed to
+ * xrCreateInstance.
+ */
+static bool
+shell_running_set_contains(const struct shell_running_set *set, const char *app_name)
+{
+	if (set == NULL || app_name == NULL || !*app_name) return false;
+	for (int i = 0; i < set->count; i++) {
+		if (strcmp(set->names[i], app_name) == 0) return true;
+	}
+	return false;
+}
+
 // --- 4C.10+4C.11: App launch from shell + auto-detect type ---
 
 /*!
@@ -1206,7 +1410,7 @@ main(int argc, char *argv[])
 
 	P("Connected to service.\n");
 
-	// Load registered apps config (4C.9)
+	// Load registered apps config (Phase 4C.9 + Phase 5.5 scanner merge)
 	registered_apps_load();
 
 #ifdef _WIN32
