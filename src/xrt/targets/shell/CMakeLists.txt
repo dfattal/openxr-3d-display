@@ -16,7 +16,8 @@ target_link_libraries(displayxr-shell PRIVATE aux_util ipc_client)
 
 if(WIN32)
     # Dbghelp: ImageDirectoryEntryToData (PE import scan)
-    target_link_libraries(displayxr-shell PRIVATE dbghelp)
+    # Comdlg32: GetOpenFileNameA (Phase 5.14 Browse-for-app tile)
+    target_link_libraries(displayxr-shell PRIVATE dbghelp comdlg32)
 endif()
 
 install(TARGETS displayxr-shell RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
