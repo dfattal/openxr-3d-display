@@ -38,6 +38,7 @@
 #include <process.h>
 #include <tlhelp32.h> // For process enumeration (service PID lookup)
 #include <shellapi.h> // For Shell_NotifyIcon (system tray)
+#include <commdlg.h>  // For GetOpenFileNameA (Phase 5.14 Browse tile)
 #else
 #include <unistd.h>
 #endif
@@ -1259,6 +1260,79 @@ shell_push_registered_apps_to_service(struct ipc_connection *ipc_c)
 	P("Pushed %d app(s) to launcher.\n", pushed);
 }
 
+#ifdef _WIN32
+/*!
+ * Phase 5.14: prompt the user for an executable via GetOpenFileNameA,
+ * append it to g_registered_apps as a user entry, persist to JSON, and
+ * re-push the registry to the service. Mirrors the OPENFILENAMEA idiom
+ * used by comp_d3d11_window.cpp's Ctrl+O launch flow.
+ *
+ * Called from the launcher click-poll branch when the service signals a
+ * Browse-tile hit (IPC_LAUNCHER_ACTION_BROWSE). The dialog is modal and
+ * blocks the shell's message loop; on return the launcher is re-shown so
+ * the user sees their new tile at the end of the grid.
+ */
+static void
+shell_browse_and_add_app(struct ipc_connection *ipc_c)
+{
+	// Phase 5.14: open the file dialog as a top-level window
+	// (hwndOwner=NULL). The service granted ASFW_ANY foreground permission
+	// when it processed the Browse click, so Windows lets the modal dialog
+	// activate normally. Using the hidden HWND_MESSAGE g_msg_hwnd as owner
+	// doesn't help — message-only windows can't be focused, so the dialog
+	// would still hide behind the compositor.
+	char path[MAX_PATH] = {0};
+	OPENFILENAMEA ofn = {0};
+	ofn.lStructSize = sizeof(ofn);
+	ofn.hwndOwner = NULL;
+	ofn.lpstrFilter = "Executables (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
+	ofn.lpstrFile = path;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.lpstrTitle = "Add app to DisplayXR launcher";
+	ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+	if (!GetOpenFileNameA(&ofn)) {
+		P("Browse: canceled\n");
+		return;
+	}
+
+	if (g_registered_app_count >= MAX_REGISTERED_APPS) {
+		PE("Registry full (%d) — cannot add '%s'\n",
+		   g_registered_app_count, path);
+		return;
+	}
+
+	// Derive a display name from the exe basename (strip path and .exe).
+	const char *base = strrchr(path, '\\');
+	if (base == NULL) base = strrchr(path, '/');
+	base = base ? base + 1 : path;
+	char name[128];
+	snprintf(name, sizeof(name), "%s", base);
+	size_t nlen = strlen(name);
+	if (nlen >= 4 && _stricmp(name + nlen - 4, ".exe") == 0) {
+		name[nlen - 4] = '\0';
+	}
+
+	struct registered_app *app = &g_registered_apps[g_registered_app_count++];
+	registered_app_zero(app);
+	snprintf(app->name, sizeof(app->name), "%s", name);
+	snprintf(app->exe_path, sizeof(app->exe_path), "%s", path);
+	snprintf(app->type, sizeof(app->type), "3d");   // assume 3d; user can edit JSON
+	snprintf(app->source, sizeof(app->source), "user");
+	snprintf(app->category, sizeof(app->category), "app");
+
+	registered_apps_save();
+	shell_push_registered_apps_to_service(ipc_c);
+	P("Browse: added '%s' from %s\n", name, path);
+}
+#else
+static void
+shell_browse_and_add_app(struct ipc_connection *ipc_c)
+{
+	(void)ipc_c;
+}
+#endif
+
 // --- 4C.10+4C.11: App launch from shell + auto-detect type ---
 
 /*!
@@ -1883,9 +1957,24 @@ main(int argc, char *argv[])
 		if (g_shell_active && g_launcher_visible) {
 			int64_t tile_index = -1;
 			if (ipc_call_shell_poll_launcher_click(&ipc_c, &tile_index) == XRT_SUCCESS &&
-			    tile_index >= 0) {
-				g_launcher_visible = false; // service already hid it
-				if (tile_index < (int64_t)g_registered_app_count) {
+			    tile_index != -1) {
+				// Service already hid the launcher when the click registered.
+				g_launcher_visible = false;
+
+				if (tile_index == IPC_LAUNCHER_ACTION_BROWSE) {
+					// Phase 5.14: Browse tile → open file dialog, add to
+					// registry, re-push, re-show launcher so the user sees
+					// their new tile.
+					shell_browse_and_add_app(&ipc_c);
+#ifdef _WIN32
+					if (service_pid != 0) {
+						AllowSetForegroundWindow(service_pid);
+					}
+#endif
+					if (ipc_call_shell_set_launcher_visible(&ipc_c, true) == XRT_SUCCESS) {
+						g_launcher_visible = true;
+					}
+				} else if (tile_index >= 0 && tile_index < (int64_t)g_registered_app_count) {
 					struct registered_app *rapp = &g_registered_apps[tile_index];
 
 					// Phase 5.11: if a matching client is already running,
