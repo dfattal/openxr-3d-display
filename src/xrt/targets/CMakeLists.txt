@@ -20,11 +20,8 @@ if(XRT_MODULE_MONADO_CLI)
 	add_subdirectory(cli)
 endif()
 
-# MCP adapter (Phase A): stdio ↔ per-PID-socket bridge.
-# POSIX only for now; Windows named-pipe variant lands in Phase A slice 7.
-if(NOT WIN32)
-	add_subdirectory(mcp_adapter)
-endif()
+# MCP adapter (Phase A): stdio ↔ per-PID-socket/pipe bridge.
+add_subdirectory(mcp_adapter)
 
 if(XRT_MODULE_MONADO_GUI)
 	add_subdirectory(gui)

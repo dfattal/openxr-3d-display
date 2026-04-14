@@ -234,59 +234,189 @@ u_mcp_enumerate_sessions(pid_t *out_pids, size_t cap)
 	return n;
 }
 
-#else // XRT_OS_WINDOWS — implemented in slice 7
+#else // XRT_OS_WINDOWS — named pipe transport
+//
+// Uses \\.\pipe\displayxr-mcp-<pid> with PIPE_TYPE_BYTE; framing (Content-
+// Length) is handled at a higher layer just like on POSIX. Enumeration
+// uses FindFirstFile over \\.\pipe\* (Named Pipe filesystem).
+
+#include <windows.h>
+#include <process.h>
+#include <stdio.h>
+#include <string.h>
+
+#define PIPE_PREFIX "\\\\.\\pipe\\displayxr-mcp-"
+
+struct u_mcp_listener
+{
+	HANDLE pipe;
+	char name[128];
+	volatile LONG closed;
+};
+
+struct u_mcp_conn
+{
+	HANDLE pipe;
+	bool owns_handle;
+};
+
+static void
+build_pipe_name(char *out, size_t cap, pid_t pid)
+{
+	snprintf(out, cap, PIPE_PREFIX "%ld", (long)pid);
+}
 
 struct u_mcp_listener *
 u_mcp_listener_open(pid_t pid)
 {
-	(void)pid;
-	U_LOG_W(LOG_PFX "Windows transport not implemented (slice 7)");
-	return NULL;
+	struct u_mcp_listener *l = U_TYPED_CALLOC(struct u_mcp_listener);
+	build_pipe_name(l->name, sizeof(l->name), pid);
+	l->pipe = CreateNamedPipeA(
+	    l->name,
+	    PIPE_ACCESS_DUPLEX,
+	    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+	    1,     // Max instances (single client).
+	    65536, // Out buffer.
+	    65536, // In buffer.
+	    0,
+	    NULL);
+	if (l->pipe == INVALID_HANDLE_VALUE) {
+		U_LOG_W(LOG_PFX "CreateNamedPipe(%s) failed: %lu", l->name, GetLastError());
+		free(l);
+		return NULL;
+	}
+	U_LOG_I(LOG_PFX "listening on %s", l->name);
+	return l;
 }
+
 struct u_mcp_conn *
-u_mcp_listener_accept(struct u_mcp_listener *l)
+u_mcp_listener_accept(struct u_mcp_listener *listener)
 {
-	(void)l;
-	return NULL;
+	if (listener == NULL) {
+		return NULL;
+	}
+	BOOL ok = ConnectNamedPipe(listener->pipe, NULL);
+	if (!ok && GetLastError() != ERROR_PIPE_CONNECTED) {
+		return NULL;
+	}
+	if (InterlockedCompareExchange(&listener->closed, 0, 0)) {
+		return NULL;
+	}
+	struct u_mcp_conn *c = U_TYPED_CALLOC(struct u_mcp_conn);
+	c->pipe = listener->pipe;
+	c->owns_handle = false; // listener retains ownership
+	return c;
 }
+
 void
-u_mcp_listener_close(struct u_mcp_listener *l)
+u_mcp_listener_close(struct u_mcp_listener *listener)
 {
-	(void)l;
+	if (listener == NULL) {
+		return;
+	}
+	InterlockedExchange(&listener->closed, 1);
+	if (listener->pipe != INVALID_HANDLE_VALUE) {
+		// Unblock any thread waiting in ConnectNamedPipe / ReadFile.
+		DisconnectNamedPipe(listener->pipe);
+		CloseHandle(listener->pipe);
+	}
+	free(listener);
 }
+
 bool
-u_mcp_conn_read(struct u_mcp_conn *c, void *buf, size_t len)
+u_mcp_conn_read(struct u_mcp_conn *conn, void *buf, size_t len)
 {
-	(void)c;
-	(void)buf;
-	(void)len;
-	return false;
+	if (conn == NULL) {
+		return false;
+	}
+	char *p = buf;
+	while (len > 0) {
+		DWORD got = 0;
+		if (!ReadFile(conn->pipe, p, (DWORD)len, &got, NULL) || got == 0) {
+			return false;
+		}
+		p += got;
+		len -= got;
+	}
+	return true;
 }
+
 bool
-u_mcp_conn_write(struct u_mcp_conn *c, const void *buf, size_t len)
+u_mcp_conn_write(struct u_mcp_conn *conn, const void *buf, size_t len)
 {
-	(void)c;
-	(void)buf;
-	(void)len;
-	return false;
+	if (conn == NULL) {
+		return false;
+	}
+	const char *p = buf;
+	while (len > 0) {
+		DWORD wrote = 0;
+		if (!WriteFile(conn->pipe, p, (DWORD)len, &wrote, NULL) || wrote == 0) {
+			return false;
+		}
+		p += wrote;
+		len -= wrote;
+	}
+	return true;
 }
+
 void
-u_mcp_conn_close(struct u_mcp_conn *c)
+u_mcp_conn_close(struct u_mcp_conn *conn)
 {
-	(void)c;
+	if (conn == NULL) {
+		return;
+	}
+	if (conn->owns_handle && conn->pipe != INVALID_HANDLE_VALUE) {
+		CloseHandle(conn->pipe);
+	}
+	free(conn);
 }
+
+int
+u_mcp_conn_fd(struct u_mcp_conn *conn)
+{
+	(void)conn;
+	return -1; // Windows clients cannot poll() a pipe HANDLE; adapter uses threads.
+}
+
 struct u_mcp_conn *
 u_mcp_conn_connect(pid_t pid)
 {
-	(void)pid;
-	return NULL;
+	char name[128];
+	build_pipe_name(name, sizeof(name), pid);
+	HANDLE h = CreateFileA(name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+	if (h == INVALID_HANDLE_VALUE) {
+		return NULL;
+	}
+	DWORD mode = PIPE_READMODE_BYTE;
+	(void)SetNamedPipeHandleState(h, &mode, NULL, NULL);
+	struct u_mcp_conn *c = U_TYPED_CALLOC(struct u_mcp_conn);
+	c->pipe = h;
+	c->owns_handle = true;
+	return c;
 }
+
 size_t
 u_mcp_enumerate_sessions(pid_t *out_pids, size_t cap)
 {
-	(void)out_pids;
-	(void)cap;
-	return 0;
+	size_t n = 0;
+	WIN32_FIND_DATAA fd;
+	HANDLE h = FindFirstFileA("\\\\.\\pipe\\displayxr-mcp-*", &fd);
+	if (h == INVALID_HANDLE_VALUE) {
+		return 0;
+	}
+	do {
+		const char *prefix = "displayxr-mcp-";
+		const char *p = strstr(fd.cFileName, prefix);
+		if (p == NULL) {
+			continue;
+		}
+		long pid = strtol(p + strlen(prefix), NULL, 10);
+		if (pid > 0 && n < cap) {
+			out_pids[n++] = (pid_t)pid;
+		}
+	} while (FindNextFileA(h, &fd));
+	FindClose(h);
+	return n;
 }
 
 #endif

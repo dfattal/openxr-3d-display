@@ -67,7 +67,15 @@ struct mcp_frame_snapshot
 	uint64_t seq;
 	int64_t predicted_display_time_ns; //!< xrLocateViews::displayTime, monotonic ns.
 	uint64_t frame_id;                 //!< sess->frame_id.begun.
-	uint32_t view_count;
+
+	// xrLocateViews reports the system max view_count across all modes
+	// (e.g. 4 on a 3D display that supports Quad), while submit reports
+	// the active mode's actual view count (e.g. 2 for Anaglyph). Keep
+	// both so get_kooima_params / get_submitted_projection report the
+	// correct per-signal count, and diff_projection pairs declared[i]
+	// with recommended[i] for i in 0..min(rec,dec).
+	uint32_t recommended_view_count;
+	uint32_t declared_view_count;
 
 	// Recommended (runtime) — written by record_recommended.
 	struct mcp_view_data recommended[XRT_MAX_VIEWS];
@@ -347,7 +355,7 @@ tool_get_kooima_params(const cJSON *params, void *userdata)
 	cJSON_AddNumberToObject(r, "seq", (double)snap.seq);
 	cJSON_AddNumberToObject(r, "predicted_display_time_ns", (double)snap.predicted_display_time_ns);
 	cJSON_AddNumberToObject(r, "frame_id", (double)snap.frame_id);
-	cJSON_AddNumberToObject(r, "view_count", snap.view_count);
+	cJSON_AddNumberToObject(r, "view_count", snap.recommended_view_count);
 
 	cJSON *disp = cJSON_CreateObject();
 	cJSON_AddNumberToObject(disp, "width_m", snap.display_width_m);
@@ -364,7 +372,7 @@ tool_get_kooima_params(const cJSON *params, void *userdata)
 	cJSON_AddItemToObject(r, "display", disp);
 
 	cJSON *views = cJSON_CreateArray();
-	for (uint32_t i = 0; i < snap.view_count && i < XRT_MAX_VIEWS; i++) {
+	for (uint32_t i = 0; i < snap.recommended_view_count && i < XRT_MAX_VIEWS; i++) {
 		cJSON *v = cJSON_CreateObject();
 		cJSON_AddItemToObject(v, "recommended_pose", pose_to_json(&snap.recommended[i].pose));
 		cJSON_AddItemToObject(v, "recommended_fov", fov_to_json(&snap.recommended[i].fov));
@@ -403,10 +411,10 @@ tool_get_submitted_projection(const cJSON *params, void *userdata)
 	cJSON_AddNumberToObject(r, "seq", (double)snap.seq);
 	cJSON_AddNumberToObject(r, "predicted_display_time_ns", (double)snap.predicted_display_time_ns);
 	cJSON_AddNumberToObject(r, "frame_id", (double)snap.frame_id);
-	cJSON_AddNumberToObject(r, "view_count", snap.view_count);
+	cJSON_AddNumberToObject(r, "view_count", snap.declared_view_count);
 
 	cJSON *views = cJSON_CreateArray();
-	for (uint32_t i = 0; i < snap.view_count && i < XRT_MAX_VIEWS; i++) {
+	for (uint32_t i = 0; i < snap.declared_view_count && i < XRT_MAX_VIEWS; i++) {
 		cJSON *v = cJSON_CreateObject();
 		cJSON_AddItemToObject(v, "declared_pose", pose_to_json(&snap.declared[i].pose));
 		cJSON_AddItemToObject(v, "declared_fov", fov_to_json(&snap.declared[i].fov));
@@ -488,9 +496,18 @@ tool_diff_projection(const cJSON *params, void *userdata)
 		return error_object("snapshot missing recommended or declared — call xrLocateViews + xrEndFrame first");
 	}
 
+	// Pair declared[i] with recommended[i] for i in 0..min(counts). The
+	// active 3D mode (e.g. Anaglyph=2) often submits fewer views than
+	// xrLocateViews reports (system max, e.g. 4).
+	uint32_t diff_count = snap.declared_view_count < snap.recommended_view_count
+	                          ? snap.declared_view_count
+	                          : snap.recommended_view_count;
+
 	cJSON *r = cJSON_CreateObject();
 	cJSON_AddNumberToObject(r, "seq", (double)snap.seq);
-	cJSON_AddNumberToObject(r, "view_count", snap.view_count);
+	cJSON_AddNumberToObject(r, "recommended_view_count", snap.recommended_view_count);
+	cJSON_AddNumberToObject(r, "declared_view_count", snap.declared_view_count);
+	cJSON_AddNumberToObject(r, "view_count", diff_count);
 
 	float display_aspect =
 	    (snap.display_height_m > 0.f) ? (snap.display_width_m / snap.display_height_m) : 0.f;
@@ -499,7 +516,7 @@ tool_diff_projection(const cJSON *params, void *userdata)
 	cJSON *flags_set = cJSON_CreateArray();
 	bool have_any_flag = false;
 
-	for (uint32_t i = 0; i < snap.view_count && i < XRT_MAX_VIEWS; i++) {
+	for (uint32_t i = 0; i < diff_count && i < XRT_MAX_VIEWS; i++) {
 		const struct mcp_view_data *rec = &snap.recommended[i];
 		const struct mcp_view_data *dec = &snap.declared[i];
 		cJSON *v = cJSON_CreateObject();
@@ -526,7 +543,7 @@ tool_diff_projection(const cJSON *params, void *userdata)
 		if (sub_aspect > 0.f && !sub_aspect_ok) {
 			cJSON_AddItemToArray(vflags, cJSON_CreateString("fov_aspect_mismatch_subimage"));
 		}
-		if (display_aspect > 0.f && !disp_aspect_ok && snap.view_count == 1) {
+		if (display_aspect > 0.f && !disp_aspect_ok && diff_count == 1) {
 			// Only flag display-aspect mismatch for mono; stereo halves the fov aspect.
 			cJSON_AddItemToArray(vflags, cJSON_CreateString("fov_aspect_mismatch_display"));
 		}
@@ -560,7 +577,7 @@ tool_diff_projection(const cJSON *params, void *userdata)
 		cJSON_AddItemToArray(views, v);
 
 		if (fov_differs || pose_stale || (sub_aspect > 0.f && !sub_aspect_ok) ||
-		    (display_aspect > 0.f && !disp_aspect_ok && snap.view_count == 1)) {
+		    (display_aspect > 0.f && !disp_aspect_ok && diff_count == 1)) {
 			have_any_flag = true;
 		}
 	}
@@ -698,7 +715,7 @@ oxr_mcp_tools_record_recommended(struct oxr_session *sess,
 	if (sess == NULL || views == NULL || view_count == 0 || view_count > XRT_MAX_VIEWS) {
 		return;
 	}
-	g_scratch.view_count = view_count;
+	g_scratch.recommended_view_count = view_count;
 	g_scratch.predicted_display_time_ns = (int64_t)display_time_ns;
 	for (uint32_t i = 0; i < view_count; i++) {
 		// XrPosef layout matches xrt_pose; same for XrFovf and xrt_fov.
@@ -728,7 +745,7 @@ oxr_mcp_tools_record_submitted(struct oxr_session *sess, const struct xrt_layer_
 	if (data->type != XRT_LAYER_PROJECTION && data->type != XRT_LAYER_PROJECTION_DEPTH) {
 		return;
 	}
-	g_scratch.view_count = data->view_count;
+	g_scratch.declared_view_count = data->view_count;
 	for (uint32_t i = 0; i < data->view_count; i++) {
 		const struct xrt_layer_projection_view_data *v = &data->proj.v[i];
 		g_scratch.declared[i].pose = v->pose;

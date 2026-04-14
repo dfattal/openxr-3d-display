@@ -67,7 +67,8 @@ try:
     r = call(3,"tools/call",{"name":"get_submitted_projection","arguments":{}})
     s = r["result"]["structured"]
     assert "error" not in s, s
-    assert s["view_count"] == k["view_count"], (s, k)
+    # declared view_count can be < recommended (active mode vs. system max).
+    assert 1 <= s["view_count"] <= k["view_count"], (s, k)
     assert "declared_pose" in s["views"][0] and "declared_fov" in s["views"][0] and "subimage" in s["views"][0], s
     print("PASS")
 finally:

@@ -2,24 +2,58 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Stdio ↔ per-PID-socket bridge for the DisplayXR MCP server.
+ * @brief  Stdio ↔ per-PID-socket/pipe bridge for the DisplayXR MCP server.
  *
- * Claude Code / Cursor launches this binary with `--pid <N|auto>`.
- * We pump byte streams between stdio (MCP over Content-Length frames)
- * and the runtime's unix socket. No parsing — the adapter is a dumb pipe.
+ * Two blocking threads pump bytes in opposite directions. No parsing.
+ * Works on POSIX (unix domain socket) and Windows (named pipe).
  */
 
 #include "util/u_mcp_transport.h"
 
 #include <errno.h>
-#include <fcntl.h>
-#include <poll.h>
+#include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
+
+#ifdef _WIN32
+typedef SSIZE_T ssize_t;
+static ssize_t
+read_fd(int fd, void *buf, size_t n)
+{
+	return _read(fd, buf, (unsigned)n);
+}
+static ssize_t
+write_fd(int fd, const void *buf, size_t n)
+{
+	return _write(fd, buf, (unsigned)n);
+}
+#define STDIN_FD _fileno(stdin)
+#define STDOUT_FD _fileno(stdout)
+#else
+static ssize_t
+read_fd(int fd, void *buf, size_t n)
+{
+	return read(fd, buf, n);
+}
+static ssize_t
+write_fd(int fd, const void *buf, size_t n)
+{
+	return write(fd, buf, n);
+}
+#define STDIN_FD STDIN_FILENO
+#define STDOUT_FD STDOUT_FILENO
+#endif
 
 static void
 usage(const char *argv0)
@@ -32,53 +66,55 @@ usage(const char *argv0)
 	        argv0);
 }
 
-static bool
-set_nonblock(int fd)
+// Thread args: pump stdin→conn or conn→stdout.
+struct pump_args
 {
-	int flags = fcntl(fd, F_GETFL, 0);
-	if (flags < 0) {
-		return false;
-	}
-	return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
-}
+	struct u_mcp_conn *conn;
+	bool stdin_to_conn;
+};
 
-static int
-pump(int from, int to)
+static void *
+pump_thread(void *arg)
 {
+	struct pump_args *a = arg;
 	char buf[4096];
-	for (;;) {
-		ssize_t r = read(from, buf, sizeof(buf));
-		if (r == 0) {
-			return 0; // EOF on this side
+	if (a->stdin_to_conn) {
+		for (;;) {
+			ssize_t r = read_fd(STDIN_FD, buf, sizeof(buf));
+			if (r <= 0) {
+				break;
+			}
+			if (!u_mcp_conn_write(a->conn, buf, (size_t)r)) {
+				break;
+			}
 		}
-		if (r < 0) {
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				return 1; // drained, keep polling
+	} else {
+		for (;;) {
+			// The transport's read is blocking and fetches as many
+			// bytes as the caller asks for — pull in chunks instead.
+			char c;
+			if (!u_mcp_conn_read(a->conn, &c, 1)) {
+				break;
 			}
-			if (errno == EINTR) {
-				continue;
+			// Drain any more bytes already queued — simple one-at-a-time
+			// keeps the adapter simple and low-latency.
+			if (write_fd(STDOUT_FD, &c, 1) <= 0) {
+				break;
 			}
-			return -1;
-		}
-		char *p = buf;
-		size_t left = (size_t)r;
-		while (left > 0) {
-			ssize_t w = write(to, p, left);
-			if (w <= 0) {
-				if (w < 0 && errno == EINTR) {
-					continue;
-				}
-				return -1;
-			}
-			p += w;
-			left -= (size_t)w;
 		}
 	}
+	return NULL;
 }
 
 int
 main(int argc, char **argv)
 {
+#ifdef _WIN32
+	// MCP peers speak raw binary framing; disable CRLF translation.
+	_setmode(_fileno(stdin), _O_BINARY);
+	_setmode(_fileno(stdout), _O_BINARY);
+#endif
+
 	const char *pid_arg = NULL;
 	bool list_mode = false;
 	for (int i = 1; i < argc; i++) {
@@ -132,49 +168,18 @@ main(int argc, char **argv)
 		fprintf(stderr, "displayxr-mcp: cannot connect to pid %ld\n", (long)pid);
 		return 1;
 	}
-	int sock_fd = u_mcp_conn_fd(conn);
 
-	if (!set_nonblock(STDIN_FILENO) || !set_nonblock(sock_fd)) {
-		fprintf(stderr, "displayxr-mcp: fcntl failed: %s\n", strerror(errno));
-		u_mcp_conn_close(conn);
-		return 1;
-	}
+	struct pump_args up = {.conn = conn, .stdin_to_conn = true};
+	struct pump_args down = {.conn = conn, .stdin_to_conn = false};
 
-	struct pollfd pfds[2] = {
-	    {.fd = STDIN_FILENO, .events = POLLIN},
-	    {.fd = sock_fd, .events = POLLIN},
-	};
+	pthread_t t_up, t_down;
+	pthread_create(&t_up, NULL, pump_thread, &up);
+	pthread_create(&t_down, NULL, pump_thread, &down);
 
-	bool stdin_open = true;
-	bool sock_open = true;
-	while (stdin_open && sock_open) {
-		pfds[0].fd = stdin_open ? STDIN_FILENO : -1;
-		pfds[1].fd = sock_open ? sock_fd : -1;
-		int n = poll(pfds, 2, -1);
-		if (n < 0) {
-			if (errno == EINTR) {
-				continue;
-			}
-			break;
-		}
-		if (pfds[0].revents & (POLLIN | POLLHUP)) {
-			int r = pump(STDIN_FILENO, sock_fd);
-			if (r == 0) {
-				stdin_open = false;
-			} else if (r < 0) {
-				break;
-			}
-		}
-		if (pfds[1].revents & (POLLIN | POLLHUP)) {
-			int r = pump(sock_fd, STDOUT_FILENO);
-			if (r == 0) {
-				sock_open = false;
-			} else if (r < 0) {
-				break;
-			}
-		}
-	}
-
+	// When the stdin-side thread exits (client closed stdin), tear the
+	// connection so the conn-side thread can unblock its read.
+	pthread_join(t_up, NULL);
 	u_mcp_conn_close(conn);
+	pthread_join(t_down, NULL);
 	return 0;
 }
