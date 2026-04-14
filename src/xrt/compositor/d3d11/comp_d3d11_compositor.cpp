@@ -35,6 +35,14 @@
 #include "xrt/xrt_display_processor_d3d11.h"
 
 #include "util/u_hud.h"
+#include "util/u_mcp_capture.h"
+
+// STB_IMAGE_WRITE_STATIC scopes stbi_write_* symbols to this TU so
+// we don't clash with comp_d3d11_service.cpp's implementation (both
+// link into ipc_server on Windows).
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 #include "math/m_api.h"
 #include "util/u_tiling.h"
@@ -209,6 +217,9 @@ struct comp_d3d11_compositor
 
 	//! Thread safety.
 	std::mutex mutex;
+
+	//! MCP capture_frame request box (serviced at end of layer_commit).
+	struct u_mcp_capture_request mcp_capture;
 };
 
 /*
@@ -861,6 +872,148 @@ d3d11_crop_atlas_for_dp(struct comp_d3d11_compositor *c,
 	return c->dp_input_srv;
 }
 
+// Stride-copy a sub-rect of BGRA source bytes into a tight RGBA buffer
+// and write it out as a PNG.
+static bool
+d3d11_write_png_subrect(const uint8_t *src_bgra,
+                        uint32_t row_pitch,
+                        uint32_t src_x,
+                        uint32_t src_y,
+                        uint32_t w,
+                        uint32_t h,
+                        const char *path)
+{
+	size_t bytes = (size_t)w * h * 4;
+	uint8_t *tight = (uint8_t *)malloc(bytes);
+	if (tight == NULL) {
+		return false;
+	}
+	for (uint32_t y = 0; y < h; y++) {
+		const uint8_t *s = src_bgra + (size_t)(src_y + y) * row_pitch + (size_t)src_x * 4;
+		uint8_t *d = tight + (size_t)y * w * 4;
+		for (uint32_t x = 0; x < w; x++) {
+			d[x * 4 + 0] = s[x * 4 + 2]; // R <- B
+			d[x * 4 + 1] = s[x * 4 + 1]; // G
+			d[x * 4 + 2] = s[x * 4 + 0]; // B <- R
+			d[x * 4 + 3] = s[x * 4 + 3]; // A
+		}
+	}
+	int rc = stbi_write_png(path, (int)w, (int)h, 4, tight, (int)(w * 4));
+	free(tight);
+	return rc != 0;
+}
+
+// Service a pending MCP capture_frame request by staging-copying the
+// renderer's atlas texture to CPU, then emitting _atlas / _L / _R PNGs.
+static void
+d3d11_compositor_service_mcp_capture(struct comp_d3d11_compositor *c)
+{
+	char prefix[U_MCP_CAPTURE_PATH_MAX];
+	uint32_t views = 0;
+	if (!u_mcp_capture_poll(&c->mcp_capture, prefix, &views)) {
+		return;
+	}
+
+	ID3D11Texture2D *atlas_tex = static_cast<ID3D11Texture2D *>(
+	    comp_d3d11_renderer_get_atlas_texture(c->renderer));
+	if (atlas_tex == nullptr) {
+		u_mcp_capture_complete(&c->mcp_capture, 0);
+		return;
+	}
+
+	D3D11_TEXTURE2D_DESC desc;
+	atlas_tex->GetDesc(&desc);
+	D3D11_TEXTURE2D_DESC sd = desc;
+	sd.Usage = D3D11_USAGE_STAGING;
+	sd.BindFlags = 0;
+	sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	sd.MiscFlags = 0;
+
+	ID3D11Texture2D *staging = nullptr;
+	if (FAILED(c->device->CreateTexture2D(&sd, nullptr, &staging)) || staging == nullptr) {
+		u_mcp_capture_complete(&c->mcp_capture, 0);
+		return;
+	}
+
+	c->context->CopyResource(staging, atlas_tex);
+
+	D3D11_MAPPED_SUBRESOURCE m = {};
+	if (FAILED(c->context->Map(staging, 0, D3D11_MAP_READ, 0, &m))) {
+		staging->Release();
+		u_mcp_capture_complete(&c->mcp_capture, 0);
+		return;
+	}
+
+	uint32_t atlas_w = desc.Width;
+	uint32_t atlas_h = desc.Height;
+	uint32_t written = 0;
+	char path[U_MCP_CAPTURE_PATH_MAX + 32];
+
+	// Atlas PNG — whether the native atlas is RGBA or BGRA, stbi_write_png
+	// treats the 4 channels as R,G,B,A and writes them in that order.
+	// The D3D11 compositor renders to DXGI_FORMAT_R8G8B8A8_UNORM (see
+	// comp_d3d11_renderer), so a direct pointer is correct for _atlas.png.
+	if (views & U_MCP_CAPTURE_ATLAS) {
+		snprintf(path, sizeof(path), "%s_atlas.png", prefix);
+		if (stbi_write_png(path, (int)atlas_w, (int)atlas_h, 4, m.pData, (int)m.RowPitch)) {
+			written |= U_MCP_CAPTURE_ATLAS;
+		}
+	}
+
+	uint32_t tile_columns = 1, tile_rows = 1;
+	comp_d3d11_renderer_get_tile_layout(c->renderer, &tile_columns, &tile_rows);
+	if (tile_columns > 0 && tile_rows > 0 && (tile_columns * tile_rows) >= 2) {
+		uint32_t eye_w = atlas_w / tile_columns;
+		uint32_t eye_h = atlas_h / tile_rows;
+		// Atlas is RGBA here (see note above); pass-through copy, not
+		// the BGRA swap that Metal needs. d3d11_write_png_subrect
+		// swaps channels, so we emulate an identity by
+		// double-swapping: use a tight-copy path.
+		uint8_t *src_rgba = (uint8_t *)m.pData;
+		if (views & U_MCP_CAPTURE_LEFT) {
+			snprintf(path, sizeof(path), "%s_L.png", prefix);
+			// stride-copy rows 0..eye_h, cols 0..eye_w
+			size_t tight_pitch = (size_t)eye_w * 4;
+			uint8_t *tight = (uint8_t *)malloc(tight_pitch * eye_h);
+			if (tight != NULL) {
+				for (uint32_t y = 0; y < eye_h; y++) {
+					memcpy(tight + (size_t)y * tight_pitch,
+					       src_rgba + (size_t)y * m.RowPitch,
+					       tight_pitch);
+				}
+				if (stbi_write_png(path, (int)eye_w, (int)eye_h, 4, tight, (int)tight_pitch)) {
+					written |= U_MCP_CAPTURE_LEFT;
+				}
+				free(tight);
+			}
+		}
+		if (views & U_MCP_CAPTURE_RIGHT) {
+			uint32_t rx = (tile_columns >= 2) ? eye_w : 0;
+			uint32_t ry = (tile_columns >= 2) ? 0 : eye_h;
+			snprintf(path, sizeof(path), "%s_R.png", prefix);
+			size_t tight_pitch = (size_t)eye_w * 4;
+			uint8_t *tight = (uint8_t *)malloc(tight_pitch * eye_h);
+			if (tight != NULL) {
+				for (uint32_t y = 0; y < eye_h; y++) {
+					memcpy(tight + (size_t)y * tight_pitch,
+					       src_rgba + (size_t)(ry + y) * m.RowPitch + (size_t)rx * 4,
+					       tight_pitch);
+				}
+				if (stbi_write_png(path, (int)eye_w, (int)eye_h, 4, tight, (int)tight_pitch)) {
+					written |= U_MCP_CAPTURE_RIGHT;
+				}
+			}
+			free(tight);
+		}
+	}
+	(void)d3d11_write_png_subrect; // unused on this path; retained for symmetry with other compositors
+
+	c->context->Unmap(staging, 0);
+	staging->Release();
+
+	u_mcp_capture_complete(&c->mcp_capture, written);
+}
+
 static xrt_result_t
 d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
@@ -1382,6 +1535,10 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		return xret;
 	}
 
+	// Service pending MCP capture_frame after Present so the atlas
+	// we stage-copy reflects exactly what the user just saw.
+	d3d11_compositor_service_mcp_capture(c);
+
 	return XRT_SUCCESS;
 }
 
@@ -1400,6 +1557,9 @@ d3d11_compositor_destroy(struct xrt_compositor *xc)
 	struct comp_d3d11_compositor *c = d3d11_comp(xc);
 
 	U_LOG_I("Destroying D3D11 compositor");
+
+	u_mcp_capture_uninstall();
+	u_mcp_capture_fini(&c->mcp_capture);
 
 #ifdef XRT_FEATURE_DEBUG_GUI
 	// Stop debug GUI first (before destroying resources it may reference)
@@ -1507,6 +1667,9 @@ comp_d3d11_compositor_create(struct xrt_device *xdev,
 	memset(&c->base, 0, sizeof(c->base));
 
 	c->xdev = xdev;
+
+	u_mcp_capture_init(&c->mcp_capture);
+	u_mcp_capture_install(&c->mcp_capture);
 	c->own_window = nullptr;
 	c->owns_window = false;
 	c->app_hwnd = nullptr;
