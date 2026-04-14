@@ -22,6 +22,7 @@
 #include "util/u_git_tag.h"
 #include "util/u_builders.h"
 #include "util/u_mcp_server.h"
+#include "oxr_mcp_tools.h"
 
 #ifdef XRT_FEATURE_CLIENT_DEBUG_GUI
 #include "util/u_debug_gui.h"
@@ -587,6 +588,7 @@ oxr_instance_create(struct oxr_logger *log,
 
 	// Opt-in AI introspection surface — Phase A.  No-op when the
 	// DISPLAYXR_MCP env var is unset, so normal runtime cost is zero.
+	oxr_mcp_tools_register_all();
 	u_mcp_server_maybe_start();
 
 	return XR_SUCCESS;
