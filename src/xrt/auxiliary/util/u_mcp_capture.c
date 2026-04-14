@@ -18,7 +18,10 @@ typedef bool (*oxr_mcp_capture_fn)(const char *path, void *userdata);
 extern void
 oxr_mcp_tools_set_capture_handler(oxr_mcp_capture_fn fn, void *userdata);
 
-#define CAPTURE_TIMEOUT_MS 500 //!< Give the compositor ~30 frames at 60 Hz.
+/*! PNG encode of a 3024×1964 atlas is ~80–150 ms per file via stb_image_write
+ *  on an M1, and we may emit three (atlas + L + R). 3 s gives enough headroom
+ *  while still timing out if the compositor thread has genuinely stalled. */
+#define CAPTURE_TIMEOUT_MS 3000
 
 void
 u_mcp_capture_init(struct u_mcp_capture_request *req)

@@ -2,10 +2,9 @@
 # Copyright 2026, DisplayXR / Leia Inc.
 # SPDX-License-Identifier: BSL-1.0
 #
-# MCP Phase A slice 6 test: capture_frame is registered and returns a
-# structured diagnostic when no compositor handler is installed. The
-# actual PNG-producing hook (Metal/GL on mac, D3D11 on Windows) is a
-# follow-up task — tracked in issue #153.
+# MCP capture_frame end-to-end test: drives a capture against a running
+# cube_handle_metal_macos and asserts the returned PNG paths exist and
+# are non-trivial.
 
 set -u
 set -o pipefail
@@ -27,10 +26,10 @@ trap 'kill $APP_PID 2>/dev/null; wait $APP_PID 2>/dev/null' EXIT
 SOCK="/tmp/displayxr-mcp-${APP_PID}.sock"
 for _ in $(seq 1 50); do [[ -S "$SOCK" ]] && break; sleep 0.1; done
 [[ -S "$SOCK" ]] || { echo "FAIL: no socket"; cat /tmp/mcp_cap_app.log; exit 1; }
-sleep 1
+sleep 2
 
 python3 - "$ADAPTER" "$APP_PID" <<'PY'
-import json, subprocess, sys
+import json, os, subprocess, sys
 ad, pid = sys.argv[1], sys.argv[2]
 def fr(o):
     b = json.dumps(o).encode()
@@ -56,11 +55,18 @@ try:
     assert "capture_frame" in tools, tools
     r = call(3,"tools/call",{"name":"capture_frame","arguments":{}})
     d = r["result"]["structured"]
-    # Until the compositor hook lands, the tool returns a structured
-    # "not wired" diagnostic, not a JSON-RPC error.
-    assert "error" in d, d
-    assert "capture_frame" in d["error"], d
-    print("PASS")
+    assert "error" not in d, d
+    files = d["files"]
+    assert len(files) >= 1, d
+    # Every returned path should exist and have a non-trivial byte size.
+    for f in files:
+        assert os.path.isfile(f["path"]), f
+        assert f["size_bytes"] > 1024, f
+        with open(f["path"], "rb") as fh:
+            sig = fh.read(8)
+        assert sig[:8] == b"\x89PNG\r\n\x1a\n", f["path"]
+    names = sorted(os.path.basename(f["path"]) for f in files)
+    print(f"PASS (files={names})")
 finally:
     try: p.stdin.close()
     except: pass

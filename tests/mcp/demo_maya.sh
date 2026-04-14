@@ -90,7 +90,11 @@ try:
           f"pipeline_consistent={d['pipeline_consistent']}, {fwd_note}")
 
     cap = structured(call(6,"tools/call",{"name":"capture_frame","arguments":{}}))
-    check("capture_frame (stub ok until #153)", "error" in cap and "capture_frame" in cap["error"])
+    import os
+    files = cap.get("files", [])
+    all_exist = files and all(os.path.isfile(f["path"]) and f["size_bytes"] > 1024 for f in files)
+    names = sorted(os.path.basename(f["path"]).split("_",1)[-1] for f in files)
+    check("capture_frame", all_exist, f"wrote {names}")
 
     tl = structured(call(7,"tools/call",{"name":"tail_log","arguments":{"since":0,"max":8}}))
     check("tail_log", len(tl["entries"]) > 0, f"got {len(tl['entries'])} entries")

@@ -40,6 +40,11 @@
 #include "util/u_hud.h"
 #include "util/u_tiling.h"
 #include "util/u_canvas.h"
+#include "util/u_mcp_capture.h"
+
+// Single-TU inclusion of the stb implementation for this compositor.
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 #ifdef XRT_BUILD_DRIVER_QWERTY
 #include "qwerty_interface.h"
@@ -212,6 +217,9 @@ struct comp_metal_compositor
 
 	//! Thread safety.
 	struct os_mutex mutex;
+
+	//! MCP capture request box (polled at end of layer_commit).
+	struct u_mcp_capture_request mcp_capture;
 };
 
 /*
@@ -1246,6 +1254,127 @@ metal_compositor_render_hud(struct comp_metal_compositor *c, float dt,
 	[encoder endEncoding];
 }
 
+// Blit a tightly-packed rect out of the BGRA-swapped RGBA buffer and
+// encode a PNG. Returns true on success.
+static bool
+metal_write_png_subrect(const uint8_t *rgba,
+                        uint32_t row_pitch,
+                        uint32_t src_x,
+                        uint32_t src_y,
+                        uint32_t w,
+                        uint32_t h,
+                        const char *path)
+{
+	size_t bytes = (size_t)w * h * 4;
+	uint8_t *tight = malloc(bytes);
+	if (tight == NULL) {
+		return false;
+	}
+	for (uint32_t y = 0; y < h; y++) {
+		memcpy(tight + (size_t)y * w * 4, rgba + (size_t)(src_y + y) * row_pitch + (size_t)src_x * 4, (size_t)w * 4);
+	}
+	int rc = stbi_write_png(path, (int)w, (int)h, 4, tight, (int)(w * 4));
+	free(tight);
+	return rc != 0;
+}
+
+// Called at end of layer_commit. Reads atlas_texture back via a blit
+// to a shared MTLBuffer (atlas is StorageModePrivate), swaps BGRA→RGBA,
+// and writes PNGs for each requested view.
+static void
+metal_compositor_service_mcp_capture(struct comp_metal_compositor *c, id<MTLCommandBuffer> render_cmd_buf)
+{
+	char prefix[U_MCP_CAPTURE_PATH_MAX];
+	uint32_t views = 0;
+	if (!u_mcp_capture_poll(&c->mcp_capture, prefix, &views)) {
+		return;
+	}
+
+	if (c->atlas_texture == nil) {
+		u_mcp_capture_complete(&c->mcp_capture, 0);
+		return;
+	}
+
+	@autoreleasepool {
+		NSUInteger atlas_w = c->atlas_texture.width;
+		NSUInteger atlas_h = c->atlas_texture.height;
+		size_t row_pitch = atlas_w * 4;
+		size_t buf_bytes = row_pitch * atlas_h;
+		id<MTLBuffer> staging = [c->device newBufferWithLength:buf_bytes
+		                                               options:MTLResourceStorageModeShared];
+		if (staging == nil) {
+			u_mcp_capture_complete(&c->mcp_capture, 0);
+			return;
+		}
+
+		// The render cmd_buf has already been committed; wait for it
+		// to finish so atlas writes are visible before we blit.
+		[render_cmd_buf waitUntilCompleted];
+
+		id<MTLCommandBuffer> blit_cb = [c->command_queue commandBuffer];
+		id<MTLBlitCommandEncoder> blit = [blit_cb blitCommandEncoder];
+		[blit copyFromTexture:c->atlas_texture
+		          sourceSlice:0
+		          sourceLevel:0
+		         sourceOrigin:MTLOriginMake(0, 0, 0)
+		           sourceSize:MTLSizeMake(atlas_w, atlas_h, 1)
+		             toBuffer:staging
+		    destinationOffset:0
+		destinationBytesPerRow:row_pitch
+		destinationBytesPerImage:buf_bytes];
+		[blit endEncoding];
+		[blit_cb commit];
+		[blit_cb waitUntilCompleted];
+
+		// Atlas format is BGRA8Unorm; swap into an RGBA buffer for PNG.
+		uint8_t *bgra = (uint8_t *)staging.contents;
+		uint8_t *rgba = malloc(buf_bytes);
+		if (rgba == NULL) {
+			u_mcp_capture_complete(&c->mcp_capture, 0);
+			return;
+		}
+		for (size_t i = 0; i < buf_bytes; i += 4) {
+			rgba[i + 0] = bgra[i + 2];
+			rgba[i + 1] = bgra[i + 1];
+			rgba[i + 2] = bgra[i + 0];
+			rgba[i + 3] = bgra[i + 3];
+		}
+
+		uint32_t written = 0;
+		char path[U_MCP_CAPTURE_PATH_MAX + 32];
+
+		if (views & U_MCP_CAPTURE_ATLAS) {
+			snprintf(path, sizeof(path), "%s_atlas.png", prefix);
+			if (stbi_write_png(path, (int)atlas_w, (int)atlas_h, 4, rgba, (int)row_pitch)) {
+				written |= U_MCP_CAPTURE_ATLAS;
+			}
+		}
+		// Stereo split only if the active mode actually has tiles.
+		if (c->tile_columns > 0 && c->tile_rows > 0 &&
+		    (c->tile_columns * c->tile_rows) >= 2) {
+			uint32_t eye_w = (uint32_t)atlas_w / c->tile_columns;
+			uint32_t eye_h = (uint32_t)atlas_h / c->tile_rows;
+			if (views & U_MCP_CAPTURE_LEFT) {
+				snprintf(path, sizeof(path), "%s_L.png", prefix);
+				if (metal_write_png_subrect(rgba, (uint32_t)row_pitch, 0, 0, eye_w, eye_h, path)) {
+					written |= U_MCP_CAPTURE_LEFT;
+				}
+			}
+			if (views & U_MCP_CAPTURE_RIGHT) {
+				uint32_t rx = (c->tile_columns >= 2) ? eye_w : 0;
+				uint32_t ry = (c->tile_columns >= 2) ? 0 : eye_h;
+				snprintf(path, sizeof(path), "%s_R.png", prefix);
+				if (metal_write_png_subrect(rgba, (uint32_t)row_pitch, rx, ry, eye_w, eye_h, path)) {
+					written |= U_MCP_CAPTURE_RIGHT;
+				}
+			}
+		}
+
+		free(rgba);
+		u_mcp_capture_complete(&c->mcp_capture, written);
+	}
+}
+
 static xrt_result_t
 metal_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 {
@@ -1680,6 +1809,11 @@ metal_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		[cmd_buf waitUntilCompleted];
 	}
 
+	// MCP capture_frame: if the server thread has posted a request,
+	// blit the atlas into a CPU-visible buffer, encode PNG(s), and
+	// unblock the waiter. Pays for itself only when actively capturing.
+	metal_compositor_service_mcp_capture(c, cmd_buf);
+
 	// Reset layer accumulator
 	c->layer_accum.layer_count = 0;
 
@@ -1692,6 +1826,12 @@ metal_compositor_destroy(struct xrt_compositor *xc)
 	struct comp_metal_compositor *c = metal_comp(xc);
 
 	U_LOG_I("Destroying Metal compositor");
+
+	// Uninstall the MCP capture hook before we drop any GPU resources —
+	// the MCP thread can no longer request a readback against us after
+	// this returns.
+	u_mcp_capture_uninstall();
+	u_mcp_capture_fini(&c->mcp_capture);
 
 	// Wrap teardown in @autoreleasepool so autoreleased Metal objects
 	// (drawables, command buffers, textures) are drained immediately
@@ -1839,6 +1979,9 @@ comp_metal_compositor_create(struct xrt_device *xdev,
 	if (c == NULL) {
 		return XRT_ERROR_ALLOCATION;
 	}
+
+	u_mcp_capture_init(&c->mcp_capture);
+	u_mcp_capture_install(&c->mcp_capture);
 
 	int ret = os_mutex_init(&c->mutex);
 	if (ret != 0) {

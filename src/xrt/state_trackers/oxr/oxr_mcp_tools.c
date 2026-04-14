@@ -653,18 +653,24 @@ oxr_mcp_tools_set_capture_handler(oxr_mcp_capture_fn fn, void *userdata)
 }
 
 // Stat the suffixed files the compositor may have written and add each
-// one that exists to the result with its byte size.
+// one that exists to the result with its byte size. Retries for up to
+// 200 ms to absorb any filesystem lag between fclose() and stat() —
+// observed intermittently on macOS for the third sequential write.
 static void
 add_written_path(cJSON *out_paths, const char *prefix, const char *suffix)
 {
 	char path[320];
 	snprintf(path, sizeof(path), "%s%s", prefix, suffix);
 	struct stat st;
-	if (stat(path, &st) == 0 && st.st_size > 0) {
-		cJSON *e = cJSON_CreateObject();
-		cJSON_AddStringToObject(e, "path", path);
-		cJSON_AddNumberToObject(e, "size_bytes", (double)st.st_size);
-		cJSON_AddItemToArray(out_paths, e);
+	for (int attempt = 0; attempt < 20; attempt++) {
+		if (stat(path, &st) == 0 && st.st_size > 0) {
+			cJSON *e = cJSON_CreateObject();
+			cJSON_AddStringToObject(e, "path", path);
+			cJSON_AddNumberToObject(e, "size_bytes", (double)st.st_size);
+			cJSON_AddItemToArray(out_paths, e);
+			return;
+		}
+		usleep(10000); // 10 ms
 	}
 }
 
@@ -691,7 +697,10 @@ tool_capture_frame(const cJSON *params, void *userdata)
 	char prefix[256];
 	long pid = (long)getpid();
 	struct oxr_session *sess = lock_session();
-	uint64_t seq = sess ? (uint64_t)sess->frame_id.begun : 0;
+	// frame_id.begun is -1 until xrBeginFrame runs; clamp to 0 so the
+	// filename doesn't render as UINT64_MAX.
+	int64_t begun = sess ? sess->frame_id.begun : 0;
+	uint64_t seq = begun >= 0 ? (uint64_t)begun : 0;
 	unlock_session();
 	// No extension — compositor appends _atlas.png / _L.png / _R.png.
 	snprintf(prefix, sizeof(prefix), "/tmp/displayxr-mcp-capture-%ld-%llu", pid, (unsigned long long)seq);
