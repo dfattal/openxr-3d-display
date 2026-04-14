@@ -33,6 +33,14 @@
 #include "util/u_canvas.h"
 #include "util/u_time.h"
 #include "util/u_hud.h"
+#include "util/u_mcp_capture.h"
+
+// STB_IMAGE_WRITE_STATIC scopes the stbi_write_* symbols to this TU so
+// we can safely implement stb in multiple compositors that link into
+// the same binary (metal, gl, d3d11, d3d11_service).
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 #include "os/os_time.h"
 #include "os/os_threading.h"
 #include "math/m_api.h"
@@ -281,6 +289,9 @@ struct comp_gl_compositor
 
 	//! Canvas output rect for shared-texture apps.
 	struct u_canvas_rect canvas;
+
+	//! MCP capture_frame request box (serviced at end of layer_commit).
+	struct u_mcp_capture_request mcp_capture;
 };
 
 static inline struct comp_gl_compositor *
@@ -946,6 +957,123 @@ gl_crop_and_process_dp(struct comp_gl_compositor *c,
 
 /*
  *
+ * MCP capture helpers
+ *
+ */
+
+static bool
+gl_write_png_subrect(const uint8_t *rgba,
+                     uint32_t row_pitch,
+                     uint32_t src_x,
+                     uint32_t src_y,
+                     uint32_t w,
+                     uint32_t h,
+                     const char *path)
+{
+	size_t bytes = (size_t)w * h * 4;
+	uint8_t *tight = malloc(bytes);
+	if (tight == NULL) {
+		return false;
+	}
+	// glReadPixels returns bottom-up; flip Y while copying the sub-rect.
+	uint32_t atlas_h_full = 0;
+	(void)atlas_h_full; // unused; caller handles flip via src_y + region math
+	for (uint32_t y = 0; y < h; y++) {
+		memcpy(tight + (size_t)y * w * 4,
+		       rgba + (size_t)(src_y + y) * row_pitch + (size_t)src_x * 4,
+		       (size_t)w * 4);
+	}
+	int rc = stbi_write_png(path, (int)w, (int)h, 4, tight, (int)(w * 4));
+	free(tight);
+	return rc != 0;
+}
+
+// Service a pending MCP capture_frame request at end of layer_commit.
+// Reads atlas_texture back via glReadPixels into a CPU buffer, flips Y
+// (GL origin is bottom-left), and writes atlas / L / R PNGs.
+static void
+gl_compositor_service_mcp_capture(struct comp_gl_compositor *c)
+{
+	char prefix[U_MCP_CAPTURE_PATH_MAX];
+	uint32_t views = 0;
+	if (!u_mcp_capture_poll(&c->mcp_capture, prefix, &views)) {
+		return;
+	}
+	if (c->atlas_texture == 0) {
+		u_mcp_capture_complete(&c->mcp_capture, 0);
+		return;
+	}
+
+	uint32_t atlas_w = c->atlas_tex_width;
+	uint32_t atlas_h = c->atlas_tex_height;
+	size_t row_pitch = (size_t)atlas_w * 4;
+	size_t bytes = row_pitch * atlas_h;
+	uint8_t *bottom_up = malloc(bytes);
+	uint8_t *top_down = malloc(bytes);
+	if (bottom_up == NULL || top_down == NULL) {
+		free(bottom_up);
+		free(top_down);
+		u_mcp_capture_complete(&c->mcp_capture, 0);
+		return;
+	}
+
+	// Pull pixels off the atlas. Bind a temporary FBO so we don't
+	// clobber whatever the caller has bound.
+	GLuint prev_read_fbo = 0;
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, (GLint *)&prev_read_fbo);
+	GLuint fbo = 0;
+	glGenFramebuffers(1, &fbo);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+	glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c->atlas_texture, 0);
+	glReadPixels(0, 0, (GLsizei)atlas_w, (GLsizei)atlas_h, GL_RGBA, GL_UNSIGNED_BYTE, bottom_up);
+	glFinish();
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, prev_read_fbo);
+	glDeleteFramebuffers(1, &fbo);
+
+	// Flip vertically: glReadPixels returns origin-lower-left.
+	for (uint32_t y = 0; y < atlas_h; y++) {
+		memcpy(top_down + (size_t)y * row_pitch,
+		       bottom_up + (size_t)(atlas_h - 1 - y) * row_pitch,
+		       row_pitch);
+	}
+	free(bottom_up);
+
+	uint32_t written = 0;
+	char path[U_MCP_CAPTURE_PATH_MAX + 32];
+
+	if (views & U_MCP_CAPTURE_ATLAS) {
+		snprintf(path, sizeof(path), "%s_atlas.png", prefix);
+		if (stbi_write_png(path, (int)atlas_w, (int)atlas_h, 4, top_down, (int)row_pitch)) {
+			written |= U_MCP_CAPTURE_ATLAS;
+		}
+	}
+	if (c->tile_columns > 0 && c->tile_rows > 0 &&
+	    (c->tile_columns * c->tile_rows) >= 2) {
+		uint32_t eye_w = atlas_w / c->tile_columns;
+		uint32_t eye_h = atlas_h / c->tile_rows;
+		if (views & U_MCP_CAPTURE_LEFT) {
+			snprintf(path, sizeof(path), "%s_L.png", prefix);
+			if (gl_write_png_subrect(top_down, (uint32_t)row_pitch, 0, 0, eye_w, eye_h, path)) {
+				written |= U_MCP_CAPTURE_LEFT;
+			}
+		}
+		if (views & U_MCP_CAPTURE_RIGHT) {
+			uint32_t rx = (c->tile_columns >= 2) ? eye_w : 0;
+			uint32_t ry = (c->tile_columns >= 2) ? 0 : eye_h;
+			snprintf(path, sizeof(path), "%s_R.png", prefix);
+			if (gl_write_png_subrect(top_down, (uint32_t)row_pitch, rx, ry, eye_w, eye_h, path)) {
+				written |= U_MCP_CAPTURE_RIGHT;
+			}
+		}
+	}
+
+	free(top_down);
+	u_mcp_capture_complete(&c->mcp_capture, written);
+}
+
+
+/*
+ *
  * Layer commit — render atlas and present
  *
  */
@@ -1462,6 +1590,11 @@ gl_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t
 	if (prev_cull_face) glEnable(GL_CULL_FACE);
 	if (prev_scissor_test) glEnable(GL_SCISSOR_TEST);
 
+	// MCP capture_frame — runs while our GL context is still current so
+	// glReadPixels from atlas_texture is valid. Early-returns when no
+	// request is pending.
+	gl_compositor_service_mcp_capture(c);
+
 	// Restore previous GL context (critical for shared texture mode where
 	// app has its own context and needs it back after compositor work)
 #ifdef XRT_OS_WINDOWS
@@ -1490,6 +1623,9 @@ static void
 gl_compositor_destroy(struct xrt_compositor *xc)
 {
 	struct comp_gl_compositor *c = gl_comp(xc);
+
+	u_mcp_capture_uninstall();
+	u_mcp_capture_fini(&c->mcp_capture);
 
 #ifdef XRT_OS_WINDOWS
 	// Make compositor context current for GL resource cleanup
@@ -1985,6 +2121,9 @@ comp_gl_compositor_create(struct xrt_device *xdev,
 {
 	struct comp_gl_compositor *c = U_TYPED_CALLOC(struct comp_gl_compositor);
 	c->xdev = xdev;
+
+	u_mcp_capture_init(&c->mcp_capture);
+	u_mcp_capture_install(&c->mcp_capture);
 
 	// Get window dimensions
 	uint32_t width = GL_DEFAULT_WIDTH;

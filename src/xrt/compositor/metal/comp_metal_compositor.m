@@ -42,7 +42,11 @@
 #include "util/u_canvas.h"
 #include "util/u_mcp_capture.h"
 
-// Single-TU inclusion of the stb implementation for this compositor.
+// STB_IMAGE_WRITE_STATIC scopes all stbi_write_* to this TU so linking
+// alongside other compositors that also implement stb doesn't produce
+// duplicate symbols. STB_IMAGE_WRITE_IMPLEMENTATION still forces the
+// single-header definitions to emit here.
+#define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
