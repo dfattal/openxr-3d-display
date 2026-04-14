@@ -59,18 +59,18 @@ try:
     assert len(d["views"]) == d["view_count"], d
     v0 = d["views"][0]
     assert "metrics" in v0 and "declared_fov_aspect_wh" in v0["metrics"], v0
-    # cube_handle_metal_macos recomputes Kooima client-side instead of
-    # forwarding the runtime's recommendation, so the tool may flag
-    # app_ignores_recommended / stale_head_pose — that's a working tool,
-    # not a failure. We only assert that every flag is a known class.
+    # cube_handle_metal_macos recomputes Kooima client-side — the tool
+    # surfaces that as an "app_not_forwarding_locate_views_*" observation
+    # (neutral, not a bug). Only aspect-class mismatches flip
+    # pipeline_consistent to false.
     known = {
-        "app_ignores_recommended",
+        "app_not_forwarding_locate_views_fov",
+        "app_not_forwarding_locate_views_pose",
         "fov_aspect_mismatch_subimage",
         "fov_aspect_mismatch_display",
-        "stale_head_pose",
     }
     assert set(d["flags"]).issubset(known), f"unexpected flag in {d['flags']}"
-    print(f"PASS (flags={d['flags']}, ok={d['ok']})")
+    print(f"PASS (flags={d['flags']}, pipeline_consistent={d['pipeline_consistent']})")
 finally:
     try: p.stdin.close()
     except: pass

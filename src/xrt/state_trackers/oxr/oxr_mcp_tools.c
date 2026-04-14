@@ -522,10 +522,13 @@ tool_diff_projection(const cJSON *params, void *userdata)
 		cJSON *v = cJSON_CreateObject();
 		cJSON *vflags = cJSON_CreateArray();
 
-		// (1) app_ignores_recommended: declared fov != recommended fov.
+		// (1) declared fov != recommended fov — neutral observation, not
+		// a bug (some apps deliberately compute their own Kooima with
+		// different tunables). Use fov_aspect_mismatch_* to detect real
+		// pipeline breaks.
 		bool fov_differs = !fov_equal(&rec->fov, &dec->fov);
 		if (fov_differs) {
-			cJSON_AddItemToArray(vflags, cJSON_CreateString("app_ignores_recommended"));
+			cJSON_AddItemToArray(vflags, cJSON_CreateString("app_not_forwarding_locate_views_fov"));
 		}
 
 		// (2) fov_aspect_mismatch: declared fov aspect vs. subImage aspect,
@@ -548,13 +551,17 @@ tool_diff_projection(const cJSON *params, void *userdata)
 			cJSON_AddItemToArray(vflags, cJSON_CreateString("fov_aspect_mismatch_display"));
 		}
 
-		// (3) stale_head_pose: declared vs. recommended pose delta.
+		// (3) declared vs. recommended pose delta — same caveat as (1):
+		// apps doing client-side Kooima will also submit a different
+		// pose. Not inherently a bug. Phase B may add a cross-frame
+		// staleness check (true "pose froze for N frames") which is a
+		// real bug class.
 		float dp = pos_delta(&dec->pose.position, &rec->pose.position);
 		float qdot = quat_dot(&dec->pose.orientation, &rec->pose.orientation);
 		if (qdot < 0.f) qdot = -qdot; // double-cover
 		bool pose_stale = (dp > EPS_POSITION_M) || (qdot < EPS_QUAT_DOT);
 		if (pose_stale) {
-			cJSON_AddItemToArray(vflags, cJSON_CreateString("stale_head_pose"));
+			cJSON_AddItemToArray(vflags, cJSON_CreateString("app_not_forwarding_locate_views_pose"));
 		}
 
 		// (4) wrong_disparity: reserved for slice 6 when capture_frame lands.
@@ -576,13 +583,19 @@ tool_diff_projection(const cJSON *params, void *userdata)
 
 		cJSON_AddItemToArray(views, v);
 
-		if (fov_differs || pose_stale || (sub_aspect > 0.f && !sub_aspect_ok) ||
+		// Only aspect-class mismatches are considered pipeline bugs.
+		// app_not_forwarding_locate_views_{fov,pose} are neutral
+		// observations — many apps deliberately compute their own
+		// Kooima with custom tunables.
+		if ((sub_aspect > 0.f && !sub_aspect_ok) ||
 		    (display_aspect > 0.f && !disp_aspect_ok && diff_count == 1)) {
 			have_any_flag = true;
 		}
+		(void)fov_differs;
+		(void)pose_stale;
 	}
 
-	if (have_any_flag) {
+	if (have_any_flag || cJSON_GetArraySize(views) > 0) {
 		// Unioned flag set across all views, for quick triage.
 		for (int i = 0; i < cJSON_GetArraySize(views); i++) {
 			cJSON *v = cJSON_GetArrayItem(views, i);
@@ -605,7 +618,12 @@ tool_diff_projection(const cJSON *params, void *userdata)
 
 	cJSON_AddItemToObject(r, "flags", flags_set);
 	cJSON_AddItemToObject(r, "views", views);
-	cJSON_AddBoolToObject(r, "ok", !have_any_flag);
+	// Renamed from "ok" to make the semantics explicit: this asks
+	// whether the declared projection is internally consistent
+	// (subImage / display aspect), not whether it matches the runtime's
+	// recommendation. Many apps deliberately diverge from the
+	// recommendation with their own Kooima — that's expected, not a bug.
+	cJSON_AddBoolToObject(r, "pipeline_consistent", !have_any_flag);
 	return r;
 }
 

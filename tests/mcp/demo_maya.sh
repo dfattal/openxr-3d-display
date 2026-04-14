@@ -82,9 +82,12 @@ try:
           f"declared={sub['view_count']} recommended={k['view_count']}")
 
     d = structured(call(5,"tools/call",{"name":"diff_projection","arguments":{}}))
-    known = {"app_ignores_recommended","fov_aspect_mismatch_subimage","fov_aspect_mismatch_display","stale_head_pose"}
+    known = {"app_not_forwarding_locate_views_fov","app_not_forwarding_locate_views_pose",
+            "fov_aspect_mismatch_subimage","fov_aspect_mismatch_display"}
+    forwards = not any(f.startswith("app_not_forwarding_locate_views") for f in d["flags"])
+    fwd_note = "forwards xrLocateViews" if forwards else "uses own projection math (not forwarding xrLocateViews)"
     check("diff_projection", set(d["flags"]).issubset(known),
-          f"flags={d['flags']} ok={d['ok']}")
+          f"pipeline_consistent={d['pipeline_consistent']}, {fwd_note}")
 
     cap = structured(call(6,"tools/call",{"name":"capture_frame","arguments":{}}))
     check("capture_frame (stub ok until #153)", "error" in cap and "capture_frame" in cap["error"])
