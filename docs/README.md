@@ -82,6 +82,7 @@ These documents describe **planned features that are not yet implemented**.
 - [Multi-Display Single Machine](roadmap/multi-display-single-machine.md) — multiple displays, one machine (#69)
 - [Multi-Display Networked](roadmap/multi-display-networked.md) — displays across the network (#70)
 - [XR_VIEW_CONFIGURATION_PRIMARY_MULTIVIEW](roadmap/XR_VIEW_CONFIGURATION_PRIMARY_MULTIVIEW.md) — Khronos multiview proposal (#80)
+- [MCP Spec v0.2](roadmap/mcp-spec-v0.2.md) — AI-native runtime control & introspection over Model Context Protocol
 
 ---
 
