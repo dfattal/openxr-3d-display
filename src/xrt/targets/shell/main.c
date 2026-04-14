@@ -50,6 +50,7 @@
 #ifdef _WIN32
 #define HOTKEY_TOGGLE 1
 #define HOTKEY_LAUNCH 2
+#define HOTKEY_CAPTURE 3
 #define WM_TRAYICON (WM_USER + 1)
 #define TRAY_CMD_ACTIVATE 2001
 #define TRAY_CMD_EXIT 2002
@@ -1562,6 +1563,126 @@ tray_show_context_menu(HWND hwnd, bool shell_active)
 #endif // _WIN32
 
 #ifdef _WIN32
+/*
+ * Phase 8: 3D capture MVP.
+ *
+ * Builds an output prefix under %USERPROFILE%\Pictures\DisplayXR, asks the
+ * runtime to write SBS / L / R PNGs of the current pre-weave atlas, then
+ * writes a JSON sidecar with the metadata returned by the runtime.
+ */
+static void
+capture_write_sidecar(const char *json_path, const struct ipc_capture_result *r)
+{
+	cJSON *root = cJSON_CreateObject();
+	if (root == NULL) {
+		return;
+	}
+
+	cJSON_AddNumberToObject(root, "schema_version", 1);
+	cJSON_AddNumberToObject(root, "timestamp_ns", (double)r->timestamp_ns);
+
+	cJSON *atlas = cJSON_AddObjectToObject(root, "atlas");
+	cJSON_AddNumberToObject(atlas, "width", r->atlas_width);
+	cJSON_AddNumberToObject(atlas, "height", r->atlas_height);
+
+	cJSON *eye = cJSON_AddObjectToObject(root, "eye");
+	cJSON_AddNumberToObject(eye, "width", r->eye_width);
+	cJSON_AddNumberToObject(eye, "height", r->eye_height);
+
+	cJSON *stereo = cJSON_AddObjectToObject(root, "stereo");
+	cJSON_AddNumberToObject(stereo, "tile_columns", r->tile_columns);
+	cJSON_AddNumberToObject(stereo, "tile_rows", r->tile_rows);
+
+	cJSON *disp = cJSON_AddObjectToObject(root, "display_m");
+	cJSON_AddNumberToObject(disp, "width", r->display_width_m);
+	cJSON_AddNumberToObject(disp, "height", r->display_height_m);
+
+	cJSON *le = cJSON_AddArrayToObject(root, "eye_left_m");
+	cJSON_AddItemToArray(le, cJSON_CreateNumber(r->eye_left_m[0]));
+	cJSON_AddItemToArray(le, cJSON_CreateNumber(r->eye_left_m[1]));
+	cJSON_AddItemToArray(le, cJSON_CreateNumber(r->eye_left_m[2]));
+
+	cJSON *re = cJSON_AddArrayToObject(root, "eye_right_m");
+	cJSON_AddItemToArray(re, cJSON_CreateNumber(r->eye_right_m[0]));
+	cJSON_AddItemToArray(re, cJSON_CreateNumber(r->eye_right_m[1]));
+	cJSON_AddItemToArray(re, cJSON_CreateNumber(r->eye_right_m[2]));
+
+	cJSON *views = cJSON_AddArrayToObject(root, "views_written");
+	if (r->views_written & IPC_CAPTURE_FLAG_SBS) {
+		cJSON_AddItemToArray(views, cJSON_CreateString("sbs"));
+	}
+	if (r->views_written & IPC_CAPTURE_FLAG_LEFT) {
+		cJSON_AddItemToArray(views, cJSON_CreateString("L"));
+	}
+	if (r->views_written & IPC_CAPTURE_FLAG_RIGHT) {
+		cJSON_AddItemToArray(views, cJSON_CreateString("R"));
+	}
+
+	char *text = cJSON_Print(root);
+	if (text != NULL) {
+		FILE *f = fopen(json_path, "wb");
+		if (f != NULL) {
+			fwrite(text, 1, strlen(text), f);
+			fclose(f);
+		} else {
+			PE("capture: failed to open sidecar %s\n", json_path);
+		}
+		free(text);
+	}
+	cJSON_Delete(root);
+}
+
+static void
+capture_frame(struct ipc_connection *ipc_c)
+{
+	const char *home = getenv("USERPROFILE");
+	if (home == NULL || home[0] == '\0') {
+		home = ".";
+	}
+
+	char dir[MAX_PATH];
+	snprintf(dir, sizeof(dir), "%s\\Pictures\\DisplayXR", home);
+
+	// Best-effort: Pictures should already exist; create the DisplayXR subdir.
+	char pictures[MAX_PATH];
+	snprintf(pictures, sizeof(pictures), "%s\\Pictures", home);
+	CreateDirectoryA(pictures, NULL);
+	if (!CreateDirectoryA(dir, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
+		PE("capture: CreateDirectory(%s) failed: %lu\n", dir, GetLastError());
+		return;
+	}
+
+	SYSTEMTIME st;
+	GetLocalTime(&st);
+
+	struct ipc_capture_request req = {0};
+	snprintf(req.path_prefix, sizeof(req.path_prefix),
+	         "%s\\capture_%04d-%02d-%02d_%02d-%02d-%02d",
+	         dir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	req.flags = IPC_CAPTURE_FLAG_ALL;
+
+	struct ipc_capture_result result = {0};
+	xrt_result_t r = ipc_call_shell_capture_frame(ipc_c, &req, &result);
+	if (r != XRT_SUCCESS) {
+		PE("capture: shell_capture_frame failed: %d\n", r);
+		return;
+	}
+
+	if (result.views_written == 0) {
+		PE("capture: runtime returned 0 views written\n");
+		return;
+	}
+
+	char json_path[MAX_PATH];
+	snprintf(json_path, sizeof(json_path), "%s.json", req.path_prefix);
+	capture_write_sidecar(json_path, &result);
+
+	P("Capture saved: %s (views=0x%x atlas=%ux%u eye=%ux%u)\n",
+	  req.path_prefix, result.views_written,
+	  result.atlas_width, result.atlas_height,
+	  result.eye_width, result.eye_height);
+}
+
 // WIN32 subsystem entry point — no console window.
 // Delegates to main() with the command line split into argc/argv.
 int WINAPI
@@ -1658,6 +1779,9 @@ main(int argc, char *argv[])
 		}
 		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_LAUNCH, MOD_CONTROL, 'L')) {
 			PE("Warning: RegisterHotKey(Ctrl+L) failed — launcher hotkey unavailable\n");
+		}
+		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_CAPTURE, MOD_CONTROL | MOD_SHIFT, '3')) {
+			PE("Warning: RegisterHotKey(Ctrl+Shift+3) failed — capture hotkey unavailable\n");
 		}
 	}
 
@@ -1839,6 +1963,13 @@ main(int argc, char *argv[])
 						} else {
 							P("Launcher %s\n", g_launcher_visible ? "shown" : "hidden");
 						}
+					}
+				} else if (msg.message == WM_HOTKEY && msg.wParam == HOTKEY_CAPTURE) {
+					// --- Ctrl+Shift+3: capture pre-weave L/R/SBS frames (Phase 8) ---
+					if (g_shell_active) {
+						capture_frame(&ipc_c);
+					} else {
+						P("Capture ignored: shell not active\n");
 					}
 				} else if (msg.message == WM_TRAYICON) {
 					if (LOWORD(msg.lParam) == WM_LBUTTONUP) {
