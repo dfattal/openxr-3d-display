@@ -91,6 +91,29 @@ Downloads all dependencies on first run (SR SDK, vcpkg, OpenXR loader). Requires
 
 **When on a Windows machine with a Leia SR display, prefer local builds over CI** — iterate faster with `scripts\build_windows.bat build` and test directly. Run scripts are generated in `_package/` (see Windows Test App section below).
 
+### Windows Compile-Check on macOS / Linux (MinGW-w64)
+```bash
+brew install mingw-w64        # one-time
+./scripts/build-mingw-check.sh                # default targets: aux_util mcp_adapter
+./scripts/build-mingw-check.sh aux_util drv_qwerty  # custom target list
+```
+Cross-compiles a curated subset against MinGW-w64 to catch Win32-API typos, missing `#ifdef XRT_OS_WINDOWS` guards, and wrong-platform symbols **before pushing to CI**. Mirrors the displayxr-unity plugin's `native~/build-win.sh` pattern.
+
+**Caveats — MinGW is NOT a full MSVC substitute:**
+- Compositors using WIL (`wil::com_ptr` in `comp_d3d11_service.cpp`) won't cross-compile. Service-side D3D11 stays MSVC-only.
+- Vulkan / vcpkg-only deps not available; targets requiring them (full openxr_displayxr.dll, comp_d3d11 native) are out of scope.
+- **MinGW ships winpthreads which adds POSIX-like extensions** (`clock_gettime`, `CLOCK_MONOTONIC`, `pid_t`, `<unistd.h>`, etc.) that **MSVC does not have**. These bugs only surface in real CI. Workarounds:
+  - Use `os_monotonic_get_ns()` from `aux/os/os_time.h` instead of `clock_gettime(CLOCK_MONOTONIC, …)`.
+  - Use C11 `timespec_get(TIME_UTC)` instead of `clock_gettime(CLOCK_REALTIME, …)`.
+  - Use `long` instead of `pid_t` in public headers (don't include `<sys/types.h>` for it).
+  - Avoid `<unistd.h>` in cross-platform code. Use `os_nanosleep()` from `aux/os/os_time.h` instead of `usleep()`. For PIDs, use a wrapper helper like `u_mcp_self_pid()` that does `getpid()` on POSIX and `GetCurrentProcessId()` on Windows.
+  - Avoid C11 `<stdatomic.h>`. MSVC needs `/experimental:c11atomics` and even then `_Atomic(T*)` syntax is unreliable. Use a `pthread_mutex_t` (uncontended is essentially free), or Windows `Interlocked*` APIs behind an `#ifdef`.
+  - `strncasecmp` / `strcasecmp` are POSIX. MSVC has `_strnicmp` / `_stricmp` in `<string.h>`. Add `#ifdef _WIN32 #define strncasecmp _strnicmp #endif` at the top of the TU.
+
+What it DOES catch reliably: `windows.h` symbol resolution, missing platform-config includes (`xrt/xrt_config_os.h` so `XRT_OS_WINDOWS` is actually defined), duplicate struct definitions across `#ifdef` branches, mistakes in cross-platform pthread wrapping.
+
+Toolchain: `cmake/toolchain-mingw-w64.cmake`. Output goes to `build-mingw/` (gitignored). Runs in ~30 s after first configure.
+
 ### CI Build (Remote)
 ```bash
 /ci-monitor "your commit message"
