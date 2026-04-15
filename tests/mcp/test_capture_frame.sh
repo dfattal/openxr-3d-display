@@ -56,17 +56,12 @@ try:
     r = call(3,"tools/call",{"name":"capture_frame","arguments":{}})
     d = r["result"]["structured"]
     assert "error" not in d, d
-    files = d["files"]
-    assert len(files) >= 1, d
-    # Every returned path should exist and have a non-trivial byte size.
-    for f in files:
-        assert os.path.isfile(f["path"]), f
-        assert f["size_bytes"] > 1024, f
-        with open(f["path"], "rb") as fh:
-            sig = fh.read(8)
-        assert sig[:8] == b"\x89PNG\r\n\x1a\n", f["path"]
-    names = sorted(os.path.basename(f["path"]) for f in files)
-    print(f"PASS (files={names})")
+    assert os.path.isfile(d["path"]), d
+    assert d["size_bytes"] > 1024, d
+    with open(d["path"], "rb") as fh:
+        sig = fh.read(8)
+    assert sig == b"\x89PNG\r\n\x1a\n", d
+    print(f"PASS ({os.path.basename(d['path'])}, {d['size_bytes']} bytes)")
 finally:
     try: p.stdin.close()
     except: pass

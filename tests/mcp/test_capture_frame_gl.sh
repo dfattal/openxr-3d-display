@@ -53,14 +53,12 @@ try:
     assert s["sessions"][0]["api"] == "opengl", s
     r = call(3,"tools/call",{"name":"capture_frame","arguments":{}})
     d = r["result"]["structured"]
-    files = d.get("files", [])
-    assert len(files) >= 1, d
-    for f in files:
-        assert os.path.isfile(f["path"]), f
-        assert f["size_bytes"] > 1024, f
-        with open(f["path"], "rb") as fh:
-            assert fh.read(8) == b"\x89PNG\r\n\x1a\n", f["path"]
-    print(f"PASS (files={sorted(os.path.basename(f['path']).split('_',1)[-1] for f in files)})")
+    assert "error" not in d, d
+    assert os.path.isfile(d["path"]), d
+    assert d["size_bytes"] > 1024, d
+    with open(d["path"], "rb") as fh:
+        assert fh.read(8) == b"\x89PNG\r\n\x1a\n", d
+    print(f"PASS ({os.path.basename(d['path'])}, {d['size_bytes']} bytes)")
 finally:
     try: p.stdin.close()
     except: pass

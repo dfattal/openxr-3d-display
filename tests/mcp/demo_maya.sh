@@ -91,10 +91,9 @@ try:
 
     cap = structured(call(6,"tools/call",{"name":"capture_frame","arguments":{}}))
     import os
-    files = cap.get("files", [])
-    all_exist = files and all(os.path.isfile(f["path"]) and f["size_bytes"] > 1024 for f in files)
-    names = sorted(os.path.basename(f["path"]).split("_",1)[-1] for f in files)
-    check("capture_frame", all_exist, f"wrote {names}")
+    path = cap.get("path", "")
+    ok = path and os.path.isfile(path) and cap.get("size_bytes", 0) > 1024
+    check("capture_frame", ok, f"{os.path.basename(path)} ({cap.get('size_bytes', 0)} bytes)")
 
     tl = structured(call(7,"tools/call",{"name":"tail_log","arguments":{"since":0,"max":8}}))
     check("tail_log", len(tl["entries"]) > 0, f"got {len(tl['entries'])} entries")

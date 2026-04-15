@@ -652,28 +652,6 @@ oxr_mcp_tools_set_capture_handler(oxr_mcp_capture_fn fn, void *userdata)
 	pthread_mutex_unlock(&g_capture_lock);
 }
 
-// Stat the suffixed files the compositor may have written and add each
-// one that exists to the result with its byte size. Retries for up to
-// 200 ms to absorb any filesystem lag between fclose() and stat() —
-// observed intermittently on macOS for the third sequential write.
-static void
-add_written_path(cJSON *out_paths, const char *prefix, const char *suffix)
-{
-	char path[320];
-	snprintf(path, sizeof(path), "%s%s", prefix, suffix);
-	struct stat st;
-	for (int attempt = 0; attempt < 20; attempt++) {
-		if (stat(path, &st) == 0 && st.st_size > 0) {
-			cJSON *e = cJSON_CreateObject();
-			cJSON_AddStringToObject(e, "path", path);
-			cJSON_AddNumberToObject(e, "size_bytes", (double)st.st_size);
-			cJSON_AddItemToArray(out_paths, e);
-			return;
-		}
-		usleep(10000); // 10 ms
-	}
-}
-
 static cJSON *
 tool_capture_frame(const cJSON *params, void *userdata)
 {
@@ -690,33 +668,32 @@ tool_capture_frame(const cJSON *params, void *userdata)
 		    o, "error",
 		    "capture_frame not wired: compositor has not registered a handler. "
 		    "Rebuild with the MCP capture hooks enabled for this graphics API.");
-		cJSON_AddStringToObject(o, "hint", "run diff_projection and tail_log in the meantime");
 		return o;
 	}
 
-	char prefix[256];
+	char path[256];
 	long pid = (long)getpid();
 	struct oxr_session *sess = lock_session();
-	// frame_id.begun is -1 until xrBeginFrame runs; clamp to 0 so the
-	// filename doesn't render as UINT64_MAX.
 	int64_t begun = sess ? sess->frame_id.begun : 0;
 	uint64_t seq = begun >= 0 ? (uint64_t)begun : 0;
 	unlock_session();
-	// No extension — compositor appends _atlas.png / _L.png / _R.png.
-	snprintf(prefix, sizeof(prefix), "/tmp/displayxr-mcp-capture-%ld-%llu", pid, (unsigned long long)seq);
+	snprintf(path, sizeof(path), "/tmp/displayxr-mcp-capture-%ld-%llu.png", pid, (unsigned long long)seq);
 
-	bool handler_ok = fn(prefix, ud);
+	bool ok = fn(path, ud);
 
 	cJSON *r = cJSON_CreateObject();
 	cJSON_AddNumberToObject(r, "frame_id", (double)seq);
-	cJSON_AddStringToObject(r, "path_prefix", prefix);
-	cJSON *paths = cJSON_CreateArray();
-	add_written_path(paths, prefix, "_atlas.png");
-	add_written_path(paths, prefix, "_L.png");
-	add_written_path(paths, prefix, "_R.png");
-	cJSON_AddItemToObject(r, "files", paths);
-
-	if (!handler_ok && cJSON_GetArraySize(paths) == 0) {
+	cJSON_AddStringToObject(r, "path", path);
+	// Absorb any brief fclose→stat lag before reporting size.
+	struct stat st = {0};
+	for (int attempt = 0; attempt < 20; attempt++) {
+		if (stat(path, &st) == 0 && st.st_size > 0) {
+			break;
+		}
+		usleep(10000);
+	}
+	cJSON_AddNumberToObject(r, "size_bytes", (double)st.st_size);
+	if (!ok || st.st_size == 0) {
 		cJSON_AddStringToObject(r, "error", "compositor capture handler reported failure");
 	}
 	return r;
@@ -725,10 +702,9 @@ tool_capture_frame(const cJSON *params, void *userdata)
 static const struct u_mcp_tool TOOL_CAPTURE_FRAME = {
     .name = "capture_frame",
     .description =
-        "Capture the compositor's most recent composited frame. Returns an array of PNG "
-        "file paths (_atlas.png, and when the active mode has a stereo split, _L.png and "
-        "_R.png) plus byte sizes. Requires a per-API compositor hook; returns a structured "
-        "error if none is registered.",
+        "Capture the compositor's most recent composited frame — the content region of the "
+        "atlas that the compositor crops and hands to the display processor (i.e. what the "
+        "app actually wrote to its swapchain). Returns the PNG path and byte size.",
     .input_schema_json = "{\"type\":\"object\",\"properties\":{}}",
     .fn = tool_capture_frame,
 };

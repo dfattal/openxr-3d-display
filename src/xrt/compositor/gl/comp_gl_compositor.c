@@ -961,114 +961,66 @@ gl_crop_and_process_dp(struct comp_gl_compositor *c,
  *
  */
 
-static bool
-gl_write_png_subrect(const uint8_t *rgba,
-                     uint32_t row_pitch,
-                     uint32_t src_x,
-                     uint32_t src_y,
-                     uint32_t w,
-                     uint32_t h,
-                     const char *path)
-{
-	size_t bytes = (size_t)w * h * 4;
-	uint8_t *tight = malloc(bytes);
-	if (tight == NULL) {
-		return false;
-	}
-	// glReadPixels returns bottom-up; flip Y while copying the sub-rect.
-	uint32_t atlas_h_full = 0;
-	(void)atlas_h_full; // unused; caller handles flip via src_y + region math
-	for (uint32_t y = 0; y < h; y++) {
-		memcpy(tight + (size_t)y * w * 4,
-		       rgba + (size_t)(src_y + y) * row_pitch + (size_t)src_x * 4,
-		       (size_t)w * 4);
-	}
-	int rc = stbi_write_png(path, (int)w, (int)h, 4, tight, (int)(w * 4));
-	free(tight);
-	return rc != 0;
-}
-
-// Service a pending MCP capture_frame request at end of layer_commit.
-// Reads atlas_texture back via glReadPixels into a CPU buffer, flips Y
-// (GL origin is bottom-left), and writes atlas / L / R PNGs.
+// Service a pending MCP capture_frame request. Reads the content
+// region of atlas_texture (tile_columns × view_width by tile_rows ×
+// view_height — what actually got composited, matching what the
+// compositor crops and sends to the DP), flips Y, and writes one PNG.
 static void
 gl_compositor_service_mcp_capture(struct comp_gl_compositor *c)
 {
-	char prefix[U_MCP_CAPTURE_PATH_MAX];
-	uint32_t views = 0;
-	if (!u_mcp_capture_poll(&c->mcp_capture, prefix, &views)) {
+	char path[U_MCP_CAPTURE_PATH_MAX];
+	if (!u_mcp_capture_poll(&c->mcp_capture, path)) {
 		return;
 	}
-	if (c->atlas_texture == 0) {
-		u_mcp_capture_complete(&c->mcp_capture, 0);
+	if (c->atlas_texture == 0 || c->tile_columns == 0 || c->tile_rows == 0 ||
+	    c->view_width == 0 || c->view_height == 0) {
+		u_mcp_capture_complete(&c->mcp_capture, false);
 		return;
 	}
 
-	uint32_t atlas_w = c->atlas_tex_width;
-	uint32_t atlas_h = c->atlas_tex_height;
-	size_t row_pitch = (size_t)atlas_w * 4;
-	size_t bytes = row_pitch * atlas_h;
+	uint32_t content_w = c->tile_columns * c->view_width;
+	uint32_t content_h = c->tile_rows * c->view_height;
+	if (content_w > c->atlas_tex_width)  content_w = c->atlas_tex_width;
+	if (content_h > c->atlas_tex_height) content_h = c->atlas_tex_height;
+
+	size_t row_pitch = (size_t)content_w * 4;
+	size_t bytes = row_pitch * content_h;
 	uint8_t *bottom_up = malloc(bytes);
 	uint8_t *top_down = malloc(bytes);
 	if (bottom_up == NULL || top_down == NULL) {
 		free(bottom_up);
 		free(top_down);
-		u_mcp_capture_complete(&c->mcp_capture, 0);
+		u_mcp_capture_complete(&c->mcp_capture, false);
 		return;
 	}
 
-	// Pull pixels off the atlas. Bind a temporary FBO so we don't
-	// clobber whatever the caller has bound.
+	// Attach atlas to a temporary read FBO; glReadPixels returns origin-
+	// lower-left so we flip Y into top_down.
 	GLuint prev_read_fbo = 0;
 	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, (GLint *)&prev_read_fbo);
 	GLuint fbo = 0;
 	glGenFramebuffers(1, &fbo);
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
 	glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c->atlas_texture, 0);
-	glReadPixels(0, 0, (GLsizei)atlas_w, (GLsizei)atlas_h, GL_RGBA, GL_UNSIGNED_BYTE, bottom_up);
+	// Atlas's lower-left origin means our content region sits in the
+	// upper-left of the texture, at (0, atlas_h - content_h).
+	GLint src_y = (GLint)c->atlas_tex_height - (GLint)content_h;
+	if (src_y < 0) src_y = 0;
+	glReadPixels(0, src_y, (GLsizei)content_w, (GLsizei)content_h, GL_RGBA, GL_UNSIGNED_BYTE, bottom_up);
 	glFinish();
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, prev_read_fbo);
 	glDeleteFramebuffers(1, &fbo);
 
-	// Flip vertically: glReadPixels returns origin-lower-left.
-	for (uint32_t y = 0; y < atlas_h; y++) {
+	for (uint32_t y = 0; y < content_h; y++) {
 		memcpy(top_down + (size_t)y * row_pitch,
-		       bottom_up + (size_t)(atlas_h - 1 - y) * row_pitch,
+		       bottom_up + (size_t)(content_h - 1 - y) * row_pitch,
 		       row_pitch);
 	}
 	free(bottom_up);
 
-	uint32_t written = 0;
-	char path[U_MCP_CAPTURE_PATH_MAX + 32];
-
-	if (views & U_MCP_CAPTURE_ATLAS) {
-		snprintf(path, sizeof(path), "%s_atlas.png", prefix);
-		if (stbi_write_png(path, (int)atlas_w, (int)atlas_h, 4, top_down, (int)row_pitch)) {
-			written |= U_MCP_CAPTURE_ATLAS;
-		}
-	}
-	if (c->tile_columns > 0 && c->tile_rows > 0 &&
-	    (c->tile_columns * c->tile_rows) >= 2) {
-		uint32_t eye_w = atlas_w / c->tile_columns;
-		uint32_t eye_h = atlas_h / c->tile_rows;
-		if (views & U_MCP_CAPTURE_LEFT) {
-			snprintf(path, sizeof(path), "%s_L.png", prefix);
-			if (gl_write_png_subrect(top_down, (uint32_t)row_pitch, 0, 0, eye_w, eye_h, path)) {
-				written |= U_MCP_CAPTURE_LEFT;
-			}
-		}
-		if (views & U_MCP_CAPTURE_RIGHT) {
-			uint32_t rx = (c->tile_columns >= 2) ? eye_w : 0;
-			uint32_t ry = (c->tile_columns >= 2) ? 0 : eye_h;
-			snprintf(path, sizeof(path), "%s_R.png", prefix);
-			if (gl_write_png_subrect(top_down, (uint32_t)row_pitch, rx, ry, eye_w, eye_h, path)) {
-				written |= U_MCP_CAPTURE_RIGHT;
-			}
-		}
-	}
-
+	bool ok = stbi_write_png(path, (int)content_w, (int)content_h, 4, top_down, (int)row_pitch) != 0;
 	free(top_down);
-	u_mcp_capture_complete(&c->mcp_capture, written);
+	u_mcp_capture_complete(&c->mcp_capture, ok);
 }
 
 

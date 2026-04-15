@@ -11,16 +11,14 @@
 #include <string.h>
 #include <time.h>
 
-// Forward decl from state_trackers/oxr/oxr_mcp_tools.h — we intentionally
-// don't pull in that header (which includes openxr.h) from aux_util.
-// The signature must stay in sync with oxr_mcp_capture_fn there.
+// Forward-decl from state_trackers/oxr/oxr_mcp_tools.h — intentionally
+// don't pull that header (which includes openxr.h) into aux_util.
 typedef bool (*oxr_mcp_capture_fn)(const char *path, void *userdata);
 extern void
 oxr_mcp_tools_set_capture_handler(oxr_mcp_capture_fn fn, void *userdata);
 
-/*! PNG encode of a 3024×1964 atlas is ~80–150 ms per file via stb_image_write
- *  on an M1, and we may emit three (atlas + L + R). 3 s gives enough headroom
- *  while still timing out if the compositor thread has genuinely stalled. */
+/*! PNG encode of a 3024×1964 atlas is ~80–150 ms on an M1; 3 s is
+ *  ample headroom while still tripping on a genuine stall. */
 #define CAPTURE_TIMEOUT_MS 3000
 
 void
@@ -38,33 +36,32 @@ u_mcp_capture_fini(struct u_mcp_capture_request *req)
 	pthread_mutex_destroy(&req->lock);
 }
 
-// Invoked on the MCP server thread. Hands off to the compositor thread
-// and blocks until done or timeout.
+// Invoked on the MCP server thread. Hands off to the compositor and
+// blocks until done or timeout.
 static bool
-handler_adapter(const char *path_prefix, void *userdata)
+handler_adapter(const char *path, void *userdata)
 {
 	struct u_mcp_capture_request *req = userdata;
-	if (req == NULL || path_prefix == NULL) {
+	if (req == NULL || path == NULL) {
 		return false;
 	}
 
 	pthread_mutex_lock(&req->lock);
-	// Truncate safely — path_prefix is caller-bounded but be defensive.
-	size_t n = strlen(path_prefix);
-	if (n >= sizeof(req->path_prefix)) {
-		n = sizeof(req->path_prefix) - 1;
+	size_t n = strlen(path);
+	if (n >= sizeof(req->path)) {
+		n = sizeof(req->path) - 1;
 	}
-	memcpy(req->path_prefix, path_prefix, n);
-	req->path_prefix[n] = '\0';
-	// Default to full atlas + L/R until the tool surfaces a view arg;
-	// once oxr_mcp_tools threads a view through userdata we'll honor it.
-	req->views = U_MCP_CAPTURE_ALL;
+	memcpy(req->path, path, n);
+	req->path[n] = '\0';
 	req->pending = true;
 	req->done = false;
-	req->views_written = 0;
+	req->success = false;
 
+	// Absolute deadline for pthread_cond_timedwait. C11's timespec_get is
+	// portable (POSIX CLOCK_REALTIME / MSVC alike); clock_gettime isn't
+	// — MSVC's <time.h> has no CLOCK_REALTIME symbol.
 	struct timespec deadline;
-	clock_gettime(CLOCK_REALTIME, &deadline);
+	(void)timespec_get(&deadline, TIME_UTC);
 	deadline.tv_sec += CAPTURE_TIMEOUT_MS / 1000;
 	deadline.tv_nsec += (CAPTURE_TIMEOUT_MS % 1000) * 1000000L;
 	if (deadline.tv_nsec >= 1000000000L) {
@@ -75,16 +72,13 @@ handler_adapter(const char *path_prefix, void *userdata)
 	while (!req->done) {
 		int rc = pthread_cond_timedwait(&req->cond, &req->lock, &deadline);
 		if (rc != 0) {
-			// Timed out — abandon; any late completion from the
-			// compositor will find !pending and no-op. We leak
-			// nothing because the buffer is on the struct.
 			req->pending = false;
 			pthread_mutex_unlock(&req->lock);
 			return false;
 		}
 	}
 
-	bool ok = req->views_written != 0;
+	bool ok = req->success;
 	req->pending = false;
 	pthread_mutex_unlock(&req->lock);
 	return ok;
@@ -103,23 +97,22 @@ u_mcp_capture_uninstall(void)
 }
 
 bool
-u_mcp_capture_poll(struct u_mcp_capture_request *req, char *out_path_prefix, uint32_t *out_views)
+u_mcp_capture_poll(struct u_mcp_capture_request *req, char *out_path)
 {
 	pthread_mutex_lock(&req->lock);
 	bool pending = req->pending && !req->done;
 	if (pending) {
-		memcpy(out_path_prefix, req->path_prefix, sizeof(req->path_prefix));
-		*out_views = req->views;
+		memcpy(out_path, req->path, sizeof(req->path));
 	}
 	pthread_mutex_unlock(&req->lock);
 	return pending;
 }
 
 void
-u_mcp_capture_complete(struct u_mcp_capture_request *req, uint32_t views_written)
+u_mcp_capture_complete(struct u_mcp_capture_request *req, bool success)
 {
 	pthread_mutex_lock(&req->lock);
-	req->views_written = views_written;
+	req->success = success;
 	req->done = true;
 	pthread_cond_signal(&req->cond);
 	pthread_mutex_unlock(&req->lock);
