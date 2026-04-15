@@ -8,13 +8,13 @@
 
 #include "u_mcp_log_ring.h"
 
+#include "os/os_time.h"
 #include "util/u_logging.h"
 
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #define RING_SIZE 512 /* must be power of two */
 #if (RING_SIZE & (RING_SIZE - 1)) != 0
@@ -26,13 +26,9 @@ static struct u_mcp_log_entry g_ring[RING_SIZE];
 static uint64_t g_next_seq = 1;
 static bool g_installed = false;
 
-static int64_t
-mono_ns(void)
-{
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
-}
+// Use the codebase's monotonic-time helper — it wraps clock_gettime on
+// POSIX and QueryPerformanceCounter on Windows (MSVC has no CLOCK_MONOTONIC).
+#define mono_ns() ((int64_t)os_monotonic_get_ns())
 
 static void
 sink_cb(const char *file, int line, const char *func, enum u_logging_level level, const char *format, va_list args,

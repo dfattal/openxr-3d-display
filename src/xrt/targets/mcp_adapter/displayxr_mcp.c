@@ -129,7 +129,7 @@ main(int argc, char **argv)
 	}
 
 	if (list_mode) {
-		pid_t pids[64];
+		long pids[64];
 		size_t n = u_mcp_enumerate_sessions(pids, 64);
 		for (size_t i = 0; i < n; i++) {
 			printf("%ld\n", (long)pids[i]);
@@ -142,9 +142,9 @@ main(int argc, char **argv)
 		return 2;
 	}
 
-	pid_t pid = 0;
+	long pid = 0;
 	if (strcmp(pid_arg, "auto") == 0) {
-		pid_t pids[64];
+		long pids[64];
 		size_t n = u_mcp_enumerate_sessions(pids, 64);
 		if (n == 0) {
 			fprintf(stderr, "displayxr-mcp: no running MCP sessions found\n");
@@ -156,7 +156,7 @@ main(int argc, char **argv)
 		}
 		pid = pids[0];
 	} else {
-		pid = (pid_t)strtol(pid_arg, NULL, 10);
+		pid = (long)strtol(pid_arg, NULL, 10);
 		if (pid <= 0) {
 			usage(argv[0]);
 			return 2;

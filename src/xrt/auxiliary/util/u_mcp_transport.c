@@ -43,13 +43,13 @@ struct u_mcp_conn
 };
 
 static void
-build_sock_path(char *out, size_t cap, pid_t pid)
+build_sock_path(char *out, size_t cap, long pid)
 {
 	snprintf(out, cap, "%s%ld%s", SOCK_PREFIX, (long)pid, SOCK_SUFFIX);
 }
 
 struct u_mcp_listener *
-u_mcp_listener_open(pid_t pid)
+u_mcp_listener_open(long pid)
 {
 	struct u_mcp_listener *l = U_TYPED_CALLOC(struct u_mcp_listener);
 	l->fd = -1;
@@ -183,7 +183,7 @@ u_mcp_conn_fd(struct u_mcp_conn *conn)
 }
 
 struct u_mcp_conn *
-u_mcp_conn_connect(pid_t pid)
+u_mcp_conn_connect(long pid)
 {
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (fd < 0) {
@@ -202,7 +202,7 @@ u_mcp_conn_connect(pid_t pid)
 }
 
 size_t
-u_mcp_enumerate_sessions(pid_t *out_pids, size_t cap)
+u_mcp_enumerate_sessions(long *out_pids, size_t cap)
 {
 	size_t n = 0;
 	DIR *d = opendir("/tmp");
@@ -230,7 +230,7 @@ u_mcp_enumerate_sessions(pid_t *out_pids, size_t cap)
 		if (pid <= 0) {
 			continue;
 		}
-		out_pids[n++] = (pid_t)pid;
+		out_pids[n++] = (long)pid;
 	}
 	closedir(d);
 	return n;
@@ -263,13 +263,13 @@ struct u_mcp_conn
 };
 
 static void
-build_pipe_name(char *out, size_t cap, pid_t pid)
+build_pipe_name(char *out, size_t cap, long pid)
 {
 	snprintf(out, cap, PIPE_PREFIX "%ld", (long)pid);
 }
 
 struct u_mcp_listener *
-u_mcp_listener_open(pid_t pid)
+u_mcp_listener_open(long pid)
 {
 	struct u_mcp_listener *l = U_TYPED_CALLOC(struct u_mcp_listener);
 	build_pipe_name(l->name, sizeof(l->name), pid);
@@ -381,7 +381,7 @@ u_mcp_conn_fd(struct u_mcp_conn *conn)
 }
 
 struct u_mcp_conn *
-u_mcp_conn_connect(pid_t pid)
+u_mcp_conn_connect(long pid)
 {
 	char name[128];
 	build_pipe_name(name, sizeof(name), pid);
@@ -398,7 +398,7 @@ u_mcp_conn_connect(pid_t pid)
 }
 
 size_t
-u_mcp_enumerate_sessions(pid_t *out_pids, size_t cap)
+u_mcp_enumerate_sessions(long *out_pids, size_t cap)
 {
 	size_t n = 0;
 	WIN32_FIND_DATAA fd;
@@ -414,7 +414,7 @@ u_mcp_enumerate_sessions(pid_t *out_pids, size_t cap)
 		}
 		long pid = strtol(p + strlen(prefix), NULL, 10);
 		if (pid > 0 && n < cap) {
-			out_pids[n++] = (pid_t)pid;
+			out_pids[n++] = (long)pid;
 		}
 	} while (FindNextFileA(h, &fd));
 	FindClose(h);

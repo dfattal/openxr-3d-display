@@ -11,7 +11,6 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,7 +26,7 @@ struct u_mcp_conn;
  * The caller unlinks via u_mcp_listener_close().
  */
 struct u_mcp_listener *
-u_mcp_listener_open(pid_t pid);
+u_mcp_listener_open(long pid);
 
 /*!
  * Accept one connection. Blocks. Returns NULL when the listener is closed
@@ -64,7 +63,7 @@ u_mcp_conn_close(struct u_mcp_conn *conn);
  * Connect to a per-PID listener as a client (used by the displayxr-mcp adapter).
  */
 struct u_mcp_conn *
-u_mcp_conn_connect(pid_t pid);
+u_mcp_conn_connect(long pid);
 
 /*!
  * Raw fd / handle for poll()-style multiplexing by the adapter.
@@ -78,7 +77,7 @@ u_mcp_conn_fd(struct u_mcp_conn *conn);
  * Fills @p out_pids (up to @p cap entries), returns count found.
  */
 size_t
-u_mcp_enumerate_sessions(pid_t *out_pids, size_t cap);
+u_mcp_enumerate_sessions(long *out_pids, size_t cap);
 
 #ifdef __cplusplus
 }
