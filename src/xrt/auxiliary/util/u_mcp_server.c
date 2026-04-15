@@ -19,7 +19,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #define LOG_PFX "[mcp] "
 #define MAX_TOOLS 32
@@ -435,7 +434,7 @@ u_mcp_server_maybe_start(void)
 	u_mcp_server_register_tool(&ECHO_TOOL);
 	u_mcp_server_register_tool(&TAIL_LOG_TOOL);
 
-	g_server.listener = u_mcp_listener_open(getpid());
+	g_server.listener = u_mcp_listener_open(u_mcp_self_pid());
 	if (g_server.listener == NULL) {
 		U_LOG_W(LOG_PFX "failed to open listener; MCP disabled");
 		return;
@@ -448,7 +447,7 @@ u_mcp_server_maybe_start(void)
 		return;
 	}
 	g_server.thread_started = true;
-	U_LOG_I(LOG_PFX "server started (pid=%ld)", (long)getpid());
+	U_LOG_I(LOG_PFX "server started (pid=%ld)", (long)u_mcp_self_pid());
 }
 
 void

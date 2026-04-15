@@ -20,6 +20,14 @@ struct u_mcp_listener;
 struct u_mcp_conn;
 
 /*!
+ * Return the current process id as a long. Hides the
+ * getpid() / GetCurrentProcessId() platform split so callers don't
+ * need <unistd.h> (MSVC has neither).
+ */
+long
+u_mcp_self_pid(void);
+
+/*!
  * Bind a per-PID listener. Returns NULL on failure.
  *
  * On POSIX this creates `/tmp/displayxr-mcp-<pid>.sock` with 0600 perms.

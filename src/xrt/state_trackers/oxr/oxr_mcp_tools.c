@@ -22,6 +22,9 @@
 #include "oxr_objects.h"
 
 #include "util/u_mcp_server.h"
+#include "util/u_mcp_transport.h"
+
+#include "os/os_time.h"
 
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_limits.h"
@@ -33,7 +36,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 static pthread_mutex_t g_sess_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct oxr_session *g_sess = NULL;
@@ -147,7 +149,7 @@ tool_list_sessions(const cJSON *params, void *userdata)
 	struct oxr_session *sess = lock_session();
 	if (sess != NULL) {
 		cJSON *e = cJSON_CreateObject();
-		cJSON_AddNumberToObject(e, "pid", (double)getpid());
+		cJSON_AddNumberToObject(e, "pid", (double)u_mcp_self_pid());
 		// Phase A is single-session; display_id is 0.
 		cJSON_AddNumberToObject(e, "display_id", 0);
 		cJSON_AddStringToObject(e, "api", gfx_api_name(sess));
@@ -672,7 +674,7 @@ tool_capture_frame(const cJSON *params, void *userdata)
 	}
 
 	char path[256];
-	long pid = (long)getpid();
+	long pid = (long)u_mcp_self_pid();
 	struct oxr_session *sess = lock_session();
 	int64_t begun = sess ? sess->frame_id.begun : 0;
 	uint64_t seq = begun >= 0 ? (uint64_t)begun : 0;
@@ -690,7 +692,7 @@ tool_capture_frame(const cJSON *params, void *userdata)
 		if (stat(path, &st) == 0 && st.st_size > 0) {
 			break;
 		}
-		usleep(10000);
+		os_nanosleep(10 * 1000 * 1000); // 10 ms
 	}
 	cJSON_AddNumberToObject(r, "size_bytes", (double)st.st_size);
 	if (!ok || st.st_size == 0) {

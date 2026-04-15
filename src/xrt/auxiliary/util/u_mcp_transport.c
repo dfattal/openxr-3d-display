@@ -31,6 +31,12 @@
 
 #ifndef XRT_OS_WINDOWS
 
+long
+u_mcp_self_pid(void)
+{
+	return (long)getpid();
+}
+
 struct u_mcp_listener
 {
 	int fd;
@@ -246,6 +252,12 @@ u_mcp_enumerate_sessions(long *out_pids, size_t cap)
 #include <process.h>
 #include <stdio.h>
 #include <string.h>
+
+long
+u_mcp_self_pid(void)
+{
+	return (long)GetCurrentProcessId();
+}
 
 #define PIPE_PREFIX "\\\\.\\pipe\\displayxr-mcp-"
 
