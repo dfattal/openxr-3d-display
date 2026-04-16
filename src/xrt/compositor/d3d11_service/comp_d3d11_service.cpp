@@ -7941,6 +7941,13 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 	bool is_headless_relay = (xsi != nullptr && xsi->is_bridge_relay);
 	if (is_headless_relay) {
 		U_LOG_W("Bridge relay session: skipping render resources (headless, events only)");
+		// Flag globally visible so the bridge-aware compositor override kicks
+		// in and qwerty's pose integration freezes.
+		g_bridge_relay_active = true;
+#ifdef XRT_BUILD_DRIVER_QWERTY
+		qwerty_set_bridge_relay_active(true);
+		U_LOG_W("qwerty: gate engaged (bridge relay active)");
+#endif
 	}
 
 	// Initialize per-client render resources (window, swap chain, display processor)

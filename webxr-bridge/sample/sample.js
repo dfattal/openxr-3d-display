@@ -24,6 +24,10 @@ const exitBtn = document.getElementById('exit-xr');
 
 function log(msg) {
   statusEl.textContent += msg + '\n';
+  // Keep the panel from growing unbounded — trim old lines.
+  if (statusEl.textContent.length > 8000) {
+    statusEl.textContent = statusEl.textContent.slice(-6000);
+  }
   statusEl.scrollTop = statusEl.scrollHeight;
   console.log('[sample]', msg);
 }
@@ -64,7 +68,7 @@ const VK = {
   SHIFT: 16,
 };
 const keyDown = new Set();           // VK codes currently down
-let mouseRightDown = false;
+let mouseLookDown = false;           // Left-mouse-drag for look (matches cube_handle)
 let mouseLastX = 0, mouseLastY = 0;
 const RIG_DEFAULTS = {
   pos: [0, 0, 0],     // additive offset to nominalViewerPosition
@@ -76,7 +80,32 @@ const RIG_DEFAULTS = {
   vHeight: VIRTUAL_DISPLAY_HEIGHT,
 };
 const rig = JSON.parse(JSON.stringify(RIG_DEFAULTS));
-function rigReset() { Object.assign(rig, JSON.parse(JSON.stringify(RIG_DEFAULTS))); }
+function rigReset() {
+  rig.pos = [0, 0, 0];
+  rig.yaw = 0;
+  rig.pitch = 0;
+  rig.ipdFactor = 1.0;
+  rig.parallaxFactor = 1.0;
+  rig.perspectiveFactor = 1.0;
+  rig.vHeight = VIRTUAL_DISPLAY_HEIGHT;
+  // Also drop any phantom held keys — bridge's hook can miss keyup events
+  // during focus changes (alt-tab, menus), leaving stuck keys that drive
+  // continuous motion/rotation.
+  keyDown.clear();
+  mouseLookDown = false;
+  // Force the origin offset to re-calibrate on the next eye-pose frame, so
+  // the current head position becomes the new display-centric baseline.
+  originOffset = null;
+  recalibKey = '';
+  // Also reset prevTimeMs so the next frame doesn't see a huge dt.
+  prevTimeMs = 0;
+  // Force three.js to re-read all GL state from the context. Our monkey-
+  // patched setRenderTarget + per-eye viewport/scissor juggling can leave
+  // three.js's cached state out of sync with the real WebGL state — which
+  // only resyncs on focus-regain via Chrome's context-restore path. Calling
+  // resetState() does the same thing on demand.
+  if (renderer) renderer.resetState();
+}
 
 // --- Three.js objects ---
 
@@ -162,12 +191,26 @@ function createScene() {
 
 // --- Projection helpers ---
 
-// Local Kooima asymmetric frustum from eye position relative to display center.
-// Matches display3d_view.c: frustum edges = near * (screen_edge - eye_xy) / eye_z.
-function buildKooimaProjection(eye, displayW, displayH) {
-  const ex = eye[0], ey = eye[1], ez = eye[2];
-  const halfW = displayW * 0.5;
-  const halfH = displayH * 0.5;
+// Local Kooima asymmetric frustum — EXACT port of test_apps/common/display3d_view.c
+// (display3d_compute_view + display3d_compute_projection).
+//   m2v        = vHeight / physicalScreenH
+//   es         = perspectiveFactor * m2v          (eye scale)
+//   eye_scaled = eye * es                         (passed to projection)
+//   kScreenW   = physicalScreenW * m2v            (virtual screen size)
+//   kScreenH   = physicalScreenH * m2v
+//   l = near * (-kScreenW/2 - eye_scaled.x) / eye_scaled.z     (similar triangles)
+//   (same shape for r, t, b)
+// The camera world position MUST be built from the same eye_scaled so the
+// view matrix and projection matrix agree.
+function buildKooimaProjection(eye, displayW, displayH, m2v, perspFac) {
+  const vh = (m2v && m2v > 0) ? m2v : 1.0;
+  const pf = (perspFac && perspFac > 0) ? perspFac : 1.0;
+  const es = pf * vh;
+  const ex = eye[0] * es, ey = eye[1] * es;
+  let ez = eye[2] * es;
+  if (ez <= 0.001) ez = 0.65;    // safety fallback (matches display3d_view.c:186)
+  const halfW = displayW * 0.5 * vh;
+  const halfH = displayH * 0.5 * vh;
   const l = NEAR * (-halfW - ex) / ez;
   const r = NEAR * (halfW - ex) / ez;
   const t = NEAR * (halfH - ey) / ez;
@@ -211,26 +254,36 @@ function onXRFrame(time, frame) {
   cubeRotation = (cubeRotation + dt * CUBE_ROT_RATE) % (Math.PI * 2);
   if (cubeMesh) cubeMesh.rotation.y = cubeRotation;
 
-  // Apply held-key movement to rig. Speed scales with vHeight so zoom feels
-  // proportional (matches cube_handle: base 0.1 units/sec * m2v / scaleFactor).
-  const moveSpeed = 0.3 * rig.vHeight;  // m/s
-  const rotSpeed = 1.2;                 // rad/s
+  // Apply held-key movement to rig. cube_handle uses 0.1 * m2v / scaleFactor;
+  // since our rig.vHeight = cube_handle's (virtualDisplayHeight / scaleFactor)
+  // already, this simplifies to 0.1 * m2v. Compute m2v locally (same formula
+  // as used lower down for the projection).
+  const _di0 = displayXR ? displayXR.displayInfo : null;
+  const _wi0 = displayXR ? displayXR.windowInfo : null;
+  const _useWin0 = !!(_wi0 && _wi0.valid && _wi0.windowSizeMeters);
+  const _screenH0 = _useWin0 ? _wi0.windowSizeMeters[1]
+                             : (_di0 && _di0.displaySizeMeters ? _di0.displaySizeMeters[1] : 0.194);
+  const _m2v0 = (_screenH0 > 0) ? (rig.vHeight / _screenH0) : 1.0;
+  const moveSpeed = 0.1 * _m2v0;                         // m/s
+  const rotSpeed = 1.2;                                  // rad/s
   if (dt > 0) {
     let mx = 0, my = 0, mz = 0;
-    if (keyDown.has(VK.W)) mz -= 1;
+    if (keyDown.has(VK.W)) mz -= 1;   // forward = local -Z
     if (keyDown.has(VK.S)) mz += 1;
-    if (keyDown.has(VK.A)) mx -= 1;
+    if (keyDown.has(VK.A)) mx -= 1;   // left = local -X
     if (keyDown.has(VK.D)) mx += 1;
-    if (keyDown.has(VK.Q)) my -= 1;
+    if (keyDown.has(VK.Q)) my -= 1;   // down = local -Y
     if (keyDown.has(VK.E)) my += 1;
     if (mx || my || mz) {
-      // Rotate movement vector by rig yaw (forward = -Z in scene).
-      const cy = Math.cos(rig.yaw), sy = Math.sin(rig.yaw);
-      const wx = cy * mx + sy * mz;
-      const wz = -sy * mx + cy * mz;
-      rig.pos[0] += wx * moveSpeed * dt;
-      rig.pos[1] += my * moveSpeed * dt;
-      rig.pos[2] += wz * moveSpeed * dt;
+      // Rotate the full move vector by the rig's yaw+pitch quaternion so all
+      // six directions are rig-local (matches cube_handle's 6DOF flying cam).
+      const moveQ = new THREE.Quaternion();
+      moveQ.setFromEuler(new THREE.Euler(rig.pitch, rig.yaw, 0, 'YXZ'));
+      const mv = new THREE.Vector3(mx, my, mz);
+      mv.applyQuaternion(moveQ);
+      rig.pos[0] += mv.x * moveSpeed * dt;
+      rig.pos[1] += mv.y * moveSpeed * dt;
+      rig.pos[2] += mv.z * moveSpeed * dt;
     }
     if (keyDown.has(VK.LEFT))  rig.yaw   += rotSpeed * dt;
     if (keyDown.has(VK.RIGHT)) rig.yaw   -= rotSpeed * dt;
@@ -300,20 +353,6 @@ function onXRFrame(time, frame) {
     }
   }
 
-  // Diagnostic log (once every 300 frames ~ 5s).
-  if (frameCount % 300 === 1) {
-    const fb = xrLayer;
-    log('diag: fb=' + fb.framebufferWidth + 'x' + fb.framebufferHeight +
-        ' tile=' + tileW + 'x' + tileH +
-        ' winPx=' + (wi && wi.windowPixelSize ? wi.windowPixelSize.join('x') : 'none') +
-        ' rig=pos[' + rig.pos.map(v => v.toFixed(2)).join(',') + ']' +
-        ' yaw=' + rig.yaw.toFixed(2) + ' pitch=' + rig.pitch.toFixed(2) +
-        ' vH=' + rig.vHeight.toFixed(3) +
-        ' ipd=' + rig.ipdFactor.toFixed(2) +
-        ' par=' + rig.parallaxFactor.toFixed(2) +
-        ' per=' + rig.perspectiveFactor.toFixed(2));
-  }
-
   // Compute pair midpoint (head position) for IPD/parallax tunables.
   let headMid = nominalPos;
   if (eyePoses && eyePoses.length > 0 && originOffset) {
@@ -335,6 +374,17 @@ function onXRFrame(time, frame) {
   // Rig orientation as a three.js quaternion (yaw around Y, pitch around X).
   const rigQuat = new THREE.Quaternion();
   rigQuat.setFromEuler(new THREE.Euler(rig.pitch, rig.yaw, 0, 'YXZ'));
+
+  // Diagnostic log (once every 600 frames ~ 10s).
+  if (frameCount % 600 === 1) {
+    log('diag: tile=' + tileW + 'x' + tileH +
+        ' rig=[' + rig.pos.map(v => v.toFixed(2)).join(',') + ']' +
+        ' yaw=' + rig.yaw.toFixed(2) + ' pitch=' + rig.pitch.toFixed(2) +
+        ' vH=' + rig.vHeight.toFixed(3) +
+        ' ipd=' + rig.ipdFactor.toFixed(2) +
+        ' par=' + rig.parallaxFactor.toFixed(2) +
+        ' per=' + rig.perspectiveFactor.toFixed(2));
+  }
 
   for (let eye = 0; eye < tileLayout.eyeCount; eye++) {
     const tileX = tileLayout.monoMode ? 0 : (eye % tileLayout.tileColumns);
@@ -372,24 +422,20 @@ function onXRFrame(time, frame) {
       eyePos = [nominalPos[0] + ipdHalf - winOffX, nominalPos[1] - winOffY, nominalPos[2]];
     }
 
-    // Kooima projection (asymmetric frustum) computed locally from eye
-    // position + screen — screen-relative angles are invariant to rig pose.
+    // Kooima projection: screen scaled by m2v (vHeight zoom, FOV invariant),
+    // eye scaled by perspectiveFactor (FOV change). Camera world position
+    // uses the same eye*perspFac so view and projection stay consistent.
     if (screenHm > 0) {
-      camera.projectionMatrix.copy(buildKooimaProjection(eyePos, screenWm, screenHm));
+      camera.projectionMatrix.copy(
+        buildKooimaProjection(eyePos, screenWm, screenHm, m2v, rig.perspectiveFactor));
     } else {
       camera.projectionMatrix.copy(buildFallbackProjection(tileW, tileH));
     }
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
 
-    // Camera world position = rig.pos + rigQuat * (eye_in_rig * m2v_eff).
-    // perspectiveFactor scales the eye XYZ in the m2v step — zoom without
-    // moving the rig (cube_handle's perspective_factor).
-    const m2v_eff = m2v * rig.perspectiveFactor;
-    const eyeInRig = new THREE.Vector3(
-      eyePos[0] * m2v_eff,
-      eyePos[1] * m2v_eff,
-      eyePos[2] * m2v_eff
-    );
+    // eye_scaled = eye * perspectiveFactor * m2v (matches display3d_view.c)
+    const es = rig.perspectiveFactor * m2v;
+    const eyeInRig = new THREE.Vector3(eyePos[0] * es, eyePos[1] * es, eyePos[2] * es);
     eyeInRig.applyQuaternion(rigQuat);
     camera.position.set(
       rig.pos[0] + eyeInRig.x,
@@ -464,20 +510,23 @@ async function enterXR() {
     const m = event.detail;
     if (m.kind === 'key') {
       if (m.down) keyDown.add(m.code); else keyDown.delete(m.code);
-      if (m.down && !m.repeat) {
-        if (m.code === VK.SPACE || m.code === VK.R) rigReset();
+      if (m.down) {
+        if (m.code === VK.SPACE || m.code === VK.R) {
+          rigReset();
+          log('rig reset');
+        }
       }
     } else if (m.kind === 'mouse') {
-      if (m.event === 'down' && m.button === 1) {
-        mouseRightDown = true;
+      if (m.event === 'down' && m.button === 0) {
+        // Left-mouse-drag = look (matches cube_handle_d3d11_win).
+        mouseLookDown = true;
         mouseLastX = m.x; mouseLastY = m.y;
-      } else if (m.event === 'up' && m.button === 1) {
-        mouseRightDown = false;
-      } else if (m.event === 'move' && mouseRightDown) {
+      } else if (m.event === 'up' && m.button === 0) {
+        mouseLookDown = false;
+      } else if (m.event === 'move' && mouseLookDown) {
         const dx = m.x - mouseLastX;
         const dy = m.y - mouseLastY;
         mouseLastX = m.x; mouseLastY = m.y;
-        // Mouse look: dx → yaw, dy → pitch (matches cube_handle 0.005 rad/px).
         rig.yaw -= dx * 0.005;
         rig.pitch -= dy * 0.005;
         if (rig.pitch > 1.4) rig.pitch = 1.4;
@@ -489,7 +538,7 @@ async function enterXR() {
       if (mods.shift)      rig.ipdFactor = Math.max(0, Math.min(1, rig.ipdFactor + notches * 0.05));
       else if (mods.ctrl)  rig.parallaxFactor = Math.max(0, Math.min(1, rig.parallaxFactor + notches * 0.05));
       else if (mods.alt)   rig.perspectiveFactor = Math.max(0.1, Math.min(10, rig.perspectiveFactor * (notches > 0 ? 1.1 : 1/1.1)));
-      else                  rig.vHeight = Math.max(0.05, Math.min(2.0, rig.vHeight * (notches > 0 ? 1/1.1 : 1.1))); // smaller vHeight = zoom in
+      else                  rig.vHeight = Math.max(0.05, Math.min(2.0, rig.vHeight * (notches > 0 ? 1/1.1 : 1.1)));
     }
   });
 
@@ -552,6 +601,15 @@ async function exitXR() {
 
 enterBtn.addEventListener('click', enterXR);
 exitBtn.addEventListener('click', exitXR);
+
+// Clear stuck-key state on focus loss / visibility change. The bridge's
+// low-level hook can miss keyup events when the compositor window isn't the
+// foreground window, leaving phantom keys in keyDown that drive runaway
+// rotation/movement.
+window.addEventListener('blur', () => { keyDown.clear(); mouseLookDown = false; });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { keyDown.clear(); mouseLookDown = false; }
+});
 
 if (navigator.xr) {
   navigator.xr.isSessionSupported('immersive-vr').then(ok => {

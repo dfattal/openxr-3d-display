@@ -229,6 +229,20 @@ qwerty_get_view_state(struct xrt_device **xdevs,
 void
 qwerty_set_process_keys(struct xrt_device **xdevs, size_t xdev_count, bool enabled);
 
+/*!
+ * Suppress qwerty pose integration when a WebXR bridge session is active.
+ * Even with key processing gated off, qwerty_get_tracked_pose keeps
+ * accumulating position from stale *_pressed flags / mouse deltas on every
+ * xrLocateViews call — which shows up as runtime head drift in the bridge's
+ * reported eye poses.
+ *
+ * @param active true while any is_bridge_relay session is connected.
+ *
+ * @ingroup drv_qwerty
+ */
+void
+qwerty_set_bridge_relay_active(bool active);
+
 
 #ifdef __cplusplus
 }

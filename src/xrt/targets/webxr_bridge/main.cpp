@@ -608,8 +608,12 @@ static LRESULT CALLBACK mouse_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 
 		switch (wParam) {
 		case WM_MOUSEMOVE:
-			e.kind = InputEvent::MOUSE; e.mevent = 0;
-			push_input_event(e);
+			// Only forward moves during drag (any button held). Idle cursor
+			// movement floods the WS and can hang Chrome.
+			if (buttons != 0) {
+				e.kind = InputEvent::MOUSE; e.mevent = 0;
+				push_input_event(e);
+			}
 			break;
 		case WM_LBUTTONDOWN: e.kind = InputEvent::MOUSE; e.mevent = 1; e.button = 0; e.down = true;  push_input_event(e); break;
 		case WM_LBUTTONUP:   e.kind = InputEvent::MOUSE; e.mevent = 2; e.button = 0; e.down = false; push_input_event(e); break;

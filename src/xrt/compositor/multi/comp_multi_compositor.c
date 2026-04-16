@@ -1320,6 +1320,10 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 			}
 		}
 		g_bridge_relay_active = any_bridge;
+#ifdef XRT_BUILD_DRIVER_QWERTY
+		extern void qwerty_set_bridge_relay_active(bool);
+		qwerty_set_bridge_relay_active(any_bridge);
+#endif
 		if (!any_bridge) {
 			U_LOG_W("Bridge relay session disconnected — legacy sessions revert to compromise scaling");
 		}
@@ -1954,6 +1958,10 @@ multi_compositor_create(struct multi_system_compositor *msc,
 		extern bool g_bridge_relay_active;
 		g_bridge_relay_active = true;
 		U_LOG_W("Bridge relay session connected — legacy sessions use mode-native tile layout");
+#ifdef XRT_BUILD_DRIVER_QWERTY
+		extern void qwerty_set_bridge_relay_active(bool);
+		qwerty_set_bridge_relay_active(true);
+#endif
 	}
 
 	u_pa_info(                                         //
