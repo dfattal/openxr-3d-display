@@ -19,6 +19,7 @@
 #ifdef XRT_OS_WINDOWS
 #include "util/u_windows.h"
 #include "service_config.h"
+#include "service_orchestrator.h"
 #include "service_tray_win.h"
 #include <stdlib.h> // __argc, __argv
 #endif
@@ -44,6 +45,12 @@ static void
 tray_shutdown_callback(void)
 {
 	g_service_shutdown_requested = true;
+}
+
+static void
+tray_config_change_callback(const struct service_config *new_cfg)
+{
+	service_orchestrator_apply_config(new_cfg);
 }
 
 static void
@@ -99,7 +106,10 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdS
 	}
 
 	// Start the system tray icon with orchestrator menu
-	service_tray_init(tray_shutdown_callback, NULL, &cfg);
+	service_tray_init(tray_shutdown_callback, tray_config_change_callback, &cfg);
+
+	// Initialize orchestrator (registers hotkeys, spawns children per config)
+	service_orchestrator_init(&cfg);
 
 	u_trace_marker_init();
 	u_metrics_init();
@@ -123,6 +133,9 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdS
 	u_mcp_server_stop();
 
 	u_metrics_close();
+
+	// Shut down orchestrator (terminates managed children, unregisters hotkeys)
+	service_orchestrator_shutdown();
 
 	// Clean up the tray icon
 	service_tray_cleanup();

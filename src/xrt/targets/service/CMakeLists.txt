@@ -31,6 +31,8 @@ if(WIN32)
 	target_sources(displayxr-service PRIVATE
 		service_config.c
 		service_config.h
+		service_orchestrator.c
+		service_orchestrator.h
 		service_tray_win.c
 		service_tray_win.h
 		service_resources.rc

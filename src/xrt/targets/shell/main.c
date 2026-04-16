@@ -63,6 +63,7 @@
 static volatile int g_running = 1;
 #ifdef _WIN32
 static bool g_shell_active = false;
+static bool g_service_managed = false; // When true, skip Ctrl+Space hotkey (service owns it)
 static bool g_launcher_visible = false; // Phase 5.7: spatial launcher panel toggle (Ctrl+L)
 static HWND g_msg_hwnd = NULL;
 #endif
@@ -683,6 +684,10 @@ parse_args(int argc, char *argv[], struct app_entry *apps, int *app_count,
 		if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			print_usage();
 			return -1;
+		}
+		if (strcmp(argv[i], "--service-managed") == 0) {
+			g_service_managed = true;
+			continue;
 		}
 		if (strcmp(argv[i], "--pose") == 0) {
 			if (i + 1 >= argc) {
@@ -1766,10 +1771,13 @@ main(int argc, char *argv[])
 		PE("Warning: failed to create message window (hotkey/tray unavailable)\n");
 	}
 
-	// Register system-wide Ctrl+Space hotkey
+	// Register system-wide hotkeys.
+	// In service-managed mode, Ctrl+Space is owned by the service — skip it.
 	if (g_msg_hwnd != NULL) {
-		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_TOGGLE, MOD_CONTROL, VK_SPACE)) {
-			PE("Warning: RegisterHotKey(Ctrl+Space) failed — hotkey unavailable\n");
+		if (!g_service_managed) {
+			if (!RegisterHotKey(g_msg_hwnd, HOTKEY_TOGGLE, MOD_CONTROL, VK_SPACE)) {
+				PE("Warning: RegisterHotKey(Ctrl+Space) failed — hotkey unavailable\n");
+			}
 		}
 		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_LAUNCH, MOD_CONTROL, 'L')) {
 			PE("Warning: RegisterHotKey(Ctrl+L) failed — launcher hotkey unavailable\n");
@@ -2220,7 +2228,9 @@ main(int argc, char *argv[])
 
 	// Cleanup hotkey and tray
 	if (g_msg_hwnd != NULL) {
-		UnregisterHotKey(g_msg_hwnd, HOTKEY_TOGGLE);
+		if (!g_service_managed) {
+			UnregisterHotKey(g_msg_hwnd, HOTKEY_TOGGLE);
+		}
 		UnregisterHotKey(g_msg_hwnd, HOTKEY_LAUNCH);
 		tray_destroy();
 		DestroyWindow(g_msg_hwnd);
