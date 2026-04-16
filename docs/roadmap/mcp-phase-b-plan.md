@@ -1,7 +1,8 @@
 # MCP Phase B — Shell/Service Mode Plan
 
-**Branch:** `feature/mcp-phase-b-ci`
-**Worktree:** `.claude/worktrees/mcp-phase-b`
+> **Status: Complete.** Merged to `main` on 2026-04-16 (PR #160). All tools listed below are shipping.
+
+**Branch:** `feature/mcp-phase-b-ci` (merged)
 **Spec:** `docs/roadmap/mcp-spec-v0.2.md` §3.2, §4.B, §5
 **Target:** David's "set me up for the 3pm review" story runs end-to-end against a live `displayxr-service` + shell.
 

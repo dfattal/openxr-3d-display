@@ -69,20 +69,27 @@ Integrate your 3D display hardware into DisplayXR.
 
 ## Roadmap
 
-These documents describe **planned features that are not yet implemented**.
+Design docs, status trackers, and plans — some shipped, some in progress.
+
+### Shipped
+
+- **[Shell Implementation Tasks](roadmap/shell-tasks.md)** — phased task tracker (Phase 0–8, all shipped on Windows)
+- [Spatial OS](roadmap/spatial-os.md) — multi-compositor architecture (#43)
+- [3D Shell](roadmap/3d-shell.md) — spatial window manager (#44)
+- [3D Capture](roadmap/3d-capture.md) — capture pipeline (shipped in Shell Phase 8)
+- [Shell/Runtime Contract](roadmap/shell-runtime-contract.md) — IPC between shell and runtime
+- [MCP Spec v0.2](roadmap/mcp-spec-v0.2.md) — AI-native runtime control & introspection over Model Context Protocol
+- [MCP Phase A Status](roadmap/mcp-phase-a-status.md) — handle-app introspection (complete)
+- [MCP Phase B Plan](roadmap/mcp-phase-b-plan.md) — service-mode shell tools (complete)
+
+### Planned
 
 - **[Roadmap Overview](roadmap/overview.md)** — milestone status and project trajectory
 - [Spatial Desktop PRD](roadmap/spatial-desktop-prd.md) — product vision
-- [Spatial OS](roadmap/spatial-os.md) — multi-compositor architecture (#43)
-- [3D Shell](roadmap/3d-shell.md) — spatial window manager (#44)
-- [3D Capture](roadmap/3d-capture.md) — capture pipeline
-- [Shell/Runtime Contract](roadmap/shell-runtime-contract.md) — IPC between shell and runtime
-- **[Shell Implementation Tasks](roadmap/shell-tasks.md)** — phased task tracker (Phase 0–5)
 - [Display Spatial Model](roadmap/display-spatial-model.md) — displays in the spatial graph (#46)
 - [Multi-Display Single Machine](roadmap/multi-display-single-machine.md) — multiple displays, one machine (#69)
 - [Multi-Display Networked](roadmap/multi-display-networked.md) — displays across the network (#70)
 - [XR_VIEW_CONFIGURATION_PRIMARY_MULTIVIEW](roadmap/XR_VIEW_CONFIGURATION_PRIMARY_MULTIVIEW.md) — Khronos multiview proposal (#80)
-- [MCP Spec v0.2](roadmap/mcp-spec-v0.2.md) — AI-native runtime control & introspection over Model Context Protocol
 
 ---
 

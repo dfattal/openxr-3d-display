@@ -15,7 +15,8 @@ See the [milestone tracker](https://github.com/DisplayXR/displayxr-runtime-pvt/m
 - **M3: Test Coverage** — #30, #31, #33 open.
 - **M4: Display Extensions** — Done. `XR_EXT_display_info` header frozen at v12 (#114 closed). Events (#3), multiview math (#38), eye tracking modes (#81), docs (#66) all complete. Vendor-initiated transition detection (#123) shipped via `get_hardware_3d_state()` DP vtable method. Remaining vendor work (MANUAL eye tracking mode) blocked on Leia SDK.
 - **M5: Interface Standardization** — #45, #46, #47 open.
-- **M6: Spatial Shell** — #43, #44 open. Phase 3B complete: all 4 APIs (D3D11, D3D12, GL, VK) working in shell individually and simultaneously. #116 (multi-client crash) fixed. Phase 4 (Spatial Companion) planned on `feature/shell-phase4-ci`.
+- **M6: Spatial Shell** — Done (Windows). Phases 0–8 shipped: multi-compositor, spatial windowing, window chrome, layout presets, 2D app capture, focus-adaptive 2D/3D mode, app launcher, graceful exit, 3D capture (Ctrl+Shift+C). macOS port deferred.
+- **MCP (AI-Native Control)** — Phase A (handle-app introspection) and Phase B (service-mode shell tools) merged. Tools: `get_kooima_params`, `capture_frame`, `list_windows`, `get/set_window_pose`, `save/load_workspace`, `apply_layout_preset`. Spec: `docs/roadmap/mcp-spec-v0.2.md`.
 
 ### Architecture
 
