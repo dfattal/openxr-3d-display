@@ -7242,6 +7242,11 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 				        sys->hardware_display_3d ? "3D" : "2D",
 				        vendor_is_3d ? "3D" : "2D");
 				sys->hardware_display_3d = vendor_is_3d;
+				// When bridge is active, don't force the rendering mode
+				// transition — let the app decide via requestRenderingMode().
+				// The app receives a hardwarestatechange event and can react.
+				// Forcing causes a brief glitch (2D content through 3D weaver).
+				if (!g_bridge_relay_active) {
 				// Update the device's active rendering mode to match
 				struct xrt_device *head = sys->xsysd ? sys->xsysd->static_roles.head : nullptr;
 				if (head != nullptr && head->hmd != NULL) {
@@ -7260,6 +7265,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 					                                head->hmd->active_rendering_mode_index);
 				}
 				sync_tile_layout(sys);
+				}
 			}
 		}
 	}
@@ -7326,12 +7332,16 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	    sys->display_width > 0 && sys->display_height > 0) {
 		uint32_t mi = sys->xdev->hmd->active_rendering_mode_index;
 		if (mi < sys->xdev->rendering_mode_count) {
+			// Use sys->display_width × viewScale — tracks the compositor window
+			// (matches in-process path: u_tiling_compute_canvas_view uses
+			// actual window dims). The sample must also use windowPixelSize ×
+			// viewScale to stay in sync.
 			float sx = sys->xdev->rendering_modes[mi].view_scale_x;
 			float sy = sys->xdev->rendering_modes[mi].view_scale_y;
 			if (sx > 0.0f && sy > 0.0f) {
 				uint32_t vw = (uint32_t)(sys->display_width * sx);
 				uint32_t vh = (uint32_t)(sys->display_height * sy);
-				{
+				if (vw > 0 && vh > 0) {
 					active_vw = vw;
 					active_vh = vh;
 					bridge_override = true;

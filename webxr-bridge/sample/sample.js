@@ -339,16 +339,19 @@ function onXRFrame(time, frame) {
   const di = displayXR ? displayXR.displayInfo : null;
   const wi = displayXR ? displayXR.windowInfo : null;
 
-  // Per-tile render dims: displayPixelSize × viewScale = active per-view area.
-  // E.g. 3840×0.5 = 1920, 2160×0.5 = 1080 for stereo SBS on 4K.
-  // Uses display info (available from frame 0 via bridge hello) rather than
-  // window info (delayed until compositor window is found by the bridge).
-  // Falls back to framebuffer / tileGrid when display info isn't available.
-  const tileW = (di && di.displayPixelSize)
-    ? Math.round(di.displayPixelSize[0] * tileLayout.viewScaleX)
+  // Per-tile render dims: windowPixelSize × viewScale = active per-view area.
+  // Matches in-process app path (renderW = g_windowWidth * viewScaleX).
+  // Falls back to displayPixelSize × viewScale (frame 0, before window info),
+  // then to framebuffer / tileGrid as last resort.
+  const pixW = (wi && wi.valid && wi.windowPixelSize) ? wi.windowPixelSize[0]
+             : (di && di.displayPixelSize) ? di.displayPixelSize[0] : 0;
+  const pixH = (wi && wi.valid && wi.windowPixelSize) ? wi.windowPixelSize[1]
+             : (di && di.displayPixelSize) ? di.displayPixelSize[1] : 0;
+  const tileW = pixW > 0
+    ? Math.round(pixW * tileLayout.viewScaleX)
     : Math.floor(glLayer.framebufferWidth / tileLayout.tileColumns);
-  const tileH = (di && di.displayPixelSize)
-    ? Math.round(di.displayPixelSize[1] * tileLayout.viewScaleY)
+  const tileH = pixH > 0
+    ? Math.round(pixH * tileLayout.viewScaleY)
     : Math.floor(glLayer.framebufferHeight / tileLayout.tileRows);
   // Window-relative Kooima: when the bridge has located the compositor window,
   // use its physical size as the screen and subtract the window-center offset
@@ -411,7 +414,7 @@ function onXRFrame(time, frame) {
   // Diagnostic log (once every 600 frames ~ 10s).
   if (frameCount % 600 === 1) {
     log('diag: tile=' + tileW + 'x' + tileH +
-        ((di && di.displayPixelSize) ? ' (disp*scale)' : ' (fb/grid)') +
+        (pixW > 0 ? ((wi && wi.valid && wi.windowPixelSize) ? ' (win*scale)' : ' (disp*scale)') : ' (fb/grid)') +
         ' ' + (rig.cameraMode ? 'CAM' : 'DISP') +
         ' rig=[' + rig.pos.map(v => v.toFixed(2)).join(',') + ']' +
         ' yaw=' + rig.yaw.toFixed(2) + ' pitch=' + rig.pitch.toFixed(2) +
@@ -648,7 +651,21 @@ async function enterXR() {
   });
 
   xrSession.addEventListener('hardwarestatechange', (event) => {
-    log('HW STATE: hw3D=' + event.detail.hardware3D);
+    const hw3D = event.detail.hardware3D;
+    log('HW STATE: hw3D=' + hw3D);
+    // Auto-request the matching rendering mode when hardware state changes
+    // (e.g., Leia display auto-switches to 3D on window focus).
+    if (displayXR) {
+      const modes = displayXR.renderingModes || [];
+      for (let i = 0; i < modes.length; i++) {
+        if (modes[i].hardware3D === hw3D) {
+          lastRequestedMode = i;
+          displayXR.requestRenderingMode(i);
+          log('auto-requesting mode ' + i + ' (' + modes[i].name + ') to match hw3D=' + hw3D);
+          break;
+        }
+      }
+    }
   });
 
   xrSession.addEventListener('displayxrinput', (event) => {
