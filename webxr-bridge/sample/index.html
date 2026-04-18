@@ -11,23 +11,77 @@
 }
 </script>
 <style>
-  body { font: 15px/1.5 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; }
-  button { font: inherit; padding: 10px 20px; cursor: pointer; }
+  :root { --green: #22c55e; --red: #ef4444; --gray: #94a3b8; --bg: #f8fafc; --card: #fff; }
+  body { font: 15px/1.5 system-ui, -apple-system, sans-serif; max-width: 680px; margin: 0 auto; padding: 24px 16px; color: #1e293b; background: var(--bg); }
+
+  /* Header with logo */
+  .header { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+  .header img { width: 48px; height: 48px; }
+  .header h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  .subtitle { color: #64748b; font-size: 13px; margin: 0 0 20px; }
+
+  /* Status indicators */
+  .status-panel { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+  .status-item { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #475569; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--gray); flex-shrink: 0; transition: background 0.3s; }
+  .status-dot.ok { background: var(--green); box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+  .status-dot.err { background: var(--red); box-shadow: 0 0 6px rgba(239,68,68,0.3); }
+
+  /* Buttons */
+  .btn-row { display: flex; gap: 10px; margin-bottom: 16px; }
+  button { font: 500 14px/1 system-ui, sans-serif; padding: 10px 22px; border: 1px solid #cbd5e1; border-radius: 8px; background: var(--card); color: #1e293b; cursor: pointer; transition: all 0.15s; }
+  button:hover:not(:disabled) { background: #f1f5f9; border-color: #94a3b8; }
+  button:active:not(:disabled) { background: #e2e8f0; }
   button:disabled { opacity: 0.4; cursor: default; }
-  #status { margin-top: 12px; padding: 10px; background: #f0f0f0; border-radius: 6px; white-space: pre-wrap; font: 13px/1.4 ui-monospace, monospace; min-height: 80px; }
+  button.primary { background: #1e293b; color: #fff; border-color: #1e293b; }
+  button.primary:hover:not(:disabled) { background: #334155; }
+  button.danger { border-color: #fca5a5; color: #dc2626; }
+  button.danger:hover:not(:disabled) { background: #fef2f2; }
+
+  /* Log */
+  #status { padding: 12px 14px; background: #1e293b; color: #e2e8f0; border-radius: 8px; white-space: pre-wrap; font: 12px/1.5 ui-monospace, 'Cascadia Code', 'Fira Code', monospace; min-height: 100px; max-height: 300px; overflow-y: auto; }
+
+  /* Controls help */
+  .controls { margin-top: 16px; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+  .controls h3 { font-size: 13px; margin: 0 0 6px; color: #475569; }
+  .controls kbd { font: 11px/1 ui-monospace, monospace; padding: 2px 5px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 3px; }
 </style>
 </head>
 <body>
-<h1>DisplayXR WebXR Bridge v2 — three.js sample</h1>
-<p>
-  Requires: <code>displayxr-service.exe</code> + <code>displayxr-webxr-bridge.exe</code>
-  running, and the DisplayXR WebXR Bridge extension loaded in Chrome.
-</p>
-<p>
-  <button id="enter-xr">Enter XR</button>
-  <button id="exit-xr" disabled>Exit XR</button>
-</p>
-<div id="status">Waiting...</div>
+
+<div class="header">
+  <img src="displayxr.png" alt="DisplayXR">
+  <h1>WebXR Bridge v2</h1>
+</div>
+<p class="subtitle">three.js Kooima 3D sample — reference implementation for WebXR on 3D displays</p>
+
+<div class="status-panel">
+  <div class="status-item"><span id="dot-webxr" class="status-dot"></span>WebXR</div>
+  <div class="status-item"><span id="dot-extension" class="status-dot"></span>Extension</div>
+  <div class="status-item"><span id="dot-bridge" class="status-dot"></span>Bridge</div>
+</div>
+
+<div class="btn-row">
+  <button id="enter-xr" class="primary" disabled>Enter XR</button>
+  <button id="exit-xr" class="danger" disabled>Exit XR</button>
+</div>
+
+<div id="status">Checking prerequisites...</div>
+
+<div class="controls">
+  <h3>Controls (compositor window focused)</h3>
+  <kbd>V</kbd> toggle 2D/3D &nbsp;
+  <kbd>C</kbd> display/camera Kooima &nbsp;
+  <kbd>WASD</kbd><kbd>QE</kbd> move &nbsp;
+  <kbd>Arrows</kbd> rotate &nbsp;
+  <kbd>LMB</kbd>+drag look<br>
+  <kbd>Wheel</kbd> vHeight/zoom &nbsp;
+  <kbd>Shift</kbd>+wheel IPD &nbsp;
+  <kbd>Ctrl</kbd>+wheel parallax &nbsp;
+  <kbd>Alt</kbd>+wheel perspective/convergence &nbsp;
+  <kbd>Space</kbd> reset rig &nbsp;
+  <kbd>0</kbd>&#8211;<kbd>8</kbd> direct mode
+</div>
 
 <script type="module" src="sample.js"></script>
 </body>

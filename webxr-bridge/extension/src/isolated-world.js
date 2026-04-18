@@ -34,11 +34,7 @@
 
     ws.onopen = function () {
       backoffMs = BACKOFF_INITIAL_MS;
-      // Notify main world that bridge is connected.
-      window.postMessage({
-        source: MSG_SOURCE_TO_MAIN,
-        payload: { type: 'bridge-status', connected: true }
-      }, window.location.origin);
+      postBridgeStatus();
       // Send hello with this extension's origin.
       ws.send(JSON.stringify({
         type: 'hello',
@@ -62,11 +58,7 @@
 
     ws.onclose = function () {
       ws = null;
-      // Notify main world that bridge disconnected.
-      window.postMessage({
-        source: MSG_SOURCE_TO_MAIN,
-        payload: { type: 'bridge-status', connected: false }
-      }, window.location.origin);
+      postBridgeStatus();
       scheduleReconnect();
     };
 
@@ -84,11 +76,24 @@
     }, backoffMs);
   }
 
+  function postBridgeStatus() {
+    window.postMessage({
+      source: MSG_SOURCE_TO_MAIN,
+      payload: { type: 'bridge-status', connected: (ws && ws.readyState === WebSocket.OPEN) }
+    }, window.location.origin);
+  }
+
   // Listen for messages from MAIN world to forward to the bridge.
   window.addEventListener('message', function (event) {
     // Strict origin check.
     if (event.origin !== window.location.origin) return;
     if (!event.data || event.data.source !== MSG_SOURCE_FROM_MAIN) return;
+
+    // Status query from sample — reply with current bridge connection state.
+    if (event.data.payload && event.data.payload.type === 'status-request') {
+      postBridgeStatus();
+      return;
+    }
 
     if (ws && ws.readyState === WebSocket.OPEN && event.data.payload) {
       ws.send(JSON.stringify(event.data.payload));

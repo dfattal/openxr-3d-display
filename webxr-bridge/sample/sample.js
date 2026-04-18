@@ -532,6 +532,8 @@ async function enterXR() {
 
   displayXR = xrSession.displayXR;
   if (displayXR) {
+    setDot(dotExtension, 'ok');
+    setDot(dotBridge, 'ok');
     log('session.displayXR available:');
     log('  displayPixelSize: ' + JSON.stringify(displayXR.displayInfo.displayPixelSize));
     log('  displaySizeMeters: ' + JSON.stringify(displayXR.displayInfo.displaySizeMeters));
@@ -539,6 +541,8 @@ async function enterXR() {
         ' (' + displayXR.renderingMode.tileColumns + 'x' + displayXR.renderingMode.tileRows + ')');
     displayXR.configureEyePoses('raw');
   } else {
+    setDot(dotExtension, 'err');
+    setDot(dotBridge, 'err');
     log('session.displayXR NOT available — is the bridge running and extension loaded?');
     log('  Start displayxr-webxr-bridge.exe, then reload this page.');
   }
@@ -568,6 +572,7 @@ async function enterXR() {
   });
 
   xrSession.addEventListener('bridgestatus', (event) => {
+    setDot(dotBridge, event.detail.connected ? 'ok' : 'err');
     log('BRIDGE: ' + (event.detail.connected ? 'connected' : 'disconnected — is displayxr-webxr-bridge running?'));
   });
 
@@ -737,12 +742,43 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) { keyDown.clear(); mouseLookDown = false; }
 });
 
+// --- Status indicators ---
+const dotWebXR = document.getElementById('dot-webxr');
+const dotExtension = document.getElementById('dot-extension');
+const dotBridge = document.getElementById('dot-bridge');
+
+function setDot(dot, state) { // 'ok', 'err', or '' (gray)
+  dot.classList.remove('ok', 'err');
+  if (state) dot.classList.add(state);
+}
+
+// Listen for bridge-status from extension (fires before any XR session).
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.source === 'displayxr-bridge' &&
+      event.data.payload && event.data.payload.type === 'bridge-status') {
+    const connected = event.data.payload.connected;
+    setDot(dotExtension, 'ok'); // got a reply → extension is loaded
+    setDot(dotBridge, connected ? 'ok' : 'err');
+  }
+});
+
+// Check WebXR support.
 if (navigator.xr) {
   navigator.xr.isSessionSupported('immersive-vr').then(ok => {
     log('WebXR immersive-vr supported: ' + ok);
+    setDot(dotWebXR, ok ? 'ok' : 'err');
     enterBtn.disabled = !ok;
   });
 } else {
   log('WebXR not available.');
+  setDot(dotWebXR, 'err');
   enterBtn.disabled = true;
 }
+
+// Ask the extension for current bridge status. The extension's isolated-world
+// handles 'status-request' and replies with 'bridge-status'. If the extension
+// isn't loaded, no reply comes and dots stay gray.
+window.postMessage({
+  source: 'displayxr-bridge-req',
+  payload: { type: 'status-request' }
+}, window.location.origin);
