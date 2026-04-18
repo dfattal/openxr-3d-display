@@ -165,6 +165,14 @@
           entry.session.dispatchEvent(new CustomEvent('hardwarestatechange', { detail: hwDetail }));
         } catch (e) {}
       });
+    } else if (msg.type === 'bridge-status') {
+      activeSessions.forEach(function (entry) {
+        try {
+          entry.session.dispatchEvent(new CustomEvent('bridgestatus', {
+            detail: { connected: msg.connected }
+          }));
+        } catch (e) {}
+      });
     } else if (msg.type === 'eye-poses') {
       latestEyePoses = msg.eyes;
     } else if (msg.type === 'input') {

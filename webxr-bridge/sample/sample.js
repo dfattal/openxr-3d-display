@@ -539,7 +539,8 @@ async function enterXR() {
         ' (' + displayXR.renderingMode.tileColumns + 'x' + displayXR.renderingMode.tileRows + ')');
     displayXR.configureEyePoses('raw');
   } else {
-    log('session.displayXR NOT available — extension not loaded?');
+    log('session.displayXR NOT available — is the bridge running and extension loaded?');
+    log('  Start displayxr-webxr-bridge.exe, then reload this page.');
   }
 
   xrSession.addEventListener('end', () => {
@@ -564,6 +565,10 @@ async function enterXR() {
         ' hw3D=' + event.detail.hardware3D);
     lastRequestedMode = event.detail.currentModeIndex;
     updateTileLayout();
+  });
+
+  xrSession.addEventListener('bridgestatus', (event) => {
+    log('BRIDGE: ' + (event.detail.connected ? 'connected' : 'disconnected — is displayxr-webxr-bridge running?'));
   });
 
   xrSession.addEventListener('hardwarestatechange', (event) => {

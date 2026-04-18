@@ -34,6 +34,11 @@
 
     ws.onopen = function () {
       backoffMs = BACKOFF_INITIAL_MS;
+      // Notify main world that bridge is connected.
+      window.postMessage({
+        source: MSG_SOURCE_TO_MAIN,
+        payload: { type: 'bridge-status', connected: true }
+      }, window.location.origin);
       // Send hello with this extension's origin.
       ws.send(JSON.stringify({
         type: 'hello',
@@ -57,6 +62,11 @@
 
     ws.onclose = function () {
       ws = null;
+      // Notify main world that bridge disconnected.
+      window.postMessage({
+        source: MSG_SOURCE_TO_MAIN,
+        payload: { type: 'bridge-status', connected: false }
+      }, window.location.origin);
       scheduleReconnect();
     };
 
