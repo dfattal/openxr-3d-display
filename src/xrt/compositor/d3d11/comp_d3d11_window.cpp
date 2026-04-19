@@ -371,11 +371,15 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	case WM_ENTERSIZEMOVE:
 		InterlockedExchange(&w->in_size_move, TRUE);
+		// Publish to HWND so cross-process consumers (WebXR bridge mouse
+		// hook) can suppress mouse forwarding during the modal drag loop.
+		SetPropW(hWnd, L"DXR_InSizeMove", (HANDLE)(uintptr_t)1);
 		InvalidateRect(hWnd, NULL, FALSE); // Kick off first WM_PAINT
 		return 0;
 
 	case WM_EXITSIZEMOVE:
 		InterlockedExchange(&w->in_size_move, FALSE);
+		RemovePropW(hWnd, L"DXR_InSizeMove");
 		SetEvent(w->paint_requested_event); // Unblock compositor if waiting
 		return 0;
 

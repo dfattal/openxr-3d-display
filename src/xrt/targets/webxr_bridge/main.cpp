@@ -666,6 +666,15 @@ static LRESULT CALLBACK mouse_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 		POINT p = ms->pt;
 		if (target != nullptr) ScreenToClient(target, &p);
 
+		// Skip forwarding while the compositor window is in the modal
+		// size/move loop (WM_ENTERSIZEMOVE..WM_EXITSIZEMOVE). The
+		// compositor publishes this as the DXR_InSizeMove HWND property —
+		// authoritative signal, works for mouse title-bar drags, border
+		// resizes, and keyboard-initiated resize (Alt+Space → Size).
+		if (target != nullptr && GetPropW(target, L"DXR_InSizeMove") != nullptr) {
+			return CallNextHookEx(nullptr, nCode, wParam, lParam);
+		}
+
 		InputEvent e{};
 		e.x = p.x; e.y = p.y;
 		// Compose held-button bitmask from async key state.
