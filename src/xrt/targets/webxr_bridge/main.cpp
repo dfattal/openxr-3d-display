@@ -41,14 +41,36 @@
 // Logging.
 // ---------------------------------------------------------------------------
 
+static FILE *g_logf = nullptr;
+static std::mutex g_logf_mtx;
+
 static void log_line(const char *level, const char *fmt, ...) {
-	std::fprintf(stdout, "[webxr-bridge][%s] ", level);
+	char line[1024];
 	va_list ap;
 	va_start(ap, fmt);
-	std::vfprintf(stdout, fmt, ap);
+	int n = std::vsnprintf(line, sizeof(line), fmt, ap);
 	va_end(ap);
-	std::fputc('\n', stdout);
+	if (n < 0) n = 0;
+	if ((size_t)n >= sizeof(line)) n = (int)sizeof(line) - 1;
+	line[n] = '\0';
+
+	std::fprintf(stdout, "[webxr-bridge][%s] %s\n", level, line);
 	std::fflush(stdout);
+
+	// Also mirror to a file so we can see output when launched headless.
+	std::lock_guard<std::mutex> lk(g_logf_mtx);
+	if (g_logf == nullptr) {
+		char path[512];
+		const char *appdata = std::getenv("LOCALAPPDATA");
+		if (appdata != nullptr) {
+			std::snprintf(path, sizeof(path), "%s\\DisplayXR\\bridge_debug.log", appdata);
+			g_logf = std::fopen(path, "a");
+		}
+	}
+	if (g_logf != nullptr) {
+		std::fprintf(g_logf, "[%s] %s\n", level, line);
+		std::fflush(g_logf);
+	}
 }
 
 #define LOG_I(...) log_line("info", __VA_ARGS__)
@@ -517,6 +539,16 @@ static bool poll_window_metrics(Bridge &b) {
 	g_compositor_hwnd.store(hwnd);
 	WindowMetrics neu;
 	bool ok = compute_window_metrics_impl(hwnd, b, neu);
+	// One-shot per unique (pixelW,pixelH) so we can see what GetClientRect
+	// actually returns as the user resizes.
+	static int last_px_w = -1, last_px_h = -1;
+	if (ok && (neu.pixelW != last_px_w || neu.pixelH != last_px_h)) {
+		LOG_I("poll_window_metrics: hwnd=%p pixel=%dx%d size=%.3fx%.3fm off=[%.3f,%.3f]",
+		      hwnd, neu.pixelW, neu.pixelH, neu.sizeWm, neu.sizeHm,
+		      neu.centerOffsetXm, neu.centerOffsetYm);
+		last_px_w = neu.pixelW;
+		last_px_h = neu.pixelH;
+	}
 	// Bridge is the source of truth for per-view tile dims. Compute from
 	// live window size × current mode's viewScale, then push to compositor
 	// so bridge_override crops the exact region the sample will render.
@@ -1049,10 +1081,14 @@ static void ws_thread_func(Bridge &b) {
 			// Drain outgoing queue.
 			std::string out_msg;
 			while (b.outgoing.pop(out_msg, 0)) {
+				bool is_win_info = out_msg.find("\"type\":\"window-info\"") != std::string::npos;
 				if (!ws_send_text(client, out_msg)) {
 					LOG_W("WS send failed, disconnecting client");
 					b.ws_client_connected.store(false);
 					break;
+				}
+				if (is_win_info) {
+					LOG_I("WS send SUCCESS window-info (%zu bytes)", out_msg.size());
 				}
 			}
 			if (!b.ws_client_connected.load()) break;
@@ -1065,23 +1101,32 @@ static void ws_thread_func(Bridge &b) {
 				}
 			} else {
 				// ws_recv_text returned false — either timeout (no data) or
-				// disconnect (FIN or error). Distinguish: MSG_PEEK of 1 byte
-				// returns 0 iff peer closed cleanly, -1+WSAEWOULDBLOCK iff no
-				// data yet, -1+other iff error. Without this, an extension
-				// reload (clean close, no error) would leave ws_client_connected
-				// stuck at true and the next connect would be rejected as a
-				// "second client".
-				char peek;
-				int r = recv(client, &peek, 1, MSG_PEEK);
-				if (r == 0) {
-					LOG_I("WS client closed");
-					b.ws_client_connected.store(false);
-					break;
-				}
-				if (r < 0 && WSAGetLastError() != WSAEWOULDBLOCK) {
-					LOG_I("WS client disconnected (socket error: %d)", WSAGetLastError());
-					b.ws_client_connected.store(false);
-					break;
+				// disconnect. We used to call recv(MSG_PEEK) here to detect
+				// clean close, but the accept()ed socket is BLOCKING by
+				// default, so that call blocked the send loop whenever there
+				// was no incoming data — which is every iteration the client
+				// isn't talking. Result: window-info messages piled up in the
+				// outgoing queue and never reached the sample.
+				//
+				// Instead, check disconnect only when select() said the socket
+				// IS readable but ws_recv_text still returned false — that
+				// means the header recv saw FIN (recv returned 0). For the
+				// extension-reload case a subsequent ws_send_text will fail
+				// on the dead socket and trigger the disconnect branch above.
+				fd_set fds;
+				FD_ZERO(&fds);
+				FD_SET(client, &fds);
+				struct timeval zero = {0, 0};
+				int sel = select(0, &fds, nullptr, nullptr, &zero);
+				if (sel > 0) {
+					// Readable with 0 bytes = clean close.
+					char peek;
+					int r = recv(client, &peek, 1, MSG_PEEK);
+					if (r == 0) {
+						LOG_I("WS client closed");
+						b.ws_client_connected.store(false);
+						break;
+					}
 				}
 			}
 		}
@@ -1489,6 +1534,10 @@ static void run_event_loop(Bridge &b) {
 				window_changed = poll_window_metrics(b) || window_changed;
 			}
 			if (window_changed && b.ws_client_connected.load()) {
+				const WindowMetrics &w = b.window_metrics;
+				LOG_I("WS send window-info: %dx%dpx %.3fx%.3fm off=[%.3f,%.3f] view=%ux%u",
+				      w.pixelW, w.pixelH, w.sizeWm, w.sizeHm,
+				      w.centerOffsetXm, w.centerOffsetYm, w.viewWidth, w.viewHeight);
 				b.outgoing.push(build_window_info_json(b.window_metrics));
 			}
 

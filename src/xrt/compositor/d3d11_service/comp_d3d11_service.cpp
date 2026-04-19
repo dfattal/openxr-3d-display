@@ -7286,9 +7286,23 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	uint32_t active_vh = sys->view_height;
 	if (g_bridge_relay_active && !sys->shell_mode) {
 		uint32_t bvw = 0, bvh = 0;
-		if (sys->compositor_hwnd) {
-			bvw = (uint32_t)(uintptr_t)GetPropW(sys->compositor_hwnd, L"DXR_BridgeViewW");
-			bvh = (uint32_t)(uintptr_t)GetPropW(sys->compositor_hwnd, L"DXR_BridgeViewH");
+		// Prefer the CURRENT frame's live HWND (c->render.hwnd) over the
+		// cached sys->compositor_hwnd. When the WebXR page is reloaded the
+		// Chrome compositor may recreate its window, leaving the cached
+		// handle stale. Bridge's FindWindowW finds the current live window
+		// and pushes DXR_BridgeViewW/H there; we must read from the same.
+		HWND prop_hwnd = c->render.hwnd != nullptr ? c->render.hwnd : sys->compositor_hwnd;
+		if (prop_hwnd) {
+			bvw = (uint32_t)(uintptr_t)GetPropW(prop_hwnd, L"DXR_BridgeViewW");
+			bvh = (uint32_t)(uintptr_t)GetPropW(prop_hwnd, L"DXR_BridgeViewH");
+		}
+		// Log which HWND we're querying once per unique HWND so we can
+		// compare with what the bridge found via FindWindowW.
+		static HWND last_logged_hwnd = (HWND)(uintptr_t)-1;
+		if (prop_hwnd != last_logged_hwnd) {
+			U_LOG_W("bridge_override: reading props from hwnd=%p (c->render.hwnd=%p sys->compositor_hwnd=%p)",
+			        prop_hwnd, c->render.hwnd, sys->compositor_hwnd);
+			last_logged_hwnd = prop_hwnd;
 		}
 		if (bvw > 0 && bvh > 0) {
 			active_vw = bvw;
@@ -7298,9 +7312,9 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			// see windowed-mode transitions in the log.
 			static uint32_t last_logged_vw = 0, last_logged_vh = 0;
 			if (bvw != last_logged_vw || bvh != last_logged_vh) {
-				U_LOG_W("BRIDGE DIMS: active=%ux%u sys_view=%ux%u display=%ux%u",
+				U_LOG_W("BRIDGE DIMS: active=%ux%u sys_view=%ux%u display=%ux%u hwnd=%p",
 				        bvw, bvh, sys->view_width, sys->view_height,
-				        sys->display_width, sys->display_height);
+				        sys->display_width, sys->display_height, prop_hwnd);
 				last_logged_vw = bvw;
 				last_logged_vh = bvh;
 			}

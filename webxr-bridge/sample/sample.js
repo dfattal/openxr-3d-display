@@ -421,6 +421,10 @@ function onXRFrame(time, frame) {
   if (frameCount % 600 === 1) {
     const tileSrc = haveBridgeView ? ' (bridge)'
                  : (pixW > 0 ? ((wi && wi.valid && wi.windowPixelSize) ? ' (win*scale)' : ' (disp*scale)') : ' (fb/grid)');
+    log('kooima: screen=' + screenWm.toFixed(3) + 'x' + screenHm.toFixed(3) + 'm' +
+        ' (useWindow=' + useWindow + ')' +
+        ' winOff=[' + winOffX.toFixed(3) + ',' + winOffY.toFixed(3) + ']' +
+        ' m2v=' + m2v.toFixed(2));
     log('diag: tile=' + tileW + 'x' + tileH + tileSrc +
         ' ' + (rig.cameraMode ? 'CAM' : 'DISP') +
         ' rig=[' + rig.pos.map(v => v.toFixed(2)).join(',') + ']' +
@@ -497,9 +501,14 @@ function onXRFrame(time, frame) {
       );
       camera.quaternion.copy(rigQuat);
     } else {
-      // Display-centric Kooima: screen scaled by m2v (vHeight zoom, FOV invariant),
-      // eye scaled by perspectiveFactor (FOV change). Camera world position
-      // uses the same eye*perspFac so view and projection stay consistent.
+      // Window-relative Kooima: screen = the app window (size, offset from
+      // display center). Projection is computed in WINDOW-FRAME using eyePos
+      // (= eye_world − winOff). Camera world position must be the PHYSICAL
+      // eye in world (= eyePos + winOff) so the view matrix keeps the scene
+      // anchored in world space while the window (and therefore its frustum)
+      // shifts. Without the +winOff, camera+frustum move together and the
+      // cube always appears centered in the window regardless of where the
+      // window sits on the display — the parallax disappears.
       if (screenHm > 0) {
         camera.projectionMatrix.copy(
           buildKooimaProjection(eyePos, screenWm, screenHm, m2v, rig.perspectiveFactor));
@@ -508,9 +517,11 @@ function onXRFrame(time, frame) {
       }
       camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
 
-      // eye_scaled = eye * perspectiveFactor * m2v (matches display3d_view.c)
+      // eye_scaled = eye_world * perspectiveFactor * m2v (matches display3d_view.c)
       const es = rig.perspectiveFactor * m2v;
-      const eyeInRig = new THREE.Vector3(eyePos[0] * es, eyePos[1] * es, eyePos[2] * es);
+      const eyeWorldX = eyePos[0] + winOffX;
+      const eyeWorldY = eyePos[1] + winOffY;
+      const eyeInRig = new THREE.Vector3(eyeWorldX * es, eyeWorldY * es, eyePos[2] * es);
       eyeInRig.applyQuaternion(rigQuat);
       camera.position.set(
         rig.pos[0] + eyeInRig.x,
