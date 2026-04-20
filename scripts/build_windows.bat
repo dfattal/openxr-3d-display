@@ -110,11 +110,20 @@ if not exist "%OPENXR_SDK%\x64\lib\openxr_loader.lib" (
     echo OpenXR loader ready.
 )
 
+:: --- OpenXR loader short-path copy (avoids spaces-in-path linker issues) ---
+:: The in-tree webxr_bridge target and the standalone test apps both link
+:: against the OpenXR loader via a short path with no spaces.
+set OPENXR_SDK_SHORT=C:\dev\openxr_sdk
+if not exist "%OPENXR_SDK_SHORT%\x64\lib\openxr_loader.lib" (
+    xcopy /E /I /Y "%OPENXR_SDK%" "%OPENXR_SDK_SHORT%" >nul
+)
+
 echo.
 echo === Dependencies ready ===
 echo   LEIASR_SDKROOT=%LEIASR_SDKROOT%
 echo   VULKAN_SDK=%VULKAN_SDK%
 echo   OPENXR_SDK=%OPENXR_SDK%
+echo   OPENXR_SDK_SHORT=%OPENXR_SDK_SHORT%
 echo   vcpkg=%REPO%vcpkg
 echo.
 
@@ -134,7 +143,8 @@ cmake -S "%REPO%." -B "%REPO%build" -G "Ninja Multi-Config" ^
   -DCMAKE_INSTALL_PREFIX="%REPO%_package" ^
   -DXRT_BUILD_INSTALLER=ON ^
   -DXRT_FEATURE_SERVICE=ON ^
-  -DXRT_FEATURE_HYBRID_MODE=ON
+  -DXRT_FEATURE_HYBRID_MODE=ON ^
+  -DOpenXR_ROOT="%OPENXR_SDK_SHORT%"
 
 if %ERRORLEVEL% NEQ 0 (
     echo CMake generate FAILED
@@ -264,6 +274,15 @@ for %%A in (cube_handle_vk_win) do (
             echo set "XR_RUNTIME_JSON=%RT_JSON%"
             echo "%REPO%test_apps\%%A\build\%%A.exe" %%*
         )
+    )
+)
+
+:: Run script for the WebXR Bridge v2 host (in-tree target, installed into _package)
+if exist "%PKG%\bin\displayxr-webxr-bridge.exe" (
+    > "%PKG%\run_webxr_bridge.bat" (
+        echo @echo off
+        echo set "XR_RUNTIME_JSON=%RT_JSON%"
+        echo "%PKG%\bin\displayxr-webxr-bridge.exe" %%*
     )
 )
 

@@ -57,6 +57,28 @@ DEBUG_GET_ONCE_BOOL_OPTION(start_windowed, "XRT_COMPOSITOR_START_WINDOWED", fals
 // Qwerty input is always enabled for non-session-target apps (DisplayXR-owned window)
 // DEBUG_GET_ONCE_BOOL_OPTION(qwerty_enable, "QWERTY_ENABLE", false)
 
+// Coarse "a bridge relay session exists" flag. True whenever the bridge
+// exe has created its headless OpenXR session; NOT a signal that the
+// compositor should divert input away from qwerty. Kept as the outer fast
+// exit so there's zero overhead when no bridge process is running.
+extern "C" bool g_bridge_relay_active;
+
+// True iff a bridge relay session exists AND a page has attached to the
+// bridge (i.e. it actually read session.displayXR). Gated on the
+// DXR_BridgeClientActive HWND prop set by the bridge exe on the compositor
+// window when it receives a 'bridge-attach' WS message from the extension.
+// Legacy non-bridge WebXR pages never send that message, so the prop stays
+// absent and this returns false — letting qwerty keep processing keys /
+// mouse in the normal way even with the extension loaded and a bridge
+// session existing.
+static inline bool
+bridge_page_attached(HWND hwnd)
+{
+	if (!g_bridge_relay_active) return false;
+	if (hwnd == nullptr) return false;
+	return GetPropW(hwnd, L"DXR_BridgeClientActive") != nullptr;
+}
+
 // Window class name
 static WCHAR szWindowClass[] = L"DisplayXRD3D11";
 static WCHAR szWindowData[] = L"DisplayXRD3D11Window";
@@ -384,11 +406,15 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	case WM_ENTERSIZEMOVE:
 		InterlockedExchange(&w->in_size_move, TRUE);
+		// Publish to HWND so cross-process consumers (WebXR bridge mouse
+		// hook) can suppress mouse forwarding during the modal drag loop.
+		SetPropW(hWnd, L"DXR_InSizeMove", (HANDLE)(uintptr_t)1);
 		InvalidateRect(hWnd, NULL, FALSE); // Kick off first WM_PAINT
 		return 0;
 
 	case WM_EXITSIZEMOVE:
 		InterlockedExchange(&w->in_size_move, FALSE);
+		RemovePropW(hWnd, L"DXR_InSizeMove");
 		SetEvent(w->paint_requested_event); // Unblock compositor if waiting
 		return 0;
 
@@ -506,7 +532,7 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			// Process qwerty first
 #ifdef XRT_BUILD_DRIVER_QWERTY
-			if (w->qwerty_enabled && w->xsysd != NULL) {
+			if (w->qwerty_enabled && w->xsysd != NULL && !bridge_page_attached(hWnd)) {
 				bool handled = false;
 				qwerty_process_win32(w->xsysd->xdevs, w->xsysd->xdev_count,
 				                     message, wParam, lParam, &handled);
@@ -543,6 +569,16 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			return 0;
 		}
 #ifdef XRT_BUILD_DRIVER_QWERTY
+		// When a bridge-attached page owns this window, don't forward keys
+		// to qwerty — mode changes go through the app-initiated HWND
+		// property relay. Consume all keys (return 0) so DefWindowProc
+		// doesn't process them. The bridge's LL hook captures them for
+		// the sample. Legacy WebXR pages (no session.displayXR use) fall
+		// through to the normal qwerty path below, even with the bridge
+		// exe running in the background.
+		if (bridge_page_attached(hWnd)) {
+			return 0;
+		}
 		if (w->qwerty_enabled && w->xsysd != NULL) {
 			bool handled = false;
 			qwerty_process_win32(w->xsysd->xdevs, w->xsysd->xdev_count,
@@ -688,7 +724,7 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
 		// Normal mode: pass to qwerty driver
 #ifdef XRT_BUILD_DRIVER_QWERTY
-		if (w->qwerty_enabled && w->xsysd != NULL) {
+		if (w->qwerty_enabled && w->xsysd != NULL && !bridge_page_attached(hWnd)) {
 			bool handled = false;
 			qwerty_process_win32(w->xsysd->xdevs, w->xsysd->xdev_count,
 			                     message, wParam, lParam, &handled);
