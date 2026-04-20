@@ -153,10 +153,16 @@ ipc_try_get_sr_view_poses(struct ipc_server *s,
 	// Get screen dimensions for Kooima FOV
 	// Try per-client window metrics first (shell mode dynamic windows),
 	// then fall back to global window metrics, then display dimensions.
+	//
+	// Headless clients (xc == NULL) — e.g., the WebXR bridge — don't
+	// render and don't own a window. They relay raw DP-tracked eye
+	// positions to a browser-side app that does its own window-relative
+	// math. Skip the window lookup entirely; return display-centric eyes.
 	float screen_width_m, screen_height_m;
 	float eye_offset_x = 0.0f, eye_offset_y = 0.0f, eye_offset_z = 0.0f;
 	struct xrt_quat win_orient = {0, 0, 0, 1};
 	bool win_has_orientation = false;
+	bool headless_client = (xc == NULL);
 	{
 		struct xrt_window_metrics wm = {0};
 		bool have_wm = false;
@@ -166,8 +172,10 @@ ipc_try_get_sr_view_poses(struct ipc_server *s,
 			have_wm = comp_d3d11_service_get_client_window_metrics(s->xsysc, xc, &wm) &&
 			          wm.valid && wm.window_width_m > 0.0f && wm.window_height_m > 0.0f;
 		}
-		// Global window metrics fallback
-		if (!have_wm) {
+		// Global window metrics fallback — skipped for headless clients so
+		// the bridge doesn't pick up Chrome's window offset and double-
+		// subtract it from eye positions sent onward to the browser sample.
+		if (!have_wm && !headless_client) {
 			have_wm = comp_d3d11_service_get_window_metrics(s->xsysc, &wm) &&
 			          wm.valid && wm.window_width_m > 0.0f && wm.window_height_m > 0.0f;
 		}
@@ -289,6 +297,27 @@ ipc_try_get_sr_view_poses(struct ipc_server *s,
 	                                    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
 	                                    XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
 	                                    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT;
+
+	// Headless-client fast path (WebXR bridge). Skip display3d/camera3d
+	// processing entirely — those functions scale eyes by perspectiveFactor
+	// × m2v, apply ipd/parallax factors, and transform via the qwerty pose.
+	// The bridge just relays raw DP-tracked eye positions to a browser app
+	// which does its own Kooima math and window-relative transformations.
+	// Return the raw display-centric eyes and device-default FOVs.
+	if (headless_client) {
+		out_head_relation->pose.position = (struct xrt_vec3){0, 0, 0};
+		out_head_relation->pose.orientation = (struct xrt_quat)XRT_QUAT_IDENTITY;
+		for (uint32_t i = 0; i < eye_count; i++) {
+			out_poses[i].position = raw_eyes[i];
+			out_poses[i].orientation = (struct xrt_quat)XRT_QUAT_IDENTITY;
+			if (xdev != NULL && xdev->hmd != NULL && i < XRT_MAX_VIEWS) {
+				out_fovs[i] = xdev->hmd->distortion.fov[i];
+			} else {
+				out_fovs[i] = (struct xrt_fov){0};
+			}
+		}
+		return true;
+	}
 
 	// Both paths use canonical display3d/camera3d functions from m_display3d_view.h
 	// and m_camera3d_view.h — same code as the in-process oxr_session.c path.
@@ -710,7 +739,21 @@ ipc_handle_session_create(volatile struct ipc_client_state *ics,
 		return XRT_ERROR_IPC_SESSION_ALREADY_CREATED;
 	}
 
-	xrt_result_t xret = xrt_system_create_session(ics->server->xsys, xsi, &xs, &xcn);
+	// For headless sessions (create_native_compositor=false), pass NULL
+	// for out_xcn so u_system::create_session registers the session for
+	// event broadcasting without returning a compositor to the caller.
+	{
+		FILE *dbg = fopen("C:\\bridge_debug.txt", "a");
+		if (dbg) {
+			fprintf(dbg, "ipc_handle_session_create: create_native_compositor=%d xsys=%p\n",
+			        (int)create_native_compositor, (void *)ics->server->xsys);
+			fflush(dbg);
+			fclose(dbg);
+		}
+	}
+	xrt_result_t xret = xrt_system_create_session(
+	    ics->server->xsys, xsi, &xs,
+	    create_native_compositor ? &xcn : NULL);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
@@ -719,7 +762,7 @@ ipc_handle_session_create(volatile struct ipc_client_state *ics,
 	ics->client_state.z_order = xsi->z_order;
 
 	ics->xs = xs;
-	ics->xc = &xcn->base;
+	ics->xc = xcn != NULL ? &xcn->base : NULL;
 
 	// Set initial state to visible and focused (matching in-process behavior).
 	// This must be called so the client's OXR layer knows to transition the
@@ -727,10 +770,11 @@ ipc_handle_session_create(volatile struct ipc_client_state *ics,
 	// to the app are deferred for AppContainer apps in oxr_session_begin().
 	ics->client_state.session_visible = true;
 	ics->client_state.session_focused = true;
-	xrt_syscomp_set_state(ics->server->xsysc, ics->xc, ics->client_state.session_visible,
-	                      ics->client_state.session_focused);
-
-	xrt_syscomp_set_z_order(ics->server->xsysc, ics->xc, ics->client_state.z_order);
+	if (ics->xc != NULL) {
+		xrt_syscomp_set_state(ics->server->xsysc, ics->xc, ics->client_state.session_visible,
+		                      ics->client_state.session_focused);
+		xrt_syscomp_set_z_order(ics->server->xsysc, ics->xc, ics->client_state.z_order);
+	}
 
 	// Return initial visibility/focus state to client (avoids race condition
 	// where client polls events after session_create but before begin_session)

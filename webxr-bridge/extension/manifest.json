@@ -1,27 +1,28 @@
 {
   "manifest_version": 3,
-  "name": "Monado WebXR Bridge",
-  "version": "1.0",
-  "description": "Bridges WebXR content to Monado OpenXR runtime on macOS",
-  "background": {
-    "service_worker": "background.js"
-  },
+  "name": "DisplayXR WebXR Bridge",
+  "version": "0.2.0",
+  "description": "Metadata/control sideband for DisplayXR WebXR sessions",
   "content_scripts": [
     {
-      "matches": ["*://*/*"],
-      "js": ["webxr-polyfill-bundle.js"],
+      "matches": ["http://*/*", "https://*/*", "file:///*"],
+      "js": ["src/isolated-world.js"],
       "run_at": "document_start",
-      "world": "MAIN"
+      "world": "ISOLATED",
+      "all_frames": false
     },
     {
-      "matches": ["*://*/*"],
-      "js": ["content-script.js"],
+      "matches": ["http://*/*", "https://*/*", "file:///*"],
+      "js": ["src/main-world.js"],
       "run_at": "document_start",
-      "world": "ISOLATED"
+      "world": "MAIN",
+      "all_frames": false
     }
   ],
-  "permissions": [
-    "nativeMessaging"
-  ],
-  "host_permissions": ["*://*/*"]
+  "permissions": [],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
 }

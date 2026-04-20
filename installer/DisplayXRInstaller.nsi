@@ -584,6 +584,9 @@ Section "DisplayXR Runtime" SecRuntime
 	; Install shell (spatial window manager)
 	File /nonfatal "${BIN_DIR}\displayxr-shell.exe"
 
+	; Install WebXR Bridge v2 host (metadata sideband for Chrome's native WebXR, issue #139)
+	File /nonfatal "${BIN_DIR}\displayxr-webxr-bridge.exe"
+
 	; Install switcher if available
 	File /nonfatal "${BIN_DIR}\DisplayXRSwitcher.exe"
 
@@ -713,6 +716,7 @@ Section "Uninstall"
 	Delete "$INSTDIR\DisplayXRClient.dll"
 	Delete "$INSTDIR\displayxr-service.exe"
 	Delete "$INSTDIR\displayxr-shell.exe"
+	Delete "$INSTDIR\displayxr-webxr-bridge.exe"
 	Delete "$INSTDIR\DisplayXRSwitcher.exe"
 	Delete "$INSTDIR\DisplayXR_win64.json"
 	Delete "$INSTDIR\install.log"

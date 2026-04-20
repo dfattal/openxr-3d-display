@@ -27,6 +27,18 @@
 #include <stdio.h>
 #include <assert.h>
 
+// Suppress qwerty pose integration while the WebXR bridge is driving the
+// session. multi_compositor flips this via qwerty_set_bridge_relay_active().
+// Self-contained in the qwerty driver so tools that link qwerty without the
+// multi_compositor (cli, gui) still resolve the symbol.
+static bool g_qwerty_bridge_relay_active = false;
+
+void
+qwerty_set_bridge_relay_active(bool active)
+{
+	g_qwerty_bridge_relay_active = active;
+}
+
 #define QWERTY_HMD_INITIAL_MOVEMENT_SPEED 0.002f // in meters per frame
 #define QWERTY_HMD_INITIAL_LOOK_SPEED 0.02f      // in radians per frame
 #define QWERTY_CONTROLLER_INITIAL_MOVEMENT_SPEED 0.005f
@@ -332,6 +344,30 @@ qwerty_get_tracked_pose(struct xrt_device *xd,
 	}
 
 	// Position
+
+	// Skip pose integration when the bridge is driving — page owns input.
+	// Also drop any lingering mouse-delta state so we don't accumulate.
+	if (g_qwerty_bridge_relay_active) {
+		qd->x_pos_delta = 0;
+		qd->y_pos_delta = 0;
+		qd->yaw_delta = 0;
+		qd->pitch_delta = 0;
+		// One-shot diagnostic so we can confirm the gate is active.
+		static bool logged_once = false;
+		if (!logged_once) {
+			logged_once = true;
+			U_LOG_W("qwerty: pose integration frozen (bridge relay active). "
+			        "pose=(%.3f, %.3f, %.3f)",
+			        (double)qd->pose.position.x,
+			        (double)qd->pose.position.y,
+			        (double)qd->pose.position.z);
+		}
+		out_relation->pose = qd->pose;
+		out_relation->relation_flags =
+		    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
+		return XRT_SUCCESS;
+	}
 
 	float sprint_boost = qd->sprint_pressed ? powf(MOVEMENT_SPEED_STEP, SPRINT_STEPS) : 1;
 	float mov_speed = qd->movement_speed * sprint_boost;

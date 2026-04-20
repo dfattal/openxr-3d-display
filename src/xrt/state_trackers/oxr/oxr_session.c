@@ -853,38 +853,6 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 	}
 #endif // XRT_OS_ANDROID
 
-	// Detect compositor-driven rendering mode changes (e.g., qwerty 0/1/2/3/4 keys).
-	// The compositor sets active_rendering_mode_index directly via xrt_device_set_property;
-	// we must detect this and push the event to the app.
-#ifdef OXR_HAVE_EXT_display_info
-	{
-		struct xrt_device *head = GET_XDEV_BY_ROLE(sess->sys, head);
-		if (head != NULL && head->hmd != NULL) {
-			uint32_t cur = head->hmd->active_rendering_mode_index;
-			if (cur != sess->last_rendering_mode_index && cur < head->rendering_mode_count) {
-				const struct xrt_rendering_mode *mode = &head->rendering_modes[cur];
-
-				// Update session hardware display state and view scales
-				bool old_3d = sess->hardware_display_3d;
-				sess->hardware_display_3d = mode->hardware_display_3d;
-				struct xrt_system_compositor *xsysc = sess->sys->xsysc;
-				if (xsysc != NULL) {
-					xsysc->info.recommended_view_scale_x = mode->view_scale_x;
-					xsysc->info.recommended_view_scale_y = mode->view_scale_y;
-				}
-
-				oxr_event_push_XrEventDataRenderingModeChanged(
-				    log, sess, sess->last_rendering_mode_index, cur);
-				if (mode->hardware_display_3d != old_3d) {
-					oxr_event_push_XrEventDataHardwareDisplayStateChanged(
-					    log, sess, mode->hardware_display_3d ? XR_TRUE : XR_FALSE);
-				}
-				sess->last_rendering_mode_index = cur;
-			}
-		}
-	}
-#endif
-
 	bool read_more_events = true;
 #ifdef XRT_OS_MACOS
 skip_macos_pump:
@@ -952,6 +920,35 @@ skip_macos_pump:
 			oxr_event_push_XrEventDataUserPresenceChangedEXT(log, sess,
 			                                                 xse.presence_change.is_user_present);
 #endif // OXR_HAVE_EXT_user_presence
+			break;
+		case XRT_SESSION_EVENT_RENDERING_MODE_CHANGE:
+#ifdef OXR_HAVE_EXT_display_info
+		{
+			struct xrt_device *head = GET_XDEV_BY_ROLE(sess->sys, head);
+			uint32_t cur = xse.rendering_mode_change.current_mode_index;
+			if (head != NULL && head->hmd != NULL && cur < head->rendering_mode_count) {
+				const struct xrt_rendering_mode *mode = &head->rendering_modes[cur];
+				sess->hardware_display_3d = mode->hardware_display_3d;
+				struct xrt_system_compositor *xsysc = sess->sys->xsysc;
+				if (xsysc != NULL) {
+					xsysc->info.recommended_view_scale_x = mode->view_scale_x;
+					xsysc->info.recommended_view_scale_y = mode->view_scale_y;
+				}
+			}
+			sess->last_rendering_mode_index = cur;
+			oxr_event_push_XrEventDataRenderingModeChanged(
+			    log, sess,
+			    xse.rendering_mode_change.previous_mode_index,
+			    xse.rendering_mode_change.current_mode_index);
+		}
+#endif // OXR_HAVE_EXT_display_info
+			break;
+		case XRT_SESSION_EVENT_HARDWARE_DISPLAY_STATE_CHANGE:
+#ifdef OXR_HAVE_EXT_display_info
+			oxr_event_push_XrEventDataHardwareDisplayStateChanged(
+			    log, sess,
+			    xse.hardware_display_state_change.hardware_display_3d ? XR_TRUE : XR_FALSE);
+#endif // OXR_HAVE_EXT_display_info
 			break;
 		case XRT_SESSION_EVENT_EXIT_REQUEST:
 			// Runtime-initiated session exit (e.g. own window was closed).
@@ -1178,7 +1175,10 @@ oxr_session_locate_views(struct oxr_logger *log,
 	}
 
 	// Get device pose for 3D world-space computation (qwerty = virtual display)
-	if (!sess->has_external_window) {
+	// Bridge-relay sessions (headless, XR_EXT_display_info) forward raw
+	// DP-tracked eye positions to a browser app; treat them like handle
+	// apps (display-local views) and skip the qwerty world_head_pos offset.
+	if (!sess->has_external_window && !sess->is_bridge_relay) {
 		struct xrt_space_relation display_relation = XRT_SPACE_RELATION_ZERO;
 		xrt_device_get_tracked_pose(xdev, XRT_INPUT_GENERIC_HEAD_POSE, xdisplay_time, &display_relation);
 		world_head_pos = display_relation.pose.position;
@@ -1393,11 +1393,12 @@ oxr_session_locate_views(struct oxr_logger *log,
 				}
 			}
 
-			// Ext apps (standalone): use raw nominal eye positions directly.
-			// FOVs come from the device (sim_display Kooima), so we only
-			// need to override the view positions to bypass the LOCAL space offset.
+			// Ext apps (standalone) and bridge-relay sessions: use raw nominal
+			// eye positions directly. FOVs come from the device (sim_display
+			// Kooima), so we only need to override the view positions to
+			// bypass the LOCAL space offset.
 			// Skip in IPC/shell mode: the server provides tracked eyes in view poses.
-			if (sess->has_external_window && !have_eye_override && have_eyes) {
+			if ((sess->has_external_window || sess->is_bridge_relay) && !have_eye_override && have_eyes) {
 				for (uint32_t ei = 0; ei < eye_count; ei++) {
 					view_eye_world[ei] = (struct xrt_vec3){
 					    adj_eyes[ei].x, adj_eyes[ei].y, adj_eyes[ei].z};
@@ -1459,9 +1460,11 @@ oxr_session_locate_views(struct oxr_logger *log,
 	if (ret != XR_SUCCESS || T_base_xdev.relation_flags == 0) {
 		// In IPC mode, the device tracking proxy may return zero flags on
 		// early frames before the server's tracking is ready. For handle apps
-		// with external windows (has_ext_win), use identity pose so the app
-		// can still render — it does its own Kooima projection via its HWND.
-		if (T_base_xdev.relation_flags == 0 && sess->has_external_window) {
+		// with external windows (has_ext_win) and bridge-relay sessions, use
+		// identity pose so the app can still render — it does its own Kooima
+		// projection via its HWND / forwards raw display-local eyes to a
+		// browser app.
+		if (T_base_xdev.relation_flags == 0 && (sess->has_external_window || sess->is_bridge_relay)) {
 			T_base_xdev.pose = (struct xrt_pose)XRT_POSE_IDENTITY;
 			T_base_xdev.relation_flags =
 			    (enum xrt_space_relation_flags)(
@@ -1469,7 +1472,7 @@ oxr_session_locate_views(struct oxr_logger *log,
 			        XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
 			        XRT_SPACE_RELATION_POSITION_VALID_BIT |
 			        XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
-			U_LOG_W("xrLocateViews: device relation_flags=0, using identity for ext_win app");
+			U_LOG_W("xrLocateViews: device relation_flags=0, using identity for ext_win/bridge app");
 		} else {
 			if (print) {
 				oxr_slog(&slog, "\n\tReturning invalid poses");
@@ -1513,11 +1516,11 @@ oxr_session_locate_views(struct oxr_logger *log,
 		// Do the magical space relation dance here.
 		struct xrt_space_relation result = {0};
 
-		// Shell IPC sessions: the server already computed display-relative
-		// view poses (via display-centric Kooima with DP eye tracking).
-		// Skip the T_base_head transform which adds a spurious Y offset
-		// from the qwerty device's world-space position.
-		if (sess->has_external_window && !have_eyes && !have_eye_override) {
+		// Shell IPC sessions and bridge-relay sessions: the server already
+		// computed display-relative view poses (via display-centric Kooima
+		// with DP eye tracking). Skip the T_base_head transform which adds a
+		// spurious Y offset from the qwerty device's world-space position.
+		if ((sess->has_external_window || sess->is_bridge_relay) && !have_eyes && !have_eye_override) {
 			// Use server poses directly (display-relative)
 			result.pose = view_pose;
 			result.relation_flags = T_base_head.relation_flags;
@@ -1581,7 +1584,7 @@ oxr_session_locate_views(struct oxr_logger *log,
 					tracked_eye = (struct xrt_vec3){0, 0, 0.5f};
 				}
 
-				if (!sess->has_external_window) {
+				if (!sess->has_external_window && !sess->is_bridge_relay) {
 					// DISPLAY MODE (Monado window): Transform tracked eye to world
 					struct xrt_vec3 rotated_eye;
 					math_quat_rotate_vec3(&world_head_ori, &tracked_eye, &rotated_eye);
@@ -1592,7 +1595,8 @@ oxr_session_locate_views(struct oxr_logger *log,
 					views[i].pose.orientation = (XrQuaternionf){
 					    world_head_ori.x, world_head_ori.y, world_head_ori.z, world_head_ori.w};
 				} else {
-					// SESSION TARGET: Use tracked eye positions directly
+					// SESSION TARGET (handle app or bridge relay):
+					// return RAW display-local DP-tracked eye positions.
 					views[i].pose.position.x = tracked_eye.x;
 					views[i].pose.position.y = tracked_eye.y;
 					views[i].pose.position.z = tracked_eye.z;
@@ -2593,6 +2597,12 @@ oxr_session_create(struct oxr_logger *log,
 	}
 #endif
 
+#ifdef OXR_HAVE_EXT_display_info
+	if (sys->inst->extensions.EXT_display_info && sys->inst->extensions.MND_headless) {
+		xsi.is_bridge_relay = true;
+	}
+#endif
+
 	/* Try allocating and populating. */
 	XrResult ret = oxr_session_create_impl(log, sys, createInfo, &xsi, &sess);
 	if (ret != XR_SUCCESS) {
@@ -2608,6 +2618,7 @@ oxr_session_create(struct oxr_logger *log,
 	// Track whether this session has an external window handle, offscreen readback, or shared texture
 	sess->has_external_window =
 	    (xsi.external_window_handle != NULL || xsi.readback_callback != NULL || xsi.shared_texture_handle != NULL);
+	sess->is_bridge_relay = xsi.is_bridge_relay;
 
 	// Tell the head device to return raw eye positions (no qwerty compose)
 	// and disable qwerty input processing for _ext/_shared apps
