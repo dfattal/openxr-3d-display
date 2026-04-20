@@ -61,4 +61,7 @@ if(WIN32)
 	if(XRT_FEATURE_SERVICE)
 		add_subdirectory(shell)
 	endif()
+
+	# DisplayXR WebXR bridge host (metadata sideband for Chrome's native WebXR)
+	add_subdirectory(webxr_bridge)
 endif()

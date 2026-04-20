@@ -23,6 +23,7 @@
 
 #include "util/u_logging.h"
 #include "util/u_misc.h"
+#include "util/u_system.h"
 #include "util/u_time.h"
 #include "os/os_time.h"
 
@@ -69,6 +70,10 @@
 #include <mutex>
 #include <sddl.h>
 
+
+// Bridge-relay flag: set by multi_compositor when a headless+display_info
+// session connects. Read in the blit loop to use mode-native tile rects.
+extern "C" bool g_bridge_relay_active;
 
 /*
  *
@@ -231,6 +236,14 @@ struct d3d11_service_compositor
 	//! Current focus state
 	bool state_focused;
 
+	//! True if this client was created as a headless bridge-relay session
+	//! (XR_EXT_display_info + XR_MND_headless). Tracked on the compositor so
+	//! compositor_destroy can clear the global g_bridge_relay_active gate
+	//! when the bridge disconnects — otherwise qwerty input and a handful
+	//! of bridge-specific code paths stay disabled even after the bridge is
+	//! gone, breaking subsequent legacy/non-bridge WebXR sessions.
+	bool is_bridge_relay;
+
 	//! App's HWND from XR_EXT_win32_window_binding (for lazy standalone init)
 	HWND app_hwnd;
 
@@ -359,6 +372,10 @@ struct d3d11_service_system
 	//! System devices for qwerty input support (passed to per-client windows)
 	struct xrt_system_devices *xsysd;
 
+	//! System used to fan out session events to every registered OpenXR
+	//! session (used for RENDERING_MODE_CHANGED / HARDWARE_DISPLAY_STATE).
+	struct u_system *usys;
+
 	//! D3D11 device (owned by service, not the app)
 	wil::com_ptr<ID3D11Device5> device;
 
@@ -428,6 +445,10 @@ struct d3d11_service_system
 	//! Tile layout for atlas (from active rendering mode, default 2x1)
 	uint32_t tile_columns;
 	uint32_t tile_rows;
+
+	//! Compositor HWND for publishing view dims (set on first client window creation).
+	//! The WebXR bridge reads these via GetPropW to get deferred-resize-aware tile dims.
+	HWND compositor_hwnd;
 
 	//! Display refresh rate
 	float refresh_rate;
@@ -840,6 +861,24 @@ d3d11_service_semaphore_from_xrt(struct xrt_compositor_semaphore *xcsem)
 	return reinterpret_cast<struct d3d11_service_semaphore *>(xcsem);
 }
 
+// True iff a bridge relay session exists AND a WebSocket client is currently
+// connected to the bridge exe. Per-frame gate for bridge-specific behavior
+// (crop override, atlas-resize skip, qwerty suppression, vendor hw-state
+// forwarding). `g_bridge_relay_active` alone is too coarse: the bridge exe
+// holds its OpenXR session alive for its entire lifetime regardless of
+// whether the Chrome extension is connected, so gating on it alone disables
+// legacy WebXR paths whenever the bridge process is running. The bridge
+// sets/clears DXR_BridgeClientActive on the compositor HWND on WS
+// accept/disconnect.
+static bool
+bridge_client_is_live(struct d3d11_service_system *sys)
+{
+	if (!g_bridge_relay_active) return false;
+	HWND hwnd = sys != nullptr ? sys->compositor_hwnd : nullptr;
+	if (hwnd == nullptr) return false;
+	return GetPropW(hwnd, L"DXR_BridgeClientActive") != nullptr;
+}
+
 // Forward declarations — defined later, used by client registration code.
 static void
 compute_grid_layout(const struct d3d11_service_system *sys,
@@ -884,6 +923,43 @@ sync_tile_layout(struct d3d11_service_system *sys)
 	if (sys->display_width > 0 && sys->display_height > 0) {
 		sys->view_width = sys->display_width / sys->tile_columns;
 		sys->view_height = sys->display_height / sys->tile_rows;
+	}
+}
+
+/*!
+ * Fan out a rendering-mode-change session event to every registered OpenXR
+ * session under this system. Also fans out a hardware-display-state-change
+ * event if the 3D bit flipped between prev_idx and new_idx. No-op if the
+ * index did not change.
+ */
+static void
+broadcast_rendering_mode_change(struct d3d11_service_system *sys,
+                                struct xrt_device *head,
+                                uint32_t prev_idx,
+                                uint32_t new_idx)
+{
+	if (sys == nullptr || sys->usys == nullptr || head == nullptr || head->hmd == NULL) {
+		return;
+	}
+	if (prev_idx == new_idx) {
+		return;
+	}
+
+	union xrt_session_event xse = {};
+	xse.rendering_mode_change.type = XRT_SESSION_EVENT_RENDERING_MODE_CHANGE;
+	xse.rendering_mode_change.previous_mode_index = prev_idx;
+	xse.rendering_mode_change.current_mode_index = new_idx;
+	u_system_broadcast_event(sys->usys, &xse);
+
+	if (prev_idx < head->rendering_mode_count && new_idx < head->rendering_mode_count) {
+		bool prev_3d = head->rendering_modes[prev_idx].hardware_display_3d;
+		bool new_3d = head->rendering_modes[new_idx].hardware_display_3d;
+		if (prev_3d != new_3d) {
+			union xrt_session_event xse2 = {};
+			xse2.hardware_display_state_change.type = XRT_SESSION_EVENT_HARDWARE_DISPLAY_STATE_CHANGE;
+			xse2.hardware_display_state_change.hardware_display_3d = new_3d;
+			u_system_broadcast_event(sys->usys, &xse2);
+		}
 	}
 }
 
@@ -1856,6 +1932,12 @@ init_client_render_resources(struct d3d11_service_system *sys,
 		}
 
 		U_LOG_W("Created window for client: hwnd=%p (%ux%u)", res->hwnd, sys->output_width, sys->output_height);
+	}
+
+	// Track compositor HWND so the WebXR bridge can push per-view tile dims
+	// via SetPropW(DXR_BridgeViewW/H) and request mode changes via DXR_RequestMode.
+	if (res->hwnd != nullptr && sys->compositor_hwnd == nullptr) {
+		sys->compositor_hwnd = res->hwnd;
 	}
 
 	// Get actual window client area (may differ from requested size if window
@@ -2892,7 +2974,30 @@ d3d11_service_render_hud(struct d3d11_service_system *sys,
                           bool weaving_done,
                           const struct xrt_eye_positions *eye_pos)
 {
-	if (!res->owns_window || res->hud == NULL || !u_hud_is_visible()) {
+	if (!res->owns_window || res->hud == NULL) {
+		return;
+	}
+	// When bridge is active, HUD visibility is controlled by the bridge's
+	// shared memory (sample's TAB key), not the qwerty driver's TAB toggle.
+	// Check bridge HUD first; fall back to u_hud_is_visible() for non-bridge.
+	static HANDLE s_bridge_hud_mapping = nullptr;
+	static struct bridge_hud_shared *s_bridge_hud = nullptr;
+	static bool s_bridge_hud_tried = false;
+	if (g_bridge_relay_active && !s_bridge_hud_tried) {
+		s_bridge_hud_tried = true;
+		s_bridge_hud_mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, BRIDGE_HUD_MAPPING_NAME);
+		if (s_bridge_hud_mapping) {
+			s_bridge_hud = (struct bridge_hud_shared *)MapViewOfFile(
+			    s_bridge_hud_mapping, FILE_MAP_READ, 0, 0, sizeof(struct bridge_hud_shared));
+			if (s_bridge_hud) {
+				U_LOG_W("Bridge HUD shared memory opened by compositor");
+			}
+		}
+	}
+	bool bridge_hud_active = (s_bridge_hud != nullptr &&
+	                          s_bridge_hud->magic == BRIDGE_HUD_MAGIC &&
+	                          s_bridge_hud->visible);
+	if (!bridge_hud_active && !u_hud_is_visible()) {
 		return;
 	}
 
@@ -3010,6 +3115,8 @@ d3d11_service_render_hud(struct d3d11_service_system *sys,
 		}
 	}
 #endif
+
+	data.bridge_hud = s_bridge_hud;
 
 	bool dirty = u_hud_update(res->hud, &data);
 
@@ -4011,6 +4118,7 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 		return XRT_ERROR_D3D11;
 	}
 	mc->hwnd = (HWND)comp_d3d11_window_get_hwnd(mc->window);
+	sys->compositor_hwnd = mc->hwnd;
 
 	if (sys->xsysd != nullptr) {
 		comp_d3d11_window_set_system_devices(mc->window, sys->xsysd);
@@ -4276,6 +4384,7 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 					return XRT_ERROR_D3D11;
 				}
 				mc->hwnd = (HWND)comp_d3d11_window_get_hwnd(mc->window);
+				sys->compositor_hwnd = mc->hwnd;
 
 				if (sys->xsysd != nullptr) {
 					comp_d3d11_window_set_system_devices(mc->window, sys->xsysd);
@@ -6403,6 +6512,7 @@ after_key_shortcuts:
 			    ? sys->xsysd->static_roles.head : nullptr;
 
 			if (head != nullptr && head->hmd != NULL) {
+				uint32_t prev_idx = head->hmd->active_rendering_mode_index;
 				if (want_2d) {
 					// Save current 3D mode index before switching to 2D
 					uint32_t cur = head->hmd->active_rendering_mode_index;
@@ -6415,6 +6525,8 @@ after_key_shortcuts:
 					// Restore 3D mode
 					head->hmd->active_rendering_mode_index = sys->last_3d_mode_index;
 				}
+				broadcast_rendering_mode_change(sys, head, prev_idx,
+				                                head->hmd->active_rendering_mode_index);
 			}
 
 			// Switch display HW mode
@@ -8088,6 +8200,26 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		sys->active_compositor = c;
 	}
 
+	// Per-frame bridge-WS-client-live gate. Used below to enable/disable
+	// bridge-specific paths (crop override, atlas-resize skip, qwerty
+	// suppression, vendor hw-state forwarding). When the bridge process
+	// exists but no extension is connected, this is false and legacy
+	// behavior runs normally. Also drives qwerty relay state transitions
+	// so qwerty wakes up the moment the WS client disconnects.
+	bool bridge_live = bridge_client_is_live(sys);
+	{
+		static bool s_last_bridge_live = false;
+		if (bridge_live != s_last_bridge_live) {
+			U_LOG_W("Bridge WS client %s — gating bridge paths %s",
+			        bridge_live ? "connected" : "disconnected",
+			        bridge_live ? "ON" : "OFF");
+			s_last_bridge_live = bridge_live;
+#ifdef XRT_BUILD_DRIVER_QWERTY
+			qwerty_set_bridge_relay_active(bridge_live);
+#endif
+		}
+	}
+
 	// Log frame submission (first frame and every 60 frames)
 	static uint32_t frame_count = 0;
 	if (frame_count == 0 || frame_count % 60 == 0) {
@@ -8140,8 +8272,14 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 					// Scale stereo texture proportionally to window/display ratio.
 					// Skip during drag to avoid expensive texture reallocation every pixel.
+					// Skip for bridge mode: the WebXR client swapchain is always
+					// allocated at full-display worst-case, and the bridge pushes
+					// content dims = windowSize × viewScale via DXR_BridgeViewW/H.
+					// The conservative min-ratio shrink here can make the atlas
+					// narrower than the bridge-computed content, clipping it.
 					// The display processor handles mismatched stereo/target sizes via stretching.
-					if (c->render.display_processor != nullptr && !in_size_move) {
+					if (c->render.display_processor != nullptr && !in_size_move &&
+					    !bridge_live) {
 						uint32_t disp_px_w = 0, disp_px_h = 0;
 						int32_t disp_left = 0, disp_top = 0;
 
@@ -8243,15 +8381,51 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		}
 	}
 
-	// Runtime-side 2D/3D toggle (V key) — polls qwerty driver each frame
+	// App-initiated mode change: bridge relays requestRenderingMode() from the
+	// WebXR sample via HWND property. Polls each frame, triggers same server-side
+	// path as qwerty V key (device update + DP toggle + broadcast).
+	if (bridge_live && c->render.hwnd != nullptr && sys->xsysd != NULL) {
+		uint32_t req = (uint32_t)(uintptr_t)GetPropW(c->render.hwnd, L"DXR_RequestMode");
+		if (req > 0) {
+			RemovePropW(c->render.hwnd, L"DXR_RequestMode");
+			uint32_t modeIdx = req - 1; // decode +1 encoding
+			struct xrt_device *head = sys->xsysd->static_roles.head;
+			if (head != nullptr && head->hmd != NULL &&
+			    modeIdx < head->rendering_mode_count &&
+			    modeIdx != head->hmd->active_rendering_mode_index) {
+				uint32_t prev_idx = head->hmd->active_rendering_mode_index;
+				head->hmd->active_rendering_mode_index = modeIdx;
+				broadcast_rendering_mode_change(sys, head, prev_idx, modeIdx);
+
+				// Toggle DP 2D/3D
+				bool want_3d = head->rendering_modes[modeIdx].hardware_display_3d;
+				struct xrt_display_processor_d3d11 *dp = nullptr;
+				if (sys->shell_mode && sys->multi_comp != nullptr)
+					dp = sys->multi_comp->display_processor;
+				else if (c->render.display_processor != nullptr)
+					dp = c->render.display_processor;
+				if (dp != nullptr)
+					xrt_display_processor_d3d11_request_display_mode(dp, want_3d);
+
+				sync_tile_layout(sys);
+				sys->hardware_display_3d = want_3d;
+				U_LOG_W("App-initiated mode change: %u -> %u (3D=%d)", prev_idx, modeIdx, (int)want_3d);
+			}
+		}
+	}
+
+	// Runtime-side 2D/3D toggle (V key) — polls qwerty driver each frame.
+	// Disabled when bridge is active: mode changes go through the HWND
+	// property relay above (app-initiated path).
 #ifdef XRT_BUILD_DRIVER_QWERTY
-	if (sys->xsysd != NULL) {
+	if (sys->xsysd != NULL && !bridge_live) {
 		bool force_2d = false;
 		bool toggled = qwerty_check_display_mode_toggle(
 		    sys->xsysd->xdevs, sys->xsysd->xdev_count, &force_2d);
 		if (toggled) {
 			struct xrt_device *head = sys->xsysd->static_roles.head;
 			if (head != nullptr && head->hmd != NULL) {
+				uint32_t prev_idx = head->hmd->active_rendering_mode_index;
 				if (force_2d) {
 					// Save current 3D mode index before switching to 2D
 					uint32_t cur = head->hmd->active_rendering_mode_index;
@@ -8264,6 +8438,8 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 					// Restore last 3D mode index
 					head->hmd->active_rendering_mode_index = sys->last_3d_mode_index;
 				}
+				broadcast_rendering_mode_change(sys, head, prev_idx,
+				                                head->hmd->active_rendering_mode_index);
 			}
 			// Switch display mode on the active DP.
 			// In shell mode, the multi-comp owns the DP (per-client has none).
@@ -8285,8 +8461,11 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			int render_mode = -1;
 			if (qwerty_check_rendering_mode_change(sys->xsysd->xdevs, sys->xsysd->xdev_count, &render_mode)) {
 				struct xrt_device *head = sys->xsysd->static_roles.head;
-				if (head != NULL) {
+				if (head != NULL && head->hmd != NULL) {
+					uint32_t prev_idx = head->hmd->active_rendering_mode_index;
 					xrt_device_set_property(head, XRT_DEVICE_PROPERTY_OUTPUT_MODE, render_mode);
+					broadcast_rendering_mode_change(sys, head, prev_idx,
+					                                head->hmd->active_rendering_mode_index);
 				}
 			}
 		}
@@ -8309,9 +8488,15 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 				        sys->hardware_display_3d ? "3D" : "2D",
 				        vendor_is_3d ? "3D" : "2D");
 				sys->hardware_display_3d = vendor_is_3d;
+				// When bridge is active, don't force the rendering mode
+				// transition — let the app decide via requestRenderingMode().
+				// The app receives a hardwarestatechange event and can react.
+				// Forcing causes a brief glitch (2D content through 3D weaver).
+				if (!bridge_live) {
 				// Update the device's active rendering mode to match
 				struct xrt_device *head = sys->xsysd ? sys->xsysd->static_roles.head : nullptr;
 				if (head != nullptr && head->hmd != NULL) {
+					uint32_t prev_idx = head->hmd->active_rendering_mode_index;
 					if (!vendor_is_3d) {
 						uint32_t cur = head->hmd->active_rendering_mode_index;
 						if (cur < head->rendering_mode_count &&
@@ -8322,8 +8507,11 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 					} else {
 						head->hmd->active_rendering_mode_index = sys->last_3d_mode_index;
 					}
+					broadcast_rendering_mode_change(sys, head, prev_idx,
+					                                head->hmd->active_rendering_mode_index);
 				}
 				sync_tile_layout(sys);
+				}
 			}
 		}
 	}
@@ -8376,6 +8564,54 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	// overwritten per projection layer (may differ for legacy compromise-scale apps)
 	uint32_t content_view_w = sys->view_width;
 	uint32_t content_view_h = sys->view_height;
+
+	// Bridge-relay: read active per-view tile dims pushed by the bridge.
+	// The bridge (as the sample's proxy) owns windowSize × viewScale and
+	// writes DXR_BridgeViewW/H via SetPropW each time the window or mode
+	// changes. We crop at exactly what it pushed, guaranteeing match with
+	// the sample's render — same model as cube_handle_d3d11_win, which
+	// sets XrCompositionLayerProjectionView.subImage.imageRect directly.
+	//
+	// Fallback to display_width × viewScale when the bridge hasn't pushed
+	// yet (first few frames before poll_window_metrics runs). Without this,
+	// Chrome's compromise-scaled subImage.imageRect wins and views scramble.
+	bool bridge_override = false;
+	uint32_t active_vw = sys->view_width;
+	uint32_t active_vh = sys->view_height;
+	if (bridge_live && !sys->shell_mode) {
+		uint32_t bvw = 0, bvh = 0;
+		// Prefer the CURRENT frame's live HWND (c->render.hwnd) over the
+		// cached sys->compositor_hwnd. When the WebXR page is reloaded the
+		// Chrome compositor may recreate its window, leaving the cached
+		// handle stale. Bridge's FindWindowW finds the current live window
+		// and pushes DXR_BridgeViewW/H there; we must read from the same.
+		HWND prop_hwnd = c->render.hwnd != nullptr ? c->render.hwnd : sys->compositor_hwnd;
+		if (prop_hwnd) {
+			bvw = (uint32_t)(uintptr_t)GetPropW(prop_hwnd, L"DXR_BridgeViewW");
+			bvh = (uint32_t)(uintptr_t)GetPropW(prop_hwnd, L"DXR_BridgeViewH");
+		}
+		if (bvw > 0 && bvh > 0) {
+			active_vw = bvw;
+			active_vh = bvh;
+			bridge_override = true;
+		} else if (sys->xdev != NULL && sys->xdev->hmd != NULL &&
+		           sys->display_width > 0 && sys->display_height > 0) {
+			uint32_t mi = sys->xdev->hmd->active_rendering_mode_index;
+			if (mi < sys->xdev->rendering_mode_count) {
+				float sx = sys->xdev->rendering_modes[mi].view_scale_x;
+				float sy = sys->xdev->rendering_modes[mi].view_scale_y;
+				if (sx > 0.0f && sy > 0.0f) {
+					uint32_t vw = (uint32_t)(sys->display_width * sx);
+					uint32_t vh = (uint32_t)(sys->display_height * sy);
+					if (vw > 0 && vh > 0) {
+						active_vw = vw;
+						active_vh = vh;
+						bridge_override = true;
+					}
+				}
+			}
+		}
+	}
 
 	// Render projection layers to stereo texture (via copy)
 	for (uint32_t i = 0; i < c->layer_accum.layer_count; i++) {
@@ -8553,14 +8789,49 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			c->atlas_flip_y = true;
 		}
 
+		static bool logged_bridge_blit = false;
+		if (bridge_override && !logged_bridge_blit) {
+			logged_bridge_blit = true;
+			U_LOG_W("BRIDGE BLIT: active=%ux%u sys_view=%ux%u display=%ux%u "
+			        "chrome_rect=(%d,%d %dx%d) tiles=%ux%u scale=%.2fx%.2f",
+			        active_vw, active_vh, sys->view_width, sys->view_height,
+			        sys->display_width, sys->display_height,
+			        layer->data.proj.v[0].sub.rect.offset.w,
+			        layer->data.proj.v[0].sub.rect.offset.h,
+			        layer->data.proj.v[0].sub.rect.extent.w,
+			        layer->data.proj.v[0].sub.rect.extent.h,
+			        sys->tile_columns, sys->tile_rows,
+			        (sys->xdev && sys->xdev->hmd && sys->xdev->hmd->active_rendering_mode_index < sys->xdev->rendering_mode_count)
+			            ? sys->xdev->rendering_modes[sys->xdev->hmd->active_rendering_mode_index].view_scale_x : -1.0f,
+			        (sys->xdev && sys->xdev->hmd && sys->xdev->hmd->active_rendering_mode_index < sys->xdev->rendering_mode_count)
+			            ? sys->xdev->rendering_modes[sys->xdev->hmd->active_rendering_mode_index].view_scale_y : -1.0f);
+		}
+
 		for (uint32_t eye = 0; eye < proj_view_count; eye++) {
 			float src_x = static_cast<float>(layer->data.proj.v[eye].sub.rect.offset.w);
 			float src_y = static_cast<float>(layer->data.proj.v[eye].sub.rect.offset.h);
 			float src_w = static_cast<float>(layer->data.proj.v[eye].sub.rect.extent.w);
 			float src_h = static_cast<float>(layer->data.proj.v[eye].sub.rect.extent.h);
 
-			// In shell mode, use actual content dims for tile layout (atlas is native-sized).
-			// In non-shell mode, use sys->view_width/height (atlas is DP-sized).
+			if (bridge_override) {
+				// Override: use active per-view dims (display × viewScale)
+				// instead of Chrome's compromise-scaled subImage.imageRect.
+				// The bridge sample rendered tiles at this size.
+				src_w = static_cast<float>(active_vw);
+				src_h = static_cast<float>(active_vh);
+				uint32_t tileX = eye % sys->tile_columns;
+				uint32_t tileY = eye / sys->tile_columns;
+				src_x = static_cast<float>(tileX * active_vw);
+				src_y = static_cast<float>(tileY * active_vh);
+			}
+
+			// Tile layout for atlas placement. Atlas tiles are always laid
+			// out at sys->view_width × sys->view_height stride — that's the
+			// invariant service_crop_atlas_for_dp relies on when it reads
+			// src_tile_x = view_idx × sys->view_width from the atlas. For
+			// bridge_override the CONTENT is smaller (active_vw × active_vh)
+			// but sits in the top-left of each full-sized tile slot, just
+			// like legacy compromise-scaled apps. The crop shader handles it.
 			uint32_t layout_vw = sys->shell_mode ? static_cast<uint32_t>(src_w) : sys->view_width;
 			uint32_t layout_vh = sys->shell_mode ? static_cast<uint32_t>(src_h) : sys->view_height;
 			uint32_t tile_x, tile_y;
@@ -8629,10 +8900,16 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		}
 		} // !zero_copy
 
-		// Track actual content dimensions from submitted rects (may differ from
-		// sys->view_width/height for legacy apps that render at compromise scale).
-		content_view_w = static_cast<uint32_t>(layer->data.proj.v[0].sub.rect.extent.w);
-		content_view_h = static_cast<uint32_t>(layer->data.proj.v[0].sub.rect.extent.h);
+		// Track actual content dimensions for DP crop.
+		if (bridge_override) {
+			// Bridge sample renders at active per-view dims — use those.
+			content_view_w = active_vw;
+			content_view_h = active_vh;
+		} else {
+			// Non-bridge: use Chrome's submitted subImage extent.
+			content_view_w = static_cast<uint32_t>(layer->data.proj.v[0].sub.rect.extent.w);
+			content_view_h = static_cast<uint32_t>(layer->data.proj.v[0].sub.rect.extent.h);
+		}
 		if (!sys->shell_mode) {
 			// Clamp to atlas tile dims in case client swapchain > atlas (#102).
 			// In shell mode, atlas is native-display-sized so no clamping needed.
@@ -8952,6 +9229,15 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 		// Canvas = (0,0,0,0): IPC hosted apps always own the full window,
 		// so canvas equals back buffer — no sub-rect needed.
+		static bool logged_dp = false;
+		if (!logged_dp) {
+			logged_dp = true;
+			U_LOG_W("DP HANDOFF: input_view=%ux%u tiles=%ux%u bb=%ux%u content=%ux%u zc=%d flip_y=%d",
+			        input_view_w, input_view_h, sys->tile_columns, sys->tile_rows,
+			        back_buffer_width, back_buffer_height,
+			        content_view_w, content_view_h,
+			        (int)use_zero_copy, (int)c->atlas_flip_y);
+		}
 		xrt_display_processor_d3d11_process_atlas(
 		    c->render.display_processor, sys->context.get(), input_srv,
 		    input_view_w, input_view_h, sys->tile_columns, sys->tile_rows,
@@ -9013,6 +9299,20 @@ compositor_destroy(struct xrt_compositor *xc)
 	struct d3d11_service_system *sys = c->sys;
 
 	U_LOG_W("Destroying D3D11 service compositor for client");
+
+	// If this was the bridge-relay session, clear the global gate so
+	// subsequent non-bridge WebXR / legacy sessions get normal compositor
+	// behavior (qwerty input enabled, V/number keys toggle mode, the
+	// bridge_override crop path stays dormant until another bridge
+	// connects). Without this the flag stays true across session ends
+	// and poisons any later non-bridge session on the same service.
+	if (c->is_bridge_relay) {
+		U_LOG_W("Bridge relay session ending — clearing g_bridge_relay_active");
+		g_bridge_relay_active = false;
+#ifdef XRT_BUILD_DRIVER_QWERTY
+		qwerty_set_bridge_relay_active(false);
+#endif
+	}
 
 	// Unregister from multi-compositor before cleanup.
 	// Always unregister if there's a multi_comp — the client may have been
@@ -9100,9 +9400,25 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 	c->window_closed = false;
 	c->exit_request_sent = false;
 	c->window_closed_frame_count = 0;
+	c->is_bridge_relay = false;
 
 	// Initialize layer accumulator
 	std::memset(&c->layer_accum, 0, sizeof(c->layer_accum));
+
+	// Bridge relay sessions (headless + XR_EXT_display_info) only need event
+	// registration — skip window, swap chain, and display processor creation.
+	bool is_headless_relay = (xsi != nullptr && xsi->is_bridge_relay);
+	if (is_headless_relay) {
+		U_LOG_W("Bridge relay session: skipping render resources (headless, events only)");
+		// Session-lifecycle flag — coarse "a bridge session exists" gate.
+		// Per-frame behavior in compositor_layer_commit reads the finer-
+		// grained bridge_client_is_live() (session-lifecycle AND WS
+		// client connected via DXR_BridgeClientActive prop). That function
+		// owns qwerty_set_bridge_relay_active() so we don't pin qwerty
+		// to "suppressed" while the bridge exe is idle.
+		c->is_bridge_relay = true;
+		g_bridge_relay_active = true;
+	}
 
 	// Initialize per-client render resources (window, swap chain, display processor)
 	// Get external window handle if app provided one via XR_EXT_win32_window_binding
@@ -9111,18 +9427,20 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 		external_hwnd = xsi->external_window_handle;
 	}
 
-	// Activate shell mode from system compositor info (set by ipc_server_process.c
-	// after init_all, before any client connects)
-	if (sys->base.info.shell_mode && !sys->shell_mode) {
-		sys->shell_mode = true;
-		U_LOG_W("Shell mode activated for D3D11 service system");
-	}
+	if (!is_headless_relay) {
+		// Activate shell mode from system compositor info (set by ipc_server_process.c
+		// after init_all, before any client connects)
+		if (sys->base.info.shell_mode && !sys->shell_mode) {
+			sys->shell_mode = true;
+			U_LOG_W("Shell mode activated for D3D11 service system");
+		}
 
-	xrt_result_t res_ret = init_client_render_resources(sys, external_hwnd, sys->xsysd, &c->render);
-	if (res_ret != XRT_SUCCESS) {
-		U_LOG_E("Failed to initialize client render resources");
-		delete c;
-		return res_ret;
+		xrt_result_t res_ret = init_client_render_resources(sys, external_hwnd, sys->xsysd, &c->render);
+		if (res_ret != XRT_SUCCESS) {
+			U_LOG_E("Failed to initialize client render resources");
+			delete c;
+			return res_ret;
+		}
 	}
 
 	// Register with multi-compositor in shell mode
@@ -9332,15 +9650,17 @@ system_destroy(struct xrt_system_compositor *xsysc)
 extern "C" xrt_result_t
 comp_d3d11_service_create_system(struct xrt_device *xdev,
                                  struct xrt_system_devices *xsysd,
+                                 struct u_system *usys,
                                  struct xrt_system_compositor **out_xsysc)
 {
-	U_LOG_W("Creating D3D11 service system compositor (xsysd=%p)", (void *)xsysd);
+	U_LOG_W("Creating D3D11 service system compositor (xsysd=%p usys=%p)", (void *)xsysd, (void *)usys);
 
 	// Allocate system compositor
 	struct d3d11_service_system *sys = new d3d11_service_system();
 	std::memset(&sys->base, 0, sizeof(sys->base));
 
 	sys->xdev = xdev;
+	sys->usys = usys;
 	sys->log_level = U_LOGGING_INFO;
 	sys->hardware_display_3d = true;
 	sys->last_3d_mode_index = 1;

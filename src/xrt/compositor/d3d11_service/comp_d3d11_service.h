@@ -25,7 +25,8 @@
 extern "C" {
 #endif
 
-// Forward decl from ipc_protocol.h — full definition is included by callers.
+struct u_system;
+// Forward decls from ipc_protocol.h — full definition is included by callers.
 struct ipc_launcher_app;
 struct ipc_capture_result;
 
@@ -48,6 +49,7 @@ struct ipc_capture_result;
  *
  * @param xdev The head device to render for.
  * @param xsysd System devices for qwerty input support (may be NULL).
+ * @param usys System used to fan out session events (may be NULL).
  * @param[out] out_xsysc Pointer to receive the system compositor.
  * @return XRT_SUCCESS on success.
  *
@@ -56,6 +58,7 @@ struct ipc_capture_result;
 xrt_result_t
 comp_d3d11_service_create_system(struct xrt_device *xdev,
                                  struct xrt_system_devices *xsysd,
+                                 struct u_system *usys,
                                  struct xrt_system_compositor **out_xsysc);
 
 /*!
