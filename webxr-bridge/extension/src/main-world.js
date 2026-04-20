@@ -211,11 +211,29 @@
   navigator.xr.requestSession = function () {
     var args = arguments;
     return originalRequestSession.apply(navigator.xr, args).then(function (realSession) {
+      // Per-session "this page is using displayXR" flag. First read of
+      // session.displayXR sends a 'bridge-attach' to the bridge, which
+      // sets the compositor-facing DXR_BridgeClientActive HWND prop.
+      // Legacy WebXR pages never read the getter, so the compositor
+      // stays on its normal non-bridge path even with the extension
+      // loaded. On session 'end' we send 'bridge-detach' to release
+      // the gate.
+      var hasAttached = false;
+      function markAttached() {
+        if (hasAttached) return;
+        hasAttached = true;
+        sendToBridge({ type: 'bridge-attach', version: 1 });
+      }
+
       // Add displayXR as a getter directly on the session object.
       // No Proxy needed — avoids brand-check failures with XRWebGLLayer,
       // updateRenderState, and other WebXR APIs that reject Proxy wrappers.
       Object.defineProperty(realSession, 'displayXR', {
-        get: function () { return buildDisplayXR(); },
+        get: function () {
+          var surface = buildDisplayXR();
+          if (surface) markAttached();
+          return surface;
+        },
         configurable: true
       });
 
@@ -224,6 +242,10 @@
 
       realSession.addEventListener('end', function () {
         activeSessions = activeSessions.filter(function (e) { return e.session !== realSession; });
+        if (hasAttached) {
+          sendToBridge({ type: 'bridge-detach', version: 1 });
+          hasAttached = false;
+        }
       });
 
       return realSession;

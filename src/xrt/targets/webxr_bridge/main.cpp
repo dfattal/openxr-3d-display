@@ -966,6 +966,24 @@ static void handle_ws_message(Bridge &b, const std::string &msg) {
 			b.stream_eye_poses = false;
 			LOG_I("WS configure: eye pose streaming OFF");
 		}
+	} else if (type == "bridge-attach") {
+		// Page is actually using session.displayXR — enable bridge-specific
+		// compositor behavior (crop override, qwerty suppression, etc.).
+		// Legacy non-bridge WebXR pages never send this, so the compositor
+		// stays on its normal path even with the extension loaded.
+		HWND hwnd = g_compositor_hwnd.load();
+		if (hwnd) {
+			SetPropW(hwnd, L"DXR_BridgeClientActive", (HANDLE)(uintptr_t)1);
+			LOG_I("WS bridge-attach: compositor gate ENGAGED");
+		} else {
+			LOG_W("WS bridge-attach: no compositor HWND yet");
+		}
+	} else if (type == "bridge-detach") {
+		HWND hwnd = g_compositor_hwnd.load();
+		if (hwnd) {
+			RemovePropW(hwnd, L"DXR_BridgeClientActive");
+			LOG_I("WS bridge-detach: compositor gate RELEASED");
+		}
 	} else if (type == "hud-update") {
 		if (b.hud_shared) {
 			// Parse "visible" and "lines" array from JSON.
@@ -1078,6 +1096,14 @@ static void ws_thread_func(Bridge &b) {
 
 		LOG_I("WS client connected");
 		b.ws_client_connected.store(true);
+		// NB: DXR_BridgeClientActive is NOT set here. The extension's
+		// content script auto-connects on every page load, so a WS
+		// connection alone does not imply the page is using
+		// session.displayXR. The extension signals actual bridge use
+		// via "bridge-attach" / "bridge-detach" messages (sent when
+		// the page first reads session.displayXR, and on session end
+		// respectively). The prop is toggled by the handlers in
+		// handle_ws_message(). See isolated-world.js and main-world.js.
 
 		// Client loop: send outgoing messages, receive incoming.
 		while (g_running.load() && b.ws_client_connected.load()) {
@@ -1132,10 +1158,21 @@ static void ws_thread_func(Bridge &b) {
 
 		b.stream_eye_poses = false;
 		b.ws_client_connected.store(false);
+		// Clear the compositor-facing signal — bridge is idle again.
+		{
+			HWND hwnd = g_compositor_hwnd.load();
+			if (hwnd) RemovePropW(hwnd, L"DXR_BridgeClientActive");
+		}
 		closesocket(client);
 		LOG_I("WS client disconnected");
 	}
 
+	// Shutdown — ensure prop is cleared even if we exited the accept loop
+	// with a client still connected (g_running flipped false).
+	{
+		HWND hwnd = g_compositor_hwnd.load();
+		if (hwnd) RemovePropW(hwnd, L"DXR_BridgeClientActive");
+	}
 	closesocket(listen_sock);
 	LOG_I("WS server shut down");
 }

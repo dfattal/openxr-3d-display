@@ -861,6 +861,24 @@ d3d11_service_semaphore_from_xrt(struct xrt_compositor_semaphore *xcsem)
 	return reinterpret_cast<struct d3d11_service_semaphore *>(xcsem);
 }
 
+// True iff a bridge relay session exists AND a WebSocket client is currently
+// connected to the bridge exe. Per-frame gate for bridge-specific behavior
+// (crop override, atlas-resize skip, qwerty suppression, vendor hw-state
+// forwarding). `g_bridge_relay_active` alone is too coarse: the bridge exe
+// holds its OpenXR session alive for its entire lifetime regardless of
+// whether the Chrome extension is connected, so gating on it alone disables
+// legacy WebXR paths whenever the bridge process is running. The bridge
+// sets/clears DXR_BridgeClientActive on the compositor HWND on WS
+// accept/disconnect.
+static bool
+bridge_client_is_live(struct d3d11_service_system *sys)
+{
+	if (!g_bridge_relay_active) return false;
+	HWND hwnd = sys != nullptr ? sys->compositor_hwnd : nullptr;
+	if (hwnd == nullptr) return false;
+	return GetPropW(hwnd, L"DXR_BridgeClientActive") != nullptr;
+}
+
 // Forward declarations — defined later, used by client registration code.
 static void
 compute_grid_layout(const struct d3d11_service_system *sys,
@@ -8182,6 +8200,26 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		sys->active_compositor = c;
 	}
 
+	// Per-frame bridge-WS-client-live gate. Used below to enable/disable
+	// bridge-specific paths (crop override, atlas-resize skip, qwerty
+	// suppression, vendor hw-state forwarding). When the bridge process
+	// exists but no extension is connected, this is false and legacy
+	// behavior runs normally. Also drives qwerty relay state transitions
+	// so qwerty wakes up the moment the WS client disconnects.
+	bool bridge_live = bridge_client_is_live(sys);
+	{
+		static bool s_last_bridge_live = false;
+		if (bridge_live != s_last_bridge_live) {
+			U_LOG_W("Bridge WS client %s — gating bridge paths %s",
+			        bridge_live ? "connected" : "disconnected",
+			        bridge_live ? "ON" : "OFF");
+			s_last_bridge_live = bridge_live;
+#ifdef XRT_BUILD_DRIVER_QWERTY
+			qwerty_set_bridge_relay_active(bridge_live);
+#endif
+		}
+	}
+
 	// Log frame submission (first frame and every 60 frames)
 	static uint32_t frame_count = 0;
 	if (frame_count == 0 || frame_count % 60 == 0) {
@@ -8241,7 +8279,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 					// narrower than the bridge-computed content, clipping it.
 					// The display processor handles mismatched stereo/target sizes via stretching.
 					if (c->render.display_processor != nullptr && !in_size_move &&
-					    !g_bridge_relay_active) {
+					    !bridge_live) {
 						uint32_t disp_px_w = 0, disp_px_h = 0;
 						int32_t disp_left = 0, disp_top = 0;
 
@@ -8346,7 +8384,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	// App-initiated mode change: bridge relays requestRenderingMode() from the
 	// WebXR sample via HWND property. Polls each frame, triggers same server-side
 	// path as qwerty V key (device update + DP toggle + broadcast).
-	if (g_bridge_relay_active && c->render.hwnd != nullptr && sys->xsysd != NULL) {
+	if (bridge_live && c->render.hwnd != nullptr && sys->xsysd != NULL) {
 		uint32_t req = (uint32_t)(uintptr_t)GetPropW(c->render.hwnd, L"DXR_RequestMode");
 		if (req > 0) {
 			RemovePropW(c->render.hwnd, L"DXR_RequestMode");
@@ -8380,7 +8418,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	// Disabled when bridge is active: mode changes go through the HWND
 	// property relay above (app-initiated path).
 #ifdef XRT_BUILD_DRIVER_QWERTY
-	if (sys->xsysd != NULL && !g_bridge_relay_active) {
+	if (sys->xsysd != NULL && !bridge_live) {
 		bool force_2d = false;
 		bool toggled = qwerty_check_display_mode_toggle(
 		    sys->xsysd->xdevs, sys->xsysd->xdev_count, &force_2d);
@@ -8454,7 +8492,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 				// transition — let the app decide via requestRenderingMode().
 				// The app receives a hardwarestatechange event and can react.
 				// Forcing causes a brief glitch (2D content through 3D weaver).
-				if (!g_bridge_relay_active) {
+				if (!bridge_live) {
 				// Update the device's active rendering mode to match
 				struct xrt_device *head = sys->xsysd ? sys->xsysd->static_roles.head : nullptr;
 				if (head != nullptr && head->hmd != NULL) {
@@ -8540,7 +8578,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	bool bridge_override = false;
 	uint32_t active_vw = sys->view_width;
 	uint32_t active_vh = sys->view_height;
-	if (g_bridge_relay_active && !sys->shell_mode) {
+	if (bridge_live && !sys->shell_mode) {
 		uint32_t bvw = 0, bvh = 0;
 		// Prefer the CURRENT frame's live HWND (c->render.hwnd) over the
 		// cached sys->compositor_hwnd. When the WebXR page is reloaded the
@@ -9372,14 +9410,14 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 	bool is_headless_relay = (xsi != nullptr && xsi->is_bridge_relay);
 	if (is_headless_relay) {
 		U_LOG_W("Bridge relay session: skipping render resources (headless, events only)");
-		// Flag globally visible so the bridge-aware compositor override kicks
-		// in and qwerty's pose integration freezes.
+		// Session-lifecycle flag — coarse "a bridge session exists" gate.
+		// Per-frame behavior in compositor_layer_commit reads the finer-
+		// grained bridge_client_is_live() (session-lifecycle AND WS
+		// client connected via DXR_BridgeClientActive prop). That function
+		// owns qwerty_set_bridge_relay_active() so we don't pin qwerty
+		// to "suppressed" while the bridge exe is idle.
 		c->is_bridge_relay = true;
 		g_bridge_relay_active = true;
-#ifdef XRT_BUILD_DRIVER_QWERTY
-		qwerty_set_bridge_relay_active(true);
-		U_LOG_W("qwerty: gate engaged (bridge relay active)");
-#endif
 	}
 
 	// Initialize per-client render resources (window, swap chain, display processor)
