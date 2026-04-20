@@ -50,8 +50,13 @@ Status indicators in the sample (`webxr-bridge/sample/index.html`) give you live
 
 Returned by the extension's main-world shim ([`extension/src/main-world.js`](extension/src/main-world.js)). Every property is read-only and re-fetched on each `session.displayXR` access — so reading per-frame is fine.
 
+The **first** access of `session.displayXR` signals the extension that the page wants the bridge. In `bridge=Auto` mode the service spawns `displayxr-webxr-bridge.exe` on demand — legacy WebXR pages (which never touch this getter) never cause a spawn. Because the bridge handshake is asynchronous, the returned surface is initially "pending": `ready` is a Promise, every other data field is `null` until it resolves.
+
+Apps MUST `await session.displayXR.ready` before reading `displayInfo`, `renderingMode`, `windowInfo`, `eyePoses`, etc. Warm-case (bridge already running) the Promise resolves in ~10 ms; cold-case (bridge needs to spawn) it takes ~500 ms. The Promise rejects after 3 s — treat the rejection as "bridge unavailable, fall back to legacy WebXR."
+
 | Field | Type | Meaning |
 |---|---|---|
+| `ready` | `Promise<void>` | Resolves when `displayInfo` is populated. Rejects on 3 s timeout. Await before reading any other field. |
 | `displayInfo.displayPixelSize` | `[w, h]` | Physical display resolution. |
 | `displayInfo.displaySizeMeters` | `[w, h]` | Physical display size. Drives Kooima. |
 | `displayInfo.nominalViewerPosition` | `[x, y, z]` | Default seated viewer position (m). |
@@ -61,6 +66,31 @@ Returned by the extension's main-world shim ([`extension/src/main-world.js`](ext
 | `eyePoses` | array | Streaming tracked eyes (call `configureEyePoses('raw')` first). |
 | `eyeTracking.supportedModes` | `string[]` | Modes the DP advertises (subset of `['MANAGED', 'MANUAL']`). |
 | `eyeTracking.defaultMode` | `'MANAGED'` \| `'MANUAL'` | Mode active if the app doesn't request one. |
+
+### Session bootstrap
+
+```js
+const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local'] });
+
+const displayXR = session.displayXR;   // triggers bridge-attach + spawn-on-demand
+let useBridge = false;
+if (displayXR && displayXR.ready) {
+  try {
+    await displayXR.ready;
+    useBridge = true;
+  } catch (e) {
+    console.log('bridge not available:', e.message);
+  }
+}
+
+if (useBridge) {
+  // displayXR.displayInfo, .renderingMode, etc. are now populated
+  displayXR.configureEyePoses('raw');
+  // ... Kooima setup, HUD, etc.
+} else {
+  // Fall back to standard WebXR — XRView.projectionMatrix + XRView.transform.
+}
+```
 
 ### Rendering mode
 
@@ -185,6 +215,8 @@ The cube stays centered in the window as the user drags it — same convention a
 
 ## Frame loop pattern
 
+Assumes you've already run the *Session bootstrap* above and cached a local `displayXR` that is `null` on the fallback path and non-null on the bridge-aware path. Don't re-read `session.displayXR` on every frame inside the fallback branch — the getter always returns a pending surface when the extension is installed, which would defeat the `if (!displayXR)` guard.
+
 ```js
 function onFrame(time, frame) {
   session.requestAnimationFrame(onFrame);
@@ -237,7 +269,8 @@ See [`docs/roadmap/webxr-bridge-v2-phase5-status.md`](../docs/roadmap/webxr-brid
 - **Recompute Kooima per frame.** `windowInfo` updates live during window drag. Don't cache `screenWm/screenHm/winOff` between frames.
 - **`renderingMode.index` is async.** When you call `requestRenderingMode(1)`, the `renderingMode.index` doesn't change until the next `renderingmodechange` event fires. Track your own `lastRequestedMode` if you need the value immediately.
 - **HUD writes are best-effort.** They go through shared memory with no acknowledgement. Don't assume an update appeared on the compositor window before you continue.
-- **`session.displayXR` may be undefined.** Always have a standard-WebXR fallback path (use `frame.getViewerPose(refSpace)` + `XRView.transform` + `XRView.projectionMatrix`). The minimal example shows the pattern.
+- **`session.displayXR` exists immediately but fields are null until `ready` resolves.** The getter always returns a surface when the extension is installed. Fields like `displayInfo` and `renderingMode` are `null` until the bridge handshake completes — `await session.displayXR.ready` first (see *Session bootstrap* above). When the extension isn't installed, the getter is absent and `session.displayXR` is `undefined` — always have a standard-WebXR fallback path.
+- **Don't spin on `session.displayXR` waiting for non-null fields.** The Promise is the single source of truth for readiness. If it rejects (3 s timeout in cold-start case where the service isn't running), treat that as "run legacy" and move on — don't retry synchronously.
 
 ## Reference map
 
