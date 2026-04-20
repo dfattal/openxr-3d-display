@@ -35,14 +35,6 @@ void
 service_orchestrator_apply_config(const struct service_config *cfg);
 
 /*!
- * Called when an AppContainer IPC client connects (Chrome WebXR).
- * In bridge Auto mode, this triggers bridge launch.
- * Thread-safe — may be called from any IPC handler thread.
- */
-void
-service_orchestrator_on_appcontainer_client(void);
-
-/*!
  * Shut down the orchestrator. Terminates managed children, unregisters
  * hotkeys. Must be called before service_tray_cleanup().
  */

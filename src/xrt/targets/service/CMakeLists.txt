@@ -37,7 +37,7 @@ if(WIN32)
 		service_tray_win.h
 		service_resources.rc
 	)
-	target_link_libraries(displayxr-service PRIVATE shell32)
+	target_link_libraries(displayxr-service PRIVATE shell32 ws2_32)
 endif()
 
 install(TARGETS displayxr-service RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
