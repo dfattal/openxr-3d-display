@@ -871,10 +871,18 @@ d3d11_service_semaphore_from_xrt(struct xrt_compositor_semaphore *xcsem)
 // sets/clears DXR_BridgeClientActive on the compositor HWND on WS
 // accept/disconnect.
 static bool
-bridge_client_is_live(struct d3d11_service_system *sys)
+bridge_client_is_live(struct d3d11_service_system *sys, HWND live_hwnd_hint)
 {
 	if (!g_bridge_relay_active) return false;
-	HWND hwnd = sys != nullptr ? sys->compositor_hwnd : nullptr;
+	// Prefer the caller's current frame hwnd over sys->compositor_hwnd.
+	// sys->compositor_hwnd is only assigned on first-session window creation
+	// (line ~1939 checks `== nullptr`), so across Chrome page reloads /
+	// session transitions it stays pinned to the old window. The bridge's
+	// FindWindowW finds the current live window and pushes
+	// DXR_BridgeClientActive there; if we check the cached pin we'd read a
+	// stale (possibly destroyed) window that never has the prop.
+	HWND hwnd = live_hwnd_hint != nullptr ? live_hwnd_hint
+	                                       : (sys != nullptr ? sys->compositor_hwnd : nullptr);
 	if (hwnd == nullptr) return false;
 	return GetPropW(hwnd, L"DXR_BridgeClientActive") != nullptr;
 }
@@ -8206,7 +8214,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	// exists but no extension is connected, this is false and legacy
 	// behavior runs normally. Also drives qwerty relay state transitions
 	// so qwerty wakes up the moment the WS client disconnects.
-	bool bridge_live = bridge_client_is_live(sys);
+	bool bridge_live = bridge_client_is_live(sys, c->render.hwnd);
 	{
 		static bool s_last_bridge_live = false;
 		if (bridge_live != s_last_bridge_live) {

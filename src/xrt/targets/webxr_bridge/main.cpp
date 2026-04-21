@@ -913,6 +913,22 @@ static void handle_ws_message(Bridge &b, const std::string &msg) {
 		}
 	}
 
+	// Refresh compositor HWND cache on every WS message that's about to
+	// touch a compositor-side HWND property. The main thread's
+	// poll_window_metrics runs at most every 500 ms once a window is found,
+	// so across Chrome session transitions — and especially when the
+	// orchestrator cold-spawns the bridge in the middle of a Chrome
+	// session — the cached hwnd can be stale or null when bridge-attach /
+	// bridge-detach / request-mode arrive. Using FindWindowW here guarantees
+	// we set the prop on the same top-level DisplayXRD3D11 window the
+	// compositor is currently rendering into (service's sys->compositor_hwnd).
+	if (type == "bridge-attach" || type == "bridge-detach" || type == "request-mode") {
+		HWND fresh = FindWindowW(L"DisplayXRD3D11", nullptr);
+		if (fresh) {
+			g_compositor_hwnd.store(fresh);
+		}
+	}
+
 	if (type == "hello") {
 		int version = find_int("version");
 		if (version != 1) {
