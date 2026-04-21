@@ -45,6 +45,7 @@
     }
 
     ws.onopen = function () {
+      console.log('[dxr-iso] WS onopen, pendingQueue.length=' + pendingQueue.length);
       backoffMs = BACKOFF_INITIAL_MS;
       postBridgeStatus();
       // Send hello with this extension's origin.
@@ -53,18 +54,32 @@
         version: 1,
         origin: window.location.origin || 'chrome-extension://'
       }));
-      // Flush any messages that arrived before the WS was open.
+      console.log('[dxr-iso] sent hello (queue flush deferred to post-hello)');
+      // Do NOT flush the queue here. The bridge's WS loop serves one
+      // incoming message per iteration and, if we send hello + queued
+      // messages back-to-back, the bridge can end up draining its outgoing
+      // queue for several iterations (display-info, window-info, etc.)
+      // before it gets back to the second recv — and in practice drops
+      // frames arriving during that window. Flush after we observe the
+      // bridge's first response (display-info) instead.
+    };
+
+    var hadFirstResponse = false;
+
+    function flushQueueOnce() {
+      if (hadFirstResponse) return;
+      hadFirstResponse = true;
       while (pendingQueue.length > 0) {
         var payload = pendingQueue.shift();
         try {
           ws.send(JSON.stringify(payload));
+          console.log('[dxr-iso] flushed ' + (payload && payload.type));
         } catch (e) {
-          // Socket died mid-flush; remaining items will be lost. Reconnect
-          // path handles the next attempt.
+          console.log('[dxr-iso] flush error: ' + e.message);
           break;
         }
       }
-    };
+    }
 
     ws.onmessage = function (event) {
       try {
@@ -77,6 +92,9 @@
         source: MSG_SOURCE_TO_MAIN,
         payload: payload
       }, window.location.origin);
+      // First inbound message from bridge (usually display-info) proves the
+      // bridge has finished processing hello. Safe to flush queued sends now.
+      flushQueueOnce();
     };
 
     ws.onclose = function () {
@@ -127,12 +145,14 @@
     if (!event.data.payload) return;
 
     if (ws && ws.readyState === WebSocket.OPEN) {
+      console.log('[dxr-iso] direct send ' + event.data.payload.type);
       ws.send(JSON.stringify(event.data.payload));
       return;
     }
 
     // Any other message from MAIN world implies the app is using
     // session.displayXR. Queue it and kick off a connect if needed.
+    console.log('[dxr-iso] queue ' + event.data.payload.type + ' (readyState=' + (ws ? ws.readyState : 'null') + ')');
     pendingQueue.push(event.data.payload);
     connect();
   });

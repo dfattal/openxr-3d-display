@@ -306,6 +306,7 @@
       function markAttached() {
         if (hasAttached) return;
         hasAttached = true;
+        console.log('[dxr-main] markAttached — posting bridge-attach');
         sendToBridge({ type: 'bridge-attach', version: 1 });
       }
 
