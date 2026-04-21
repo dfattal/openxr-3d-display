@@ -99,8 +99,10 @@ sibling_exe_path(const char *exe_name, char *buf, size_t buf_size)
 }
 
 //! Launch a child process and return its PROCESS_INFORMATION.
+//! If log_path is non-NULL, child's stdout and stderr are redirected to it.
 static bool
-launch_child(const char *exe_path, const char *args, PROCESS_INFORMATION *pi)
+launch_child_with_log(const char *exe_path, const char *args,
+                      const char *log_path, PROCESS_INFORMATION *pi)
 {
 	char cmd[1024];
 	if (args && args[0]) {
@@ -114,7 +116,33 @@ launch_child(const char *exe_path, const char *args, PROCESS_INFORMATION *pi)
 	si.cb = sizeof(si);
 	ZeroMemory(pi, sizeof(*pi));
 
-	BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, pi);
+	HANDLE log_h = INVALID_HANDLE_VALUE;
+	BOOL inherit = FALSE;
+	if (log_path && log_path[0]) {
+		SECURITY_ATTRIBUTES sa;
+		ZeroMemory(&sa, sizeof(sa));
+		sa.nLength = sizeof(sa);
+		sa.bInheritHandle = TRUE;
+		log_h = CreateFileA(log_path,
+		                    FILE_APPEND_DATA | SYNCHRONIZE,
+		                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		                    &sa, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (log_h != INVALID_HANDLE_VALUE) {
+			si.dwFlags = STARTF_USESTDHANDLES;
+			si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+			si.hStdOutput = log_h;
+			si.hStdError = log_h;
+			inherit = TRUE;
+		} else {
+			OW("Failed to open log file %s (error %lu)", log_path,
+			   (unsigned long)GetLastError());
+		}
+	}
+
+	BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, inherit, 0, NULL, NULL, &si, pi);
+	if (log_h != INVALID_HANDLE_VALUE) {
+		CloseHandle(log_h); // our copy; child keeps its own
+	}
 	if (!ok) {
 		OW("Failed to launch: %s (error %lu)", cmd, (unsigned long)GetLastError());
 		return false;
@@ -124,6 +152,25 @@ launch_child(const char *exe_path, const char *args, PROCESS_INFORMATION *pi)
 	CloseHandle(pi->hThread);
 	pi->hThread = NULL;
 
+	return true;
+}
+
+static bool
+launch_child(const char *exe_path, const char *args, PROCESS_INFORMATION *pi)
+{
+	return launch_child_with_log(exe_path, args, NULL, pi);
+}
+
+//! Build %LOCALAPPDATA%\DisplayXR\<basename>.log.
+static bool
+appdata_log_path(const char *basename, char *buf, size_t buf_size)
+{
+	char appdata[MAX_PATH];
+	DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", appdata, MAX_PATH);
+	if (len == 0 || len >= MAX_PATH) {
+		return false;
+	}
+	snprintf(buf, buf_size, "%s\\DisplayXR\\%s.log", appdata, basename);
 	return true;
 }
 
@@ -247,9 +294,14 @@ bridge_watch_thread_func(LPVOID param)
 	// In Enable mode, restart the bridge
 	if (mode == SERVICE_CHILD_ENABLE) {
 		char bridge_path[MAX_PATH];
+		char log_path[MAX_PATH];
+		const char *log = NULL;
+		if (appdata_log_path("webxr-bridge", log_path, sizeof(log_path))) {
+			log = log_path;
+		}
 		if (sibling_exe_path("displayxr-webxr-bridge.exe", bridge_path, sizeof(bridge_path))) {
 			EnterCriticalSection(&s_bridge_lock);
-			if (launch_child(bridge_path, NULL, &s_bridge_pi)) {
+			if (launch_child_with_log(bridge_path, NULL, log, &s_bridge_pi)) {
 				s_bridge_running = true;
 				OW("Restarted WebXR bridge (Enable mode)");
 				s_bridge_watch_thread =
@@ -285,7 +337,12 @@ spawn_bridge(void)
 		return;
 	}
 
-	if (!launch_child(bridge_path, NULL, &s_bridge_pi)) {
+	char log_path[MAX_PATH];
+	const char *log = NULL;
+	if (appdata_log_path("webxr-bridge", log_path, sizeof(log_path))) {
+		log = log_path;
+	}
+	if (!launch_child_with_log(bridge_path, NULL, log, &s_bridge_pi)) {
 		LeaveCriticalSection(&s_bridge_lock);
 		return;
 	}
