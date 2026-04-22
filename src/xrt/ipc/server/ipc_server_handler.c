@@ -1298,9 +1298,41 @@ ipc_handle_compositor_get_window_metrics(volatile struct ipc_client_state *ics,
 {
 	IPC_TRACE_MARKER();
 
-	// 2a.0 stub: real per-client metrics land in 2a.1.
-	struct xrt_window_metrics zero = {0};
-	*out_metrics = zero;
+	struct xrt_window_metrics wm = {0};
+
+#if defined(XRT_HAVE_LEIA_SR_D3D11) && defined(XRT_HAVE_D3D11_SERVICE_COMPOSITOR)
+	// Per-client window metrics are only meaningful when the D3D11 service
+	// compositor is in shell mode and has assigned a slot to this client.
+	// `xc` is NULL for headless / pre-render sessions; comp_d3d11_service_*
+	// returns false in that case and we surface valid=false to the client.
+	if (ics->server != NULL && ics->server->xsysc != NULL && ics->xc != NULL) {
+		(void)comp_d3d11_service_get_client_window_metrics(
+		    ics->server->xsysc, ics->xc, &wm);
+	}
+
+	// One-shot diagnostic per IPC client so we can see metrics flowing.
+	// Keyed on server_thread_index (one slot per concurrent client thread).
+	{
+		static bool logged_per_thread[IPC_MAX_CLIENTS] = {false};
+		int idx = ics->server_thread_index;
+		if (idx >= 0 && idx < IPC_MAX_CLIENTS && !logged_per_thread[idx]) {
+			logged_per_thread[idx] = true;
+			IPC_INFO(ics->server,
+			         "compositor_get_window_metrics: thread=%d valid=%d "
+			         "win_px=%ux%u win_m=%.3fx%.3f offset=(%.3f,%.3f,%.3f)",
+			         idx, (int)wm.valid,
+			         (unsigned)wm.window_pixel_width, (unsigned)wm.window_pixel_height,
+			         (double)wm.window_width_m, (double)wm.window_height_m,
+			         (double)wm.window_center_offset_x_m,
+			         (double)wm.window_center_offset_y_m,
+			         (double)wm.window_center_offset_z_m);
+		}
+	}
+#else
+	(void)ics;
+#endif
+
+	*out_metrics = wm;
 
 	return XRT_SUCCESS;
 }
