@@ -8823,14 +8823,20 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 			if (bridge_override) {
 				// Override: use active per-view dims (display × viewScale)
-				// instead of Chrome's compromise-scaled subImage.imageRect.
-				// The bridge sample rendered tiles at this size.
+				// instead of Chrome's compromise-scaled subImage.imageRect
+				// extent. The bridge sample rendered at this size. BUT
+				// honor Chrome's sub.rect.offset for the tile position —
+				// Chrome may allocate an fb larger than
+				// tileColumns * active_vw (e.g. 7680×2160 instead of
+				// 3840×2160 when it uses max-view-size per eye); each
+				// view's sub-image is then placed at Chrome's offset, and
+				// the bridge sample renders content at the TOP-LEFT of
+				// that slot. Using tileX * active_vw for src_x would miss
+				// it for bigger fbs.
 				src_w = static_cast<float>(active_vw);
 				src_h = static_cast<float>(active_vh);
-				uint32_t tileX = eye % sys->tile_columns;
-				uint32_t tileY = eye / sys->tile_columns;
-				src_x = static_cast<float>(tileX * active_vw);
-				src_y = static_cast<float>(tileY * active_vh);
+				// src_x, src_y keep their values from Chrome's
+				// sub.rect.offset above.
 			}
 
 			// Tile layout for atlas placement. Atlas tiles are always laid
@@ -9805,13 +9811,47 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 	sys->xmcc.notify_display_refresh_changed = NULL;
 	sys->base.xmcc = &sys->xmcc;
 
-	// Fill system compositor info
+	// Fill system compositor info.
+	//
+	// Chrome's WebXR sizes its shared framebuffer by packing `view_count`
+	// per-view slots horizontally:
+	//   fb.width  = view_count × per_view.recommended.width
+	//   fb.height = per_view.recommended.height
+	// We want fb equal to the WORST-CASE ATLAS across all DP rendering
+	// modes (independent max of width and height), so every mode's atlas
+	// fits without fb re-allocation:
+	//   atlas_w[mode] = tile_cols[mode] × view_width_pixels[mode]
+	//                 = tile_cols[mode] × (display_w × viewScaleX[mode])
+	//   atlas_h[mode] = tile_rows[mode] × view_height_pixels[mode]
+	// Max over modes → per_view.width = max_atlas_w / view_count,
+	//                  per_view.height = max_atlas_h.
+	// view_count is whatever the HMD driver declares (2 for Leia, e.g. 5
+	// for a hypothetical lightfield 3×2 mode).
 	sys->base.info.max_layers = XRT_MAX_LAYERS;
-	sys->base.info.views[0].recommended.width_pixels = sys->view_width;
-	sys->base.info.views[0].recommended.height_pixels = sys->view_height;
-	sys->base.info.views[0].max.width_pixels = sys->view_width * 2;
-	sys->base.info.views[0].max.height_pixels = sys->view_height * 2;
-	sys->base.info.views[1] = sys->base.info.views[0];
+	const uint32_t view_count =
+	    (xdev != nullptr && xdev->hmd != nullptr) ? xdev->hmd->view_count : 2;
+	uint32_t max_atlas_w = sys->display_width;
+	uint32_t max_atlas_h = sys->display_height;
+	if (xdev != nullptr && xdev->rendering_mode_count > 0) {
+		max_atlas_w = 0;
+		max_atlas_h = 0;
+		for (uint32_t i = 0; i < xdev->rendering_mode_count; i++) {
+			uint32_t aw = xdev->rendering_modes[i].atlas_width_pixels;
+			uint32_t ah = xdev->rendering_modes[i].atlas_height_pixels;
+			if (aw > max_atlas_w) max_atlas_w = aw;
+			if (ah > max_atlas_h) max_atlas_h = ah;
+		}
+	}
+	const uint32_t per_view_w =
+	    (view_count > 0) ? max_atlas_w / view_count : max_atlas_w;
+	const uint32_t per_view_h = max_atlas_h;
+	for (uint32_t i = 0; i < view_count && i < XRT_MAX_VIEWS; i++) {
+		sys->base.info.views[i].recommended.width_pixels = per_view_w;
+		sys->base.info.views[i].recommended.height_pixels = per_view_h;
+		// max >= recommended, 2× headroom for framebufferScaleFactor > 1.
+		sys->base.info.views[i].max.width_pixels = per_view_w * 2;
+		sys->base.info.views[i].max.height_pixels = per_view_h * 2;
+	}
 
 	// Set supported blend modes (Chrome WebXR requires at least OPAQUE)
 	sys->base.info.supported_blend_modes[0] = XRT_BLEND_MODE_OPAQUE;

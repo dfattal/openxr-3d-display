@@ -991,6 +991,15 @@ static void handle_ws_message(Bridge &b, const std::string &msg) {
 		if (hwnd) {
 			SetPropW(hwnd, L"DXR_BridgeClientActive", (HANDLE)(uintptr_t)1);
 			LOG_I("WS bridge-attach: compositor gate ENGAGED");
+			// Send an ACK so the client-side session.displayXR.ready can
+			// resolve in sync with the compositor gate, not when
+			// display-info arrives. display-info is sent in response to
+			// `hello` which always precedes `bridge-attach` in the queue,
+			// so without this ACK the app would think bridge is ready
+			// while the compositor is still on its legacy (non-override)
+			// path — which causes a tile-dim mismatch for one or more
+			// frames when the sample switches to bridge-aware rendering.
+			b.outgoing.push(std::string("{\"type\":\"bridge-attached\",\"version\":1}"));
 		} else {
 			LOG_W("WS bridge-attach: no compositor HWND yet");
 		}
