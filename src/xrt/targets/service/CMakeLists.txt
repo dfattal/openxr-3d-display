@@ -26,14 +26,18 @@ if(WIN32)
 	)
 	target_link_libraries(displayxr-service PRIVATE delayimp)
 
-	# Run as GUI app (no console window) with system tray icon
+	# Run as GUI app (no console window) with system tray icon and orchestrator
 	set_target_properties(displayxr-service PROPERTIES WIN32_EXECUTABLE TRUE)
 	target_sources(displayxr-service PRIVATE
+		service_config.c
+		service_config.h
+		service_orchestrator.c
+		service_orchestrator.h
 		service_tray_win.c
 		service_tray_win.h
 		service_resources.rc
 	)
-	target_link_libraries(displayxr-service PRIVATE shell32)
+	target_link_libraries(displayxr-service PRIVATE shell32 ws2_32)
 endif()
 
 install(TARGETS displayxr-service RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

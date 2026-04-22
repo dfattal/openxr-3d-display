@@ -913,6 +913,22 @@ static void handle_ws_message(Bridge &b, const std::string &msg) {
 		}
 	}
 
+	// Refresh compositor HWND cache on every WS message that's about to
+	// touch a compositor-side HWND property. The main thread's
+	// poll_window_metrics runs at most every 500 ms once a window is found,
+	// so across Chrome session transitions — and especially when the
+	// orchestrator cold-spawns the bridge in the middle of a Chrome
+	// session — the cached hwnd can be stale or null when bridge-attach /
+	// bridge-detach / request-mode arrive. Using FindWindowW here guarantees
+	// we set the prop on the same top-level DisplayXRD3D11 window the
+	// compositor is currently rendering into (service's sys->compositor_hwnd).
+	if (type == "bridge-attach" || type == "bridge-detach" || type == "request-mode") {
+		HWND fresh = FindWindowW(L"DisplayXRD3D11", nullptr);
+		if (fresh) {
+			g_compositor_hwnd.store(fresh);
+		}
+	}
+
 	if (type == "hello") {
 		int version = find_int("version");
 		if (version != 1) {
@@ -975,6 +991,15 @@ static void handle_ws_message(Bridge &b, const std::string &msg) {
 		if (hwnd) {
 			SetPropW(hwnd, L"DXR_BridgeClientActive", (HANDLE)(uintptr_t)1);
 			LOG_I("WS bridge-attach: compositor gate ENGAGED");
+			// Send an ACK so the client-side session.displayXR.ready can
+			// resolve in sync with the compositor gate, not when
+			// display-info arrives. display-info is sent in response to
+			// `hello` which always precedes `bridge-attach` in the queue,
+			// so without this ACK the app would think bridge is ready
+			// while the compositor is still on its legacy (non-override)
+			// path — which causes a tile-dim mismatch for one or more
+			// frames when the sample switches to bridge-aware rendering.
+			b.outgoing.push(std::string("{\"type\":\"bridge-attached\",\"version\":1}"));
 		} else {
 			LOG_W("WS bridge-attach: no compositor HWND yet");
 		}

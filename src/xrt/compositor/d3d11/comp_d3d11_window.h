@@ -211,6 +211,14 @@ comp_d3d11_window_set_input_forward(struct comp_d3d11_window *window,
                                      bool is_capture);
 
 /*!
+ * Mark shell mode as active/inactive on the window. While active, ESC on the
+ * compositor window is swallowed instead of posting WM_CLOSE — an empty shell
+ * (no focused app) would otherwise take the service down with its own window.
+ */
+void
+comp_d3d11_window_set_shell_mode_active(struct comp_d3d11_window *window, bool active);
+
+/*!
  * Suppress or resume input forwarding (for shell drag/resize operations).
  * When suppressed, the WndProc does not forward mouse or keyboard events to
  * the app.

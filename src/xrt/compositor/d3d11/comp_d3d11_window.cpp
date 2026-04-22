@@ -158,6 +158,11 @@ struct comp_d3d11_window
 	//! True when the forward target is a captured 2D window.
 	volatile LONG input_forward_is_capture;
 
+	//! True while shell_mode is active on the service side. Gates ESC-closes-window
+	//! so an empty shell (no focused app → input_forward_hwnd == NULL) doesn't
+	//! PostMessage(WM_CLOSE) and take the service down with it.
+	volatile LONG shell_mode_active;
+
 
 	//! Focused window rect in shell-window client pixels (for mouse coord remapping).
 	//! When forwarding mouse events, shell coords are remapped to app-local coords.
@@ -564,6 +569,12 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		// qwerty sees it. Shell mode never reaches this block because
 		// input_forward_hwnd != NULL takes the forwarding path above.
 		if (message == WM_KEYDOWN && wParam == VK_ESCAPE) {
+			// Shell mode with no focused app: input_forward_hwnd is NULL so we
+			// fall into this block, but closing the window kills the service.
+			// Swallow the key instead; user can press Ctrl+Space to dismiss.
+			if (InterlockedCompareExchange(&w->shell_mode_active, 0, 0)) {
+				return 0;
+			}
 			U_LOG_W("D3D11 window: ESC pressed — closing (non-shell mode)");
 			PostMessageW(hWnd, WM_CLOSE, 0, 0);
 			return 0;
@@ -1198,6 +1209,15 @@ comp_d3d11_window_set_input_forward(struct comp_d3d11_window *window,
 	} else {
 		U_LOG_W("D3D11 window: input forwarding disabled");
 	}
+}
+
+void
+comp_d3d11_window_set_shell_mode_active(struct comp_d3d11_window *window, bool active)
+{
+	if (window == NULL) {
+		return;
+	}
+	InterlockedExchange(&window->shell_mode_active, active ? 1 : 0);
 }
 
 // Returns true if input forwarding should currently be suppressed, considering

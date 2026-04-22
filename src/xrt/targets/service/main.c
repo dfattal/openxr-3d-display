@@ -18,6 +18,8 @@
 
 #ifdef XRT_OS_WINDOWS
 #include "util/u_windows.h"
+#include "service_config.h"
+#include "service_orchestrator.h"
 #include "service_tray_win.h"
 #include <stdlib.h> // __argc, __argv
 #endif
@@ -43,6 +45,12 @@ static void
 tray_shutdown_callback(void)
 {
 	g_service_shutdown_requested = true;
+}
+
+static void
+tray_config_change_callback(const struct service_config *new_cfg)
+{
+	service_orchestrator_apply_config(new_cfg);
 }
 
 static void
@@ -83,7 +91,20 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdS
 
 	u_win_try_privilege_or_priority_from_args(U_LOGGING_INFO, argc, argv);
 
-	// Parse --shell flag for multi-compositor shell mode
+	// Load orchestrator config (shell/bridge modes, start-on-login)
+	struct service_config cfg;
+	service_config_load(&cfg);
+
+	// If user disabled "Start on login" via the tray menu, exit immediately.
+	// The HKLM Run key still launches us, but we honor the config and bow out
+	// before creating any windows or tray icons. The service can still be
+	// started manually or via IPC auto-launch from an OpenXR app.
+	if (!cfg.start_on_login) {
+		ExitProcess(0);
+	}
+
+	// Parse --shell flag for backwards compat (legacy multi-terminal workflow).
+	// The orchestrator will also enable shell mode when it spawns the shell.
 	bool shell_mode = false;
 	for (int i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "--shell") == 0) {
@@ -92,8 +113,11 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdS
 		}
 	}
 
-	// Start the system tray icon
-	service_tray_init(tray_shutdown_callback);
+	// Start the system tray icon with orchestrator menu
+	service_tray_init(tray_shutdown_callback, tray_config_change_callback, &cfg);
+
+	// Initialize orchestrator (registers hotkeys, spawns children per config)
+	service_orchestrator_init(&cfg);
 
 	u_trace_marker_init();
 	u_metrics_init();
@@ -117,6 +141,9 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdS
 	u_mcp_server_stop();
 
 	u_metrics_close();
+
+	// Shut down orchestrator (terminates managed children, unregisters hotkeys)
+	service_orchestrator_shutdown();
 
 	// Clean up the tray icon
 	service_tray_cleanup();

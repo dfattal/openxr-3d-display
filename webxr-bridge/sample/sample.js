@@ -78,6 +78,12 @@ let xrSession = null;
 let gl = null;
 let xrLayer = null;
 let displayXR = null;
+// True once session.displayXR.ready has resolved for the current session.
+// The render loop uses this to decide bridge-aware vs legacy path. We can't
+// rely on `displayXR == null` alone because the getter now always returns a
+// non-null surface (its fields are null until ready resolves), and the render
+// loop re-reads the getter every frame for eye-pose freshness.
+let useBridge = false;
 let frameCount = 0;
 // Reference space used by the standard-WebXR fallback path (see onXRFrame).
 // Only populated when the DisplayXR extension/bridge isn't available.
@@ -372,8 +378,12 @@ function onXRFrame(time, frame) {
   xrSession.requestAnimationFrame(onXRFrame);
   frameCount++;
 
-  // Re-read displayXR each frame for latest eye poses.
-  displayXR = xrSession.displayXR;
+  // Re-read displayXR each frame for latest eye poses. Skip on fallback —
+  // the getter now always returns a non-null pending surface, which would
+  // defeat every `if (!displayXR)` guard downstream.
+  if (useBridge) {
+    displayXR = xrSession.displayXR;
+  }
 
   // Refresh the on-page bridge-state panel (throttled internally to ~10 Hz).
   updateBridgeStatePanel();
@@ -382,13 +392,13 @@ function onXRFrame(time, frame) {
   if (!glLayer) return;
 
   // --- Fallback path: standard WebXR, no bridge -------------------------
-  // If the DisplayXR extension / bridge isn't present, render using the
-  // plain WebXR per-view API (getViewerPose + XRView.projectionMatrix +
-  // XRView.transform). No Kooima, no window-relative math — the
-  // compositor's legacy compromise-scale path handles display mapping.
-  // This lets the sample still work on browsers where the extension
-  // isn't installed.
-  if (!displayXR && fallbackRefSpace) {
+  // If the DisplayXR extension / bridge isn't present (or ready timed out),
+  // render using the plain WebXR per-view API (getViewerPose +
+  // XRView.projectionMatrix + XRView.transform). No Kooima, no
+  // window-relative math — the compositor's legacy compromise-scale path
+  // handles display mapping. This lets the sample still work on browsers
+  // where the extension isn't installed.
+  if (!useBridge && fallbackRefSpace) {
     renderFallbackFrame(time, frame, glLayer);
     return;
   }
@@ -533,15 +543,35 @@ function onXRFrame(time, frame) {
           : ' per=' + rig.perspectiveFactor.toFixed(2) + ' vH=' + rig.vHeight.toFixed(3)));
   }
 
+  // Per-OpenXR-view slot dims. Chrome packs views SBS horizontally:
+  //   slotW = fb.width / openxr_view_count
+  //   slotH = fb.height
+  // The OpenXR view count is a property of the runtime's view configuration
+  // (= hmd->view_count, whatever the driver declares), independent of the
+  // current DP mode's tile count. For a 5-view lightfield runtime the fb
+  // has 5 slots and the 3×2 lightfield mode fills slots 0-4; for Leia's
+  // 2-view runtime the fb has 2 slots and mono modes fill just slot 0.
+  // Placing content at the top-left of each slot is what the compositor's
+  // bridge_override crop reads (via Chrome's sub.rect.offset).
+  const openxrViewCount = (displayXR && displayXR.renderingMode &&
+                           displayXR.renderingMode.views &&
+                           displayXR.renderingMode.views.length > 0)
+    ? displayXR.renderingMode.views.length
+    : 2;
+  const slotW = Math.floor(glLayer.framebufferWidth / openxrViewCount);
+  const slotH = glLayer.framebufferHeight;
+
   for (let eye = 0; eye < tileLayout.eyeCount; eye++) {
     const tileX = tileLayout.monoMode ? 0 : (eye % tileLayout.tileColumns);
     const tileY = tileLayout.monoMode ? 0 : Math.floor(eye / tileLayout.tileColumns);
-    const vpX = tileX * tileW;
+    const vpX = tileX * slotW;
     // GL viewport Y=0 is at the BOTTOM. ANGLE maps GL coords to D3D11
-    // (Y=0 at top). To place content at the D3D11 top (where the compositor
-    // reads), set GL Y so that ANGLE's flip lands at D3D11 row 0.
-    // GL vpY = fbHeight - tileH - (tileY * tileH)
-    const vpY = glLayer.framebufferHeight - tileH - (tileY * tileH);
+    // (Y=0 at top). Place content at the D3D11 top of each tile slot:
+    //   D3D11 tile-top row = tileY * slotH
+    //   D3D11 content fills rows [tileY*slotH, tileY*slotH + tileH)
+    //   GL  y = fbHeight - (D3D11 row + 1)
+    //   GL viewport y (bottom of rect) = fbHeight - tileY*slotH - tileH
+    const vpY = glLayer.framebufferHeight - tileY * slotH - tileH;
 
     renderer.setViewport(vpX, vpY, tileW, tileH);
     renderer.setScissor(vpX, vpY, tileW, tileH);
@@ -734,11 +764,34 @@ async function enterXR() {
     return;
   }
 
+  // First access of session.displayXR:
+  // - With the extension installed: fires bridge-attach, kicks the extension's
+  //   WebSocket (which in Auto mode spawns displayxr-webxr-bridge.exe via the
+  //   service's port-9014 trampoline), and returns a pending surface whose
+  //   .ready Promise resolves when display-info arrives (~10 ms warm,
+  //   ~500 ms cold). On timeout, we fall back to legacy WebXR.
+  // - Without the extension: getter is absent, displayXR is undefined — we go
+  //   straight to the legacy path.
   displayXR = xrSession.displayXR;
-  if (displayXR) {
+  var bridgeReady = false;
+  if (displayXR && displayXR.ready) {
     setDot(dotExtension, 'ok');
+    try {
+      await displayXR.ready;
+      // Re-read — the getter builds a new surface each call, and the
+      // one we captured before `ready` is the pending snapshot with
+      // null fields. Post-ready, we need the populated snapshot.
+      displayXR = xrSession.displayXR;
+      bridgeReady = true;
+    } catch (e) {
+      log('session.displayXR.ready timed out: ' + e.message);
+    }
+  }
+
+  useBridge = bridgeReady;
+  if (bridgeReady) {
     setDot(dotBridge, 'ok');
-    log('session.displayXR available:');
+    log('session.displayXR ready:');
     log('  displayPixelSize: ' + JSON.stringify(displayXR.displayInfo.displayPixelSize));
     log('  displaySizeMeters: ' + JSON.stringify(displayXR.displayInfo.displaySizeMeters));
     log('  renderingMode: ' + displayXR.renderingMode.name +
@@ -759,9 +812,10 @@ async function enterXR() {
     // The sample still renders — it just skips Kooima, window tracking, and
     // HUD, and lets Chrome + the compositor's legacy compromise-scale path
     // handle tile layout + weaving.
-    setDot(dotExtension, 'err');
+    setDot(dotExtension, displayXR ? 'ok' : 'err');
     setDot(dotBridge, 'err');
-    log('session.displayXR not available — running as a standard WebXR app.');
+    displayXR = null; // signal to the rest of the sample to use fallback
+    log('session.displayXR not ready — running as a standard WebXR app.');
     log('  (install the DisplayXR extension + bridge for Kooima 3D and window tracking)');
     try {
       fallbackRefSpace = await xrSession.requestReferenceSpace('local');
@@ -780,6 +834,7 @@ async function enterXR() {
     log('session ended');
     xrSession = null;
     displayXR = null;
+    useBridge = false;
     fallbackRefSpace = null;
     if (renderer) { renderer.dispose(); renderer = null; }
     scene = null;
