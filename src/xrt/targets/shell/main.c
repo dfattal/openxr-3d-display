@@ -63,6 +63,7 @@
 static volatile int g_running = 1;
 #ifdef _WIN32
 static bool g_shell_active = false;
+static bool g_service_managed = false; // When true, skip Ctrl+Space hotkey (service owns it)
 static bool g_launcher_visible = false; // Phase 5.7: spatial launcher panel toggle (Ctrl+L)
 static HWND g_msg_hwnd = NULL;
 #endif
@@ -683,6 +684,10 @@ parse_args(int argc, char *argv[], struct app_entry *apps, int *app_count,
 		if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			print_usage();
 			return -1;
+		}
+		if (strcmp(argv[i], "--service-managed") == 0) {
+			g_service_managed = true;
+			continue;
 		}
 		if (strcmp(argv[i], "--pose") == 0) {
 			if (i + 1 >= argc) {
@@ -1766,7 +1771,9 @@ main(int argc, char *argv[])
 		PE("Warning: failed to create message window (hotkey/tray unavailable)\n");
 	}
 
-	// Register system-wide Ctrl+Space hotkey
+	// Register system-wide hotkeys. Ctrl+Space in service-managed mode exits
+	// the shell so the orchestrator's keyboard hook (gated on !s_shell_running)
+	// can re-spawn us on the next press.
 	if (g_msg_hwnd != NULL) {
 		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_TOGGLE, MOD_CONTROL, VK_SPACE)) {
 			PE("Warning: RegisterHotKey(Ctrl+Space) failed — hotkey unavailable\n");
@@ -1785,9 +1792,16 @@ main(int argc, char *argv[])
 	}
 
 	// --- Decide startup mode ---
-	// If launched with apps or captures: activate immediately (current behavior).
-	// If launched with no args: start deactivated in tray, wait for Ctrl+Space.
-	bool start_active = (app_count > 0 || capture_count > 0);
+	// If launched with apps or captures: activate immediately.
+	// If launched via the service orchestrator (--service-managed): also
+	// activate immediately. The orchestrator only spawns us in response to
+	// Ctrl+Space being pressed (semantically "summon shell"), so starting
+	// inactive-in-tray would need a second Ctrl+Space to activate — but
+	// with --service-managed we skip our own hotkey registration, so no
+	// one's listening for that second press.
+	// Standalone no-args launches still start in tray and wait for the
+	// shell's own Ctrl+Space to toggle active.
+	bool start_active = (app_count > 0 || capture_count > 0 || g_service_managed);
 
 	if (start_active) {
 		P("Activating shell mode...\n");
@@ -1869,6 +1883,14 @@ main(int argc, char *argv[])
 			MSG msg;
 			while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
 				if (msg.message == WM_HOTKEY && msg.wParam == HOTKEY_TOGGLE) {
+					// Service-managed shell: Ctrl+Space exits instead of
+					// toggling to tray. The orchestrator will re-spawn us
+					// on the next press via its keyboard hook.
+					if (g_service_managed) {
+						P("Ctrl+Space pressed — exiting service-managed shell.\n");
+						g_running = 0;
+						break;
+					}
 					// --- Toggle shell active/inactive ---
 					if (g_shell_active) {
 						P("Deactivating shell...\n");
@@ -1920,6 +1942,9 @@ main(int argc, char *argv[])
 								PE("Failed to reconnect to service.\n");
 								continue;
 							}
+							// Service was restarted — its in-memory launcher
+							// app list is empty. Re-push so Ctrl+L shows tiles.
+							shell_push_registered_apps_to_service(&ipc_c);
 						}
 
 						// Already-running IPC apps (OpenXR handle apps) are

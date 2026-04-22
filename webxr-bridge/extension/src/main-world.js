@@ -22,6 +22,62 @@
   var latestWindowInfo = null;
   var activeSessions = []; // Proxy-wrapped sessions that receive events.
 
+  // --- Ready promise infrastructure ---
+  //
+  // The first read of session.displayXR triggers the bridge attach (which
+  // spawns the bridge in Auto mode). display-info arrives asynchronously —
+  // apps await session.displayXR.ready before reading displayInfo fields.
+  //
+  // Cold-start budget: ~500 ms (service spawn + OpenXR init) + ~10 ms
+  // (bridge handshake). 3 s gives healthy margin.
+
+  var READY_TIMEOUT_MS = 3000;
+  var readyPromise = null;
+  var readyResolve = null;
+  // ready resolves only when BOTH of these are true — otherwise the app
+  // would see `ready` fire on display-info arrival while the compositor
+  // gate (DXR_BridgeClientActive, set by the bridge on bridge-attach
+  // handling) hasn't engaged yet, causing a tile-dim mismatch for the
+  // first few frames of the new-session render.
+  var readyHasDisplayInfo = false;
+  var readyHasBridgeAck = false;
+
+  function ensureReadyPromise() {
+    if (readyPromise) return readyPromise;
+    readyPromise = new Promise(function (resolve, reject) {
+      readyResolve = resolve;
+      setTimeout(function () {
+        if (readyResolve) {
+          readyResolve = null;
+          readyPromise = null; // allow next access to retry
+          reject(new Error('displayXR ready timeout'));
+        }
+      }, READY_TIMEOUT_MS);
+    });
+    return readyPromise;
+  }
+
+  function maybeResolveReady() {
+    if (!readyHasDisplayInfo || !readyHasBridgeAck) return;
+    if (readyResolve) {
+      var fn = readyResolve;
+      readyResolve = null;
+      fn();
+    }
+  }
+
+  function invalidateReady() {
+    // Called on bridge disconnect / session end so the next getter access
+    // builds a fresh promise and re-waits for the compositor gate to engage.
+    readyResolve = null;
+    readyPromise = null;
+    // bridge-attached ACK is per-attach; require a new one for the next
+    // session. display-info is a stable bridge-side cache — leave its flag
+    // alone unless the bridge itself dropped (caller sets hasDisplayInfo = false
+    // explicitly when appropriate).
+    readyHasBridgeAck = false;
+  }
+
   // --- Helper: send a message to the bridge via ISOLATED world ---
 
   function sendToBridge(payload) {
@@ -34,12 +90,42 @@
   // --- Build the session.displayXR surface ---
 
   function buildDisplayXR() {
-    if (!latestDisplayInfo) return null;
+    var ready = ensureReadyPromise();
+
+    if (!latestDisplayInfo) {
+      // Pending surface — apps await `ready` before reading fields.
+      // Methods that queue bridge messages work now: isolated-world's queue
+      // holds them until the WS opens, then flushes on connect.
+      return {
+        ready: ready,
+        displayInfo: null,
+        eyeTracking: null,
+        windowInfo: null,
+        renderingMode: null,
+        eyePoses: null,
+        renderingModes: null,
+        computeFramebufferSize: function () { return null; },
+        requestRenderingMode: function (modeIndex) {
+          sendToBridge({ type: 'request-mode', version: 1, modeIndex: modeIndex });
+        },
+        requestEyeTrackingMode: function (mode) {
+          sendToBridge({ type: 'request-eye-tracking-mode', version: 1, mode: mode });
+        },
+        sendHudUpdate: function (visible, lines) {
+          sendToBridge({ type: 'hud-update', version: 1, visible: visible, lines: lines || [] });
+        },
+        configureEyePoses: function (format) {
+          sendToBridge({ type: 'configure', version: 1, eyePoseFormat: format || 'raw' });
+        }
+      };
+    }
 
     var di = latestDisplayInfo;
     var rm = latestRenderingMode || null;
 
     return {
+      ready: ready,
+
       displayInfo: {
         displayPixelSize: di.displayPixelSize,
         displaySizeMeters: di.displaySizeMeters,
@@ -145,6 +231,16 @@
       latestRenderingMode = buildRenderingModeFromDisplayInfo(msg);
       // display-info embeds the current window-info snapshot.
       if (msg.windowInfo) latestWindowInfo = msg.windowInfo;
+      // First half of the ready gate. Full resolve only when bridge-attached
+      // ACK also arrives (see below).
+      readyHasDisplayInfo = true;
+      maybeResolveReady();
+    } else if (msg.type === 'bridge-attached') {
+      // Bridge acknowledged bridge-attach by setting DXR_BridgeClientActive
+      // on the compositor HWND. Safe to resolve ready — compositor gate is
+      // live from this point onward.
+      readyHasBridgeAck = true;
+      maybeResolveReady();
     } else if (msg.type === 'window-info') {
       latestWindowInfo = msg.windowInfo || null;
       var wDetail = { windowInfo: latestWindowInfo };
@@ -181,6 +277,24 @@
         } catch (e) {}
       });
     } else if (msg.type === 'bridge-status') {
+      if (!msg.connected) {
+        // Bridge dropped — clear cached data and reset the per-connection
+        // ready flags. Do NOT invalidateReady() here: during cold-spawn,
+        // the trampoline's TCP accept-then-close causes a spurious WS
+        // close/open cycle before the bridge is even up, and destroying
+        // the pending readyResolve would leave the sample's existing
+        // `await displayXR.ready` with no way to unblock. Instead keep
+        // the promise pending; the flags will re-flip true on reconnect +
+        // new display-info + new bridge-attached ACK, and the original
+        // resolver fires then. If the disconnect is permanent (bridge
+        // actually crashed), the 3 s timeout rejects.
+        latestDisplayInfo = null;
+        latestRenderingMode = null;
+        latestWindowInfo = null;
+        latestEyePoses = null;
+        readyHasDisplayInfo = false;
+        readyHasBridgeAck = false;
+      }
       activeSessions.forEach(function (entry) {
         try {
           entry.session.dispatchEvent(new CustomEvent('bridgestatus', {
@@ -228,11 +342,17 @@
       // Add displayXR as a getter directly on the session object.
       // No Proxy needed — avoids brand-check failures with XRWebGLLayer,
       // updateRenderState, and other WebXR APIs that reject Proxy wrappers.
+      //
+      // The getter always fires markAttached (sends bridge-attach). In Auto
+      // mode this is the signal that opens isolated-world's WebSocket and,
+      // on first connect, spawns the bridge via the service trampoline. The
+      // returned surface is always non-null; its `ready` Promise resolves
+      // when display-info arrives. Legacy WebXR pages never touch this
+      // getter, so they never spawn the bridge.
       Object.defineProperty(realSession, 'displayXR', {
         get: function () {
-          var surface = buildDisplayXR();
-          if (surface) markAttached();
-          return surface;
+          markAttached();
+          return buildDisplayXR();
         },
         configurable: true
       });
@@ -246,6 +366,12 @@
           sendToBridge({ type: 'bridge-detach', version: 1 });
           hasAttached = false;
         }
+        // Next session's displayXR access must re-wait for a fresh
+        // bridge-attach ACK before `ready` resolves — otherwise the app
+        // would start rendering in bridge dims before the compositor gate
+        // has re-engaged on the new session's HWND. display-info is a
+        // stable bridge-side cache across sessions, so we keep that flag.
+        invalidateReady();
       });
 
       return realSession;

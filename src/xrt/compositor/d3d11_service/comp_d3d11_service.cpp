@@ -861,6 +861,18 @@ d3d11_service_semaphore_from_xrt(struct xrt_compositor_semaphore *xcsem)
 	return reinterpret_cast<struct d3d11_service_semaphore *>(xcsem);
 }
 
+// Write sys->shell_mode and mirror the flag onto the multi-comp window so
+// its WndProc's ESC-close path can distinguish empty-shell (no focused app)
+// from true non-shell mode — see comp_d3d11_window.cpp ESC handling.
+static inline void
+service_set_shell_mode(struct d3d11_service_system *sys, bool active)
+{
+	sys->shell_mode = active;
+	if (sys->multi_comp != nullptr && sys->multi_comp->window != nullptr) {
+		comp_d3d11_window_set_shell_mode_active(sys->multi_comp->window, active);
+	}
+}
+
 // True iff a bridge relay session exists AND a WebSocket client is currently
 // connected to the bridge exe. Per-frame gate for bridge-specific behavior
 // (crop override, atlas-resize skip, qwerty suppression, vendor hw-state
@@ -871,10 +883,18 @@ d3d11_service_semaphore_from_xrt(struct xrt_compositor_semaphore *xcsem)
 // sets/clears DXR_BridgeClientActive on the compositor HWND on WS
 // accept/disconnect.
 static bool
-bridge_client_is_live(struct d3d11_service_system *sys)
+bridge_client_is_live(struct d3d11_service_system *sys, HWND live_hwnd_hint)
 {
 	if (!g_bridge_relay_active) return false;
-	HWND hwnd = sys != nullptr ? sys->compositor_hwnd : nullptr;
+	// Prefer the caller's current frame hwnd over sys->compositor_hwnd.
+	// sys->compositor_hwnd is only assigned on first-session window creation
+	// (line ~1939 checks `== nullptr`), so across Chrome page reloads /
+	// session transitions it stays pinned to the old window. The bridge's
+	// FindWindowW finds the current live window and pushes
+	// DXR_BridgeClientActive there; if we check the cached pin we'd read a
+	// stale (possibly destroyed) window that never has the prop.
+	HWND hwnd = live_hwnd_hint != nullptr ? live_hwnd_hint
+	                                       : (sys != nullptr ? sys->compositor_hwnd : nullptr);
 	if (hwnd == nullptr) return false;
 	return GetPropW(hwnd, L"DXR_BridgeClientActive") != nullptr;
 }
@@ -4121,6 +4141,9 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 	}
 	mc->hwnd = (HWND)comp_d3d11_window_get_hwnd(mc->window);
 	sys->compositor_hwnd = mc->hwnd;
+	// Seed the window's shell-mode flag from current sys state (service_set_shell_mode
+	// no-ops while multi_comp is null, so earlier activation hasn't reached the window).
+	comp_d3d11_window_set_shell_mode_active(mc->window, sys->shell_mode);
 
 	if (sys->xsysd != nullptr) {
 		comp_d3d11_window_set_system_devices(mc->window, sys->xsysd);
@@ -4389,6 +4412,7 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 				}
 				mc->hwnd = (HWND)comp_d3d11_window_get_hwnd(mc->window);
 				sys->compositor_hwnd = mc->hwnd;
+				comp_d3d11_window_set_shell_mode_active(mc->window, sys->shell_mode);
 
 				if (sys->xsysd != nullptr) {
 					comp_d3d11_window_set_system_devices(mc->window, sys->xsysd);
@@ -5520,7 +5544,7 @@ multi_compositor_render(struct d3d11_service_system *sys)
 	if (mc->window != nullptr && !comp_d3d11_window_is_valid(mc->window)) {
 		U_LOG_W("Multi-comp: window closed (ESC) — deactivating shell");
 		// Set shell_mode flags to false so the shell process detects the change
-		sys->shell_mode = false;
+		service_set_shell_mode(sys, false);
 		sys->base.info.shell_mode = false;
 		// Run the full deactivate path (capture teardown, DP release, etc.)
 		// We need to recreate the window on resume since it was destroyed by ESC,
@@ -8210,7 +8234,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	// exists but no extension is connected, this is false and legacy
 	// behavior runs normally. Also drives qwerty relay state transitions
 	// so qwerty wakes up the moment the WS client disconnects.
-	bool bridge_live = bridge_client_is_live(sys);
+	bool bridge_live = bridge_client_is_live(sys, c->render.hwnd);
 	{
 		static bool s_last_bridge_live = false;
 		if (bridge_live != s_last_bridge_live) {
@@ -8819,14 +8843,20 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 			if (bridge_override) {
 				// Override: use active per-view dims (display × viewScale)
-				// instead of Chrome's compromise-scaled subImage.imageRect.
-				// The bridge sample rendered tiles at this size.
+				// instead of Chrome's compromise-scaled subImage.imageRect
+				// extent. The bridge sample rendered at this size. BUT
+				// honor Chrome's sub.rect.offset for the tile position —
+				// Chrome may allocate an fb larger than
+				// tileColumns * active_vw (e.g. 7680×2160 instead of
+				// 3840×2160 when it uses max-view-size per eye); each
+				// view's sub-image is then placed at Chrome's offset, and
+				// the bridge sample renders content at the TOP-LEFT of
+				// that slot. Using tileX * active_vw for src_x would miss
+				// it for bigger fbs.
 				src_w = static_cast<float>(active_vw);
 				src_h = static_cast<float>(active_vh);
-				uint32_t tileX = eye % sys->tile_columns;
-				uint32_t tileY = eye / sys->tile_columns;
-				src_x = static_cast<float>(tileX * active_vw);
-				src_y = static_cast<float>(tileY * active_vh);
+				// src_x, src_y keep their values from Chrome's
+				// sub.rect.offset above.
 			}
 
 			// Tile layout for atlas placement. Atlas tiles are always laid
@@ -9435,7 +9465,7 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 		// Activate shell mode from system compositor info (set by ipc_server_process.c
 		// after init_all, before any client connects)
 		if (sys->base.info.shell_mode && !sys->shell_mode) {
-			sys->shell_mode = true;
+			service_set_shell_mode(sys, true);
 			U_LOG_W("Shell mode activated for D3D11 service system");
 		}
 
@@ -9801,23 +9831,47 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 	sys->xmcc.notify_display_refresh_changed = NULL;
 	sys->base.xmcc = &sys->xmcc;
 
-	// Fill system compositor info — initialize all views[0..view_count-1].
-	// These are fallback values only: oxr_system_fill_in() overrides
-	// recommended using display_pixel_width × view_scale at runtime, and
-	// bumps max to display_pixel_width if needed.  The important thing is
-	// that all view_count entries are initialized (not just [0] and [1])
-	// so future N>2-view devices don't read garbage.
+	// Fill system compositor info.
+	//
+	// Chrome's WebXR sizes its shared framebuffer by packing `view_count`
+	// per-view slots horizontally:
+	//   fb.width  = view_count × per_view.recommended.width
+	//   fb.height = per_view.recommended.height
+	// We want fb equal to the WORST-CASE ATLAS across all DP rendering
+	// modes (independent max of width and height), so every mode's atlas
+	// fits without fb re-allocation:
+	//   atlas_w[mode] = tile_cols[mode] × view_width_pixels[mode]
+	//                 = tile_cols[mode] × (display_w × viewScaleX[mode])
+	//   atlas_h[mode] = tile_rows[mode] × view_height_pixels[mode]
+	// Max over modes → per_view.width = max_atlas_w / view_count,
+	//                  per_view.height = max_atlas_h.
+	// view_count is whatever the HMD driver declares (2 for Leia, e.g. 5
+	// for a hypothetical lightfield 3×2 mode).
 	sys->base.info.max_layers = XRT_MAX_LAYERS;
-
-	uint32_t view_count = (sys->xdev != nullptr && sys->xdev->hmd != nullptr)
-	                           ? sys->xdev->hmd->view_count : 2;
+	uint32_t view_count =
+	    (xdev != nullptr && xdev->hmd != nullptr) ? xdev->hmd->view_count : 2;
 	if (view_count == 0) view_count = 2;
-
+	uint32_t max_atlas_w = sys->display_width;
+	uint32_t max_atlas_h = sys->display_height;
+	if (xdev != nullptr && xdev->rendering_mode_count > 0) {
+		max_atlas_w = 0;
+		max_atlas_h = 0;
+		for (uint32_t i = 0; i < xdev->rendering_mode_count; i++) {
+			uint32_t aw = xdev->rendering_modes[i].atlas_width_pixels;
+			uint32_t ah = xdev->rendering_modes[i].atlas_height_pixels;
+			if (aw > max_atlas_w) max_atlas_w = aw;
+			if (ah > max_atlas_h) max_atlas_h = ah;
+		}
+	}
+	const uint32_t per_view_w =
+	    (view_count > 0) ? max_atlas_w / view_count : max_atlas_w;
+	const uint32_t per_view_h = max_atlas_h;
 	for (uint32_t i = 0; i < view_count && i < XRT_MAX_VIEWS; i++) {
-		sys->base.info.views[i].recommended.width_pixels = sys->view_width;
-		sys->base.info.views[i].recommended.height_pixels = sys->view_height;
-		sys->base.info.views[i].max.width_pixels = sys->view_width;
-		sys->base.info.views[i].max.height_pixels = sys->view_height;
+		sys->base.info.views[i].recommended.width_pixels = per_view_w;
+		sys->base.info.views[i].recommended.height_pixels = per_view_h;
+		// max >= recommended, 2× headroom for framebufferScaleFactor > 1.
+		sys->base.info.views[i].max.width_pixels = per_view_w * 2;
+		sys->base.info.views[i].max.height_pixels = per_view_h * 2;
 	}
 
 	// Set supported blend modes (Chrome WebXR requires at least OPAQUE)
@@ -10749,7 +10803,7 @@ comp_d3d11_service_add_capture_client(struct xrt_system_compositor *xsysc,
 	// Normally this happens on first IPC client connect, but capture
 	// clients may arrive before any IPC client.
 	if (!sys->shell_mode && sys->base.info.shell_mode) {
-		sys->shell_mode = true;
+		service_set_shell_mode(sys, true);
 		U_LOG_W("Shell mode activated for D3D11 service system (via capture client)");
 	}
 	if (!sys->shell_mode) {
@@ -10880,7 +10934,7 @@ comp_d3d11_service_ensure_shell_window(struct xrt_system_compositor *xsysc)
 
 	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
 	if (!sys->shell_mode) {
-		sys->shell_mode = true;
+		service_set_shell_mode(sys, true);
 		U_LOG_W("Shell mode activated for D3D11 service system (via ensure_shell_window)");
 	}
 
@@ -10893,7 +10947,7 @@ comp_d3d11_service_ensure_shell_window(struct xrt_system_compositor *xsysc)
 		U_LOG_W("Shell: resuming from suspended state");
 
 		mc->suspended = false;
-		sys->shell_mode = true;
+		service_set_shell_mode(sys, true);
 
 		// Reverse hot-switch is LAZY: just flag each client compositor.
 		// Each client's next layer_commit will tear down its own DP and
@@ -11015,7 +11069,7 @@ comp_d3d11_service_deactivate_shell(struct xrt_system_compositor *xsysc)
 
 		// Clear the compositor's local shell_mode flag so layer_commit
 		// takes the standalone path instead of the (now suspended) multi-comp.
-		sys->shell_mode = false;
+		service_set_shell_mode(sys, false);
 
 	// --- 4C.2: Stop all capture sessions and restore 2D windows ---
 	for (int i = 0; i < D3D11_MULTI_MAX_CLIENTS; i++) {
