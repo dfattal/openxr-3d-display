@@ -9844,8 +9844,9 @@ comp_d3d11_service_create_system(struct xrt_device *xdev,
 	// view_count is whatever the HMD driver declares (2 for Leia, e.g. 5
 	// for a hypothetical lightfield 3×2 mode).
 	sys->base.info.max_layers = XRT_MAX_LAYERS;
-	const uint32_t view_count =
+	uint32_t view_count =
 	    (xdev != nullptr && xdev->hmd != nullptr) ? xdev->hmd->view_count : 2;
+	if (view_count == 0) view_count = 2;
 	uint32_t max_atlas_w = sys->display_width;
 	uint32_t max_atlas_h = sys->display_height;
 	if (xdev != nullptr && xdev->rendering_mode_count > 0) {
