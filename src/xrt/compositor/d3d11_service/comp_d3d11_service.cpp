@@ -861,6 +861,18 @@ d3d11_service_semaphore_from_xrt(struct xrt_compositor_semaphore *xcsem)
 	return reinterpret_cast<struct d3d11_service_semaphore *>(xcsem);
 }
 
+// Write sys->shell_mode and mirror the flag onto the multi-comp window so
+// its WndProc's ESC-close path can distinguish empty-shell (no focused app)
+// from true non-shell mode — see comp_d3d11_window.cpp ESC handling.
+static inline void
+service_set_shell_mode(struct d3d11_service_system *sys, bool active)
+{
+	sys->shell_mode = active;
+	if (sys->multi_comp != nullptr && sys->multi_comp->window != nullptr) {
+		comp_d3d11_window_set_shell_mode_active(sys->multi_comp->window, active);
+	}
+}
+
 // True iff a bridge relay session exists AND a WebSocket client is currently
 // connected to the bridge exe. Per-frame gate for bridge-specific behavior
 // (crop override, atlas-resize skip, qwerty suppression, vendor hw-state
@@ -4127,6 +4139,9 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 	}
 	mc->hwnd = (HWND)comp_d3d11_window_get_hwnd(mc->window);
 	sys->compositor_hwnd = mc->hwnd;
+	// Seed the window's shell-mode flag from current sys state (service_set_shell_mode
+	// no-ops while multi_comp is null, so earlier activation hasn't reached the window).
+	comp_d3d11_window_set_shell_mode_active(mc->window, sys->shell_mode);
 
 	if (sys->xsysd != nullptr) {
 		comp_d3d11_window_set_system_devices(mc->window, sys->xsysd);
@@ -4393,6 +4408,7 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 				}
 				mc->hwnd = (HWND)comp_d3d11_window_get_hwnd(mc->window);
 				sys->compositor_hwnd = mc->hwnd;
+				comp_d3d11_window_set_shell_mode_active(mc->window, sys->shell_mode);
 
 				if (sys->xsysd != nullptr) {
 					comp_d3d11_window_set_system_devices(mc->window, sys->xsysd);
@@ -5524,7 +5540,7 @@ multi_compositor_render(struct d3d11_service_system *sys)
 	if (mc->window != nullptr && !comp_d3d11_window_is_valid(mc->window)) {
 		U_LOG_W("Multi-comp: window closed (ESC) — deactivating shell");
 		// Set shell_mode flags to false so the shell process detects the change
-		sys->shell_mode = false;
+		service_set_shell_mode(sys, false);
 		sys->base.info.shell_mode = false;
 		// Run the full deactivate path (capture teardown, DP release, etc.)
 		// We need to recreate the window on resume since it was destroyed by ESC,
@@ -9445,7 +9461,7 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 		// Activate shell mode from system compositor info (set by ipc_server_process.c
 		// after init_all, before any client connects)
 		if (sys->base.info.shell_mode && !sys->shell_mode) {
-			sys->shell_mode = true;
+			service_set_shell_mode(sys, true);
 			U_LOG_W("Shell mode activated for D3D11 service system");
 		}
 
@@ -10781,7 +10797,7 @@ comp_d3d11_service_add_capture_client(struct xrt_system_compositor *xsysc,
 	// Normally this happens on first IPC client connect, but capture
 	// clients may arrive before any IPC client.
 	if (!sys->shell_mode && sys->base.info.shell_mode) {
-		sys->shell_mode = true;
+		service_set_shell_mode(sys, true);
 		U_LOG_W("Shell mode activated for D3D11 service system (via capture client)");
 	}
 	if (!sys->shell_mode) {
@@ -10912,7 +10928,7 @@ comp_d3d11_service_ensure_shell_window(struct xrt_system_compositor *xsysc)
 
 	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
 	if (!sys->shell_mode) {
-		sys->shell_mode = true;
+		service_set_shell_mode(sys, true);
 		U_LOG_W("Shell mode activated for D3D11 service system (via ensure_shell_window)");
 	}
 
@@ -10925,7 +10941,7 @@ comp_d3d11_service_ensure_shell_window(struct xrt_system_compositor *xsysc)
 		U_LOG_W("Shell: resuming from suspended state");
 
 		mc->suspended = false;
-		sys->shell_mode = true;
+		service_set_shell_mode(sys, true);
 
 		// Reverse hot-switch is LAZY: just flag each client compositor.
 		// Each client's next layer_commit will tear down its own DP and
@@ -11047,7 +11063,7 @@ comp_d3d11_service_deactivate_shell(struct xrt_system_compositor *xsysc)
 
 		// Clear the compositor's local shell_mode flag so layer_commit
 		// takes the standalone path instead of the (now suspended) multi-comp.
-		sys->shell_mode = false;
+		service_set_shell_mode(sys, false);
 
 	// --- 4C.2: Stop all capture sessions and restore 2D windows ---
 	for (int i = 0; i < D3D11_MULTI_MAX_CLIENTS; i++) {
