@@ -20,6 +20,14 @@ concurrency:
   group: publish-demo-gaussiansplat-${{ github.ref }}
   cancel-in-progress: false
 
+# GITHUB_TOKEN needs actions:read so publish-binaries can poll
+# build-windows.yml status via `gh run list`, and actions:write so
+# `gh run download` can pull the GaussianSplattingVK artifact. Without
+# these, the wait loop silently returns empty for every iteration.
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   sync-source:
     if: github.repository == 'DisplayXR/displayxr-runtime-pvt'
