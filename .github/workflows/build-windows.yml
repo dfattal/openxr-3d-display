@@ -23,6 +23,15 @@ jobs:
           fetch-depth: 2
       - id: filter
         run: |
+          # Tag pushes are releases — always build test apps + demos so the
+          # per-demo publish workflows can attach binary zips to releases.
+          # github.event.before is all-zeros on tag pushes, so the diff-based
+          # path below would miss this case.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "test_apps=true" >> "$GITHUB_OUTPUT"
+            echo "Detected tag push — forcing test_apps_changed=true"
+            exit 0
+          fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE=${{ github.event.pull_request.base.sha }}
           else
