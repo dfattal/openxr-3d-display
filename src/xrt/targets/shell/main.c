@@ -1775,13 +1775,13 @@ main(int argc, char *argv[])
 	// the shell so the orchestrator's keyboard hook (gated on !s_shell_running)
 	// can re-spawn us on the next press.
 	if (g_msg_hwnd != NULL) {
-		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_TOGGLE, MOD_CONTROL, VK_SPACE)) {
+		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_TOGGLE, MOD_CONTROL | MOD_NOREPEAT, VK_SPACE)) {
 			PE("Warning: RegisterHotKey(Ctrl+Space) failed — hotkey unavailable\n");
 		}
-		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_LAUNCH, MOD_CONTROL, 'L')) {
+		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_LAUNCH, MOD_CONTROL | MOD_NOREPEAT, 'L')) {
 			PE("Warning: RegisterHotKey(Ctrl+L) failed — launcher hotkey unavailable\n");
 		}
-		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_CAPTURE, MOD_CONTROL | MOD_SHIFT, 'C')) {
+		if (!RegisterHotKey(g_msg_hwnd, HOTKEY_CAPTURE, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 'C')) {
 			PE("Warning: RegisterHotKey(Ctrl+Shift+C) failed — capture hotkey unavailable\n");
 		}
 	}
