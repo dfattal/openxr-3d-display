@@ -3745,6 +3745,12 @@ multi_compositor_unregister_client(struct d3d11_service_system *sys, struct d3d1
 			mc->client_count--;
 			if (mc->focused_slot == i) {
 				mc->focused_slot = -1;
+				for (int j = 0; j < D3D11_MULTI_MAX_CLIENTS; j++) {
+					if (mc->clients[j].active && !mc->clients[j].minimized) {
+						mc->focused_slot = j;
+						break;
+					}
+				}
 				multi_compositor_update_input_forward(mc);
 			}
 			// Cancel any active drag on this slot
@@ -4047,6 +4053,12 @@ multi_compositor_remove_capture_client(struct d3d11_service_system *sys, int slo
 
 	if (mc->focused_slot == slot_index) {
 		mc->focused_slot = -1;
+		for (int j = 0; j < D3D11_MULTI_MAX_CLIENTS; j++) {
+			if (mc->clients[j].active && !mc->clients[j].minimized) {
+				mc->focused_slot = j;
+				break;
+			}
+		}
 		multi_compositor_update_input_forward(mc);
 	}
 	if (mc->drag.active && mc->drag.slot == slot_index) {
@@ -5710,32 +5722,24 @@ multi_compositor_render(struct d3d11_service_system *sys)
 		goto after_key_shortcuts;
 	}
 
-	// TAB: cycle focus — includes unfocused state (-1)
-	// Cycle: slot 0 → slot 1 → ... → -1 (unfocused) → slot 0
+	// TAB / Shift+TAB: cycle focus forward/backward. Never unfocuses when windows exist.
 	// Ignore ALT+TAB (system task switcher) — only process bare TAB.
 	if ((GetAsyncKeyState(VK_TAB) & 1) && !(GetAsyncKeyState(VK_MENU) & 0x8000)) {
 		if (mc->client_count > 0) {
-			// Start from current and advance
-			int next = mc->focused_slot + 1;
-			bool found = false;
-			// Search active slots starting from next
-			for (int i = 0; i < D3D11_MULTI_MAX_CLIENTS; i++) {
-				int idx = (next + i) % D3D11_MULTI_MAX_CLIENTS;
-				if (idx <= mc->focused_slot && mc->focused_slot >= 0) {
-					// Wrapped around — go to unfocused
-					break;
-				}
+			bool reverse = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+			int n = D3D11_MULTI_MAX_CLIENTS;
+			// base: for -1, forward searches from slot 0, reverse from last slot
+			int base = (mc->focused_slot >= 0) ? mc->focused_slot : (reverse ? n : -1);
+			for (int i = 1; i <= n; i++) {
+				int idx = reverse
+				        ? ((base - i) % n + n) % n
+				        : (base + i) % n;
 				if (mc->clients[idx].active && !mc->clients[idx].minimized) {
 					mc->focused_slot = idx;
-					found = true;
 					break;
 				}
 			}
-			if (!found) {
-				mc->focused_slot = -1; // unfocused
-			}
-			U_LOG_W("Multi-comp: TAB → focused slot %d%s", mc->focused_slot,
-			        mc->focused_slot < 0 ? " (unfocused)" : "");
+			U_LOG_W("Multi-comp: %sTAB → focused slot %d", reverse ? "Shift+" : "", mc->focused_slot);
 			multi_compositor_update_input_forward(mc);
 
 
