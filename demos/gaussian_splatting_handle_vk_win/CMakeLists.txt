@@ -130,3 +130,12 @@ if(EXISTS "${VK_WEAVER_DLL}")
             "$<TARGET_FILE_DIR:gaussian_splatting_handle_vk_win>/SimulatedRealityVulkanBeta.dll"
     )
 endif()
+
+# Copy bundled default scene next to the exe (auto-loaded at startup).
+set(BUNDLED_SCENE "${CMAKE_CURRENT_SOURCE_DIR}/assets/butterfly.spz")
+if(EXISTS "${BUNDLED_SCENE}")
+    add_custom_command(TARGET gaussian_splatting_handle_vk_win POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${BUNDLED_SCENE}" "$<TARGET_FILE_DIR:gaussian_splatting_handle_vk_win>/butterfly.spz"
+        COMMENT "Copying bundled butterfly.spz next to exe"
+    )
+endif()
