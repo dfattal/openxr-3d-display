@@ -739,8 +739,20 @@ ipc_handle_session_create(volatile struct ipc_client_state *ics,
 			fclose(dbg);
 		}
 	}
+	// Populate application_name on the session info from the IPC client's
+	// instance-describe record so the compositor can surface meaningful
+	// slot titles for clients that don't set XR_EXT_win32_window_binding
+	// (notably Chrome WebXR, which connects without an HWND and would
+	// otherwise show as "App N"). Local copy so we can modify the const
+	// input without touching the caller's struct.
+	struct xrt_session_info xsi_local = *xsi;
+	strncpy(xsi_local.application_name,
+	        ics->client_state.info.application_name,
+	        sizeof(xsi_local.application_name) - 1);
+	xsi_local.application_name[sizeof(xsi_local.application_name) - 1] = '\0';
+
 	xrt_result_t xret = xrt_system_create_session(
-	    ics->server->xsys, xsi, &xs,
+	    ics->server->xsys, &xsi_local, &xs,
 	    create_native_compositor ? &xcn : NULL);
 	if (xret != XRT_SUCCESS) {
 		return xret;
