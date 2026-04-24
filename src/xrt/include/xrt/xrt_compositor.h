@@ -973,6 +973,15 @@ struct xrt_session_info
 	//! concurrent legacy session is bridge-aware and should use mode-native
 	//! tile rects instead of legacy compromise scaling.
 	bool is_bridge_relay;
+
+	//! Application name from the creating OpenXR client's xrInstance info.
+	//! Populated server-side in ipc_handle_session_create from
+	//! ics->client_state.info.application_name; empty for in-process
+	//! sessions. The compositor uses this as a fallback for slot titles
+	//! when XR_EXT_win32_window_binding wasn't set (e.g. Chrome WebXR
+	//! running through the bridge) — without it those slots show as
+	//! "App N" instead of something meaningful like "Google Chrome 147".
+	char application_name[128];
 };
 
 /*!
