@@ -9881,15 +9881,24 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 		c->app_hwnd = (HWND)external_hwnd;
 
 		// Get app name from HWND title for title bar display.
+		// Fallback chain:
+		//   1. Window text (handle apps that expose their HWND).
+		//   2. xsi->application_name (clients that don't set
+		//      XR_EXT_win32_window_binding, like Chrome WebXR through the
+		//      bridge — ipc_handle_session_create populates this from the
+		//      IPC client's xrInstance applicationInfo).
+		//   3. "App <slot>" as last resort.
 		// If another slot already has the same name, append "-2", "-3", etc.
 		{
 			char base_name[128] = {0};
 			if (external_hwnd != 0) {
 				int len = GetWindowTextA((HWND)external_hwnd, base_name, sizeof(base_name));
-				if (len <= 0) {
-					snprintf(base_name, sizeof(base_name), "App %d", slot);
-				}
-			} else {
+				if (len <= 0) base_name[0] = '\0';
+			}
+			if (base_name[0] == '\0' && xsi != NULL && xsi->application_name[0] != '\0') {
+				snprintf(base_name, sizeof(base_name), "%s", xsi->application_name);
+			}
+			if (base_name[0] == '\0') {
 				snprintf(base_name, sizeof(base_name), "App %d", slot);
 			}
 
