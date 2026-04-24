@@ -139,3 +139,8 @@ scripts/test/out/
 # Runtime screenshot captures
 shell_screenshot.png
 shell_capture*.png
+
+# Local copies of secrets (GitHub App private keys, PAT dumps, etc.).
+# The canonical store is org-level GitHub Actions secrets; this dir is
+# just a local backup / working copy. NEVER commit its contents.
+.secrets/
