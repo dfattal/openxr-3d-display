@@ -134,11 +134,10 @@ struct InputState {
 // percentile-based extent — see ApplyAutoFitForLoadedScene().
 static constexpr float kDefaultVirtualDisplayHeightM = 1.5f;
 
-// Margin on the voxel-flood-fill main-object Y extent. The flood-fill
-// already isolates the dense central object from outliers (walls/floor),
-// so we just add a small visual breathing room — 1.4 leaves the object
-// at roughly 70% of frame height with comfortable margin.
-static constexpr float kAutoFitVerticalComfort = 1.4f;
+// Comfort margin is baked into getMainObjectBounds (which picks a different
+// multiplier for single-object vs scene-with-central-object). Keep this at
+// 1.0 to mean "no extra margin on top of what the bounds method returned".
+static constexpr float kAutoFitVerticalComfort = 1.0f;
 
 // Cached auto-fit result for the currently loaded scene. Reused by Reset
 // so 'Space' returns to the framed pose rather than world origin.
@@ -745,13 +744,14 @@ static bool CreateMacOSWindow(uint32_t width, uint32_t height) {
     [g_hudView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
     [g_hudBackdrop addSubview:g_hudView];
 
-    // --- Top bar (Open / Auto-Orbit / Mode / Flip) — frosted vibrancy panel ---
+    // --- Top bar (Open / Auto-Orbit / Mode / Flip) — transparent so the
+    // buttons sit directly over the rendered content (no frosted panel
+    // hiding the top of the scene).
     const CGFloat barH = 48.0;
     NSRect barFrame = NSMakeRect(0, height - barH, width, barH);
-    NSVisualEffectView *topBar = [[NSVisualEffectView alloc] initWithFrame:barFrame];
-    [topBar setMaterial:NSVisualEffectMaterialHUDWindow];
-    [topBar setBlendingMode:NSVisualEffectBlendingModeWithinWindow];
-    [topBar setState:NSVisualEffectStateActive];
+    NSView *topBar = [[NSView alloc] initWithFrame:barFrame];
+    [topBar setWantsLayer:YES];
+    [[topBar layer] setBackgroundColor:[[NSColor clearColor] CGColor]];
     [topBar setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     g_topBar = topBar;
     [g_metalView addSubview:g_topBar];
@@ -1720,7 +1720,17 @@ int main() {
 
                         XrPosef cameraPose;
                         quat_from_yaw_pitch(g_input.yaw, g_input.pitch, &cameraPose.orientation);
-                        cameraPose.position = {g_input.cameraPosX, g_input.cameraPosY, g_input.cameraPosZ};
+                        // The view-stage Y-flip (and X-flip) is post-applied to the view
+                        // matrix as view * diag(±1, ±1, 1, 1). For non-zero displayPose
+                        // axes, this leaves the display center at view-space y = -2·cy − 0.1
+                        // instead of -0.1, breaking the Kooima frustum's centering. Mirror
+                        // the corresponding axis of displayPose so the view-stage flip and
+                        // the projection stay aligned.
+                        float dispX = g_input.cameraPosX;
+                        float dispY = g_input.cameraPosY;
+                        if (g_input.flipX) dispX = -dispX;
+                        if (g_input.flipY) dispY = -dispY;
+                        cameraPose.position = {dispX, dispY, g_input.cameraPosZ};
 
                         XrVector3f nominalViewer = {xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ};
 
