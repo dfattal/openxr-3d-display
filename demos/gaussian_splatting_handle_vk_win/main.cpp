@@ -79,11 +79,10 @@ static std::mutex g_sceneMutex;
 
 // Fallback vHeight when no scene is loaded; replaced per-scene by auto-fit.
 static constexpr float kFallbackVirtualDisplayHeightM = 0.24f;
-// Margin on the voxel-flood-fill main-object Y extent. The flood-fill
-// already isolates the dense central object from outliers (walls/floor),
-// so we just add a small visual breathing room — 1.4 leaves the object
-// at roughly 70% of frame height with comfortable margin.
-static constexpr float kAutoFitVerticalComfort = 1.4f;
+// Comfort margin is baked into getMainObjectBounds (which picks a different
+// multiplier for single-object vs scene-with-central-object). Keep this at
+// 1.0 to mean "no extra margin on top of what the bounds method returned".
+static constexpr float kAutoFitVerticalComfort = 1.0f;
 
 // Cached auto-fit pose for the currently loaded scene. Reused by Reset
 // so 'Space' returns to the framed pose rather than world origin.

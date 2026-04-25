@@ -1396,7 +1396,7 @@ bool GsRenderer::getMainObjectBounds(uint32_t gridSize,
     //    the loosest-but-still-valid result.
     const size_t minFill = std::max((size_t)16, totalVoxels / 100);
     const size_t maxFill = totalVoxels / 3;
-    const float thresholds[] = {0.05f, 0.10f, 0.20f, 0.30f, 0.50f, 0.70f};
+    const float thresholds[] = {0.01f, 0.02f, 0.05f, 0.10f, 0.20f, 0.30f, 0.50f, 0.70f};
 
     std::vector<bool> filled(totalVoxels, false);
     std::vector<bool> bestFilled(totalVoxels, false);
@@ -1432,17 +1432,99 @@ bool GsRenderer::getMainObjectBounds(uint32_t gridSize,
         if (y < minVox[1]) minVox[1] = y; if (y > maxVox[1]) maxVox[1] = y;
         if (z < minVox[2]) minVox[2] = z; if (z > maxVox[2]) maxVox[2] = z;
     }
+    float denseCenter[3], denseExt[3];
     for (int a = 0; a < 3; a++) {
         float voxSize = (vmax[a] - vmin[a]) / (float)G;
-        float worldMin = vmin[a] + (float)minVox[a] * voxSize;
-        float worldMax = vmin[a] + (float)(maxVox[a] + 1) * voxSize;
-        outCenter[a] = 0.5f * (worldMin + worldMax);
-        outExtent[a] = worldMax - worldMin;
+        float denseMinW = vmin[a] + (float)minVox[a] * voxSize;
+        float denseMaxW = vmin[a] + (float)(maxVox[a] + 1) * voxSize;
+        denseCenter[a] = 0.5f * (denseMinW + denseMaxW);
+        denseExt[a] = denseMaxW - denseMinW;
     }
 
-    printf("GsRenderer: main object %zu/%zu voxels (%.2f%% of grid, threshold %.2fx peak)\n",
+    // 7. Branch on regime: a high fill ratio means the dense cluster
+    //    occupies most of the scene's 5–95 bbox, so we have a single tight
+    //    object (butterfly) — use full min/max so sparse extremities like
+    //    antennae aren't clipped. A low fill ratio means the dense cluster
+    //    is a small central region inside a larger scene (KAWS gallery,
+    //    Leila room) — use the exact bbox of gaussians within the flood-
+    //    fill voxels (tighter than the voxel-aligned bbox).
+    float fillRatio = (float)bestCount / (float)totalVoxels;
+    const float kSingleObjectFillThresh = 0.02f;
+    const float kComfort = 1.10f;  // 10 % margin on the object bbox
+
+    bool isSingleObject = (fillRatio > kSingleObjectFillThresh);
+    if (isSingleObject) {
+        // Full min/max bounding box of all gaussians.
+        float fullMin[3] = { FLT_MAX,  FLT_MAX,  FLT_MAX};
+        float fullMax[3] = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
+        for (const auto& g : pickData_) {
+            if (g.px < fullMin[0]) fullMin[0] = g.px;
+            if (g.px > fullMax[0]) fullMax[0] = g.px;
+            if (g.py < fullMin[1]) fullMin[1] = g.py;
+            if (g.py > fullMax[1]) fullMax[1] = g.py;
+            if (g.pz < fullMin[2]) fullMin[2] = g.pz;
+            if (g.pz > fullMax[2]) fullMax[2] = g.pz;
+        }
+        for (int a = 0; a < 3; a++) {
+            outCenter[a] = 0.5f * (fullMin[a] + fullMax[a]);
+            outExtent[a] = (fullMax[a] - fullMin[a]) * kComfort;
+        }
+    } else {
+        // Gaussian-precise bbox + opacity-weighted centroid for in-flood-
+        // fill gaussians. Center on the centroid (pulls toward the densest
+        // part of the object — e.g. the can in a Leila scene — away from
+        // sparse appendages like a chain extending upward). Extent is
+        // symmetric around the centroid covering the full precise bbox so
+        // sparse extensions stay visible at the frame edge but don't
+        // dominate the framing center.
+        float preciseMin[3] = { FLT_MAX,  FLT_MAX,  FLT_MAX};
+        float preciseMax[3] = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
+        double sumW = 0.0;
+        double centroidSum[3] = {0.0, 0.0, 0.0};
+        for (const auto& g : pickData_) {
+            int xi = (int)((g.px - vmin[0]) * invSize[0]);
+            int yi = (int)((g.py - vmin[1]) * invSize[1]);
+            int zi = (int)((g.pz - vmin[2]) * invSize[2]);
+            if (xi < 0 || xi >= (int)G || yi < 0 || yi >= (int)G ||
+                zi < 0 || zi >= (int)G) continue;
+            size_t vid = ((size_t)xi * G + (size_t)yi) * G + (size_t)zi;
+            if (!bestFilled[vid]) continue;
+            if (g.px < preciseMin[0]) preciseMin[0] = g.px;
+            if (g.px > preciseMax[0]) preciseMax[0] = g.px;
+            if (g.py < preciseMin[1]) preciseMin[1] = g.py;
+            if (g.py > preciseMax[1]) preciseMax[1] = g.py;
+            if (g.pz < preciseMin[2]) preciseMin[2] = g.pz;
+            if (g.pz > preciseMax[2]) preciseMax[2] = g.pz;
+            double w = g.opacity;
+            sumW += w;
+            centroidSum[0] += w * g.px;
+            centroidSum[1] += w * g.py;
+            centroidSum[2] += w * g.pz;
+        }
+        // Defensive fall-back (shouldn't trigger in practice).
+        if (preciseMin[0] > preciseMax[0] || sumW < 1e-6) {
+            for (int a = 0; a < 3; a++) {
+                outCenter[a] = denseCenter[a];
+                outExtent[a] = denseExt[a] * kComfort;
+            }
+        } else {
+            float centroid[3] = {(float)(centroidSum[0] / sumW),
+                                 (float)(centroidSum[1] / sumW),
+                                 (float)(centroidSum[2] / sumW)};
+            for (int a = 0; a < 3; a++) {
+                outCenter[a] = centroid[a];
+                float halfMax = std::max(preciseMax[a] - centroid[a],
+                                         centroid[a] - preciseMin[a]);
+                outExtent[a] = 2.0f * halfMax * kComfort;
+            }
+        }
+    }
+
+    printf("GsRenderer: main object %zu/%zu voxels (%.2f%% of grid, threshold %.2fx peak) — %s\n",
            bestCount, totalVoxels,
-           100.0 * (double)bestCount / (double)totalVoxels, bestThresh);
+           100.0 * (double)fillRatio, bestThresh,
+           isSingleObject ? "SINGLE OBJECT (5-95 bbox + 1.1x)"
+                          : "SCENE w/ central object (dense bbox + 1.4x)");
     return true;
 }
 
