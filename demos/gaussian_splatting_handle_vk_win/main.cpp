@@ -77,6 +77,58 @@ static std::atomic<bool> g_loadRequested{false};
 static std::string g_loadedFileName;
 static std::mutex g_sceneMutex;
 
+// Fallback vHeight when no scene is loaded; replaced per-scene by auto-fit.
+static constexpr float kFallbackVirtualDisplayHeightM = 0.24f;
+// Multiplier on the inner-quartile (25-75) Y extent — IQR captures the
+// densest splat cluster (typically the main object); 1.4× brings ~the
+// full object into frame with margin. Walls/floor outside the IQR still
+// render but don't dominate the framing.
+static constexpr float kAutoFitVerticalComfort = 1.4f;
+
+// Cached auto-fit pose for the currently loaded scene. Reused by Reset
+// so 'Space' returns to the framed pose rather than world origin.
+static float g_fitCenter[3] = {0.0f, 0.0f, 0.0f};
+static float g_fitVHeight   = kFallbackVirtualDisplayHeightM;
+static float g_fitYaw       = 0.0f;
+static std::atomic<bool> g_fitValid{false};
+
+// Compute robust scene bounds (5th–95th percentile per axis) and stage
+// new display-rig pose + vHeight on g_inputState. Display orientation is
+// kept identity (forward = world −Z): splats have no canonical front, and
+// any heuristic (PCA, etc.) can pick the wrong side; the user can rotate
+// with mouse drag from a predictable starting pose.
+// Caller must hold g_sceneMutex (we read pickData_ from the renderer).
+static void ApplyAutoFitForLoadedScene_locked() {
+    float center[3], extent[3];
+    bool ok = g_gsRenderer.getRobustSceneBounds(0.25f, 0.75f, center, extent);
+    if (ok) {
+        float vh = extent[1] * kAutoFitVerticalComfort;
+        if (!(vh > 1e-3f)) ok = false;
+        if (ok) {
+            g_fitCenter[0] = center[0];
+            g_fitCenter[1] = center[1];
+            g_fitCenter[2] = center[2];
+            g_fitVHeight = vh;
+            // Search 8 yaws to face the captured side of the scene.
+            float viewerOffset[3] = {0.0f, 0.1f, 0.6f};
+            g_fitYaw = g_gsRenderer.findBestYaw(g_fitCenter, viewerOffset, 8);
+            LOG_INFO("Auto-fit: center=(%.3f, %.3f, %.3f) extent=(%.3f, %.3f, %.3f) vHeight=%.3f yaw=%.0fdeg",
+                     center[0], center[1], center[2],
+                     extent[0], extent[1], extent[2], vh, g_fitYaw * 57.2957795f);
+        }
+    }
+    g_fitValid.store(ok);
+
+    std::lock_guard<std::mutex> lock(g_inputMutex);
+    g_inputState.cameraPosX = ok ? g_fitCenter[0] : 0.0f;
+    g_inputState.cameraPosY = ok ? g_fitCenter[1] : 0.0f;
+    g_inputState.cameraPosZ = ok ? g_fitCenter[2] : 0.0f;
+    g_inputState.yaw = ok ? g_fitYaw : 0.0f;
+    g_inputState.pitch = 0.0f;
+    g_inputState.viewParams.virtualDisplayHeight = ok ? g_fitVHeight : kFallbackVirtualDisplayHeightM;
+    g_inputState.viewParams.scaleFactor = 1.0f;
+}
+
 // Fullscreen state
 static bool g_fullscreen = false;
 static RECT g_savedWindowRect = {};
@@ -152,6 +204,7 @@ static void TryAutoLoadBundledScene() {
     if (g_gsRenderer.loadScene(path.c_str())) {
         g_loadedFileName = GetPlyFilename(path);
         LOG_INFO("Loaded %s (%s)", g_loadedFileName.c_str(), GetPlyFileSize(path).c_str());
+        ApplyAutoFitForLoadedScene_locked();
     } else {
         LOG_WARN("Auto-load failed for %s", path.c_str());
     }
@@ -178,6 +231,7 @@ static void OpenLoadDialog(HWND hwnd) {
                 g_loadedFileName = GetPlyFilename(path);
                 LOG_INFO("Scene loaded: %s (%s)", g_loadedFileName.c_str(),
                     GetPlyFileSize(path).c_str());
+                ApplyAutoFitForLoadedScene_locked();
             } else {
                 LOG_ERROR("Failed to load scene: %s", path.c_str());
                 MessageBoxA(hwnd, "Failed to load scene file.\nThe file may be corrupt or unsupported.",
@@ -457,6 +511,16 @@ static void RenderThreadFunc(
 
         UpdatePerformanceStats(perfStats);
         UpdateCameraMovement(inputSnapshot, perfStats.deltaTime, xr->displayHeightM);
+
+        // On Space-reset: shared UpdateCameraMovement returns to (0,0,0) + default
+        // vHeight. For the splat demo, restore the per-scene auto-fit pose instead.
+        if (resetRequested && g_fitValid.load()) {
+            inputSnapshot.cameraPosX = g_fitCenter[0];
+            inputSnapshot.cameraPosY = g_fitCenter[1];
+            inputSnapshot.cameraPosZ = g_fitCenter[2];
+            inputSnapshot.yaw = g_fitYaw;
+            inputSnapshot.viewParams.virtualDisplayHeight = g_fitVHeight;
+        }
 
         {
             std::lock_guard<std::mutex> lock(g_inputMutex);
@@ -1219,7 +1283,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     LOG_INFO("          L=Load  Tab=HUD  F11=Fullscreen  ESC=Quit");
     LOG_INFO("");
 
-    g_inputState.viewParams.virtualDisplayHeight = 0.24f;
+    g_inputState.viewParams.virtualDisplayHeight = kFallbackVirtualDisplayHeightM;
     g_inputState.renderingModeCount = xr.renderingModeCount;
     {
         using namespace std::chrono;

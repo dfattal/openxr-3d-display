@@ -324,8 +324,10 @@ bool GsRenderer::createBuffers()
 {
     uint32_t N = numGaussians_;
     uint32_t totalTiles = tileX_ * tileY_;
-    maxSortInstances_ = N * 4;
-    // Ensure capacity for a single splat covering all tiles
+    // Initial multiplier sized for mono full-resolution viewport. SBS/3D modes
+    // generate ~4× fewer fragments per gaussian (smaller pixel-space radius),
+    // so this is generous for stereo. growSortBuffers() handles overflow.
+    maxSortInstances_ = N * 8;
     if (maxSortInstances_ < totalTiles)
         maxSortInstances_ = totalTiles;
 
@@ -606,6 +608,16 @@ bool GsRenderer::loadScene(const char* plyPath)
 
     if (!parseOk || vertices.empty()) {
         fprintf(stderr, "GsRenderer: failed to parse scene file: %s\n", plyPath);
+        return false;
+    }
+
+    // Drop outlier gaussians before GPU upload — typical splat captures contain
+    // 1–3 % stray "floater" splats that produce huge translucent blobs at the
+    // frame edges. Done here so createBuffers() and pickData_ both see the
+    // cleaned set automatically.
+    filterFloaters(vertices);
+    if (vertices.empty()) {
+        fprintf(stderr, "GsRenderer: all gaussians filtered as floaters in %s\n", plyPath);
         return false;
     }
 
@@ -971,9 +983,12 @@ void GsRenderer::renderEye(VkImage swapchainImage,
         vkUnmapMemory(device_, totalSumHostBuffer_.memory);
     }
 
-    // Clamp to sort buffer capacity
+    // Sort capacity check: dense scenes in mono full-res can exceed the
+    // initial heuristic. Reallocate rather than truncate (which would drop
+    // the falloff fragments of every gaussian past the cap).
     if (numInstances > maxSortInstances_) {
-        numInstances = maxSortInstances_;
+        vkQueueWaitIdle(queue_);  // CMD1 already wait-idled, but be explicit
+        growSortBuffers(numInstances);
     }
 
     if (numInstances == 0) {
@@ -1260,6 +1275,260 @@ bool GsRenderer::getSceneBBox(float outMin[3], float outMax[3]) const
     outMin[0] = mn[0]; outMin[1] = mn[1]; outMin[2] = mn[2];
     outMax[0] = mx[0]; outMax[1] = mx[1]; outMax[2] = mx[2];
     return true;
+}
+
+bool GsRenderer::getRobustSceneBounds(float loPct, float hiPct,
+                                      float outCenter[3], float outExtent[3]) const
+{
+    if (pickData_.empty()) return false;
+    if (loPct < 0.0f) loPct = 0.0f;
+    if (hiPct > 1.0f) hiPct = 1.0f;
+    if (hiPct <= loPct) { hiPct = loPct + 1e-3f; if (hiPct > 1.0f) hiPct = 1.0f; }
+
+    const size_t n = pickData_.size();
+    std::vector<float> coord(n);
+    for (int axis = 0; axis < 3; axis++) {
+        for (size_t i = 0; i < n; i++) {
+            const auto& g = pickData_[i];
+            coord[i] = (axis == 0) ? g.px : (axis == 1) ? g.py : g.pz;
+        }
+        size_t loIdx = (size_t)(loPct * (float)(n - 1));
+        size_t hiIdx = (size_t)(hiPct * (float)(n - 1));
+        if (hiIdx <= loIdx) hiIdx = loIdx + 1;
+        if (hiIdx >= n) hiIdx = n - 1;
+        std::nth_element(coord.begin(), coord.begin() + loIdx, coord.end());
+        float lo = coord[loIdx];
+        std::nth_element(coord.begin() + loIdx + 1, coord.begin() + hiIdx, coord.end());
+        float hi = coord[hiIdx];
+        outCenter[axis] = 0.5f * (lo + hi);
+        outExtent[axis] = hi - lo;
+    }
+    return true;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// filterFloaters — drop outlier gaussians before GPU upload. Mirrors the
+// percentile-based logic in getRobustSceneBounds() but operates on the raw
+// vertex set (pickData_ doesn't exist yet at load time).
+// ═════════════════════════════════════════════════════════════════════════
+
+void GsRenderer::filterFloaters(std::vector<GsVertex>& vertices) const
+{
+    const size_t n = vertices.size();
+    if (n < 16) return;  // tiny scenes — nothing to do
+
+    // 1. Robust per-axis center + extent (5th–95th percentile per axis).
+    float center[3], extent[3];
+    {
+        std::vector<float> coord(n);
+        for (int axis = 0; axis < 3; axis++) {
+            for (size_t i = 0; i < n; i++) coord[i] = vertices[i].position[axis];
+            size_t loIdx = (size_t)(0.05f * (float)(n - 1));
+            size_t hiIdx = (size_t)(0.95f * (float)(n - 1));
+            if (hiIdx <= loIdx) hiIdx = loIdx + 1;
+            if (hiIdx >= n) hiIdx = n - 1;
+            std::nth_element(coord.begin(), coord.begin() + loIdx, coord.end());
+            float lo = coord[loIdx];
+            std::nth_element(coord.begin() + loIdx + 1, coord.begin() + hiIdx, coord.end());
+            float hi = coord[hiIdx];
+            center[axis] = 0.5f * (lo + hi);
+            extent[axis] = hi - lo;
+        }
+    }
+
+    // 2. 99th-percentile of max(scale_xyz) — only catch the truly extreme.
+    //    Wall / background splats sit in the top few % of scales naturally
+    //    (sparse coverage of large flat surfaces); a tight threshold here
+    //    eats the room. Real floaters are 1–2 orders of magnitude over p99.
+    float scaleP99;
+    {
+        std::vector<float> maxScales(n);
+        for (size_t i = 0; i < n; i++) {
+            const auto& s = vertices[i].scale_opacity;
+            maxScales[i] = std::max({s[0], s[1], s[2]});
+        }
+        size_t p99 = (size_t)(0.99f * (float)(n - 1));
+        std::nth_element(maxScales.begin(), maxScales.begin() + p99, maxScales.end());
+        scaleP99 = maxScales[p99];
+    }
+
+    // 3. Loose thresholds — we only want to kill obvious outliers.
+    const float distMul = 4.0f;     // 4× extent = obvious spatial floater
+    const float scaleMul = 10.0f;   // 10× p99 = bizarrely huge ellipsoid
+    float distLim[3] = { distMul * extent[0], distMul * extent[1], distMul * extent[2] };
+    float scaleLim = scaleMul * scaleP99;
+
+    // 4. Erase-remove pass. A gaussian is a floater only if BOTH (a) any axis
+    //    is far from centroid AND (b) its scale is huge — gating on both
+    //    avoids killing legitimate distant background splats (walls, sky)
+    //    that have normal scales.
+    auto isFloater = [&](const GsVertex& v) -> bool {
+        bool farPos = false;
+        for (int axis = 0; axis < 3; axis++) {
+            float d = std::fabs(v.position[axis] - center[axis]);
+            if (d > distLim[axis]) { farPos = true; break; }
+        }
+        float maxS = std::max({v.scale_opacity[0], v.scale_opacity[1], v.scale_opacity[2]});
+        bool hugeScale = (maxS > scaleLim);
+        return farPos && hugeScale;
+    };
+    size_t before = vertices.size();
+    vertices.erase(std::remove_if(vertices.begin(), vertices.end(), isFloater),
+                   vertices.end());
+    size_t after = vertices.size();
+    size_t trimmed = before - after;
+    double pct = before ? (100.0 * (double)trimmed / (double)before) : 0.0;
+    printf("GsRenderer: trimmed %zu floaters (kept %zu of %zu, %.1f%%)\n",
+           trimmed, after, before, pct);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// findBestYaw — test numCandidates evenly-spaced yaws and return the one
+// with the highest opacity-weighted gaussian mass in front of the viewer.
+// Operates on pickData_, so call after loadScene() succeeds.
+// ═════════════════════════════════════════════════════════════════════════
+
+float GsRenderer::findBestYaw(const float displayCenter[3],
+                              const float viewerOffsetLocal[3],
+                              uint32_t numCandidates) const
+{
+    if (pickData_.empty() || numCandidates == 0) return 0.0f;
+
+    const float ox = viewerOffsetLocal[0];
+    const float oy = viewerOffsetLocal[1];
+    const float oz = viewerOffsetLocal[2];
+    const float twoPi = 6.283185307179586f;
+
+    float bestYaw = 0.0f;
+    float bestMass = -1.0f;
+
+    for (uint32_t k = 0; k < numCandidates; k++) {
+        float theta = twoPi * (float)k / (float)numCandidates;
+        float c = std::cos(theta), s = std::sin(theta);
+
+        // Rotate viewer offset and display-forward (0,0,-1) by yaw around +Y.
+        // Ry: [c 0 s; 0 1 0; -s 0 c]
+        float vwx = displayCenter[0] + (c * ox + s * oz);
+        float vwy = displayCenter[1] + oy;
+        float vwz = displayCenter[2] + (-s * ox + c * oz);
+        float fwdX = -s;
+        float fwdY = 0.0f;
+        float fwdZ = -c;
+
+        float mass = 0.0f;
+        for (const auto& g : pickData_) {
+            float dx = g.px - vwx;
+            float dy = g.py - vwy;
+            float dz = g.pz - vwz;
+            float along = dx * fwdX + dy * fwdY + dz * fwdZ;
+            if (along > 0.0f) {
+                mass += g.opacity;
+            }
+        }
+
+        if (mass > bestMass) {
+            bestMass = mass;
+            bestYaw = theta;
+        }
+    }
+
+    printf("GsRenderer: best yaw = %.1f deg (visible mass = %.0f, candidates = %u)\n",
+           bestYaw * 57.2957795f, bestMass, numCandidates);
+    return bestYaw;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// growSortBuffers — reallocate sort/hist buffers + re-bind descriptors when
+// the per-frame tile-fragment count outgrows current capacity. Mirrors the
+// dynamic-multiplier strategy used upstream (shg8/3DGS.cpp). Caller must
+// have wait-idled the queue before invoking.
+// ═════════════════════════════════════════════════════════════════════════
+
+void GsRenderer::growSortBuffers(uint32_t requiredCapacity)
+{
+    if (requiredCapacity <= maxSortInstances_) return;
+
+    uint32_t oldCap = maxSortInstances_;
+    // 2× headroom so we don't grow next frame on small jitter.
+    uint32_t newCap = requiredCapacity * 2;
+    uint32_t totalTiles = tileX_ * tileY_;
+    if (newCap < totalTiles) newCap = totalTiles;
+
+    auto devLocal = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    auto ssboUsage = (VkBufferUsageFlags)(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+
+    gsDestroyBuffer(device_, sortKeysEvenBuffer_);
+    gsDestroyBuffer(device_, sortKeysOddBuffer_);
+    gsDestroyBuffer(device_, sortValsEvenBuffer_);
+    gsDestroyBuffer(device_, sortValsOddBuffer_);
+    gsDestroyBuffer(device_, sortHistBuffer_);
+
+    sortKeysEvenBuffer_ = gsCreateBuffer(device_, physDevice_,
+        (VkDeviceSize)newCap * 8, ssboUsage, devLocal);
+    sortKeysOddBuffer_ = gsCreateBuffer(device_, physDevice_,
+        (VkDeviceSize)newCap * 8, ssboUsage, devLocal);
+    sortValsEvenBuffer_ = gsCreateBuffer(device_, physDevice_,
+        (VkDeviceSize)newCap * 4, ssboUsage, devLocal);
+    sortValsOddBuffer_ = gsCreateBuffer(device_, physDevice_,
+        (VkDeviceSize)newCap * 4, ssboUsage, devLocal);
+
+    uint32_t globalInv = (newCap + numRadixSortBlocksPerWG_ * 256 - 1) /
+                         (numRadixSortBlocksPerWG_ * 256);
+    numSortWorkgroups_ = globalInv ? globalInv : 1;
+    sortHistBuffer_ = gsCreateBuffer(device_, physDevice_,
+        (VkDeviceSize)numSortWorkgroups_ * 256 * 4, ssboUsage, devLocal);
+
+    maxSortInstances_ = newCap;
+
+    // Re-bind every descriptor that points at the recreated buffers.
+    writeBufferDS(device_, dsPreprocessSort_, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortKeysEvenBuffer_.buffer, sortKeysEvenBuffer_.size);
+    writeBufferDS(device_, dsPreprocessSort_, 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortValsEvenBuffer_.buffer, sortValsEvenBuffer_.size);
+
+    writeBufferDS(device_, dsHistEven_, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortKeysEvenBuffer_.buffer, sortKeysEvenBuffer_.size);
+    writeBufferDS(device_, dsHistEven_, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortHistBuffer_.buffer, sortHistBuffer_.size);
+    writeBufferDS(device_, dsHistOdd_, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortKeysOddBuffer_.buffer, sortKeysOddBuffer_.size);
+    writeBufferDS(device_, dsHistOdd_, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortHistBuffer_.buffer, sortHistBuffer_.size);
+
+    writeBufferDS(device_, dsSortEvenToOdd_, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortKeysEvenBuffer_.buffer, sortKeysEvenBuffer_.size);
+    writeBufferDS(device_, dsSortEvenToOdd_, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortKeysOddBuffer_.buffer, sortKeysOddBuffer_.size);
+    writeBufferDS(device_, dsSortEvenToOdd_, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortValsEvenBuffer_.buffer, sortValsEvenBuffer_.size);
+    writeBufferDS(device_, dsSortEvenToOdd_, 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortValsOddBuffer_.buffer, sortValsOddBuffer_.size);
+    writeBufferDS(device_, dsSortEvenToOdd_, 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortHistBuffer_.buffer, sortHistBuffer_.size);
+
+    writeBufferDS(device_, dsSortOddToEven_, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortKeysOddBuffer_.buffer, sortKeysOddBuffer_.size);
+    writeBufferDS(device_, dsSortOddToEven_, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortKeysEvenBuffer_.buffer, sortKeysEvenBuffer_.size);
+    writeBufferDS(device_, dsSortOddToEven_, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortValsOddBuffer_.buffer, sortValsOddBuffer_.size);
+    writeBufferDS(device_, dsSortOddToEven_, 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortValsEvenBuffer_.buffer, sortValsEvenBuffer_.size);
+    writeBufferDS(device_, dsSortOddToEven_, 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortHistBuffer_.buffer, sortHistBuffer_.size);
+
+    writeBufferDS(device_, dsTileBoundary_, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortKeysEvenBuffer_.buffer, sortKeysEvenBuffer_.size);
+
+    writeBufferDS(device_, dsRenderSet0_, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                  sortValsEvenBuffer_.buffer, sortValsEvenBuffer_.size);
+
+    double mb = ((double)newCap * (8 + 8 + 4 + 4) +
+                 (double)numSortWorkgroups_ * 256 * 4) / (1024.0 * 1024.0);
+    printf("GsRenderer: grew sort buffers %u -> %u instances (%.1f MB total)\n",
+           oldCap, newCap, mb);
 }
 
 // ═════════════════════════════════════════════════════════════════════════
