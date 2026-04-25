@@ -146,6 +146,14 @@ void main() {
     float lambda = max(lambda1, lambda2);
     float radii = ceil(3.0 * sqrt(lambda));
 
+    // Subpixel cull — gaussians smaller than 1 px contribute nothing visible
+    // and waste sort capacity. (Capping the radius higher would create square
+    // cutoff artifacts because cov2d would be unchanged; floater control is
+    // done at load time via filterFloaters() instead.)
+    if (radii < 1.0) {
+        return;
+    }
+
     vec2 uv = vec2(ndc2Pix(ndc.x, int(width)), ndc2Pix(ndc.y, int(height)));
 
     uvec4 bounding_box = uvec4(

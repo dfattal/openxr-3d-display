@@ -26,9 +26,11 @@ bool ParseSpzFile(const std::string& path, std::vector<GsVertex>& vertices)
 {
     vertices.clear();
 
-    // Load and unpack SPZ, converting from RUB (SPZ native) to RDF (PLY convention)
+    // EXPERIMENT: was RDF (Y-down, Z-forward = COLMAP/gsplat-trainer PLY convention).
+    // Trying RUB (Y-up, Z-back = OpenGL / OpenXR / SPZ-native) to see if the
+    // scene matches SuperSplat's orientation without needing a 180° yaw fix.
     spz::UnpackOptions options;
-    options.to = spz::CoordinateSystem::RDF;
+    options.to = spz::CoordinateSystem::RUB;
     spz::GaussianCloud cloud = spz::loadSpz(path, options);
 
     if (cloud.numPoints <= 0) {
