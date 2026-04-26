@@ -1,10 +1,11 @@
 # WebXR-in-Shell Plan
 
 **Branch:** `feature/webxr-in-shell` (off `main` after `#161` is merged)
-**Status:** Stages 0–3 complete. Bridge-aware color shift in shell
-(documented as a Stage 2 follow-up) resolved in commit `48dbdc6b2` —
-see `webxr-bridge-color-shift-plan.md` §Outcome. **Stage 4 (live
-resize during an active session) is the only remaining open item.**
+**Status:** All stages complete (0–4). Bridge-aware color shift in
+shell (documented as a Stage 2 follow-up) resolved in commit
+`48dbdc6b2` — see `webxr-bridge-color-shift-plan.md` §Outcome. Stage 4
+(live resize during an active session) was implicitly satisfied by
+the per-frame IPC pull added in Stage 2a — see Stage 4 entry below.
 The qwerty-freeze stack from the Stage 4c agent prompt (commits
 `0be7055f4` → `5ac8e5f2b`) landed before the color fix.
 
@@ -290,12 +291,34 @@ Each stage should build + test cleanly on its own.
 - Test: bridge-aware sample in shell → renders with correct
   window-local Kooima, same as a handle app.
 
-### Stage 4 — live resize/pose events
-- Service → bridge: when multi-comp updates a slot rect/pose, push
-  a `window-info` event.
-- Bridge → extension → main-world: forward as fresh display-info.
-- Test: drag/resize the WebXR window during a live session;
-  content reflows.
+### Stage 4 — live resize/pose events ✅ (already covered by Stage 2a/3)
+
+**Resolution:** No dedicated push-event work required. The per-frame
+pull machinery added in Stage 2a (commit `d4001374a`) and the bridge's
+own metric poll loop satisfy the live-resize requirement.
+
+- **Legacy Chrome WebXR.** `xrLocateViews` invokes
+  `oxr_session_get_window_metrics` per frame, which routes through
+  `comp_ipc_client_compositor_get_window_metrics` → IPC →
+  `comp_d3d11_service_get_client_window_metrics`. The server reads
+  live `mc->clients[slot]` fields (no caching), so each frame's Kooima
+  FOV reflects the current window pose/dimensions.
+- **Bridge-aware sessions.** The bridge child polls
+  `try_override_with_per_client_metrics` on its main loop (~60ms
+  cadence in shell mode); when metrics change it pushes a fresh
+  `window-info` JSON message over the WebSocket and Three.js reflows.
+- **Drag/resize handling.** The multi-comp's title-drag and edge-resize
+  handlers update `mc->clients[s].window_pose`, `window_width_m`,
+  `window_height_m`, and recalculate `window_rect_*` on the same frame
+  the input arrives. Both consumers above pick up the new values on
+  the next frame.
+
+The Stage 4 entry as originally written assumed a push model
+(service-initiated `window-info` event). The pull model that Stage 2
+shipped covers the same need at a lower cost (no push wiring, no
+ordering hazards, latency bounded by frame rate / poll cadence).
+Verified informally during the bridge color-shift regression sweep —
+shrink-and-drag reflows the WebGL content immediately.
 
 ### Stage 5 — cleanup
 - Remove Stage 1's scale-blit fallback if Stages 2/3 cover all
