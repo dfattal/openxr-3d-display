@@ -279,6 +279,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
 
     case WM_KEYDOWN:
+        if (wParam == VK_ESCAPE) {
+            PostMessage(hwnd, WM_CLOSE, 0, 0);
+            return 0;
+        }
+        if (wParam == VK_F11) {
+            ToggleFullscreen(hwnd);
+            return 0;
+        }
+        // L key = load shortcut
+        if (wParam == 'L') {
+            PostMessage(hwnd, WM_USER + 1, 0, 0);
+            return 0;
+        }
+        // I key = capture multi-view atlas
         if (wParam == 'I' || wParam == 'i') {
             g_captureAtlasRequested.store(true);
         }
@@ -300,22 +314,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         g_running.store(false);
         PostQuitMessage(0);
         return 0;
-
-    case WM_KEYDOWN:
-        if (wParam == VK_ESCAPE) {
-            PostMessage(hwnd, WM_CLOSE, 0, 0);
-            return 0;
-        }
-        if (wParam == VK_F11) {
-            ToggleFullscreen(hwnd);
-            return 0;
-        }
-        // L key = load shortcut
-        if (wParam == 'L') {
-            PostMessage(hwnd, WM_USER + 1, 0, 0);
-            return 0;
-        }
-        break;
     }
 
     return DefWindowProc(hwnd, msg, wParam, lParam);
