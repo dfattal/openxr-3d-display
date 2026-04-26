@@ -27,7 +27,10 @@ struct ID3D11Texture2D;
 struct ID3D12Device;
 struct ID3D12CommandQueue;
 struct ID3D12Resource;
-typedef int DXGI_FORMAT;
+// DXGI_FORMAT is intentionally NOT forward-declared — it's an enum in
+// dxgiformat.h and any redeclaration here would clash with includers
+// that already pulled in the real header. The D3D readback helpers
+// don't take format params; they query it from the texture itself.
 #endif
 
 // Vulkan handles — forward-declare so the header doesn't pull in vulkan.h.
