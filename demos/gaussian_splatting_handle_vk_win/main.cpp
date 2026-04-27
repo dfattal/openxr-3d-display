@@ -150,6 +150,16 @@ static void ApplyAutoFitForLoadedScene_locked() {
     // so app-start view params (perspectiveFactor, scaleFactor, etc.) match
     // the Space-reset state.
     g_inputState.resetViewRequested = true;
+
+    // Treat scene load as a fresh user interaction so the auto-orbit idle
+    // timer restarts. Without this, an asset loaded after the 10s idle
+    // threshold starts rotating immediately on first display.
+    {
+        using namespace std::chrono;
+        g_inputState.lastInputTimeSec = (double)duration_cast<microseconds>(
+            high_resolution_clock::now().time_since_epoch()).count() * 1e-6;
+        g_inputState.animationActive = false;
+    }
 }
 
 // Fullscreen state
@@ -513,6 +523,18 @@ static void RenderThreadFunc(
         {
             std::lock_guard<std::mutex> lock(g_inputMutex);
             inputSnapshot = g_inputState;
+        }
+        // Pitch sign flip for the GS demo: shared input_handler.cpp mutates
+        // pitch with `-= dy` (cube_handle convention, paired with negative
+        // VkViewport.height Y-flip at rasterization). The GS demo Y-flips
+        // at the *view* stage in gs_renderer.cpp instead — that inverts the
+        // visual response, so we negate here to restore drag-down → look-down.
+        // Only `renderPitch` is used downstream; `inputSnapshot.pitch` itself
+        // stays in shared-handler convention so the writeback at end of frame
+        // doesn't compound.
+        float renderPitch = -inputSnapshot.pitch;
+        {
+            std::lock_guard<std::mutex> lock(g_inputMutex);
             resetRequested = g_inputState.resetViewRequested;
             animateToggle = g_inputState.animateToggleRequested;
             loadReq = g_inputState.loadRequested;
@@ -601,8 +623,8 @@ static void RenderThreadFunc(
 
                 if (frameState.shouldRender) {
                     if (LocateViews(*xr, frameState.predictedDisplayTime,
-                        inputSnapshot.cameraPosX, inputSnapshot.cameraPosY, inputSnapshot.cameraPosZ,
-                        inputSnapshot.yaw, inputSnapshot.pitch,
+                        inputSnapshot.cameraPosX, -inputSnapshot.cameraPosY, inputSnapshot.cameraPosZ,
+                        inputSnapshot.yaw, renderPitch,
                         inputSnapshot.viewParams)) {
 
                         XrViewLocateInfo locateInfo = {XR_TYPE_VIEW_LOCATE_INFO};
@@ -692,11 +714,15 @@ static void RenderThreadFunc(
 
                             XrPosef displayPose;
                             XMVECTOR pOri = XMQuaternionRotationRollPitchYaw(
-                                inputSnapshot.pitch, inputSnapshot.yaw, 0);
+                                renderPitch, inputSnapshot.yaw, 0);
                             XMFLOAT4 q;
                             XMStoreFloat4(&q, pOri);
                             displayPose.orientation = {q.x, q.y, q.z, q.w};
-                            displayPose.position = {inputSnapshot.cameraPosX, inputSnapshot.cameraPosY, inputSnapshot.cameraPosZ};
+                            // GsRenderer Y-mirrors the world inside updateUniforms (see comment
+                            // in gs_renderer.cpp). The off-axis Kooima projection assumes the
+                            // mirror is reflected in the displayPose passed to display3d_compute_views,
+                            // so negate Y here to keep the eye-vs-display geometry consistent.
+                            displayPose.position = {inputSnapshot.cameraPosX, -inputSnapshot.cameraPosY, inputSnapshot.cameraPosZ};
 
                             XrVector3f nominalViewer = {xr->nominalViewerX, xr->nominalViewerY, xr->nominalViewerZ};
                             Display3DScreen screen = {winW_m, winH_m};
@@ -735,8 +761,14 @@ static void RenderThreadFunc(
                             XrVector3f centerEyeProcessed = (es != 0.0f)
                                 ? XrVector3f{centerEyeDisp.x / es, centerEyeDisp.y / es, centerEyeDisp.z / es}
                                 : centerEyeDisp;
+                            // Use a real-world-frame displayPose for picking — the unproject
+                            // ray needs to be in the same frame as the splats (un-Y-flipped
+                            // world). The render-time displayPose has its Y negated for the
+                            // renderer's view-stage Y mirror; using that here would put
+                            // rayOrigin in a mirror frame and pickGaussian would intersect
+                            // against splats in the wrong frame.
                             XrPosef displayPoseLocal;
-                            XMVECTOR pOri = XMQuaternionRotationRollPitchYaw(inputSnapshot.pitch, inputSnapshot.yaw, 0);
+                            XMVECTOR pOri = XMQuaternionRotationRollPitchYaw(renderPitch, inputSnapshot.yaw, 0);
                             XMFLOAT4 q;
                             XMStoreFloat4(&q, pOri);
                             displayPoseLocal.orientation = {q.x, q.y, q.z, q.w};
@@ -755,16 +787,20 @@ static void RenderThreadFunc(
                             float hitPos[3];
                             std::lock_guard<std::mutex> sceneLock(g_sceneMutex);
                             if (g_gsRenderer.pickGaussian(rayOrigin, rayDir, hitPos)) {
-                                // Splats are in canonical +Y-up world after the loader
-                                // conversions; renderer Y-row negation handles screen-Y.
-                                // Translate the display to the hit point but preserve
-                                // the current orientation — the user wants to "fly to"
-                                // the splat without re-aiming the display.
+                                // Both endpoints stored in WORLD frame (the same frame as
+                                // inputSnapshot.cameraPosX/Y/Z) so the slerp interpolates
+                                // consistently. displayPoseLocal has its Y negated for the
+                                // display3d_compute_view boundary; we mustn't store that
+                                // negated copy as the slerp's "from" pose, otherwise the
+                                // mid-transition lerp drifts vertically toward 2·cy − y.
+                                XrPosef fromWorld;
+                                fromWorld.orientation = displayPoseLocal.orientation;
+                                fromWorld.position = {inputSnapshot.cameraPosX, inputSnapshot.cameraPosY, inputSnapshot.cameraPosZ};
                                 XrPosef target;
                                 target.position = {hitPos[0], hitPos[1], hitPos[2]};
                                 target.orientation = displayPoseLocal.orientation;
                                 std::lock_guard<std::mutex> inputLock(g_inputMutex);
-                                g_inputState.transitionFrom = displayPoseLocal;
+                                g_inputState.transitionFrom = fromWorld;
                                 g_inputState.transitionTo = target;
                                 g_inputState.transitionT = 0.0f;
                                 g_inputState.transitioning = true;
@@ -796,9 +832,9 @@ static void RenderThreadFunc(
                                     monoM2vView = inputSnapshot.viewParams.virtualDisplayHeight / xr->displayHeightM;
                                 float eyeScale = inputSnapshot.viewParams.perspectiveFactor * monoM2vView / inputSnapshot.viewParams.scaleFactor;
                                 XMVECTOR playerOri = XMQuaternionRotationRollPitchYaw(
-                                    inputSnapshot.pitch, inputSnapshot.yaw, 0);
+                                    renderPitch, inputSnapshot.yaw, 0);
                                 XMVECTOR playerPos = XMVectorSet(
-                                    inputSnapshot.cameraPosX, inputSnapshot.cameraPosY,
+                                    inputSnapshot.cameraPosX, -inputSnapshot.cameraPosY,
                                     inputSnapshot.cameraPosZ, 0.0f);
                                 XMVECTOR worldPos = XMVector3Rotate(centerLocalPos * eyeScale, playerOri) + playerPos;
                                 XMVECTOR worldOri = XMQuaternionMultiply(localOri, playerOri);
@@ -983,9 +1019,9 @@ static void RenderThreadFunc(
                                     xr->eyeTrackingActive, xr->isEyeTracking,
                                     xr->activeEyeTrackingMode, xr->supportedEyeTrackingModes);
 
-                                float fwdX = -sinf(inputSnapshot.yaw) * cosf(inputSnapshot.pitch);
-                                float fwdY =  sinf(inputSnapshot.pitch);
-                                float fwdZ = -cosf(inputSnapshot.yaw) * cosf(inputSnapshot.pitch);
+                                float fwdX = -sinf(inputSnapshot.yaw) * cosf(renderPitch);
+                                float fwdY =  sinf(renderPitch);
+                                float fwdZ = -cosf(inputSnapshot.yaw) * cosf(renderPitch);
                                 std::wstring cameraText = FormatCameraInfo(
                                     inputSnapshot.cameraPosX, inputSnapshot.cameraPosY, inputSnapshot.cameraPosZ,
                                     fwdX, fwdY, fwdZ);
