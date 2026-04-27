@@ -813,42 +813,56 @@ void GsRenderer::updateUniforms(const float viewMatrix[16], const float projMatr
 {
     GsUniformBuffer ub;
 
-    // Extract camera position from view matrix: cam = -R^T * t
+    // Y-flip the world before any view-derived computation. The compute
+    // shader writes via ndc2Pix(ndc.y) (Vulkan: ndc.y=+1 → pixel.y near
+    // height-1, i.e. bottom-of-image), so without compensation a +Y-up
+    // world appears upside-down. The "obvious" fix — negating the Y row
+    // of proj_mat (i.e. flipping clip.y) — places splat *centers* right-
+    // side-up but doesn't propagate into the cov2d Jacobian, leaving the
+    // anisotropic 2D ellipses computed against the un-flipped world. The
+    // resulting size mismatch (cov2d[0][0] differs by a non-trivial
+    // 4·a·b·Σ[0,1] term for any non-axis-aligned view × non-diagonal Σ)
+    // shows up as radial streaks / fuzz on splat edges. Flipping at the
+    // *view* stage (right-multiply by diag(1,-1,1,1)) instead keeps
+    // W = R_c2w consistent with the world frame the cov2d formula assumes.
+    //
+    // CALLER CONTRACT: the demo must pass `viewMatrix` already built with
+    // a Y-mirrored display pose (i.e. cameraPose.position.y = -intended_y)
+    // so the off-axis Kooima projection's eye-vs-display geometry stays
+    // consistent with the world flip we apply here. Without that, the
+    // scene renders with a 2·cy vertical offset.
+    float vmFlipped[16];
+    memcpy(vmFlipped, viewMatrix, 16 * sizeof(float));
+    vmFlipped[4] = -vmFlipped[4];
+    vmFlipped[5] = -vmFlipped[5];
+    vmFlipped[6] = -vmFlipped[6];
+    vmFlipped[7] = -vmFlipped[7];
+
+    // Extract camera position from the (Y-flipped) view matrix: cam = -R^T * t
     // Column-major: col0=[0..3], col1=[4..7], col2=[8..11], col3=[12..15]
-    float tx = viewMatrix[12], ty = viewMatrix[13], tz = viewMatrix[14];
-    ub.camera_position[0] = -(viewMatrix[0]*tx + viewMatrix[1]*ty + viewMatrix[2]*tz);
-    ub.camera_position[1] = -(viewMatrix[4]*tx + viewMatrix[5]*ty + viewMatrix[6]*tz);
-    ub.camera_position[2] = -(viewMatrix[8]*tx + viewMatrix[9]*ty + viewMatrix[10]*tz);
+    float tx = vmFlipped[12], ty = vmFlipped[13], tz = vmFlipped[14];
+    ub.camera_position[0] = -(vmFlipped[0]*tx + vmFlipped[1]*ty + vmFlipped[2]*tz);
+    ub.camera_position[1] = -(vmFlipped[4]*tx + vmFlipped[5]*ty + vmFlipped[6]*tz);
+    ub.camera_position[2] = -(vmFlipped[8]*tx + vmFlipped[9]*ty + vmFlipped[10]*tz);
     ub.camera_position[3] = 1.0f;
 
-    // proj_mat = projMatrix * viewMatrix (combined view-projection)
-    // The shader does: p_hom = proj_mat * worldPos → clip space
+    // proj_mat = projMatrix * vmFlipped (combined view-projection,
+    // with Y-flip already baked into the view stage). The shader does
+    // p_hom = proj_mat * worldPos → clip space. No proj-stage Y negation.
     for (int col = 0; col < 4; col++) {
         for (int row = 0; row < 4; row++) {
             float sum = 0.0f;
             for (int k = 0; k < 4; k++) {
-                sum += projMatrix[k * 4 + row] * viewMatrix[col * 4 + k];
+                sum += projMatrix[k * 4 + row] * vmFlipped[col * 4 + k];
             }
             ub.proj_mat[col * 4 + row] = sum;
         }
     }
 
-    // Negate row 1 (Y output) of proj_mat so this Vulkan-compute renderer
-    // matches the +Y-up convention the rest of the pipeline uses. Without
-    // this, world +Y projects to high pixel.y (bottom of swapchain image)
-    // because the compute shader writes via ndc2Pix(ndc.y) and Vulkan has
-    // no graphics-pipeline viewport flip available. Equivalent to the
-    // negative-VkViewport.height trick used by cube_handle_vk_{win,macos}.
-    ub.proj_mat[1]  = -ub.proj_mat[1];
-    ub.proj_mat[5]  = -ub.proj_mat[5];
-    ub.proj_mat[9]  = -ub.proj_mat[9];
-    ub.proj_mat[13] = -ub.proj_mat[13];
-
-    // view_mat = viewMatrix with Z row negated (make positive Z = forward)
-    // This is needed because the shader's Jacobian and near-plane test assume
-    // positive Z for objects in front of the camera.
-    // OpenXR uses -Z forward; we negate row 2 so p_view.z becomes positive.
-    memcpy(ub.view_mat, viewMatrix, 16 * sizeof(float));
+    // view_mat = vmFlipped with Z row negated (make positive Z = forward).
+    // The shader's Jacobian and near-plane test assume positive Z for
+    // objects in front of the camera; OpenXR uses -Z forward.
+    memcpy(ub.view_mat, vmFlipped, 16 * sizeof(float));
     // Negate row 2 (column-major indices 2, 6, 10, 14)
     ub.view_mat[2]  = -ub.view_mat[2];
     ub.view_mat[6]  = -ub.view_mat[6];
