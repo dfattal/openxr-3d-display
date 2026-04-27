@@ -546,7 +546,12 @@ static void OpenLoadDialog() {
 - (void)mouseDragged:(NSEvent *)event {
     MarkUserInput(g_input);
     g_input.yaw -= (float)[event deltaX] * 0.005f;
-    g_input.pitch -= (float)[event deltaY] * 0.005f;
+    // pitch += because the renderer Y-mirrors the world internally
+    // (gs_renderer.cpp); without this, mouse-drag-up would tilt the
+    // camera DOWN. cube_handle apps go the other way (-= deltaY)
+    // because they Y-flip at rasterization (negative VkViewport.height),
+    // not at view stage.
+    g_input.pitch += (float)[event deltaY] * 0.005f;
     float maxPitch = 1.5f;
     if (g_input.pitch > maxPitch) g_input.pitch = maxPitch;
     if (g_input.pitch < -maxPitch) g_input.pitch = -maxPitch;
@@ -1416,6 +1421,10 @@ static void ApplyAutoFitForLoadedScene() {
     g_input.pitch = 0.0f;
     g_input.viewParams.virtualDisplayHeight = g_fitValid ? g_fitVHeight : kDefaultVirtualDisplayHeightM;
     g_input.viewParams.scaleFactor = 1.0f;
+    // Treat scene load as a fresh user interaction so the auto-orbit idle
+    // timer restarts. Without this, an asset loaded after the 10s idle
+    // threshold starts rotating immediately on first display.
+    MarkUserInput(g_input);
 
     // Per-format orientation correction is now done at load time (PLY loader
     // converts RDF+X-mirror → canonical RUB; SPZ loader uses RUB natively).
@@ -1696,7 +1705,11 @@ int main() {
 
                         XrPosef cameraPose;
                         quat_from_yaw_pitch(g_input.yaw, g_input.pitch, &cameraPose.orientation);
-                        cameraPose.position = {g_input.cameraPosX, g_input.cameraPosY, g_input.cameraPosZ};
+                        // GsRenderer Y-mirrors the world inside updateUniforms (see comment
+                        // in gs_renderer.cpp). The off-axis Kooima projection assumes the
+                        // mirror is reflected in the displayPose passed to display3d_compute_view,
+                        // so negate Y here to keep the eye-vs-display geometry consistent.
+                        cameraPose.position = {g_input.cameraPosX, -g_input.cameraPosY, g_input.cameraPosZ};
 
                         XrVector3f nominalViewer = {xr.nominalViewerX, xr.nominalViewerY, xr.nominalViewerZ};
 
@@ -1803,9 +1816,17 @@ int main() {
                             XrVector3f centerEyeProcessed = (es != 0.0f)
                                 ? (XrVector3f){centerEyeDisp.x / es, centerEyeDisp.y / es, centerEyeDisp.z / es}
                                 : centerEyeDisp;
+                            // Use a real-world-frame displayPose for picking — the unproject
+                            // ray needs to be in the same frame as the splats (un-Y-flipped
+                            // world). cameraPose has its Y negated for the renderer's view-
+                            // stage Y mirror; using it here would put rayOrigin in a mirror
+                            // frame and pickGaussian would intersect against splats in the
+                            // wrong frame.
+                            XrPosef cameraPoseWorld = cameraPose;
+                            cameraPoseWorld.position.y = g_input.cameraPosY;
                             Display3DView centerView;
                             display3d_compute_view(&centerEyeProcessed, &screen2, &tunables2,
-                                                   &cameraPose, 0.01f, 100.0f, &centerView);
+                                                   &cameraPoseWorld, 0.01f, 100.0f, &centerView);
 
                             XrVector3f rayOriginV, rayDirV;
                             display3d_unproject_ndc_to_ray(ndcX, ndcY,
@@ -1816,15 +1837,19 @@ int main() {
                             float rayDir[3]    = {rayDirV.x,    rayDirV.y,    rayDirV.z};
                             float hitPos[3];
                             if (g_gsRenderer.pickGaussian(rayOrigin, rayDir, hitPos)) {
-                                // Splats are in canonical +Y-up world after the loader
-                                // conversions; renderer Y-row negation handles screen-Y.
-                                // Translate to the hit point but preserve the current
-                                // orientation — the user wants to "fly to" the splat
-                                // without re-aiming the display.
+                                // Both endpoints stored in WORLD frame (the same frame as
+                                // g_input.cameraPosX/Y/Z) so the slerp interpolates
+                                // consistently. cameraPose has its Y negated for the
+                                // display3d_compute_view boundary; we mustn't store that
+                                // negated copy as the slerp's "from" pose, otherwise the
+                                // mid-transition lerp drifts vertically toward 2·cy − y.
+                                XrPosef fromWorld;
+                                fromWorld.orientation = cameraPose.orientation;
+                                fromWorld.position = {g_input.cameraPosX, g_input.cameraPosY, g_input.cameraPosZ};
                                 XrPosef target;
                                 target.position = {hitPos[0], hitPos[1], hitPos[2]};
                                 target.orientation = cameraPose.orientation;
-                                g_input.transitionFrom = cameraPose;
+                                g_input.transitionFrom = fromWorld;
                                 g_input.transitionTo = target;
                                 g_input.transitionT = 0.0f;
                                 g_input.transitioning = true;
