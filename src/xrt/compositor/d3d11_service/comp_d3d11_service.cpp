@@ -68,7 +68,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <map>
 #include <mutex>
+#include <set>
 #include <sddl.h>
 
 
@@ -158,6 +160,12 @@ struct d3d11_service_swapchain
 
 	//! Whether this swapchain was created by the service (vs imported from client)
 	bool service_created;
+
+	//! [#184] The DXGI format originally requested by the client (before any
+	//! TYPELESS-storage rewrite for cross-process kernel-object identity).
+	//! Used by the compose path to choose the right SRV format when the
+	//! underlying storage is TYPELESS.
+	DXGI_FORMAT requested_dxgi_format;
 };
 
 /*!
@@ -1136,6 +1144,25 @@ get_srgb_format(DXGI_FORMAT format)
 		return DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
 	default:
 		return format;  // Return as-is
+	}
+}
+
+/*!
+ * [#184] Get the UNORM variant of an SRGB format. Returns the same format
+ * if not SRGB or no UNORM variant exists.
+ */
+static inline DXGI_FORMAT
+get_unorm_format(DXGI_FORMAT format)
+{
+	switch (format) {
+	case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+		return DXGI_FORMAT_R8G8B8A8_UNORM;
+	case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+		return DXGI_FORMAT_B8G8R8A8_UNORM;
+	case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+		return DXGI_FORMAT_B8G8R8X8_UNORM;
+	default:
+		return format;
 	}
 }
 
@@ -2572,6 +2599,7 @@ compositor_create_swapchain(struct xrt_compositor *xc,
 
 	// Convert format
 	DXGI_FORMAT dxgi_format = xrt_format_to_dxgi(info->format);
+	sc->requested_dxgi_format = dxgi_format; // [#184] preserve original typed intent
 
 	// Determine bind flags
 	UINT bind_flags = D3D11_BIND_SHADER_RESOURCE; // Always need SRV for compositor
@@ -2660,6 +2688,50 @@ compositor_create_swapchain(struct xrt_compositor *xc,
 
 		U_LOG_W("Created shared texture [%u]: handle=%p (NT handle)", i, shared_handle);
 
+		// [#184] Probe cross-process kernel-object identity for shared textures.
+		// Paint a sentinel orange. If the same NT handle on the client side opens the
+		// same kernel object, the client's writes will overwrite this. If the readback
+		// at first compose still sees orange, the client opened a different kernel object.
+		// Cycle 4: applies to ALL render-target formats (was SRGB-only) so cube_handle
+		// (UNORM, known-good in shell) is also probed — that tells us whether the
+		// identity bug is universal or SRGB-specific.
+		if (bind_flags & D3D11_BIND_RENDER_TARGET) {
+			HRESULT hr_acq = sc->images[i].keyed_mutex->AcquireSync(0, 1000);
+			if (SUCCEEDED(hr_acq)) {
+				D3D11_RENDER_TARGET_VIEW_DESC rtv_desc = {};
+				rtv_desc.Format = dxgi_format;
+				if (tex_desc.ArraySize > 1) {
+					rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+					rtv_desc.Texture2DArray.ArraySize = tex_desc.ArraySize;
+					rtv_desc.Texture2DArray.FirstArraySlice = 0;
+					rtv_desc.Texture2DArray.MipSlice = 0;
+				} else {
+					rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+					rtv_desc.Texture2D.MipSlice = 0;
+				}
+				wil::com_ptr<ID3D11RenderTargetView> sentinel_rtv;
+				HRESULT hr_rtv = sys->device->CreateRenderTargetView(
+				    sc->images[i].texture.get(), &rtv_desc, sentinel_rtv.put());
+				if (SUCCEEDED(hr_rtv)) {
+					const FLOAT orange[4] = {1.0f, 0.5f, 0.0f, 1.0f};
+					sys->context->ClearRenderTargetView(sentinel_rtv.get(), orange);
+					sys->context->Flush();
+					U_LOG_W("[#184] sentinel paint: sc=%p img=%u tex=%p NT=%p fmt=%u %ux%u "
+					        "arr=%u mips=%u sample=%u misc=0x%x",
+					        (void *)sc, i, (void *)sc->images[i].texture.get(), shared_handle,
+					        (unsigned)dxgi_format, info->width, info->height,
+					        tex_desc.ArraySize, tex_desc.MipLevels,
+					        tex_desc.SampleDesc.Count, tex_desc.MiscFlags);
+				} else {
+					U_LOG_W("[#184] sentinel paint: CreateRenderTargetView failed [%u]: 0x%08lx",
+					        i, hr_rtv);
+				}
+				sc->images[i].keyed_mutex->ReleaseSync(0);
+			} else {
+				U_LOG_W("[#184] sentinel paint: AcquireSync failed [%u]: 0x%08lx", i, hr_acq);
+			}
+		}
+
 		// Create SRV for compositor
 		D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
 		srv_desc.Format = dxgi_format;
@@ -2677,6 +2749,16 @@ compositor_create_swapchain(struct xrt_compositor *xc,
 
 	U_LOG_W("Created swapchain with %u shared images (%ux%u, format=%d)",
 	        image_count, info->width, info->height, (int)dxgi_format);
+
+	// [#184] Log the service's adapter LUID once per swapchain so client-side
+	// [#184] OpenSharedResource1 logs can be cross-referenced.
+	if (is_srgb_format(dxgi_format)) {
+		LUID svc_luid = {};
+		std::memcpy(&svc_luid, sys->base.info.client_d3d_deviceLUID.data, sizeof(svc_luid));
+		U_LOG_W("[#184] svc adapter LUID=%08lx-%08lx (srgb swapchain sc=%p fmt=%u %ux%u)",
+		        (unsigned long)svc_luid.HighPart, (unsigned long)svc_luid.LowPart,
+		        (void *)sc, (unsigned)dxgi_format, info->width, info->height);
+	}
 
 	// Note: KeyedMutex starts in released state (key 0), so client can acquire immediately.
 	// No initial release needed.
@@ -2720,6 +2802,7 @@ compositor_import_swapchain(struct xrt_compositor *xc,
 	sc->image_count = image_count;
 	sc->info = *info;
 	sc->service_created = false; // Imported from client
+	sc->requested_dxgi_format = xrt_format_to_dxgi(info->format); // [#184]
 
 	U_LOG_W("Importing swapchain: %u images, %ux%u, format=%u, usage=0x%x",
 	        image_count, info->width, info->height, info->format, info->bits);
@@ -9394,6 +9477,10 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			}
 			view_textures[eye]->GetDesc(&view_descs[eye]);
 			view_is_srgb[eye] = is_srgb_format(view_descs[eye].Format);
+			// [#184] Cycle 6: when storage was rewritten to UNORM for cross-process
+			// identity, do NOT override view_is_srgb back to true — D3D11 forbids
+			// SRGB-typed SRV over UNORM-typed storage. SRV must use UNORM. Gamma
+			// will be wrong, but we only need to know if writes propagate.
 		}
 		if (!views_valid) continue;
 
@@ -9439,6 +9526,80 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			        sys->display_width, sys->display_height, sys->view_width, sys->view_height);
 		}
 		proj_log_count++;
+
+		// [#184] One-shot CPU readback per source texture, with the keyed mutex held
+		// (acquired in the loop above). Sample 4 corner pixels. If RGBA matches the
+		// orange sentinel painted at swapchain create, the plugin's writes never
+		// reached this kernel object — confirms cross-process identity bug.
+		// Gate by per-texture set so this fires once per (sc,image) pair, not per frame.
+		{
+			static std::map<ID3D11Texture2D *, uint32_t> readback_count;
+			static std::mutex readback_mu;
+			for (uint32_t eye = 0; eye < proj_view_count; eye++) {
+				// [#184] fire for any swapchain whose original request was SRGB,
+				// regardless of current storage format (we may rewrite to UNORM).
+				if (!is_srgb_format(view_scs[eye]->requested_dxgi_format)) continue;
+				if (!view_mutex_acquired[eye]) continue;
+				ID3D11Texture2D *src = view_textures[eye];
+				uint32_t n;
+				{
+					std::lock_guard<std::mutex> lk(readback_mu);
+					n = readback_count[src]++;
+				}
+				// Cycle 7: fire on first frame, then every 60th frame, max 8 times.
+				if (n != 0 && (n % 60 != 0 || n > 480)) continue;
+
+				// Build a STAGING copy with the same desc.
+				D3D11_TEXTURE2D_DESC staging_desc = view_descs[eye];
+				staging_desc.Usage = D3D11_USAGE_STAGING;
+				staging_desc.BindFlags = 0;
+				staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+				staging_desc.MiscFlags = 0;
+				staging_desc.ArraySize = 1;
+				staging_desc.MipLevels = 1;
+				wil::com_ptr<ID3D11Texture2D> staging;
+				HRESULT hrs = sys->device->CreateTexture2D(&staging_desc, nullptr, staging.put());
+				if (FAILED(hrs)) {
+					U_LOG_W("[#184] readback eye=%u: CreateTexture2D(STAGING) failed 0x%08lx fmt=%u",
+					        eye, hrs, view_descs[eye].Format);
+					continue;
+				}
+				// Copy slice 0 mip 0 of source into staging.
+				sys->context->CopySubresourceRegion(
+				    staging.get(), 0, 0, 0, 0,
+				    src, 0, nullptr);
+				sys->context->Flush();
+
+				D3D11_MAPPED_SUBRESOURCE mapped = {};
+				hrs = sys->context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped);
+				if (FAILED(hrs)) {
+					U_LOG_W("[#184] readback eye=%u: Map failed 0x%08lx", eye, hrs);
+					continue;
+				}
+				const uint32_t W = view_descs[eye].Width;
+				const uint32_t H = view_descs[eye].Height;
+				auto sample = [&](uint32_t x, uint32_t y) -> uint32_t {
+					if (x >= W) x = W - 1;
+					if (y >= H) y = H - 1;
+					const uint8_t *row = static_cast<const uint8_t *>(mapped.pData) + (size_t)y * mapped.RowPitch;
+					return *reinterpret_cast<const uint32_t *>(row + (size_t)x * 4);
+				};
+				uint32_t p_tl = sample(8, 8);
+				uint32_t p_tr = sample(W > 8 ? W - 9 : 0, 8);
+				uint32_t p_bl = sample(8, H > 8 ? H - 9 : 0);
+				uint32_t p_br = sample(W > 8 ? W - 9 : 0, H > 8 ? H - 9 : 0);
+				uint32_t p_ct = sample(W / 2, H / 2);
+				sys->context->Unmap(staging.get(), 0);
+
+				U_LOG_W("[#184] readback n=%u eye=%u sc=%p tex=%p %ux%u fmt=%u "
+				        "TL=0x%08x TR=0x%08x BL=0x%08x BR=0x%08x CTR=0x%08x",
+				        n, eye, (void *)view_scs[eye], (void *)src, W, H, view_descs[eye].Format,
+				        p_tl, p_tr, p_bl, p_br, p_ct);
+				// Decoder hint: orange sentinel = R=0xFF G=0x80 B=0x00 A=0xFF
+				// In RGBA8 little-endian that is 0xFF0080FF.
+				// Black = 0x00000000.
+			}
+		}
 
 		// Zero-copy optimization: all views reference the same swapchain texture,
 		// sub-rects match tiling layout, and texture matches content dimensions.

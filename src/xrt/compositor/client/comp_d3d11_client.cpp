@@ -385,6 +385,36 @@ import_image(ID3D11Device1 &device, HANDLE h)
 	snprintf(buf, sizeof(buf), "[DisplayXR] OpenSharedResource1 SUCCESS: handle=%p -> texture=%p\n",
 	         h, (void*)tex.get());
 	OutputDebugStringA(buf);
+
+	// [#184] Log texture desc + client-side adapter LUID once per import so we can
+	// cross-reference with the service's [#184] sentinel paint log. Mismatch in
+	// LUID, dims, or format would prove the client opened a different kernel
+	// object (or opened on a different adapter).
+	{
+		D3D11_TEXTURE2D_DESC d = {};
+		tex->GetDesc(&d);
+		LUID luid = {};
+		wil::com_ptr<IDXGIDevice> dxgi_dev;
+		if (SUCCEEDED(device.QueryInterface(IID_PPV_ARGS(dxgi_dev.put())))) {
+			wil::com_ptr<IDXGIAdapter> adapter;
+			if (SUCCEEDED(dxgi_dev->GetAdapter(adapter.put()))) {
+				DXGI_ADAPTER_DESC adesc = {};
+				if (SUCCEEDED(adapter->GetDesc(&adesc))) {
+					luid = adesc.AdapterLuid;
+				}
+			}
+		}
+		char buf2[512];
+		snprintf(buf2, sizeof(buf2),
+		         "[#184] client OpenSharedResource1 OK: NT=%p tex=%p fmt=%u %ux%u "
+		         "arr=%u mips=%u sample=%u misc=0x%x bind=0x%x usage=%u "
+		         "client_adapter_LUID=%08lx-%08lx\n",
+		         h, (void *)tex.get(), (unsigned)d.Format, d.Width, d.Height,
+		         d.ArraySize, d.MipLevels, d.SampleDesc.Count, d.MiscFlags,
+		         d.BindFlags, (unsigned)d.Usage,
+		         (unsigned long)luid.HighPart, (unsigned long)luid.LowPart);
+		OutputDebugStringA(buf2);
+	}
 	return tex;
 }
 
@@ -417,6 +447,21 @@ import_image_dxgi(ID3D11Device1 &device, HANDLE h)
 	snprintf(buf, sizeof(buf), "[DisplayXR] OpenSharedResource SUCCESS: handle=%p -> texture=%p\n",
 	         h, (void*)tex.get());
 	OutputDebugStringA(buf);
+
+	// [#184] If the LEGACY DXGI fallback fires for a service-allocated swapchain,
+	// that itself is a smoking gun (the service creates NT-handle textures, the
+	// client should never take this branch). Loud-log it.
+	{
+		D3D11_TEXTURE2D_DESC d = {};
+		tex->GetDesc(&d);
+		char buf2[512];
+		snprintf(buf2, sizeof(buf2),
+		         "[#184] client LEGACY OpenSharedResource(DXGI) fired: NT=%p tex=%p fmt=%u %ux%u "
+		         "arr=%u mips=%u sample=%u misc=0x%x bind=0x%x\n",
+		         h, (void *)tex.get(), (unsigned)d.Format, d.Width, d.Height,
+		         d.ArraySize, d.MipLevels, d.SampleDesc.Count, d.MiscFlags, d.BindFlags);
+		OutputDebugStringA(buf2);
+	}
 	return tex;
 }
 
