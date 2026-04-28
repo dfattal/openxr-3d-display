@@ -8,56 +8,59 @@ code-paths: [src/xrt/compositor/multi/, src/xrt/ipc/]
 
 > **Status: Proposal** — not yet implemented. Tracking issue: [#43](https://github.com/DisplayXR/displayxr-runtime-pvt/issues/43), [#44](https://github.com/DisplayXR/displayxr-runtime-pvt/issues/44)
 
-# Shell / Runtime Contract
+# Workspace / Runtime Contract
 
 ## Scope and Related Docs
 
-This doc defines the **IPC message set** between the 3D shell and the spatial runtime. It establishes a clean boundary so rendering machinery does not drift into shell code, and UX policy does not drift into runtime code.
+This doc defines the **IPC message set** between a workspace controller and the spatial runtime. The DisplayXR Shell is our reference workspace controller, but the contract is the boundary — any privileged IPC client implementing it can play the role (verticals, kiosks, OEM-branded workspaces, AI-agent drivers).
+
+The boundary exists so rendering machinery does not drift into workspace-controller code, and UX policy does not drift into runtime code.
 
 | Doc | Relationship |
 |-----|-------------|
 | [spatial-os.md](spatial-os.md) (#43) | **Compositing mechanism.** The runtime side of this contract — multi-compositor, shared textures, display processing. |
-| [3d-shell.md](3d-shell.md) (#44) | **Shell layer.** The shell side of this contract — window placement, chrome, interaction. |
+| [3d-shell.md](3d-shell.md) (#44) | **Reference workspace controller.** The DisplayXR Shell side of this contract — window placement, chrome, interaction. |
 | [3d-capture.md](3d-capture.md) | **Capture pipeline.** Capture commands and completion events flow through this contract. |
+| [spatial-workspace-extensions-plan.md](spatial-workspace-extensions-plan.md) | **Extension plan.** Roadmap for promoting this contract into the public `XR_DISPLAYXR_spatial_workspace` + `XR_DISPLAYXR_app_launcher` extensions. |
 
 ## Purpose
 
 Define a clean boundary so:
-- Rendering machinery does not drift into shell code
+- Rendering machinery does not drift into workspace-controller code
 - UX policy does not drift into runtime code
-- The shell can be replaced (OEM shells, alternate shells, kiosk mode) without touching the runtime
-- The runtime can evolve its compositing internals without breaking shell compatibility
+- The workspace controller can be replaced (OEM-branded workspaces, vertical-specific cockpits, kiosks, AI-agent drivers) without touching the runtime
+- The runtime can evolve its compositing internals without breaking workspace-controller compatibility
 
 ## Boundary Rule
 
 - **Runtime implements rendering truth** — compositing, projection, weaving, capture, hit testing
-- **Shell implements desktop behavior** — placement policy, chrome, focus, persistence, launcher
-- **Apps require no SDK** — a normal OpenXR handle app works in the shell with zero code changes (Level 0 universal app, see [spatial-desktop-prd.md § 5.1](spatial-desktop-prd.md)). Shell-aware extensions (Level 1) and spatial UI toolkits (Level 2) are optional enhancements, never requirements.
+- **Workspace controller implements desktop behavior** — placement policy, chrome, focus, persistence, launcher
+- **Apps require no SDK** — a normal OpenXR handle app works inside any workspace with zero code changes (Level 0 universal app, see [spatial-desktop-prd.md § 5.1](spatial-desktop-prd.md)). Workspace-aware extensions (Level 1) and spatial UI toolkits (Level 2) are optional enhancements, never requirements.
 
-## Shell → Runtime (Control Path)
+## Controller → Runtime (Control Path)
 
-The shell must be able to send:
+The workspace controller must be able to send:
 
 | Message | Description | Status |
 |---------|-------------|--------|
-| **`shell_activate`** | Enter shell mode (multi-comp takes over DP + display) | Implemented |
-| **`shell_deactivate`** | Exit shell mode (per-client compositors resume direct rendering) | Phase 4D |
-| **`shell_set_window_pose`** | Position, orientation, size of a window quad in 3D space | Implemented |
-| **`shell_get_window_pose`** | Query current window transform | Implemented |
-| **`shell_set_visibility`** | Show/hide a window without destroying it (minimize) | Implemented |
-| **`shell_add_capture_client`** | Adopt a 2D OS window: runtime starts `Windows.Graphics.Capture` for the given HWND, returns client_id | Phase 4A |
-| **`shell_remove_capture_client`** | Stop capturing a 2D window, remove virtual client slot | Phase 4A |
+| **`workspace_activate`** | Enter workspace mode (multi-comp takes over DP + display) | Implemented |
+| **`workspace_deactivate`** | Exit workspace mode (per-client compositors resume direct rendering) | Phase 4D |
+| **`workspace_set_window_pose`** | Position, orientation, size of a window quad in 3D space | Implemented |
+| **`workspace_get_window_pose`** | Query current window transform | Implemented |
+| **`workspace_set_window_visibility`** | Show/hide a window without destroying it (minimize) | Implemented |
+| **`workspace_add_capture_client`** | Adopt a 2D OS window: runtime starts `Windows.Graphics.Capture` for the given HWND, returns client_id | Phase 4A |
+| **`workspace_remove_capture_client`** | Stop capturing a 2D window, remove virtual client slot | Phase 4A |
 | **Capture commands** *(future)* | Start/stop frame capture, recording, session capture | Phase 5+ |
 | **Layout updates** | Batch update of multiple window transforms (layout preset apply) | Phase 2+ |
 
-## Runtime → Shell (Service Path)
+## Runtime → Controller (Service Path)
 
 The runtime must be able to expose:
 
 | Message | Description | Status |
 |---------|-------------|--------|
 | **`system_get_clients`** | List of connected IPC apps (id, name, state) | Implemented |
-| **`shell_get_client_type`** | Returns `CLIENT_TYPE_OPENXR_3D` or `CLIENT_TYPE_CAPTURED_2D` | Phase 4A |
+| **`workspace_get_client_type`** | Returns `CLIENT_TYPE_OPENXR_3D` or `CLIENT_TYPE_CAPTURED_2D` | Phase 4A |
 | **Hit-test results** | Which window a mouse ray intersects, and where on the surface | Implemented (server-side) |
 | **App presence** | App connected/disconnected, session created/destroyed | Implemented (poll-based) |
 | **Display state** | Display resolution, refresh rate, capabilities | Implemented (shared memory) |
@@ -68,9 +71,9 @@ The runtime must be able to expose:
 
 The contract is transport-agnostic. Implementation options:
 
-1. **Privileged IPC** — Shell connects as a privileged client over the existing IPC infrastructure (`src/xrt/ipc/`). Shell messages become additional IPC calls with elevated permissions.
+1. **Privileged IPC** — The workspace controller connects as a privileged client over the existing IPC infrastructure (`src/xrt/ipc/`). Controller messages are additional IPC calls with elevated permissions. **(Current implementation.)**
 
-2. **Custom OpenXR extension** — `XR_EXT_spatial_window_management` extension that the shell uses as a regular OpenXR client with shell-specific capabilities.
+2. **Custom OpenXR extension** — `XR_DISPLAYXR_spatial_workspace` (window pose / focus / capture) and `XR_DISPLAYXR_app_launcher` (launcher tile registry), used by the controller as a regular OpenXR client with privileged capabilities. **(Phase 2 target — see [spatial-workspace-extensions-plan.md](spatial-workspace-extensions-plan.md).)**
 
 3. **Platform service abstraction** — Platform-specific mechanism (e.g., named pipes on Windows, XPC on macOS) if OpenXR extension overhead is too high for real-time window pose updates.
 

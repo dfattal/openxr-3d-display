@@ -131,7 +131,7 @@ Physical 3D Display
 |-----------|-----|
 | Multi-compositor pipeline | [spatial-os.md](spatial-os.md) |
 | Window manager / shell | [3d-shell.md](3d-shell.md) |
-| Shell/runtime IPC contract | [shell-runtime-contract.md](shell-runtime-contract.md) |
+| Shell/runtime IPC contract | [workspace-runtime-contract.md](workspace-runtime-contract.md) |
 | 3D capture pipeline | [3d-capture.md](3d-capture.md) |
 | Multi-display (local) | [multi-display-single-machine.md](multi-display-single-machine.md) |
 | Multi-display (networked) | [multi-display-networked.md](multi-display-networked.md) |
@@ -160,7 +160,7 @@ The platform is designed so that **no SDK is required for basic spatial app supp
 
 ### 5.2 Terminology: Spatial OS vs Shell
 
-- **Shell** = the window manager + launcher. Manages window layout, focus, input routing, app lifecycle UX. A single component, replaceable (OEM shells, kiosk mode, alternate shells). Developed in a private repo, communicates with the runtime via the [shell-runtime contract](shell-runtime-contract.md).
+- **Shell** = the window manager + launcher. Manages window layout, focus, input routing, app lifecycle UX. A single component, replaceable (OEM shells, kiosk mode, alternate shells). Developed in a private repo, communicates with the runtime via the [workspace-runtime contract](workspace-runtime-contract.md).
 - **Spatial OS** = the full platform stack: runtime + shell + extensions + capture pipeline. The product/platform name encompassing all components. Issues #43 (multi-compositor) and #44 (shell/spatial OS) track the two main subsystems.
 
 The shell is the first visible deliverable of the spatial OS, but the spatial OS also includes the runtime's multi-compositor, the extension APIs, the capture pipeline, and future components like spatial audio and shared world models.
@@ -231,7 +231,7 @@ Multi-display extends the single-display spatial desktop into a workspace where 
 
 The shell/runtime contract defines the IPC message set and boundary rules between the rendering runtime and the desktop shell, ensuring clean separation of mechanism from policy.
 
-**Full specification:** [shell-runtime-contract.md](shell-runtime-contract.md)
+**Full specification:** [workspace-runtime-contract.md](workspace-runtime-contract.md)
 
 ---
 

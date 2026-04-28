@@ -64,7 +64,7 @@ All documents in `docs/roadmap/` describe planned features that are not yet impl
 - [Spatial OS](spatial-os.md) — multi-compositor architecture
 - [3D Shell](3d-shell.md) — spatial window manager
 - [3D Capture](3d-capture.md) — capture pipeline
-- [Shell/Runtime Contract](shell-runtime-contract.md) — IPC between shell and runtime
+- [Workspace/Runtime Contract](workspace-runtime-contract.md) — IPC between a workspace controller and the runtime
 - [Display Spatial Model](display-spatial-model.md) — displays in the spatial graph
 - [Multi-Display Single Machine](multi-display-single-machine.md) — multiple displays, one machine
 - [Multi-Display Networked](multi-display-networked.md) — displays across the network

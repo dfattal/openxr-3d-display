@@ -150,6 +150,6 @@ Each slice lands with at least one scripted test under `tests/mcp/`:
 
 - Phase A plan/status: `docs/roadmap/mcp-phase-a-plan.md`, `mcp-phase-a-status.md`
 - Spec: `docs/roadmap/mcp-spec-v0.2.md` §3.2, §4.B, §5
-- Shell-runtime contract: `docs/roadmap/shell-runtime-contract.md`
+- Workspace/runtime contract: `docs/roadmap/workspace-runtime-contract.md`
 - Existing atlas capture path: `src/xrt/compositor/d3d11_service/comp_d3d11_service.cpp:7929`
 - 3D capture roadmap (for deferred recording): `docs/roadmap/3d-capture.md`

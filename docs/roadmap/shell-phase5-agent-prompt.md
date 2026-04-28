@@ -16,7 +16,7 @@ Read these docs first (in order):
 2. `docs/roadmap/shell-phase5-plan.md` — **the plan you're implementing** (exploration phase + launcher UI)
 3. `docs/roadmap/shell-phase5-status.md` — task checklist (update as you complete tasks)
 4. `docs/roadmap/shell-phase4c-status.md` — what Phase 4C delivered (the foundation you build on)
-5. `docs/roadmap/shell-runtime-contract.md` — IPC protocol boundary (runtime vs shell)
+5. `docs/roadmap/workspace-runtime-contract.md` — IPC protocol boundary (runtime vs shell)
 6. `docs/reference/window-drag-rendering.md` — how the multi-compositor handles windows (useful for launcher panel rendering)
 7. `docs/roadmap/3d-shell.md` and `docs/roadmap/spatial-desktop-prd.md` — product vision for the shell
 
