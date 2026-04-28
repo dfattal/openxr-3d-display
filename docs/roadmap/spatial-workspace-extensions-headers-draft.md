@@ -40,12 +40,12 @@ We start with two and merge if the boundary feels artificial after Phase 2 is in
 
 The workspace controller is a regular OpenXR client that opts into privileged mode. Bootstrap:
 
-1. Process launches; binary path is whatever `service.json::workspace_binary` points at (defaults to `displayxr-shell.exe`, configurable per Phase 1).
+1. Process launches; binary path is whatever `service.json::workspace_binary` points at (defaults to `displayxr-shell.exe`, configurable per Phase 1). Detection of whether *any* controller is installed happens at service startup — see [spatial-workspace-controller-detection.md](spatial-workspace-controller-detection.md).
 2. Process calls `xrCreateInstance` with `XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME` in `enabledExtensionNames` (and optionally `XR_EXT_APP_LAUNCHER_EXTENSION_NAME`).
 3. Process creates a session normally (graphics binding can be `XR_NULL_HANDLE` — workspace controllers don't render swapchains; they only instruct).
 4. Process calls `xrActivateSpatialWorkspaceEXT(session)`. The runtime checks:
    - At most one workspace is active per system. Returns `XR_ERROR_LIMIT_REACHED` if another controller already holds the role.
-   - Caller authorization: in the current implementation the runtime checks `application_name == config.workspace_app_name` (defaults to `"displayxr-shell"`). Phase 2 promotes this to a proper handshake — see "Open questions". For now, the simple match is enough to gate the privileged surface.
+   - Caller authorization: orchestrator-PID match (with manual-mode fallback). Full design in [spatial-workspace-auth-handshake.md](spatial-workspace-auth-handshake.md).
 5. On success the session is *the* workspace session. All subsequent extension calls go through this `XrSession` handle.
 
 Lifecycle:
@@ -508,11 +508,7 @@ The shell repo, once severed (Phase 3), pins a minimum SPEC_VERSION in its CMake
 
 ## Open questions
 
-1. **Authorization model.** Today the IPC server gates the privileged role on `application_name == "displayxr-shell"`. For Phase 2, options:
-   - Keep matching `application_name`, but make the allowed name configurable in `service.json` (`workspace_app_name = "..."`).
-   - Add a per-binary capability the OS verifies (Authenticode / code-signing on Windows, codesign entitlement on macOS).
-   - Trust the orchestrator: only the binary the orchestrator spawned (matching its PID) can activate.
-   The orchestrator-PID approach is the easiest defensible thing — the service knows which PID it spawned via `service_orchestrator.c`, and `xrActivateSpatialWorkspaceEXT` only succeeds for that PID. Configurable name is the fallback for legacy multi-terminal flows.
+1. **Authorization model.** ✅ **Resolved** — see [spatial-workspace-auth-handshake.md](spatial-workspace-auth-handshake.md). Orchestrator-PID match with manual-mode fallback for `--workspace`-flagged dev sessions; the literal `"displayxr-shell"` `application_name` match in `ipc_server_handler.c:296` is removed in the third commit of the auth-handshake migration.
 
 2. **Click events: poll-and-clear vs xrPollEvent.** Current Phase 1 IPC uses poll-and-clear (`launcher_poll_click`). Two patterns to choose between:
    - Keep poll-and-clear (simple, current model).

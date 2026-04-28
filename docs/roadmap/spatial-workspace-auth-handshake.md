@@ -1,6 +1,6 @@
 # Workspace Activation — Auth Handshake (draft)
 
-**Status:** Draft, 2026-04-28. Resolves Open Question #1 from [spatial-workspace-extensions-headers-draft.md](spatial-workspace-extensions-headers-draft.md).
+**Status:** Draft, 2026-04-28. Resolves Open Question #1 from [spatial-workspace-extensions-headers-draft.md](spatial-workspace-extensions-headers-draft.md). Sister doc to [spatial-workspace-controller-detection.md](spatial-workspace-controller-detection.md) — together these define **Phase 2.0** of the extensions effort, the architectural prep that gates the larger Phase 2.A–2.H code migrations.
 
 Defines how the runtime decides whether a connecting client is allowed to activate workspace mode. Today the answer is hardcoded brand-matching on `application_name == "displayxr-shell"` — exactly the coupling the workspace-extensions effort is trying to remove.
 
@@ -188,7 +188,7 @@ Recommend the new vendor error code, defined alongside the extension. Maps inter
 
 ## Migration path
 
-Lands as a small Phase 2 sub-step (call it "Phase 2.0 — auth handshake"). Three-commit sequence:
+Lands as part of **Phase 2.0** (alongside [controller detection](spatial-workspace-controller-detection.md)). Three-commit sequence within the auth-handshake half:
 
 1. **Add `service_orchestrator_get_workspace_pid()` getter.** Pure addition, no behavior change. Covered by header + impl.
 2. **Wire PID check into `ipc_handle_workspace_activate`.** Behavior change: workspace activation now requires PID match (or manual mode). The legacy `application_name == "displayxr-shell"` check stays in place during this commit as a fallback so existing setups don't break.
