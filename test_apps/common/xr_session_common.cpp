@@ -10,6 +10,7 @@
 #include "logging.h"
 #include <cstring>
 #include <cmath>
+#include <cstdlib> // [#184] getenv for DISPLAYXR_TEST_FORCE_SRGB
 // #include <chrono>  // [Commented out — was only used for convergence plane logging throttle]
 
 using namespace DirectX;
@@ -141,6 +142,26 @@ bool CreateSwapchain(XrSessionManager& xr) {
 
     // Use runtime's preferred format (first in the list per OpenXR spec)
     int64_t selectedFormat = formats[0];
+
+    // [#184] Diagnostic: DISPLAYXR_TEST_FORCE_SRGB=1 picks the first SRGB-typed
+    // format from the list instead of formats[0]. Tests whether the cross-process
+    // kernel-object identity bug reproduces with a non-Unity SRGB-requesting
+    // OpenXR client. The runtime exposes formats as DXGI codes for D3D11 clients
+    // and as VK codes for VK clients — match both:
+    //   DXGI 29 = R8G8B8A8_UNORM_SRGB,  91 = B8G8R8A8_UNORM_SRGB
+    //   VK   43 = R8G8B8A8_SRGB,        50 = B8G8R8A8_SRGB
+    if (const char *force = std::getenv("DISPLAYXR_TEST_FORCE_SRGB"); force && force[0] == '1') {
+        LOG_INFO("[#184] DISPLAYXR_TEST_FORCE_SRGB=1 — searching for SRGB format in list");
+        for (uint32_t i = 0; i < formatCount; i++) {
+            if (formats[i] == 29 || formats[i] == 91 ||
+                formats[i] == 43 || formats[i] == 50) {
+                selectedFormat = formats[i];
+                LOG_INFO("[#184] picked SRGB format %lld at index %u", selectedFormat, i);
+                break;
+            }
+        }
+    }
+
     LOG_INFO("Selected swapchain format: %lld (0x%llX)", selectedFormat, selectedFormat);
 
     const auto& view = xr.configViews[0];
