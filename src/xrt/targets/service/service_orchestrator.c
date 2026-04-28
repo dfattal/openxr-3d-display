@@ -8,6 +8,7 @@
 
 #include "service_orchestrator.h"
 #include "service_tray_win.h"
+#include "service_workspace_manifest.h"
 
 #include "util/u_debug.h"
 #include "util/u_logging.h"
@@ -68,6 +69,12 @@ static HANDLE s_workspace_watch_thread = NULL;
 static bool s_hotkey_registered = false; // true when WH_KEYBOARD_LL hook is active
 static HHOOK s_kbd_hook = NULL;
 
+// Set once at init: true iff the workspace controller binary exists next to
+// the service exe. When false, all workspace mode handling is short-circuited
+// — the runtime operates as a standalone platform.
+static bool s_workspace_available = false;
+static struct workspace_manifest s_workspace_manifest = {0};
+
 static PROCESS_INFORMATION s_bridge_pi;
 static bool s_bridge_running = false;
 static HANDLE s_bridge_watch_thread = NULL;
@@ -111,6 +118,44 @@ sibling_exe_path(const char *exe_name, char *buf, size_t buf_size)
 
 	snprintf(buf, buf_size, "%s%s", self_path, exe_name);
 	return true;
+}
+
+//! Existence check that excludes directories.
+static bool
+sibling_file_exists(const char *path)
+{
+	DWORD attrs = GetFileAttributesA(path);
+	return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+//! Detect whether a workspace controller is installed. Sets
+//! s_workspace_available + s_workspace_manifest. Logs the outcome.
+//! Called once from service_orchestrator_init before any apply_workspace_mode.
+static void
+detect_workspace_controller(const struct service_config *cfg)
+{
+	char workspace_path[MAX_PATH];
+	if (!sibling_exe_path(cfg->workspace_binary, workspace_path, sizeof(workspace_path))) {
+		s_workspace_available = false;
+		return;
+	}
+
+	if (!sibling_file_exists(workspace_path)) {
+		s_workspace_available = false;
+		OW("Workspace controller not installed (looked for %s)", workspace_path);
+		return;
+	}
+
+	s_workspace_available = true;
+	if (!service_workspace_manifest_load(workspace_path, &s_workspace_manifest)) {
+		// Controller present but no/invalid manifest — fall back to a
+		// generic name so the tray submenu still has a label.
+		snprintf(s_workspace_manifest.display_name,
+		         sizeof(s_workspace_manifest.display_name),
+		         "Workspace Controller");
+	}
+	OW("Workspace controller detected: %s (binary=%s)",
+	   s_workspace_manifest.display_name, workspace_path);
 }
 
 //! Launch a child process and return its PROCESS_INFORMATION.
@@ -249,6 +294,9 @@ workspace_watch_thread_func(LPVOID param)
 static void
 spawn_workspace(void)
 {
+	if (!s_workspace_available) {
+		return;
+	}
 	if (s_workspace_running) {
 		return;
 	}
@@ -632,6 +680,12 @@ uninstall_workspace_hotkey(void)
 static void
 apply_workspace_mode(enum service_child_mode mode)
 {
+	// No controller installed → nothing to spawn, no hotkey to register.
+	// Terminate path stays a no-op cleanup; nothing was running to begin with.
+	if (!s_workspace_available) {
+		return;
+	}
+
 	switch (mode) {
 	case SERVICE_CHILD_ENABLE:
 		// Uninstall keyboard hook if active
@@ -725,10 +779,27 @@ service_orchestrator_init(const struct service_config *cfg)
 		                                                  (LONG_PTR)orchestrator_wnd_proc_hook);
 	}
 
+	// Detect workspace controller before applying workspace mode — apply_workspace_mode
+	// short-circuits when no controller is installed, leaving the runtime as a
+	// standalone OpenXR + WebXR platform with no spatial-desktop features.
+	detect_workspace_controller(cfg);
+
 	apply_workspace_mode(cfg->workspace);
 	apply_bridge_mode(cfg->bridge);
 
 	return true;
+}
+
+bool
+service_orchestrator_is_workspace_available(void)
+{
+	return s_workspace_available;
+}
+
+const char *
+service_orchestrator_get_workspace_display_name(void)
+{
+	return s_workspace_manifest.display_name;
 }
 
 void
@@ -837,6 +908,18 @@ service_orchestrator_apply_config(const struct service_config *cfg)
 void
 service_orchestrator_shutdown(void)
 {
+}
+
+bool
+service_orchestrator_is_workspace_available(void)
+{
+	return false;
+}
+
+const char *
+service_orchestrator_get_workspace_display_name(void)
+{
+	return "";
 }
 
 #endif // XRT_OS_WINDOWS

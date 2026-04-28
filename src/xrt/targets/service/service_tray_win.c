@@ -7,6 +7,7 @@
  */
 
 #include "service_tray_win.h"
+#include "service_orchestrator.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -114,14 +115,6 @@ show_context_menu(HWND hwnd)
 	POINT pt;
 	GetCursorPos(&pt);
 
-	// Workspace submenu (radio group: Enable, Auto, Disable)
-	HMENU workspace_sub = CreatePopupMenu();
-	AppendMenuW(workspace_sub, MF_STRING, IDM_WORKSPACE_ENABLE, L"Enable");
-	AppendMenuW(workspace_sub, MF_STRING, IDM_WORKSPACE_AUTO, L"Auto");
-	AppendMenuW(workspace_sub, MF_STRING, IDM_WORKSPACE_DISABLE, L"Disable");
-	CheckMenuRadioItem(workspace_sub, IDM_WORKSPACE_ENABLE, IDM_WORKSPACE_AUTO,
-	                   workspace_mode_to_id(s_config.workspace), MF_BYCOMMAND);
-
 	// Bridge submenu (radio group: Enable, Auto, Disable)
 	HMENU bridge_sub = CreatePopupMenu();
 	AppendMenuW(bridge_sub, MF_STRING, IDM_BRIDGE_ENABLE, L"Enable");
@@ -132,7 +125,30 @@ show_context_menu(HWND hwnd)
 
 	// Main menu
 	HMENU menu = CreatePopupMenu();
-	AppendMenuW(menu, MF_POPUP, (UINT_PTR)workspace_sub, L"Workspace Controller");
+
+	// Workspace submenu — only built when a controller binary is detected next
+	// to the service. Bare runtime (no controller installed) gets just the
+	// Bridge entry, which is the honest reflection of what the runtime can
+	// do on its own.
+	if (service_orchestrator_is_workspace_available()) {
+		HMENU workspace_sub = CreatePopupMenu();
+		AppendMenuW(workspace_sub, MF_STRING, IDM_WORKSPACE_ENABLE, L"Enable");
+		AppendMenuW(workspace_sub, MF_STRING, IDM_WORKSPACE_AUTO, L"Auto");
+		AppendMenuW(workspace_sub, MF_STRING, IDM_WORKSPACE_DISABLE, L"Disable");
+		CheckMenuRadioItem(workspace_sub, IDM_WORKSPACE_ENABLE, IDM_WORKSPACE_AUTO,
+		                   workspace_mode_to_id(s_config.workspace), MF_BYCOMMAND);
+
+		// Convert UTF-8 manifest display name to wide for the menu item.
+		const char *name_utf8 = service_orchestrator_get_workspace_display_name();
+		wchar_t name_wide[256];
+		if (name_utf8 == NULL || name_utf8[0] == '\0' ||
+		    MultiByteToWideChar(CP_UTF8, 0, name_utf8, -1,
+		                        name_wide, ARRAYSIZE(name_wide)) == 0) {
+			wcscpy_s(name_wide, ARRAYSIZE(name_wide), L"Workspace Controller");
+		}
+		AppendMenuW(menu, MF_POPUP, (UINT_PTR)workspace_sub, name_wide);
+	}
+
 	AppendMenuW(menu, MF_POPUP, (UINT_PTR)bridge_sub, L"WebXR Bridge");
 	AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
 	AppendMenuW(menu, MF_STRING | (s_config.start_on_login ? MF_CHECKED : MF_UNCHECKED),
