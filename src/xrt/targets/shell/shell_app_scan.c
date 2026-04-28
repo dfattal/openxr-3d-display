@@ -28,6 +28,11 @@
 
 #include <windows.h>
 
+// Forward declaration — used by the sidecar walk below to dedup against
+// already-registered entries; defined alongside the registered-mode helpers.
+static bool
+already_present(const struct shell_scanned_app *out, int count, const char *exe);
+
 // -----------------------------------------------------------------------------
 // Sidecar parsing
 // -----------------------------------------------------------------------------
@@ -104,11 +109,23 @@ resolve_icon_path(const char *sidecar_dir, const char *rel, char *out, size_t ou
 	copy_str(out, out_size, candidate);
 }
 
-// Validate and populate a scanned_app from a parsed sidecar JSON object.
+// Validate and populate a scanned_app from a parsed manifest JSON object.
+//
+// @p exe_path is the resolved absolute exe path. In sidecar mode the caller
+// derives it from the manifest's sibling .exe; in registered mode the caller
+// reads it from the manifest's "exe_path" field.
+//
+// @p sidecar_dir is the directory containing the manifest — used for resolving
+// relative icon paths.
+//
+// @p manifest_path is the absolute path to the .displayxr.json file — recorded
+// so the launcher's remove action can delete it (registered mode) or skip
+// deletion (sidecar mode, by checking the path location).
+//
 // Returns true on success.
 static bool
 parse_sidecar(const cJSON *root, const char *exe_path, const char *sidecar_dir,
-              struct shell_scanned_app *app)
+              const char *manifest_path, struct shell_scanned_app *app)
 {
 	memset(app, 0, sizeof(*app));
 
@@ -205,6 +222,7 @@ parse_sidecar(const cJSON *root, const char *exe_path, const char *sidecar_dir,
 	}
 
 	copy_str(app->exe_path, sizeof(app->exe_path), exe_path);
+	copy_str(app->manifest_path, sizeof(app->manifest_path), manifest_path ? manifest_path : "");
 	return true;
 }
 
@@ -257,7 +275,7 @@ try_load_app_from_exe(const char *exe_path, struct shell_scanned_app *app)
 	if (!last_sep) last_sep = strrchr(sidecar_dir, '/');
 	if (last_sep) *last_sep = '\0';
 
-	bool ok = parse_sidecar(root, exe_path, sidecar_dir, app);
+	bool ok = parse_sidecar(root, exe_path, sidecar_dir, sidecar_path, app);
 	cJSON_Delete(root);
 
 	if (!ok) return false;
@@ -301,6 +319,9 @@ scan_dir_for_exes(const char *dir, struct shell_scanned_app *out, int max_out, i
 
 		if (*count >= max_out) break;
 
+		// Skip if a registered-mode (or earlier) entry already targets this exe.
+		if (already_present(out, *count, exe_path)) continue;
+
 		if (try_load_app_from_exe(exe_path, &out[*count])) {
 			(*count)++;
 		}
@@ -340,6 +361,158 @@ scan_parent_build_dirs(const char *parent, struct shell_scanned_app *out, int ma
 		scan_dir_for_exes(build_dir, out, max_out, count);
 
 		if (*count >= max_out) break;
+	} while (FindNextFileA(h, &fd));
+
+	FindClose(h);
+}
+
+// -----------------------------------------------------------------------------
+// Dedup
+// -----------------------------------------------------------------------------
+
+// Case-insensitive, slash-normalized comparison of two exe paths. Mirrors the
+// logic in main.c::exe_path_equal — kept duplicated rather than #include'd
+// because shell_app_scan is a separate TU and main.c does not export this.
+static bool
+exe_path_eq_ci(const char *a, const char *b)
+{
+	if (a == NULL || b == NULL) return a == b;
+	while (*a && *b) {
+		int ca = (unsigned char)*a;
+		int cb = (unsigned char)*b;
+		if (ca == '/') ca = '\\';
+		if (cb == '/') cb = '\\';
+		if (ca >= 'A' && ca <= 'Z') ca += 32;
+		if (cb >= 'A' && cb <= 'Z') cb += 32;
+		if (ca != cb) return false;
+		a++; b++;
+	}
+	return *a == '\0' && *b == '\0';
+}
+
+// True if @p exe is already represented in @p out[0..count). Used to drop
+// duplicates so the first registration (per walk order) wins.
+static bool
+already_present(const struct shell_scanned_app *out, int count, const char *exe)
+{
+	for (int i = 0; i < count; i++) {
+		if (exe_path_eq_ci(out[i].exe_path, exe)) return true;
+	}
+	return false;
+}
+
+// -----------------------------------------------------------------------------
+// Registered-mode scan (manifest in a discovery dir, exe via "exe_path")
+// -----------------------------------------------------------------------------
+
+// Try to load a registered manifest from @p manifest_path. Reads the JSON,
+// requires "exe_path" to be present and resolve to an existing file, then
+// reuses parse_sidecar(). On success, populates @p app and returns true.
+static bool
+try_load_registered_manifest(const char *manifest_path, struct shell_scanned_app *app)
+{
+	char *text = read_file_text(manifest_path, 64 * 1024);
+	if (!text) {
+		LOG_W("failed to read manifest: %s\n", manifest_path);
+		return false;
+	}
+
+	cJSON *root = cJSON_Parse(text);
+	free(text);
+	if (!root) {
+		LOG_W("invalid JSON in manifest: %s\n", manifest_path);
+		return false;
+	}
+
+	const cJSON *j_exe = cJSON_GetObjectItemCaseSensitive(root, "exe_path");
+	if (!cJSON_IsString(j_exe) || !j_exe->valuestring || !*j_exe->valuestring) {
+		LOG_W("rejecting %s: registered manifest missing exe_path\n", manifest_path);
+		cJSON_Delete(root);
+		return false;
+	}
+
+	// Normalize slashes to backslashes so the value matches what Windows APIs
+	// produce. Also bounds-check.
+	char exe_path[SHELL_PATH_MAX];
+	if (strlen(j_exe->valuestring) >= sizeof(exe_path)) {
+		LOG_W("rejecting %s: exe_path too long\n", manifest_path);
+		cJSON_Delete(root);
+		return false;
+	}
+	copy_str(exe_path, sizeof(exe_path), j_exe->valuestring);
+	for (char *p = exe_path; *p; p++) {
+		if (*p == '/') *p = '\\';
+	}
+
+	DWORD attrs = GetFileAttributesA(exe_path);
+	if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+		LOG_W("rejecting %s: exe_path does not exist (%s)\n", manifest_path, exe_path);
+		cJSON_Delete(root);
+		return false;
+	}
+
+	// Manifest dir = parent of manifest_path; relative icon paths resolve here.
+	char manifest_dir[SHELL_PATH_MAX];
+	copy_str(manifest_dir, sizeof(manifest_dir), manifest_path);
+	char *last_sep = strrchr(manifest_dir, '\\');
+	if (!last_sep) last_sep = strrchr(manifest_dir, '/');
+	if (last_sep) *last_sep = '\0';
+
+	bool ok = parse_sidecar(root, exe_path, manifest_dir, manifest_path, app);
+	cJSON_Delete(root);
+	if (!ok) return false;
+
+	// Same warning as sidecar mode — manifest is authoritative but a missing
+	// openxr import on a "3d" app is usually a misconfiguration.
+	if (strcmp(app->type, "3d") == 0) {
+		if (!shell_pe_exe_imports(exe_path, "openxr_loader.dll")) {
+			LOG_W("warning: %s has type=3d but does not import openxr_loader.dll\n",
+			      exe_path);
+		}
+	}
+	return true;
+}
+
+// Enumerate *.displayxr.json files in @p dir (non-recursive). For each, try to
+// load it as a registered manifest. Skip duplicates by exe_path.
+static void
+scan_registered_dir(const char *dir, struct shell_scanned_app *out, int max_out, int *count)
+{
+	if (*count >= max_out) return;
+
+	DWORD dir_attrs = GetFileAttributesA(dir);
+	if (dir_attrs == INVALID_FILE_ATTRIBUTES || !(dir_attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+		// Discovery dir doesn't exist yet — that's fine, just skip.
+		return;
+	}
+
+	LOG_I("scanning registered dir: %s\n", dir);
+
+	char glob[SHELL_PATH_MAX];
+	snprintf(glob, sizeof(glob), "%s\\*.displayxr.json", dir);
+
+	WIN32_FIND_DATAA fd;
+	HANDLE h = FindFirstFileA(glob, &fd);
+	if (h == INVALID_HANDLE_VALUE) return;
+
+	do {
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+		if (*count >= max_out) break;
+
+		char manifest_path[SHELL_PATH_MAX];
+		snprintf(manifest_path, sizeof(manifest_path), "%s\\%s", dir, fd.cFileName);
+
+		struct shell_scanned_app candidate;
+		if (!try_load_registered_manifest(manifest_path, &candidate)) continue;
+
+		if (already_present(out, *count, candidate.exe_path)) {
+			LOG_I("dedup: %s already registered, skipping %s\n",
+			      candidate.exe_path, manifest_path);
+			continue;
+		}
+
+		out[*count] = candidate;
+		(*count)++;
 	} while (FindNextFileA(h, &fd));
 
 	FindClose(h);
@@ -389,7 +562,26 @@ shell_scan_apps(const char *shell_exe_dir, struct shell_scanned_app *out, int ma
 
 	int count = 0;
 
-	// 1) Dev-repo layout — walk up from the shell exe dir looking for test_apps/.
+	// 1) Registered-mode dirs (drop-in *.displayxr.json with exe_path).
+	//    Walked first so per-user registrations win over system-wide,
+	//    which win over sidecar-mode dev paths. See
+	//    docs/specs/displayxr-app-manifest.md §5.
+	{
+		const char *local_appdata = getenv("LOCALAPPDATA");
+		if (local_appdata && *local_appdata) {
+			char dir[SHELL_PATH_MAX];
+			snprintf(dir, sizeof(dir), "%s\\DisplayXR\\apps", local_appdata);
+			scan_registered_dir(dir, out, max_out, &count);
+		}
+		const char *program_data = getenv("ProgramData");
+		if (program_data && *program_data) {
+			char dir[SHELL_PATH_MAX];
+			snprintf(dir, sizeof(dir), "%s\\DisplayXR\\apps", program_data);
+			scan_registered_dir(dir, out, max_out, &count);
+		}
+	}
+
+	// 2) Sidecar-mode dev paths — walk up from the shell exe dir looking for test_apps/.
 	char repo_root[SHELL_PATH_MAX] = {0};
 	bool have_repo = false;
 	if (shell_exe_dir && *shell_exe_dir) {
@@ -420,7 +612,9 @@ shell_scan_apps(const char *shell_exe_dir, struct shell_scanned_app *out, int ma
 		LOG_I("no repo root found — skipping dev paths\n");
 	}
 
-	// 2) Production install path.
+	// 3) Sidecar-mode production install path. Kept for backward compat with
+	//    the original v1 install layout. New installers should prefer
+	//    registered mode (step 1).
 	const char *pf = getenv("ProgramFiles");
 	if (pf && *pf) {
 		char prod[SHELL_PATH_MAX];
@@ -428,9 +622,6 @@ shell_scan_apps(const char *shell_exe_dir, struct shell_scanned_app *out, int ma
 		DWORD attrs = GetFileAttributesA(prod);
 		if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
 			LOG_I("scanning production path: %s\n", prod);
-			// v1: flat layout — exes directly under DisplayXR\apps\. Future
-			// installer shape (per-app subdirectories) can be added when it
-			// exists.
 			scan_dir_for_exes(prod, out, max_out, &count);
 		}
 	}

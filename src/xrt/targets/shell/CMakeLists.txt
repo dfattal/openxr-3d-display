@@ -10,7 +10,10 @@ add_executable(displayxr-shell WIN32
 )
 add_sanitizers(displayxr-shell)
 
-target_include_directories(displayxr-shell PRIVATE ipc)
+target_include_directories(displayxr-shell PRIVATE
+    ipc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../external/stb  # stb_image_write.h (Browse-for-app icon extract)
+)
 
 target_link_libraries(displayxr-shell PRIVATE aux_util ipc_client)
 
