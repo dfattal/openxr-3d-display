@@ -512,6 +512,85 @@ get_runtime_json_path(char *buf, size_t buf_size)
 	return false;
 }
 
+// Write everything before the last path separator of @p path into @p out.
+// If there's no separator, @p out is set to "." (current dir). Used to derive
+// lpCurrentDirectory for CreateProcessA so launched apps land with their
+// install dir as CWD, matching Explorer-launched behavior.
+static void
+dirname_of(const char *path, char *out, size_t out_size)
+{
+	if (out_size == 0) return;
+	out[0] = '\0';
+	if (path == NULL || !*path) {
+		snprintf(out, out_size, ".");
+		return;
+	}
+
+	const char *last_bs = strrchr(path, '\\');
+	const char *last_fs = strrchr(path, '/');
+	const char *last = last_bs > last_fs ? last_bs : last_fs;
+	if (last == NULL) {
+		snprintf(out, out_size, ".");
+		return;
+	}
+
+	size_t len = (size_t)(last - path);
+	if (len >= out_size) len = out_size - 1;
+	memcpy(out, path, len);
+	out[len] = '\0';
+}
+
+// Ensure the Windows Per-App Graphics Settings registry has a "high
+// performance" preference for @p exe_path, matching what Settings → System →
+// Display → Graphics writes. DXGI honours this at process start, which puts
+// the launched app on the same adapter as the (dGPU-pinned) service. Without
+// it, third-party apps that don't carry NvOptimusEnablement land on the iGPU
+// on hybrid laptops, and the IPC shared swapchain texture renders black on
+// the service side because shared textures can't bridge two adapters.
+//
+// Idempotent. Only writes if the entry is missing or empty so a user-set
+// "Power saving" preference is respected.
+//
+// Reference: docs.microsoft.com/en-us/windows/win32/direct3ddxgi/dxgi-1-6-improvements
+static void
+ensure_app_gpu_pref_high(const char *exe_path)
+{
+	const char *kSubkey = "Software\\Microsoft\\DirectX\\UserGpuPreferences";
+	HKEY hkey = NULL;
+	DWORD disposition = 0;
+	LSTATUS rc = RegCreateKeyExA(HKEY_CURRENT_USER, kSubkey, 0, NULL,
+	                             REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE,
+	                             NULL, &hkey, &disposition);
+	if (rc != ERROR_SUCCESS || hkey == NULL) {
+		PE("ensure_app_gpu_pref_high: RegCreateKeyEx failed (%ld) for %s\n",
+		   (long)rc, exe_path);
+		return;
+	}
+
+	// Read existing value first — respect any pre-existing preference, even
+	// "power saving". Only write when missing/empty.
+	char existing[256] = {0};
+	DWORD existing_size = sizeof(existing);
+	DWORD existing_type = 0;
+	rc = RegQueryValueExA(hkey, exe_path, NULL, &existing_type,
+	                      (LPBYTE)existing, &existing_size);
+	bool already_set = (rc == ERROR_SUCCESS && existing_type == REG_SZ &&
+	                    existing_size > 1);
+	if (!already_set) {
+		const char *value = "GpuPreference=2;"; // 2 = high-performance / dGPU
+		rc = RegSetValueExA(hkey, exe_path, 0, REG_SZ, (const BYTE *)value,
+		                    (DWORD)strlen(value) + 1);
+		if (rc == ERROR_SUCCESS) {
+			P("Registered high-perf GPU preference for %s\n", exe_path);
+		} else {
+			PE("ensure_app_gpu_pref_high: RegSetValueEx failed (%ld) for %s\n",
+			   (long)rc, exe_path);
+		}
+	}
+
+	RegCloseKey(hkey);
+}
+
 /*!
  * Launch an app with DISPLAYXR_SHELL_SESSION=1 and XR_RUNTIME_JSON set.
  */
@@ -533,6 +612,17 @@ launch_app(struct app_entry *app, const char *runtime_json)
 		return false;
 	}
 
+	// Force the launched app onto the same adapter as the dGPU-pinned
+	// service so the IPC shared swapchain texture works on hybrid laptops.
+	// See ensure_app_gpu_pref_high for why this matters.
+	ensure_app_gpu_pref_high(abs_path);
+
+	// CWD = exe's install dir (matches Explorer behavior). DisplayXRClient.dll
+	// drops displayxr.log relative to CWD; without this it would land
+	// wherever the shell happened to be launched from.
+	char exe_dir[MAX_PATH];
+	dirname_of(abs_path, exe_dir, sizeof(exe_dir));
+
 	// Quote the exe path in case of spaces
 	char cmd[MAX_PATH + 16];
 	snprintf(cmd, sizeof(cmd), "\"%s\"", abs_path);
@@ -552,7 +642,7 @@ launch_app(struct app_entry *app, const char *runtime_json)
 	    NULL, cmd, NULL, NULL, FALSE,
 	    CREATE_NEW_CONSOLE,  // Each app gets its own console
 	    NULL,                // Inherit our (modified) environment
-	    NULL, &si, &pi);
+	    exe_dir, &si, &pi);
 
 	// Clean up env vars so they don't leak to future CreateProcess calls
 	// (though it doesn't matter since we set them every time)
@@ -1453,11 +1543,18 @@ shell_launch_registered_app(struct ipc_connection *ipc_c,
 		}
 		snprintf(cmd, sizeof(cmd), "\"%s\"", abs_path);
 
+		// 2D apps don't share textures, but pin them to the same adapter
+		// anyway for consistency with 3D apps and to keep DXGI happy.
+		ensure_app_gpu_pref_high(abs_path);
+
+		char exe_dir[MAX_PATH];
+		dirname_of(abs_path, exe_dir, sizeof(exe_dir));
+
 		// Clear shell env vars so 2D app doesn't accidentally pick them up
 		SetEnvironmentVariableA("DISPLAYXR_SHELL_SESSION", NULL);
 
 		BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, FALSE,
-		    CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi);
+		    CREATE_NEW_CONSOLE, NULL, exe_dir, &si, &pi);
 		if (!ok) {
 			PE("  Failed to launch 2D app: %lu\n", GetLastError());
 			return;
