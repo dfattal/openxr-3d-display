@@ -133,9 +133,14 @@ bool UpdateInputState(InputState& state, UINT msg, WPARAM wParam, LPARAM lParam)
         bool ctrl  = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         bool alt   = (GetKeyState(VK_MENU) & 0x8000) != 0;
         if (shift) {
-            state.viewParams.ipdFactor *= factor;
-            if (state.viewParams.ipdFactor < 0.0f) state.viewParams.ipdFactor = 0.0f;
-            if (state.viewParams.ipdFactor > 1.0f) state.viewParams.ipdFactor = 1.0f;
+            // ipd and parallax are conceptually a single "3D effect strength"
+            // knob — driving them in lockstep matches the +/- key bindings
+            // and the macOS demo's behaviour.
+            float v = state.viewParams.ipdFactor * factor;
+            if (v < 0.0f) v = 0.0f;
+            if (v > 1.0f) v = 1.0f;
+            state.viewParams.ipdFactor = v;
+            state.viewParams.parallaxFactor = v;
         } else if (ctrl) {
             state.viewParams.parallaxFactor *= factor;
             if (state.viewParams.parallaxFactor < 0.0f) state.viewParams.parallaxFactor = 0.0f;
@@ -146,9 +151,12 @@ bool UpdateInputState(InputState& state, UINT msg, WPARAM wParam, LPARAM lParam)
                 if (state.viewParams.invConvergenceDistance < 0.1f) state.viewParams.invConvergenceDistance = 0.1f;
                 if (state.viewParams.invConvergenceDistance > 10.0f) state.viewParams.invConvergenceDistance = 10.0f;
             } else {
+                // Cap perspectiveFactor at 1.0 — values above that exaggerate
+                // the Kooima eye separation past the display's natural geometry
+                // and look wrong (Z-fighting / hyperstereo on the splat scene).
                 state.viewParams.perspectiveFactor *= factor;
                 if (state.viewParams.perspectiveFactor < 0.1f) state.viewParams.perspectiveFactor = 0.1f;
-                if (state.viewParams.perspectiveFactor > 10.0f) state.viewParams.perspectiveFactor = 10.0f;
+                if (state.viewParams.perspectiveFactor > 1.0f) state.viewParams.perspectiveFactor = 1.0f;
             }
         } else {
             if (state.cameraMode) {

@@ -138,9 +138,12 @@ static void ApplyAutoFitForLoadedScene_locked() {
         // sensible vHeight rather than failing the fit. Mirrors macOS:1399.
         if (!(vh > 1e-3f)) vh = kFallbackVirtualDisplayHeightM;
         g_fitVHeight = vh;
-        // Search 8 yaws to face the captured side of the scene.
-        float viewerOffset[3] = {0.0f, 0.1f, 0.6f};
-        g_fitYaw = g_gsRenderer.findBestYaw(g_fitCenter, viewerOffset, 8);
+        // Anchor at yaw=0 and trust the loader's RUB convention (PLY loader
+        // converts RDF+X-mirror → RUB at load time; SPZ is RUB-native and
+        // SuperSplat-authored scenes already face −Z at yaw=0). Matches
+        // macOS:1407 — the user can drag with LMB if a particular asset's
+        // authored orientation is off.
+        g_fitYaw = 0.0f;
         LOG_INFO("Auto-fit: center=(%.3f, %.3f, %.3f) extent=(%.3f, %.3f, %.3f) vHeight=%.3f yaw=%.0fdeg",
                  center[0], center[1], center[2],
                  extent[0], extent[1], extent[2], vh, g_fitYaw * 57.2957795f);
