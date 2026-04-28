@@ -22,7 +22,7 @@ Build apps for 3D displays using the OpenXR standard.
 
 Contribute to the DisplayXR runtime — compositors, state tracker, auxiliary code.
 
-- **[Production Components](architecture/production-components.md)** — what ships, what runs, how the pieces connect (service, shell, bridge, runtime DLL)
+- **[Production Components](architecture/production-components.md)** — what ships, what runs, how the pieces connect (service, workspace controller, bridge, runtime DLL)
 - **[Contributing Guide](guides/contributing.md)** — workflow, code style, CI expectations
 - **[Separation of Concerns](architecture/separation-of-concerns.md)** — layer boundaries (authoritative)
 - **[Project Structure](architecture/project-structure.md)** — source tree organization
@@ -78,7 +78,7 @@ Design docs, status trackers, and plans — some shipped, some in progress.
 - [Spatial OS](roadmap/spatial-os.md) — multi-compositor architecture (#43)
 - [3D Shell](roadmap/3d-shell.md) — spatial window manager (#44)
 - [3D Capture](roadmap/3d-capture.md) — capture pipeline (shipped in Shell Phase 8)
-- [Shell/Runtime Contract](roadmap/shell-runtime-contract.md) — IPC between shell and runtime
+- [Workspace/Runtime Contract](roadmap/workspace-runtime-contract.md) — IPC between a workspace controller and the runtime
 - [MCP Spec v0.2](roadmap/mcp-spec-v0.2.md) — AI-native runtime control & introspection over Model Context Protocol
 - [MCP Phase A Status](roadmap/mcp-phase-a-status.md) — handle-app introspection (complete)
 - [MCP Phase B Plan](roadmap/mcp-phase-b-plan.md) — service-mode shell tools (complete)

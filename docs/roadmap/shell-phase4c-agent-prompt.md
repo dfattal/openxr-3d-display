@@ -16,7 +16,7 @@ Read these docs first (in order):
 2. `docs/roadmap/shell-phase4c-plan.md` — **the plan you're implementing** (full task list, sequences, design)
 3. `docs/roadmap/shell-phase4c-status.md` — current progress (update as you complete tasks)
 4. `docs/roadmap/shell-phase4a-status.md` — Phase 4A/4B status (what's already built)
-5. `docs/roadmap/shell-runtime-contract.md` — IPC protocol boundary
+5. `docs/roadmap/workspace-runtime-contract.md` — IPC protocol boundary
 
 ## Branch
 

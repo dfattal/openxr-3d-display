@@ -349,7 +349,7 @@ _package\bin\displayxr-shell.exe --pose -0.1,0.05,0,0.14,0.08 app1.exe --pose 0.
 
 **Shell controls:** Left-click=focus window, title bar drag=move window, edge drag=resize, Right-click=focus+forward to app, Double-click title bar=maximize/restore, Scroll=resize window, Ctrl+1-4=layout presets, TAB=cycle focus, DELETE=close app, ESC=dismiss shell, V=toggle 2D/3D, WASD/left-click-drag=app input. Title bar buttons: close (X), minimize (—). Spatial raycasting hit-test (eye→cursor→window plane in meters).
 
-**When launching from Claude Code:** Use `displayxr-shell.exe` — it handles service auto-start, `XR_RUNTIME_JSON`, and `DISPLAYXR_SHELL_SESSION=1` automatically. Use `run_in_background: true` on the Bash tool call and `timeout: 600000`. See `docs/roadmap/shell-phase1-status.md` for the full test procedure.
+**When launching from Claude Code:** Use `displayxr-shell.exe` — it handles service auto-start, `XR_RUNTIME_JSON`, and `DISPLAYXR_WORKSPACE_SESSION=1` automatically. Use `run_in_background: true` on the Bash tool call and `timeout: 600000`. See `docs/roadmap/shell-phase1-status.md` for the full test procedure.
 
 ## Documentation
 
@@ -373,7 +373,7 @@ See `docs/README.md` for a complete index. Key docs by task:
 | Track shell implementation progress | `docs/roadmap/shell-tasks.md` |
 | Shell Phase 2 plan and status | `docs/roadmap/shell-phase2-plan.md`, `shell-phase2-status.md` |
 | Understand the 3D capture pipeline | `docs/roadmap/3d-capture.md` |
-| Understand shell/runtime IPC contract | `docs/roadmap/shell-runtime-contract.md` |
+| Understand workspace/runtime IPC contract | `docs/roadmap/workspace-runtime-contract.md` |
 | Understand the overall product vision | `docs/roadmap/spatial-desktop-prd.md` |
 
 ## Debug Logs
@@ -474,7 +474,7 @@ For ACCESS_VIOLATION or other crashes in the runtime or test apps:
 # Launch app under procdump — catches first-chance exception and writes full dump
 procdump64.exe -accepteula -e -ma -x . path/to/app.exe
 ```
-For shell mode: start the service first (`displayxr-service.exe --shell`), set `XR_RUNTIME_JSON` and `DISPLAYXR_SHELL_SESSION=1`, then launch the app under procdump.
+For shell mode: start the service first (`displayxr-service.exe --shell`), set `XR_RUNTIME_JSON` and `DISPLAYXR_WORKSPACE_SESSION=1`, then launch the app under procdump.
 
 **Step 2: Analyze the dump** with cdb (installed with WinDbg):
 ```bash

@@ -98,7 +98,7 @@ The IPC plumbing is identical whether the client is a Chrome tab or an app launc
 
 - **N clients, not one.** The service runs in multi-compositor mode and composites every connected client (shell plus one or more 3D apps) into a single output.
 - **Not sandboxed.** Shell-launched apps run with the user's normal token — no AppContainer. `ipc_server_mainloop_windows.cpp` still sets a named-pipe DACL that grants access to both the normal user SID and AppContainer, so the same pipe works for both clients. The shared-handle `SECURITY_ATTRIBUTES` for Chrome adds a `ALL APPLICATION PACKAGES` ACE; shell-launched apps don't need that ACE but don't reject it either.
-- **Shell is a privileged IPC client.** Beyond the standard frame path, the shell sends window pose, focus, layout, and 2D-capture commands over the shell↔service control channel (see [shell-runtime-contract.md](../roadmap/shell-runtime-contract.md)).
+- **Shell is a privileged IPC client.** Beyond the standard frame path, the shell sends window pose, focus, layout, and 2D-capture commands over the shell↔service control channel (see [workspace-runtime-contract.md](../roadmap/workspace-runtime-contract.md)).
 - **Mode gate.** `DISPLAYXR_SHELL_SESSION=1` is the flag the shell sets in the environment of every app it launches; the runtime DLL sees it in `u_sandbox_should_use_ipc()` and routes to IPC even though the process isn't sandboxed.
 
 ---

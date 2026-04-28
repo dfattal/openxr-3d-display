@@ -8,7 +8,7 @@ platform: Windows (D3D11 first, macOS deferred)
 
 # 3D Shell Implementation Tasks
 
-Living task tracker for the spatial shell. For architecture and design rationale, see [spatial-os.md](spatial-os.md) (#43), [3d-shell.md](3d-shell.md) (#44), and [shell-runtime-contract.md](shell-runtime-contract.md).
+Living task tracker for the spatial shell. For architecture and design rationale, see [spatial-os.md](spatial-os.md) (#43), [3d-shell.md](3d-shell.md) (#44), and [workspace-runtime-contract.md](workspace-runtime-contract.md).
 
 ### Key Architecture Decisions (ADRs)
 

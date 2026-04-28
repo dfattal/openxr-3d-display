@@ -15,7 +15,7 @@ Read these docs first (in order):
 1. `CLAUDE.md` — project overview, build commands, architecture
 2. `docs/roadmap/shell-phase4-plan.md` — full Phase 4 design
 3. `docs/roadmap/shell-phase4a-status.md` — what Phase 4A built (capture pipeline, 2D mode switch, resize sync)
-4. `docs/roadmap/shell-runtime-contract.md` — IPC protocol boundary
+4. `docs/roadmap/workspace-runtime-contract.md` — IPC protocol boundary
 
 ## Branch
 
