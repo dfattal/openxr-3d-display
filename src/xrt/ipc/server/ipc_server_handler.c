@@ -2153,7 +2153,7 @@ ipc_handle_system_toggle_io_device(volatile struct ipc_client_state *ics, uint32
 }
 
 xrt_result_t
-ipc_handle_shell_activate(volatile struct ipc_client_state *_ics)
+ipc_handle_workspace_activate(volatile struct ipc_client_state *_ics)
 {
 	struct ipc_server *s = _ics->server;
 
@@ -2186,7 +2186,7 @@ ipc_handle_shell_activate(volatile struct ipc_client_state *_ics)
 }
 
 xrt_result_t
-ipc_handle_shell_deactivate(volatile struct ipc_client_state *_ics)
+ipc_handle_workspace_deactivate(volatile struct ipc_client_state *_ics)
 {
 	struct ipc_server *s = _ics->server;
 
@@ -2210,7 +2210,7 @@ ipc_handle_shell_deactivate(volatile struct ipc_client_state *_ics)
 }
 
 xrt_result_t
-ipc_handle_shell_get_state(volatile struct ipc_client_state *_ics, bool *out_active)
+ipc_handle_workspace_get_state(volatile struct ipc_client_state *_ics, bool *out_active)
 {
 	struct ipc_server *s = _ics->server;
 	*out_active = s->shell_mode;
@@ -2218,7 +2218,7 @@ ipc_handle_shell_get_state(volatile struct ipc_client_state *_ics, bool *out_act
 }
 
 xrt_result_t
-ipc_handle_shell_set_launcher_visible(volatile struct ipc_client_state *_ics, bool visible)
+ipc_handle_launcher_set_visible(volatile struct ipc_client_state *_ics, bool visible)
 {
 	struct ipc_server *s = _ics->server;
 
@@ -2238,7 +2238,7 @@ ipc_handle_shell_set_launcher_visible(volatile struct ipc_client_state *_ics, bo
 }
 
 xrt_result_t
-ipc_handle_shell_clear_launcher_apps(volatile struct ipc_client_state *_ics)
+ipc_handle_launcher_clear_apps(volatile struct ipc_client_state *_ics)
 {
 	struct ipc_server *s = _ics->server;
 
@@ -2256,7 +2256,7 @@ ipc_handle_shell_clear_launcher_apps(volatile struct ipc_client_state *_ics)
 }
 
 xrt_result_t
-ipc_handle_shell_add_launcher_app(volatile struct ipc_client_state *_ics,
+ipc_handle_launcher_add_app(volatile struct ipc_client_state *_ics,
                                    const struct ipc_launcher_app *app)
 {
 	struct ipc_server *s = _ics->server;
@@ -2276,7 +2276,7 @@ ipc_handle_shell_add_launcher_app(volatile struct ipc_client_state *_ics,
 }
 
 xrt_result_t
-ipc_handle_shell_set_running_tile_mask(volatile struct ipc_client_state *_ics, uint64_t mask)
+ipc_handle_launcher_set_running_tile_mask(volatile struct ipc_client_state *_ics, uint64_t mask)
 {
 	struct ipc_server *s = _ics->server;
 
@@ -2295,7 +2295,7 @@ ipc_handle_shell_set_running_tile_mask(volatile struct ipc_client_state *_ics, u
 }
 
 xrt_result_t
-ipc_handle_shell_poll_launcher_click(volatile struct ipc_client_state *_ics,
+ipc_handle_launcher_poll_click(volatile struct ipc_client_state *_ics,
                                       int64_t *out_tile_index)
 {
 	struct ipc_server *s = _ics->server;
@@ -2315,7 +2315,7 @@ ipc_handle_shell_poll_launcher_click(volatile struct ipc_client_state *_ics,
 }
 
 xrt_result_t
-ipc_handle_shell_set_window_pose(volatile struct ipc_client_state *_ics,
+ipc_handle_workspace_set_window_pose(volatile struct ipc_client_state *_ics,
                                   uint32_t client_id,
                                   const struct xrt_pose *pose,
                                   float width_m,
@@ -2375,7 +2375,7 @@ ipc_handle_shell_set_window_pose(volatile struct ipc_client_state *_ics,
 }
 
 xrt_result_t
-ipc_handle_shell_set_visibility(volatile struct ipc_client_state *_ics,
+ipc_handle_workspace_set_window_visibility(volatile struct ipc_client_state *_ics,
                                  uint32_t client_id,
                                  bool visible)
 {
@@ -2418,7 +2418,7 @@ ipc_handle_shell_set_visibility(volatile struct ipc_client_state *_ics,
 }
 
 xrt_result_t
-ipc_handle_shell_get_window_pose(volatile struct ipc_client_state *_ics,
+ipc_handle_workspace_get_window_pose(volatile struct ipc_client_state *_ics,
                                   uint32_t client_id,
                                   struct xrt_pose *out_pose,
                                   float *out_width_m,
@@ -2471,7 +2471,7 @@ ipc_handle_shell_get_window_pose(volatile struct ipc_client_state *_ics,
 }
 
 xrt_result_t
-ipc_handle_shell_add_capture_client(volatile struct ipc_client_state *_ics,
+ipc_handle_workspace_add_capture_client(volatile struct ipc_client_state *_ics,
                                      uint64_t hwnd,
                                      uint32_t *out_client_id)
 {
@@ -2505,7 +2505,7 @@ ipc_handle_shell_add_capture_client(volatile struct ipc_client_state *_ics,
 }
 
 xrt_result_t
-ipc_handle_shell_remove_capture_client(volatile struct ipc_client_state *_ics,
+ipc_handle_workspace_remove_capture_client(volatile struct ipc_client_state *_ics,
                                         uint32_t client_id)
 {
 	struct ipc_server *s = _ics->server;
@@ -2534,7 +2534,7 @@ ipc_handle_shell_remove_capture_client(volatile struct ipc_client_state *_ics,
 }
 
 xrt_result_t
-ipc_handle_shell_capture_frame(volatile struct ipc_client_state *_ics,
+ipc_handle_workspace_capture_frame(volatile struct ipc_client_state *_ics,
                                 const struct ipc_capture_request *request,
                                 struct ipc_capture_result *out_capture_result)
 {

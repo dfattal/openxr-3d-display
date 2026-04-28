@@ -797,7 +797,7 @@ try_apply_poses(struct ipc_connection *ipc_c, struct app_entry *apps, int app_co
 				pose.position.y = apps[a].py;
 				pose.position.z = apps[a].pz;
 
-				r = ipc_call_shell_set_window_pose(
+				r = ipc_call_workspace_set_window_pose(
 				    ipc_c, id, &pose,
 				    apps[a].width_m, apps[a].height_m);
 				if (r == XRT_SUCCESS) {
@@ -1024,7 +1024,7 @@ enumerate_and_adopt_windows(struct ipc_connection *ipc_c,
 		}
 
 		uint32_t cid = 0;
-		xrt_result_t r = ipc_call_shell_add_capture_client(ipc_c, ce->hwnd, &cid);
+		xrt_result_t r = ipc_call_workspace_add_capture_client(ipc_c, ce->hwnd, &cid);
 		if (r == XRT_SUCCESS) {
 			ce->client_id = cid;
 			ce->added = true;
@@ -1050,7 +1050,7 @@ cleanup_closed_captures(struct ipc_connection *ipc_c,
 		if (!captures[i].added) continue;
 		if (!IsWindow((HWND)(uintptr_t)captures[i].hwnd)) {
 			P("  Window closed: '%s' (client_id=%u)\n", captures[i].name, captures[i].client_id);
-			ipc_call_shell_remove_capture_client(ipc_c, captures[i].client_id);
+			ipc_call_workspace_remove_capture_client(ipc_c, captures[i].client_id);
 			// Shift remaining entries
 			for (int j = i; j < *capture_count - 1; j++) {
 				captures[j] = captures[j + 1];
@@ -1249,9 +1249,9 @@ shell_compute_running_tile_mask(struct ipc_connection *ipc_c)
 static void
 shell_push_registered_apps_to_service(struct ipc_connection *ipc_c)
 {
-	xrt_result_t r = ipc_call_shell_clear_launcher_apps(ipc_c);
+	xrt_result_t r = ipc_call_launcher_clear_apps(ipc_c);
 	if (r != XRT_SUCCESS) {
-		PE("ipc_call_shell_clear_launcher_apps failed: %d\n", r);
+		PE("ipc_call_launcher_clear_apps failed: %d\n", r);
 		return;
 	}
 
@@ -1272,9 +1272,9 @@ shell_push_registered_apps_to_service(struct ipc_connection *ipc_c)
 		snprintf(msg.icon_3d_path, sizeof(msg.icon_3d_path), "%s", src->icon_3d_path);
 		snprintf(msg.icon_3d_layout, sizeof(msg.icon_3d_layout), "%s", src->icon_3d_layout);
 
-		r = ipc_call_shell_add_launcher_app(ipc_c, &msg);
+		r = ipc_call_launcher_add_app(ipc_c, &msg);
 		if (r != XRT_SUCCESS) {
-			PE("ipc_call_shell_add_launcher_app[%d] failed: %d\n", i, r);
+			PE("ipc_call_launcher_add_app[%d] failed: %d\n", i, r);
 			return;
 		}
 		pushed++;
@@ -1587,7 +1587,7 @@ shell_launch_registered_app(struct ipc_connection *ipc_c,
 			GetWindowTextA(found_hwnd, ce->name, sizeof(ce->name));
 
 			uint32_t cid = 0;
-			xrt_result_t r = ipc_call_shell_add_capture_client(ipc_c, ce->hwnd, &cid);
+			xrt_result_t r = ipc_call_workspace_add_capture_client(ipc_c, ce->hwnd, &cid);
 			if (r == XRT_SUCCESS) {
 				ce->client_id = cid;
 				ce->added = true;
@@ -1832,9 +1832,9 @@ capture_frame(struct ipc_connection *ipc_c)
 	req.flags = IPC_CAPTURE_FLAG_ATLAS;
 
 	struct ipc_capture_result result = {0};
-	xrt_result_t r = ipc_call_shell_capture_frame(ipc_c, &req, &result);
+	xrt_result_t r = ipc_call_workspace_capture_frame(ipc_c, &req, &result);
 	if (r != XRT_SUCCESS) {
-		PE("capture: shell_capture_frame failed: %d\n", r);
+		PE("capture: workspace_capture_frame failed: %d\n", r);
 		return;
 	}
 
@@ -1894,7 +1894,7 @@ main(int argc, char *argv[])
 	}
 
 	// Connect to service. The IPC client library auto-starts displayxr-service
-	// if not running. We then send shell_activate to enter shell mode dynamically.
+	// if not running. We then send workspace_activate to enter shell mode dynamically.
 	P("Connecting to service...\n");
 
 	struct ipc_connection ipc_c = {0};
@@ -1976,9 +1976,9 @@ main(int argc, char *argv[])
 
 	if (start_active) {
 		P("Activating shell mode...\n");
-		xret = ipc_call_shell_activate(&ipc_c);
+		xret = ipc_call_workspace_activate(&ipc_c);
 		if (xret != XRT_SUCCESS) {
-			PE("Warning: shell_activate failed\n");
+			PE("Warning: workspace_activate failed\n");
 		}
 		g_shell_active = true;
 		tray_update_tooltip(true);
@@ -1986,7 +1986,7 @@ main(int argc, char *argv[])
 		// Add capture clients
 		for (int i = 0; i < capture_count; i++) {
 			uint32_t cid = 0;
-			xrt_result_t r = ipc_call_shell_add_capture_client(&ipc_c, captures[i].hwnd, &cid);
+			xrt_result_t r = ipc_call_workspace_add_capture_client(&ipc_c, captures[i].hwnd, &cid);
 			if (r == XRT_SUCCESS) {
 				captures[i].client_id = cid;
 				captures[i].added = true;
@@ -2019,9 +2019,9 @@ main(int argc, char *argv[])
 #else
 	// Non-Windows: simple activate + poll (no hotkey/tray)
 	P("Activating shell mode...\n");
-	xret = ipc_call_shell_activate(&ipc_c);
+	xret = ipc_call_workspace_activate(&ipc_c);
 	if (xret != XRT_SUCCESS) {
-		PE("Warning: shell_activate failed\n");
+		PE("Warning: workspace_activate failed\n");
 	}
 	bool auto_adopt = false;
 #endif
@@ -2065,7 +2065,7 @@ main(int argc, char *argv[])
 					// --- Toggle shell active/inactive ---
 					if (g_shell_active) {
 						P("Deactivating shell...\n");
-						ipc_call_shell_deactivate(&ipc_c);
+						ipc_call_workspace_deactivate(&ipc_c);
 
 						// Clear local capture tracking
 						for (int i = 0; i < capture_count; i++) {
@@ -2091,7 +2091,7 @@ main(int argc, char *argv[])
 						P("Shell deactivated — waiting in tray.\n");
 					} else {
 						P("Activating shell...\n");
-						xret = ipc_call_shell_activate(&ipc_c);
+						xret = ipc_call_workspace_activate(&ipc_c);
 
 						// If IPC pipe is dead (service exited), reconnect.
 						// The IPC client lib auto-starts the service.
@@ -2106,7 +2106,7 @@ main(int argc, char *argv[])
 								Sleep(1000);
 							}
 							if (xret == XRT_SUCCESS) {
-								xret = ipc_call_shell_activate(&ipc_c);
+								xret = ipc_call_workspace_activate(&ipc_c);
 								service_pid = find_service_pid();
 							}
 							if (xret != XRT_SUCCESS) {
@@ -2145,10 +2145,10 @@ main(int argc, char *argv[])
 							AllowSetForegroundWindow(service_pid);
 						}
 
-						xrt_result_t lret = ipc_call_shell_set_launcher_visible(
+						xrt_result_t lret = ipc_call_launcher_set_visible(
 						    &ipc_c, g_launcher_visible);
 						if (lret != XRT_SUCCESS) {
-							PE("ipc_call_shell_set_launcher_visible failed: %d\n", lret);
+							PE("ipc_call_launcher_set_visible failed: %d\n", lret);
 							g_launcher_visible = !g_launcher_visible; // roll back
 						} else {
 							P("Launcher %s\n", g_launcher_visible ? "shown" : "hidden");
@@ -2254,7 +2254,7 @@ main(int argc, char *argv[])
 		// The compositor sets shell_mode=false — sync our state.
 		if (g_shell_active) {
 			bool server_active = false;
-			if (ipc_call_shell_get_state(&ipc_c, &server_active) == XRT_SUCCESS) {
+			if (ipc_call_workspace_get_state(&ipc_c, &server_active) == XRT_SUCCESS) {
 				if (!server_active) {
 					P("Shell deactivated by compositor (ESC) — returning to tray.\n");
 					capture_count = 0;
@@ -2273,7 +2273,7 @@ main(int argc, char *argv[])
 			static uint64_t s_last_running_mask = (uint64_t)-1;
 			uint64_t mask = shell_compute_running_tile_mask(&ipc_c);
 			if (mask != s_last_running_mask) {
-				ipc_call_shell_set_running_tile_mask(&ipc_c, mask);
+				ipc_call_launcher_set_running_tile_mask(&ipc_c, mask);
 				s_last_running_mask = mask;
 			}
 		}
@@ -2293,7 +2293,7 @@ main(int argc, char *argv[])
 		// stale-binary issue resolved by the Phase 6 rebuild.
 		if (g_shell_active && g_launcher_visible) {
 			int64_t tile_index = -1;
-			if (ipc_call_shell_poll_launcher_click(&ipc_c, &tile_index) == XRT_SUCCESS &&
+			if (ipc_call_launcher_poll_click(&ipc_c, &tile_index) == XRT_SUCCESS &&
 			    tile_index != -1) {
 				// Service already hid the launcher when the action registered.
 				g_launcher_visible = false;
@@ -2313,7 +2313,7 @@ main(int argc, char *argv[])
 						AllowSetForegroundWindow(service_pid);
 					}
 #endif
-					if (ipc_call_shell_set_launcher_visible(&ipc_c, true) == XRT_SUCCESS) {
+					if (ipc_call_launcher_set_visible(&ipc_c, true) == XRT_SUCCESS) {
 						g_launcher_visible = true;
 					}
 				} else if (tile_index <= -(int64_t)IPC_LAUNCHER_ACTION_REMOVE_BASE) {
@@ -2379,7 +2379,7 @@ main(int argc, char *argv[])
 						AllowSetForegroundWindow(service_pid);
 					}
 #endif
-					if (ipc_call_shell_set_launcher_visible(&ipc_c, true) == XRT_SUCCESS) {
+					if (ipc_call_launcher_set_visible(&ipc_c, true) == XRT_SUCCESS) {
 						g_launcher_visible = true;
 					}
 				} else if (tile_index == IPC_LAUNCHER_ACTION_BROWSE) {
@@ -2392,7 +2392,7 @@ main(int argc, char *argv[])
 						AllowSetForegroundWindow(service_pid);
 					}
 #endif
-					if (ipc_call_shell_set_launcher_visible(&ipc_c, true) == XRT_SUCCESS) {
+					if (ipc_call_launcher_set_visible(&ipc_c, true) == XRT_SUCCESS) {
 						g_launcher_visible = true;
 					}
 				} else if (tile_index >= 0 && tile_index < (int64_t)g_registered_app_count) {
@@ -2455,7 +2455,7 @@ main(int argc, char *argv[])
 #ifdef _WIN32
 	// Deactivate shell if still active
 	if (g_shell_active) {
-		ipc_call_shell_deactivate(&ipc_c);
+		ipc_call_workspace_deactivate(&ipc_c);
 	}
 
 	// Cleanup hotkey and tray

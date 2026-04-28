@@ -308,8 +308,8 @@ struct ipc_client_list
  * Phase 5.8: registered-app record shipped one-at-a-time from the shell
  * process to the service for the spatial launcher panel. Sized to fit a
  * single ipc message under IPC_BUF_SIZE — the shell calls
- * ipc_call_shell_clear_launcher_apps then loops over its registry calling
- * ipc_call_shell_add_launcher_app per entry whenever the registry changes.
+ * ipc_call_launcher_clear_apps then loops over its registry calling
+ * ipc_call_launcher_add_app per entry whenever the registry changes.
  *
  * @ingroup ipc
  */
@@ -319,7 +319,7 @@ struct ipc_client_list
 #define IPC_LAUNCHER_PATH_MAX 256
 #define IPC_LAUNCHER_TYPE_MAX 8
 
-// Phase 5.14: sentinel returned via ipc_call_shell_poll_launcher_click to mean
+// Phase 5.14: sentinel returned via ipc_call_launcher_poll_click to mean
 // "the user clicked the Browse-for-app virtual tile" rather than a real tile.
 // Real tile indices are >= 0; -1 means no pending action.
 #define IPC_LAUNCHER_ACTION_BROWSE (-100)
@@ -354,7 +354,7 @@ struct ipc_launcher_app
 #define IPC_CAPTURE_PATH_MAX 256
 
 /*!
- * Phase 8: request struct for shell_capture_frame. Wraps the path prefix
+ * Phase 8: request struct for workspace_capture_frame. Wraps the path prefix
  * (without extension — runtime appends "_atlas.png") because the IPC
  * schema only supports struct/scalar parameter types.
  *
@@ -367,7 +367,7 @@ struct ipc_capture_request
 };
 
 /*!
- * Phase 8: result returned by shell_capture_frame. The runtime fills this
+ * Phase 8: result returned by workspace_capture_frame. The runtime fills this
  * with the metadata needed for a sidecar JSON file (timestamp, atlas/eye
  * dimensions, stereo layout, display physical size, eye poses at capture).
  *
