@@ -37,8 +37,16 @@
 #include <windows.h>
 #include <process.h>
 #include <tlhelp32.h> // For process enumeration (service PID lookup)
-#include <shellapi.h> // For Shell_NotifyIcon (system tray)
+#include <shellapi.h> // For Shell_NotifyIcon (system tray); PrivateExtractIconsA (Browse PE-icon extract)
 #include <commdlg.h>  // For GetOpenFileNameA (Phase 5.14 Browse tile)
+
+// PNG encoding for the Browse-for-app PE icon → tile-icon conversion. Defined
+// here (not in shell_app_scan.c) because main.c owns the Browse flow and this
+// keeps the dependency in one TU. STB_IMAGE_WRITE_IMPLEMENTATION must be
+// defined in exactly one source file per binary; the displayxr-service binary
+// has its own definition in comp_d3d11_service.cpp.
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 #else
 #include <unistd.h>
 #endif
@@ -258,13 +266,13 @@ struct registered_app
 {
 	char name[128];
 	char exe_path[MAX_PATH];
+	char manifest_path[MAX_PATH];  // .displayxr.json path (so launcher remove can delete it); "" for legacy entries
 	char type[8];          // "3d", "2d", or "" (unknown)
-	char source[8];        // "user" | "scan"  (5.5)
-	char category[32];     // sidecar "category", default "app"
-	char description[256]; // sidecar "description"
-	char display_mode[16]; // sidecar "display_mode", default "auto"
+	char category[32];     // manifest "category", default "app"
+	char description[256]; // manifest "description"
+	char display_mode[16]; // manifest "display_mode", default "auto"
 	char icon_path[MAX_PATH];     // resolved 2D icon (absolute) or ""
-	char icon_3d_path[MAX_PATH];  // resolved SBS icon (absolute) or ""
+	char icon_3d_path[MAX_PATH];  // resolved 3D icon (absolute) or ""
 	char icon_3d_layout[8];       // "sbs-lr"|"sbs-rl"|"tb"|"bt"|""
 };
 
@@ -328,32 +336,12 @@ registered_app_zero(struct registered_app *app)
 	memset(app, 0, sizeof(*app));
 }
 
-// Merge a single scanned app into the in-memory registry. If an existing
-// entry has a matching exe_path it is replaced; otherwise the entry is
-// appended.
+// Append a scanned app into the in-memory registry. The scanner already
+// dedups by exe_path, so we just append. Caller is responsible for clearing
+// g_registered_apps[] before the scan run.
 static void
-merge_scanned_app(const struct shell_scanned_app *s)
+append_scanned_app(const struct shell_scanned_app *s)
 {
-	// Replace any existing entry (user or scan) with the same exe_path.
-	for (int i = 0; i < g_registered_app_count; i++) {
-		if (exe_path_equal(g_registered_apps[i].exe_path, s->exe_path)) {
-			struct registered_app *app = &g_registered_apps[i];
-			registered_app_zero(app);
-			snprintf(app->name, sizeof(app->name), "%s", s->name);
-			snprintf(app->exe_path, sizeof(app->exe_path), "%s", s->exe_path);
-			snprintf(app->type, sizeof(app->type), "%s", s->type);
-			snprintf(app->source, sizeof(app->source), "scan");
-			snprintf(app->category, sizeof(app->category), "%s", s->category);
-			snprintf(app->description, sizeof(app->description), "%s", s->description);
-			snprintf(app->display_mode, sizeof(app->display_mode), "%s", s->display_mode);
-			snprintf(app->icon_path, sizeof(app->icon_path), "%s", s->icon_path);
-			snprintf(app->icon_3d_path, sizeof(app->icon_3d_path), "%s", s->icon_3d_path);
-			snprintf(app->icon_3d_layout, sizeof(app->icon_3d_layout), "%s", s->icon_3d_layout);
-			return;
-		}
-	}
-
-	// Append as a new entry.
 	if (g_registered_app_count >= MAX_REGISTERED_APPS) {
 		PE("registry full — dropping scanned app '%s'\n", s->name);
 		return;
@@ -362,31 +350,14 @@ merge_scanned_app(const struct shell_scanned_app *s)
 	registered_app_zero(app);
 	snprintf(app->name, sizeof(app->name), "%s", s->name);
 	snprintf(app->exe_path, sizeof(app->exe_path), "%s", s->exe_path);
+	snprintf(app->manifest_path, sizeof(app->manifest_path), "%s", s->manifest_path);
 	snprintf(app->type, sizeof(app->type), "%s", s->type);
-	snprintf(app->source, sizeof(app->source), "scan");
 	snprintf(app->category, sizeof(app->category), "%s", s->category);
 	snprintf(app->description, sizeof(app->description), "%s", s->description);
 	snprintf(app->display_mode, sizeof(app->display_mode), "%s", s->display_mode);
 	snprintf(app->icon_path, sizeof(app->icon_path), "%s", s->icon_path);
 	snprintf(app->icon_3d_path, sizeof(app->icon_3d_path), "%s", s->icon_3d_path);
 	snprintf(app->icon_3d_layout, sizeof(app->icon_3d_layout), "%s", s->icon_3d_layout);
-}
-
-// Remove every entry whose source == "scan". Called before re-running the
-// scanner so stale scan results from previous runs don't linger.
-static void
-drop_scan_entries(void)
-{
-	int dst = 0;
-	for (int i = 0; i < g_registered_app_count; i++) {
-		if (strcmp(g_registered_apps[i].source, "scan") != 0) {
-			if (dst != i) {
-				g_registered_apps[dst] = g_registered_apps[i];
-			}
-			dst++;
-		}
-	}
-	g_registered_app_count = dst;
 }
 
 // Forward declarations — these are called from registered_apps_load but
@@ -398,6 +369,10 @@ static void
 get_exe_dir(char *buf, size_t buf_size);
 #endif
 
+// Rebuild the in-memory registry from the manifest scanner. Manifests
+// (sidecar + registered) are now the sole source of truth — registered_apps.json
+// is just a debug snapshot of the last scan, not a separate input. See
+// docs/specs/displayxr-app-manifest.md §11.
 static void
 registered_apps_load(void)
 {
@@ -408,73 +383,14 @@ registered_apps_load(void)
 
 #ifdef _WIN32
 	{
-		// Make sure the parent directory exists before we try to write.
+		// Make sure the parent directory exists before we try to write the
+		// debug snapshot.
 		char dir[512];
 		snprintf(dir, sizeof(dir), "%s", path);
 		char *last = strrchr(dir, '\\');
 		if (last) { *last = '\0'; CreateDirectoryA(dir, NULL); }
 	}
-#endif
 
-	// -------- 1) Load existing JSON, if present. --------
-	FILE *f = fopen(path, "rb");
-	if (f != NULL) {
-		fseek(f, 0, SEEK_END);
-		long len = ftell(f);
-		fseek(f, 0, SEEK_SET);
-		if (len > 0 && len <= 256 * 1024) {
-			char *data = (char *)malloc((size_t)len + 1);
-			if (data != NULL) {
-				fread(data, 1, (size_t)len, f);
-				data[len] = '\0';
-
-				cJSON *root = cJSON_Parse(data);
-				free(data);
-				if (root && cJSON_IsArray(root)) {
-					cJSON *entry = NULL;
-					cJSON_ArrayForEach(entry, root)
-					{
-						if (g_registered_app_count >= MAX_REGISTERED_APPS) break;
-						struct registered_app *app =
-						    &g_registered_apps[g_registered_app_count];
-						registered_app_zero(app);
-
-						json_copy_str(app->name, sizeof(app->name), entry, "name");
-						json_copy_str(app->exe_path, sizeof(app->exe_path), entry, "exe_path");
-						json_copy_str(app->type, sizeof(app->type), entry, "type");
-						json_copy_str(app->source, sizeof(app->source), entry, "source");
-						json_copy_str(app->category, sizeof(app->category), entry, "category");
-						json_copy_str(app->description, sizeof(app->description), entry, "description");
-						json_copy_str(app->display_mode, sizeof(app->display_mode), entry, "display_mode");
-						json_copy_str(app->icon_path, sizeof(app->icon_path), entry, "icon_path");
-						json_copy_str(app->icon_3d_path, sizeof(app->icon_3d_path), entry, "icon_3d_path");
-						json_copy_str(app->icon_3d_layout, sizeof(app->icon_3d_layout), entry, "icon_3d_layout");
-
-						// Back-compat: a Phase 4C JSON has no `source` field.
-						// Treat pre-existing entries as user-added.
-						if (app->source[0] == '\0') {
-							snprintf(app->source, sizeof(app->source), "user");
-						}
-
-						g_registered_app_count++;
-					}
-				}
-				cJSON_Delete(root);
-			}
-		}
-		fclose(f);
-	} else {
-		P("No registered_apps.json found — starting with empty registry.\n");
-		// Per the spec, the launcher is manifest-gated: only apps with a
-		// .displayxr.json sidecar (or apps the user explicitly adds via
-		// Browse-for-app) appear. No built-in defaults. The scanner runs
-		// next and populates anything it finds.
-	}
-
-	// -------- 2) Drop stale scan entries, re-run scanner, merge. --------
-	drop_scan_entries();
-
-#ifdef _WIN32
 	{
 		char exe_dir[MAX_PATH] = {0};
 		get_exe_dir(exe_dir, sizeof(exe_dir));
@@ -486,18 +402,18 @@ registered_apps_load(void)
 		struct shell_scanned_app scanned[MAX_REGISTERED_APPS];
 		int n = shell_scan_apps(exe_dir, scanned, MAX_REGISTERED_APPS);
 		for (int i = 0; i < n; i++) {
-			merge_scanned_app(&scanned[i]);
+			append_scanned_app(&scanned[i]);
 		}
 	}
 #endif
 
-	P("Registry: %d app(s) after merge.\n", g_registered_app_count);
+	P("Registry: %d app(s) after scan.\n", g_registered_app_count);
 	for (int i = 0; i < g_registered_app_count; i++) {
-		P("  [%s] %s  (%s)\n", g_registered_apps[i].source, g_registered_apps[i].name,
-		  g_registered_apps[i].exe_path);
+		P("  %s  (%s)\n", g_registered_apps[i].name, g_registered_apps[i].exe_path);
 	}
 
-	// -------- 3) Persist merged registry so users can hand-edit later. --------
+	// Persist a snapshot of the current scan for debugging / inspection.
+	// Not a source of truth — the next load() rebuilds entirely from manifests.
 	registered_apps_save();
 }
 
@@ -514,7 +430,7 @@ registered_apps_save(void)
 		cJSON_AddStringToObject(obj, "name", app->name);
 		cJSON_AddStringToObject(obj, "exe_path", app->exe_path);
 		cJSON_AddStringToObject(obj, "type", app->type);
-		cJSON_AddStringToObject(obj, "source", app->source[0] ? app->source : "user");
+		if (app->manifest_path[0])  cJSON_AddStringToObject(obj, "manifest_path", app->manifest_path);
 		if (app->category[0])       cJSON_AddStringToObject(obj, "category", app->category);
 		if (app->description[0])    cJSON_AddStringToObject(obj, "description", app->description);
 		if (app->display_mode[0])   cJSON_AddStringToObject(obj, "display_mode", app->display_mode);
@@ -1277,32 +1193,149 @@ shell_push_registered_apps_to_service(struct ipc_connection *ipc_c)
 }
 
 #ifdef _WIN32
+
+// Get the per-user registered-mode discovery dir, e.g.
+// "C:\Users\foo\AppData\Local\DisplayXR\apps". Creates intermediate dirs.
+// Returns true on success.
+static bool
+get_registered_apps_dir(char *out, size_t out_size)
+{
+	const char *local_appdata = getenv("LOCALAPPDATA");
+	if (local_appdata == NULL || !*local_appdata) return false;
+
+	char base[MAX_PATH];
+	snprintf(base, sizeof(base), "%s\\DisplayXR", local_appdata);
+	CreateDirectoryA(base, NULL);
+
+	snprintf(out, out_size, "%s\\apps", base);
+	CreateDirectoryA(out, NULL);
+	return true;
+}
+
+// Replace path separators and any non-portable characters with '_'. Used to
+// derive a manifest filename from an exe basename.
+static void
+sanitize_basename(const char *src, char *dst, size_t dst_size)
+{
+	size_t i = 0;
+	for (; src[i] && i + 1 < dst_size; i++) {
+		char c = src[i];
+		bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+		          (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+		dst[i] = ok ? c : '_';
+	}
+	dst[i] = '\0';
+}
+
+// Extract the largest available app icon from @p exe and write it as PNG to
+// @p out_png. Uses PrivateExtractIconsA to request the largest standard size
+// (256x256), then DrawIconEx onto a 32-bit DIB so PNG-compressed Vista-era
+// icons render correctly. Returns true on success.
+static bool
+extract_pe_icon_to_png(const char *exe, const char *out_png)
+{
+	const int target = 256;
+	HICON hicon = NULL;
+	UINT extracted = PrivateExtractIconsA(exe, 0, target, target, &hicon, NULL, 1, 0);
+	if (extracted == 0 || extracted == (UINT)-1 || hicon == NULL) {
+		// Fall back to the system "large icon" size (32x32 on classic
+		// Windows). Better than nothing.
+		extracted = PrivateExtractIconsA(exe, 0, GetSystemMetrics(SM_CXICON),
+		                                 GetSystemMetrics(SM_CYICON), &hicon,
+		                                 NULL, 1, 0);
+		if (extracted == 0 || extracted == (UINT)-1 || hicon == NULL) {
+			return false;
+		}
+	}
+
+	// Determine icon dimensions from the actual HICON (PrivateExtractIcons
+	// may have given us the largest available size, not 256).
+	ICONINFO ii = {0};
+	if (!GetIconInfo(hicon, &ii)) {
+		DestroyIcon(hicon);
+		return false;
+	}
+	BITMAP bm = {0};
+	int w = target, h = target;
+	if (ii.hbmColor && GetObject(ii.hbmColor, sizeof(bm), &bm)) {
+		w = bm.bmWidth;
+		h = bm.bmHeight;
+	}
+	if (ii.hbmMask) DeleteObject(ii.hbmMask);
+	if (ii.hbmColor) DeleteObject(ii.hbmColor);
+
+	// Render the icon onto a 32bpp top-down DIB. DrawIconEx handles alpha
+	// for both Vista PNG icons and classic AND/XOR-mask icons.
+	BITMAPINFO bi = {0};
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = w;
+	bi.bmiHeader.biHeight = -h;     // negative → top-down
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+
+	HDC screen_dc = GetDC(NULL);
+	HDC mem_dc = CreateCompatibleDC(screen_dc);
+	void *bits = NULL;
+	HBITMAP dib = CreateDIBSection(screen_dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+	ReleaseDC(NULL, screen_dc);
+
+	if (dib == NULL || bits == NULL) {
+		if (dib) DeleteObject(dib);
+		DeleteDC(mem_dc);
+		DestroyIcon(hicon);
+		return false;
+	}
+
+	HGDIOBJ prev = SelectObject(mem_dc, dib);
+	memset(bits, 0, (size_t)w * (size_t)h * 4);  // transparent background
+	BOOL drew = DrawIconEx(mem_dc, 0, 0, hicon, w, h, 0, NULL, DI_NORMAL);
+	SelectObject(mem_dc, prev);
+	DeleteDC(mem_dc);
+	DestroyIcon(hicon);
+
+	if (!drew) {
+		DeleteObject(dib);
+		return false;
+	}
+
+	// DIB layout is BGRA; stb expects RGBA, so swap channels in place.
+	uint8_t *px = (uint8_t *)bits;
+	for (int i = 0; i < w * h; i++) {
+		uint8_t b = px[i * 4 + 0];
+		px[i * 4 + 0] = px[i * 4 + 2];
+		px[i * 4 + 2] = b;
+	}
+
+	int ok = stbi_write_png(out_png, w, h, 4, bits, w * 4);
+	DeleteObject(dib);
+	return ok != 0;
+}
+
 /*!
- * Phase 5.14: prompt the user for an executable via GetOpenFileNameA,
- * append it to g_registered_apps as a user entry, persist to JSON, and
- * re-push the registry to the service. Mirrors the OPENFILENAMEA idiom
- * used by comp_d3d11_window.cpp's Ctrl+O launch flow.
+ * Browse-for-app: prompt for an executable, write a registered-mode manifest
+ * (`<sanitized>.displayxr.json` with `exe_path`) into
+ * `%LOCALAPPDATA%\DisplayXR\apps\`, extract the embedded PE icon as a sibling
+ * `<sanitized>.png`, and re-trigger discovery so the new tile shows up. See
+ * docs/specs/displayxr-app-manifest.md §11.
  *
  * Called from the launcher click-poll branch when the service signals a
- * Browse-tile hit (IPC_LAUNCHER_ACTION_BROWSE). The dialog is modal and
- * blocks the shell's message loop; on return the launcher is re-shown so
- * the user sees their new tile at the end of the grid.
+ * Browse-tile hit (IPC_LAUNCHER_ACTION_BROWSE). The file dialog is modal and
+ * blocks the shell's message loop; on return the launcher is re-shown so the
+ * user sees their new tile.
  */
 static void
 shell_browse_and_add_app(struct ipc_connection *ipc_c)
 {
-	// Phase 5.14: open the file dialog as a top-level window
-	// (hwndOwner=NULL). The service granted ASFW_ANY foreground permission
-	// when it processed the Browse click, so Windows lets the modal dialog
-	// activate normally. Using the hidden HWND_MESSAGE g_msg_hwnd as owner
-	// doesn't help — message-only windows can't be focused, so the dialog
-	// would still hide behind the compositor.
-	char path[MAX_PATH] = {0};
+	// Open the file dialog as a top-level window (hwndOwner=NULL). The
+	// service granted ASFW_ANY foreground permission when it processed the
+	// Browse click, so Windows lets the modal dialog activate normally.
+	char exe_path[MAX_PATH] = {0};
 	OPENFILENAMEA ofn = {0};
 	ofn.lStructSize = sizeof(ofn);
 	ofn.hwndOwner = NULL;
 	ofn.lpstrFilter = "Executables (*.exe)\0*.exe\0All Files (*.*)\0*.*\0";
-	ofn.lpstrFile = path;
+	ofn.lpstrFile = exe_path;
 	ofn.nMaxFile = MAX_PATH;
 	ofn.lpstrTitle = "Add app to DisplayXR launcher";
 	ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
@@ -1312,16 +1345,10 @@ shell_browse_and_add_app(struct ipc_connection *ipc_c)
 		return;
 	}
 
-	if (g_registered_app_count >= MAX_REGISTERED_APPS) {
-		PE("Registry full (%d) — cannot add '%s'\n",
-		   g_registered_app_count, path);
-		return;
-	}
-
 	// Derive a display name from the exe basename (strip path and .exe).
-	const char *base = strrchr(path, '\\');
-	if (base == NULL) base = strrchr(path, '/');
-	base = base ? base + 1 : path;
+	const char *base = strrchr(exe_path, '\\');
+	if (base == NULL) base = strrchr(exe_path, '/');
+	base = base ? base + 1 : exe_path;
 	char name[128];
 	snprintf(name, sizeof(name), "%s", base);
 	size_t nlen = strlen(name);
@@ -1329,17 +1356,64 @@ shell_browse_and_add_app(struct ipc_connection *ipc_c)
 		name[nlen - 4] = '\0';
 	}
 
-	struct registered_app *app = &g_registered_apps[g_registered_app_count++];
-	registered_app_zero(app);
-	snprintf(app->name, sizeof(app->name), "%s", name);
-	snprintf(app->exe_path, sizeof(app->exe_path), "%s", path);
-	snprintf(app->type, sizeof(app->type), "3d");   // assume 3d; user can edit JSON
-	snprintf(app->source, sizeof(app->source), "user");
-	snprintf(app->category, sizeof(app->category), "app");
+	char sanitized[128];
+	sanitize_basename(name, sanitized, sizeof(sanitized));
 
-	registered_apps_save();
+	char dir[MAX_PATH];
+	if (!get_registered_apps_dir(dir, sizeof(dir))) {
+		PE("Browse: cannot resolve %%LOCALAPPDATA%%\\DisplayXR\\apps\n");
+		return;
+	}
+
+	char manifest_path[MAX_PATH];
+	snprintf(manifest_path, sizeof(manifest_path), "%s\\%s.displayxr.json", dir,
+	         sanitized);
+	char icon_path[MAX_PATH];
+	snprintf(icon_path, sizeof(icon_path), "%s\\%s.png", dir, sanitized);
+
+	bool have_icon = extract_pe_icon_to_png(exe_path, icon_path);
+	if (!have_icon) {
+		P("Browse: PE icon extraction failed for %s — manifest will be iconless\n",
+		  exe_path);
+	}
+
+	// Build the manifest JSON via cJSON for proper escaping of paths
+	// containing backslashes, spaces, etc.
+	cJSON *root = cJSON_CreateObject();
+	cJSON_AddNumberToObject(root, "schema_version", 1);
+	cJSON_AddStringToObject(root, "name", name);
+	cJSON_AddStringToObject(root, "type", "3d");
+	cJSON_AddStringToObject(root, "category", "app");
+	cJSON_AddStringToObject(root, "exe_path", exe_path);
+	if (have_icon) {
+		// Icon path is relative to the manifest, per §2.3.
+		char icon_rel[256];
+		snprintf(icon_rel, sizeof(icon_rel), "%s.png", sanitized);
+		cJSON_AddStringToObject(root, "icon", icon_rel);
+	}
+
+	char *json_str = cJSON_Print(root);
+	cJSON_Delete(root);
+	if (json_str == NULL) {
+		PE("Browse: cJSON_Print failed\n");
+		return;
+	}
+
+	FILE *f = fopen(manifest_path, "wb");
+	if (f == NULL) {
+		PE("Browse: cannot write manifest %s\n", manifest_path);
+		free(json_str);
+		return;
+	}
+	fwrite(json_str, 1, strlen(json_str), f);
+	fclose(f);
+	free(json_str);
+
+	P("Browse: wrote manifest %s\n", manifest_path);
+
+	// Re-scan + re-push so the new tile appears.
+	registered_apps_load();
 	shell_push_registered_apps_to_service(ipc_c);
-	P("Browse: added '%s' from %s\n", name, path);
 }
 #else
 static void
@@ -2148,8 +2222,52 @@ main(int argc, char *argv[])
 				} else if (tile_index <= -(int64_t)IPC_LAUNCHER_ACTION_REMOVE_BASE) {
 					int full_idx = (int)(-(tile_index) - IPC_LAUNCHER_ACTION_REMOVE_BASE);
 					if (full_idx >= 0 && full_idx < g_registered_app_count) {
-						P("Launcher: removing '%s' permanently\n",
-						  g_registered_apps[full_idx].name);
+						struct registered_app *rm = &g_registered_apps[full_idx];
+						P("Launcher: removing '%s' permanently\n", rm->name);
+
+#ifdef _WIN32
+						// Delete the manifest file (and sibling icon files)
+						// when it's a registered-mode manifest the user owns.
+						// Sidecar manifests in dev paths are developer-owned
+						// and never deleted here.
+						if (rm->manifest_path[0]) {
+							const char *local = getenv("LOCALAPPDATA");
+							const char *progdata = getenv("ProgramData");
+							bool in_user_dir = (local && _strnicmp(rm->manifest_path,
+							    local, strlen(local)) == 0);
+							bool in_system_dir = (progdata && _strnicmp(rm->manifest_path,
+							    progdata, strlen(progdata)) == 0);
+							if (in_user_dir || in_system_dir) {
+								if (DeleteFileA(rm->manifest_path)) {
+									P("  deleted manifest: %s\n", rm->manifest_path);
+								} else {
+									DWORD err = GetLastError();
+									PE("  could not delete manifest %s "
+									   "(err=%lu) — tile will reappear next scan\n",
+									   rm->manifest_path, err);
+								}
+								// Also delete the resolved icon files when
+								// they live alongside the manifest. We
+								// compare directories so we don't nuke a
+								// shared icon in another location.
+								char manifest_dir[MAX_PATH];
+								snprintf(manifest_dir, sizeof(manifest_dir), "%s",
+								         rm->manifest_path);
+								char *sep = strrchr(manifest_dir, '\\');
+								if (sep) *sep = '\0';
+								if (rm->icon_path[0] &&
+								    _strnicmp(rm->icon_path, manifest_dir,
+								              strlen(manifest_dir)) == 0) {
+									DeleteFileA(rm->icon_path);
+								}
+								if (rm->icon_3d_path[0] &&
+								    _strnicmp(rm->icon_3d_path, manifest_dir,
+								              strlen(manifest_dir)) == 0) {
+									DeleteFileA(rm->icon_3d_path);
+								}
+							}
+						}
+#endif
 						// Shift remaining entries down.
 						for (int j = full_idx; j < g_registered_app_count - 1; j++) {
 							g_registered_apps[j] = g_registered_apps[j + 1];
