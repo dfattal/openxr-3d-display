@@ -802,6 +802,15 @@ service_orchestrator_get_workspace_display_name(void)
 	return s_workspace_manifest.display_name;
 }
 
+unsigned long
+service_orchestrator_get_workspace_pid(void)
+{
+	if (s_workspace_running) {
+		return (unsigned long)s_workspace_pi.dwProcessId;
+	}
+	return 0;
+}
+
 void
 service_orchestrator_apply_config(const struct service_config *cfg)
 {
@@ -920,6 +929,12 @@ const char *
 service_orchestrator_get_workspace_display_name(void)
 {
 	return "";
+}
+
+unsigned long
+service_orchestrator_get_workspace_pid(void)
+{
+	return 0;
 }
 
 #endif // XRT_OS_WINDOWS

@@ -65,6 +65,20 @@ service_orchestrator_is_workspace_available(void);
 const char *
 service_orchestrator_get_workspace_display_name(void);
 
+/*!
+ * PID of the workspace controller process spawned by this orchestrator, or 0
+ * if no orchestrator-spawned workspace is running.
+ *
+ * Used by the IPC layer to authenticate `workspace_activate` requests: only
+ * the process the orchestrator launched may transition the runtime into
+ * workspace mode. A return value of 0 means manual mode — first-claim wins.
+ *
+ * Return type is `unsigned long` (not `DWORD`) so this header stays free of
+ * `<windows.h>`; callers cast as needed.
+ */
+unsigned long
+service_orchestrator_get_workspace_pid(void);
+
 #ifdef __cplusplus
 }
 #endif
