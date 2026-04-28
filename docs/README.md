@@ -89,6 +89,9 @@ Design docs, status trackers, and plans — some shipped, some in progress.
 - [Spatial Desktop PRD](roadmap/spatial-desktop-prd.md) — product vision
 - [Spatial Workspace Extensions Plan](roadmap/spatial-workspace-extensions-plan.md) — three-phase plan to decouple the shell from the runtime: boundary rename (Phase 1, done), policy migration behind extensions (Phase 2), repo severance (Phase 3)
 - [Workspace Extensions Header Sketch](roadmap/spatial-workspace-extensions-headers-draft.md) — `XR_EXT_spatial_workspace.h` + `XR_EXT_app_launcher.h` C-level API draft, mapping table from the existing IPC RPCs, mechanism-vs-policy lists, open design questions
+- [Workspace Controller Detection](roadmap/spatial-workspace-controller-detection.md) — Phase 2.0 prep: orchestrator detects installed controller via sidecar `.controller.json` manifest; tray submenu shows / hides accordingly. Makes the bare-runtime install (no shell) a real product
+- [Workspace Activation Auth Handshake](roadmap/spatial-workspace-auth-handshake.md) — Phase 2.0 prep: orchestrator-PID match replaces the brand-coupled `application_name == "displayxr-shell"` check
+- [Phase 2 Audit](roadmap/spatial-workspace-extensions-phase2-audit.md) — line-by-line classification of the 162 remaining `shell` mentions in `comp_d3d11_service.cpp` as mechanism / policy / gone, with sub-step migration order (2.A through 2.H)
 - [Workspace/Runtime Contract](roadmap/workspace-runtime-contract.md) — IPC message set between a workspace controller and the runtime (the current implementation; promoted to public extensions in Phase 2)
 - [Display Spatial Model](roadmap/display-spatial-model.md) — displays in the spatial graph (#46)
 - [Multi-Display Single Machine](roadmap/multi-display-single-machine.md) — multiple displays, one machine (#69)

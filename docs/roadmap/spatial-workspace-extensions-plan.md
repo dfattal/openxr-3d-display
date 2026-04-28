@@ -40,11 +40,18 @@ After Phase 1: the public runtime's IPC protocol, core interface, and orchestrat
 
 ### Phase 2 — Mechanism vs policy split (separate branches, weeks)
 
-Move policy (which apps exist, what tiles to show, layout-preset semantics, registered_apps.json management, capture client lifecycle) **out of the compositor** into the shell process behind the workspace extensions. Mechanism (multi-client atlas composition, raycast hit-test against window planes, offscreen capture, IPC plumbing) **stays in the runtime** under neutral names.
+Phase 2 is preceded by **Phase 2.0** — two short pieces of architectural prep that gate the larger code migrations. Both modify the orchestrator and tray; both are designed in their own docs:
 
-This is where the 217 internal mentions get cleaned up — most by deletion (the code moves to the shell process), the rest by renaming once they're clearly mechanism with no policy embedded.
+- **[Workspace controller detection](spatial-workspace-controller-detection.md)** — orchestrator detects whether a workspace controller binary is installed and reads its sidecar `.controller.json` manifest for display metadata. Tray submenu shows / hides accordingly. Makes the runtime a real platform: bare-runtime install (no shell) gives a useful product (OpenXR + WebXR bridge) with no Workspace submenu; installing the shell adds the submenu.
+- **[Workspace activation auth handshake](spatial-workspace-auth-handshake.md)** — replaces the literal `"displayxr-shell"` `application_name` match in `ipc_server_handler.c:296` with an orchestrator-PID match. Removes the last brand coupling in the runtime.
 
-Output: two extension surfaces frozen and published — `XR_DISPLAYXR_spatial_workspace` (the compositor-side extension: window pose, focus, capture) and `XR_DISPLAYXR_app_launcher` (launcher tile registry, click events).
+After Phase 2.0 the runtime ships standalone, recognises any installed workspace controller by its manifest, and grants the activation right by spawn-PID rather than by hardcoded name. With that scaffolding in place, Phase 2 then moves policy out of the compositor:
+
+Move policy (which apps exist, what tiles to show, layout-preset semantics, registered_apps.json management, capture client lifecycle) **out of the compositor** into the workspace controller process behind the workspace extensions. Mechanism (multi-client atlas composition, raycast hit-test against window planes, offscreen capture, IPC plumbing) **stays in the runtime** under neutral names.
+
+This is where the 162 internal mentions in `comp_d3d11_service.cpp` (down from 217 after Phase 1) get cleaned up — most by deletion (the code moves to the workspace process), the rest by renaming once they're clearly mechanism with no policy embedded. The line-by-line classification is in the [Phase 2 audit](spatial-workspace-extensions-phase2-audit.md), which proposes 8 sub-steps (2.A through 2.H) ordered lowest-blast-radius-first.
+
+Output: two extension surfaces frozen and published — `XR_EXT_spatial_workspace` (the compositor-side extension: window pose, focus, capture) and `XR_EXT_app_launcher` (launcher tile registry, click events). Header sketches in [spatial-workspace-extensions-headers-draft.md](spatial-workspace-extensions-headers-draft.md).
 
 ### Phase 3 — Severance (separate branches, weeks)
 

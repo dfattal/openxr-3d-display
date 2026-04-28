@@ -54,7 +54,18 @@ After Phase 2: the file shrinks meaningfully. The launcher cluster (4660 lines w
 
 ## Migration order — Phase 2 sub-steps
 
-The plan doc proposed an order; the audit confirms it. Here it is again with the audit's classification linked back:
+The plan doc proposed an order; the audit confirms it. Phase 2 is preceded by **Phase 2.0** (architectural prep — neither sub-step touches `comp_d3d11_service.cpp` directly):
+
+### Phase 2.0 — Architectural prep (gates Phase 2.A onward)
+
+**Two sister docs, lands as one or two short branches:**
+
+- **[Workspace controller detection](spatial-workspace-controller-detection.md)** — orchestrator file-presence check + sidecar `.controller.json` manifest read; conditional tray UI; hotkey gated on availability. Makes the runtime a real platform (installable without the shell, with a useful WebXR + standalone-OpenXR experience).
+- **[Workspace activation auth handshake](spatial-workspace-auth-handshake.md)** — orchestrator-PID match replaces the literal `"displayxr-shell"` `application_name` match in `ipc_server_handler.c:296`. Removes the last brand coupling in the runtime.
+
+Lands as a few hundred lines of orchestrator + tray + IPC-handler changes. Doesn't touch the compositor body — the 162 mentions in this audit are untouched by Phase 2.0. Phase 2.A starts the compositor migration.
+
+Below: the original 8 sub-steps, lowest-blast-radius first.
 
 ### Phase 2.A — Capture client lifecycle
 
