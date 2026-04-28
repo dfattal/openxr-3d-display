@@ -300,7 +300,7 @@ comp_d3d11_service_get_capture_client_window_pose(struct xrt_system_compositor *
 
 /*!
  * Eagerly create the shell compositor window (for empty shell startup).
- * Called after shell_activate when no clients are connected yet, so the
+ * Called after workspace_activate when no clients are connected yet, so the
  * window exists to receive Ctrl+O app launch requests.
  */
 bool
@@ -309,7 +309,7 @@ comp_d3d11_service_ensure_shell_window(struct xrt_system_compositor *xsysc);
 /*!
  * Deactivate the shell: stop captures and restore 2D windows, suspend
  * multi-compositor (hide window, release DP, stop render loop).
- * Called by ipc_handle_shell_deactivate().
+ * Called by ipc_handle_workspace_deactivate().
  *
  * @param xsysc The system compositor (must be D3D11 service in shell mode).
  *
@@ -322,7 +322,7 @@ comp_d3d11_service_deactivate_shell(struct xrt_system_compositor *xsysc);
  * Show or hide the spatial launcher panel. When visible, the multi-compositor
  * draws a rounded-corner launcher overlay at the zero-disparity plane
  * (z = 0 in display coordinates). Called by
- * ipc_handle_shell_set_launcher_visible() in response to Ctrl+L from the shell.
+ * ipc_handle_launcher_set_visible() in response to Ctrl+L from the shell.
  *
  * No-op if the shell is not currently active.
  *

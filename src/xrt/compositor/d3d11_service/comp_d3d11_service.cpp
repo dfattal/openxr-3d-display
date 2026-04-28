@@ -327,13 +327,13 @@ struct d3d11_service_system
 	//! Phase 5.8: spatial launcher app registry, pushed from the shell
 	//! process via clear+add IPC calls. Lives on the service (not the
 	//! multi-comp) so it survives multi-comp create/destroy cycles —
-	//! the shell can push at any time, even before shell_activate.
+	//! the shell can push at any time, even before workspace_activate.
 	struct ipc_launcher_app launcher_apps[IPC_LAUNCHER_MAX_APPS];
 	uint32_t launcher_app_count;
 
 	//! Phase 5.9/5.10: pending launcher tile click. Set by the WM_LBUTTONDOWN
 	//! handler when the user clicks a tile, consumed by the shell via
-	//! ipc_call_shell_poll_launcher_click(). -1 means no pending click.
+	//! ipc_call_launcher_poll_click(). -1 means no pending click.
 	//! Also carries IPC_LAUNCHER_ACTION_BROWSE for the Browse tile.
 	//! Phase 6.6: also carries IPC_LAUNCHER_ACTION_REMOVE + the removed
 	//! tile's full index in pending_launcher_remove_full_index.
@@ -744,7 +744,7 @@ struct d3d11_multi_compositor
 	bool suspended;
 
 	//! Phase 5.7: spatial launcher panel visible.
-	//! Toggled by Ctrl+L via ipc_call_shell_set_launcher_visible. When true, the
+	//! Toggled by Ctrl+L via ipc_call_launcher_set_visible. When true, the
 	//! render loop draws a rounded-corner panel at the zero-disparity plane.
 	//! The app list it renders lives on d3d11_service_system (sys->launcher_apps).
 	bool launcher_visible;

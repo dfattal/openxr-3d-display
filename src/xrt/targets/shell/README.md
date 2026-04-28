@@ -35,8 +35,8 @@ The shell is a pure IPC client — it communicates with the runtime exclusively 
 ```
 DisplayXR Shell (policy)
   │
-  │  3 IPC calls: shell_activate, shell_set_window_pose, shell_get_window_pose
-  │  + capture: shell_add_capture_client, shell_remove_capture_client
+  │  3 IPC calls: workspace_activate, workspace_set_window_pose, workspace_get_window_pose
+  │  + capture: workspace_add_capture_client, workspace_remove_capture_client
   │
   ▼
 DisplayXR Runtime (mechanism)
