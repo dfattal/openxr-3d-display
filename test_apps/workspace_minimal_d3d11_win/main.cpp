@@ -1,0 +1,261 @@
+// Copyright 2026, DisplayXR
+// SPDX-License-Identifier: BSL-1.0
+//
+// workspace_minimal_d3d11_win
+//
+// Minimal validation client for XR_EXT_spatial_workspace (Phase 2.A).
+// Creates an instance + session, resolves the five extension PFNs, and walks
+// through activate -> get-state -> add/remove capture client -> deactivate.
+//
+// Two valid run paths:
+//   1. Launched under an authorized workspace orchestrator -> activate
+//      returns XR_SUCCESS and the full sequence runs.
+//   2. Launched standalone -> activate returns XR_ERROR_FEATURE_UNSUPPORTED
+//      (Phase 2.0 PID-auth denies the call). The test reports the deny and
+//      exits cleanly.
+//
+// Any other outcome is a test failure.
+//
+// XR_USE_GRAPHICS_API_D3D11 and XR_USE_PLATFORM_WIN32 are set by CMake's
+// target_compile_definitions; do not redefine here.
+
+#include <Unknwn.h>
+#include <windows.h>
+#include <d3d11.h>
+#include <dxgi1_2.h>
+#include <wrl/client.h>
+
+#include <openxr/openxr.h>
+#include <openxr/openxr_platform.h>
+#include <openxr/XR_EXT_spatial_workspace.h>
+
+#include <cstdio>
+#include <cstring>
+#include <vector>
+
+using Microsoft::WRL::ComPtr;
+
+namespace {
+
+const char *
+xr_result_str(XrResult r)
+{
+	switch (r) {
+	case XR_SUCCESS: return "XR_SUCCESS";
+	case XR_ERROR_FEATURE_UNSUPPORTED: return "XR_ERROR_FEATURE_UNSUPPORTED";
+	case XR_ERROR_LIMIT_REACHED: return "XR_ERROR_LIMIT_REACHED";
+	case XR_ERROR_FUNCTION_UNSUPPORTED: return "XR_ERROR_FUNCTION_UNSUPPORTED";
+	case XR_ERROR_VALIDATION_FAILURE: return "XR_ERROR_VALIDATION_FAILURE";
+	case XR_ERROR_RUNTIME_FAILURE: return "XR_ERROR_RUNTIME_FAILURE";
+	case XR_ERROR_HANDLE_INVALID: return "XR_ERROR_HANDLE_INVALID";
+	default: return "<other>";
+	}
+}
+
+#define CHECK_XR(stmt, label)                                                                                          \
+	do {                                                                                                           \
+		XrResult _r = (stmt);                                                                                  \
+		std::printf("[%-44s] %s (%d)\n", label, xr_result_str(_r), _r);                                        \
+		if (XR_FAILED(_r)) {                                                                                   \
+			return _r;                                                                                     \
+		}                                                                                                      \
+	} while (0)
+
+XrResult
+run_workspace_test()
+{
+	// 1. Enumerate available instance extensions and confirm our extension is listed.
+	uint32_t propCount = 0;
+	XrResult r = xrEnumerateInstanceExtensionProperties(nullptr, 0, &propCount, nullptr);
+	if (XR_FAILED(r)) {
+		std::printf("[xrEnumerateInstanceExtensionProperties (count)] %s\n", xr_result_str(r));
+		return r;
+	}
+	std::vector<XrExtensionProperties> props(propCount, {XR_TYPE_EXTENSION_PROPERTIES});
+	r = xrEnumerateInstanceExtensionProperties(nullptr, propCount, &propCount, props.data());
+	if (XR_FAILED(r)) {
+		std::printf("[xrEnumerateInstanceExtensionProperties] %s\n", xr_result_str(r));
+		return r;
+	}
+
+	bool workspace_listed = false;
+	for (const auto &p : props) {
+		if (std::strcmp(p.extensionName, XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME) == 0) {
+			workspace_listed = true;
+			std::printf("[enumerate                                ] found %s v%u\n", p.extensionName,
+			            p.extensionVersion);
+			break;
+		}
+	}
+	if (!workspace_listed) {
+		std::printf("FAIL: runtime did not advertise %s\n", XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME);
+		return XR_ERROR_RUNTIME_FAILURE;
+	}
+
+	// 2. Create instance with the workspace extension + D3D11 graphics binding.
+	const char *enabled_exts[] = {
+	    XR_KHR_D3D11_ENABLE_EXTENSION_NAME,
+	    XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME,
+	};
+	XrInstanceCreateInfo instInfo = {XR_TYPE_INSTANCE_CREATE_INFO};
+	instInfo.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
+	std::strncpy(instInfo.applicationInfo.applicationName, "workspace_minimal_d3d11_win",
+	             sizeof(instInfo.applicationInfo.applicationName) - 1);
+	instInfo.applicationInfo.applicationVersion = 1;
+	instInfo.enabledExtensionCount = (uint32_t)(sizeof(enabled_exts) / sizeof(enabled_exts[0]));
+	instInfo.enabledExtensionNames = enabled_exts;
+
+	XrInstance instance = XR_NULL_HANDLE;
+	CHECK_XR(xrCreateInstance(&instInfo, &instance), "xrCreateInstance");
+
+	// 3. Resolve the five extension PFNs (must be non-null when extension is enabled).
+	PFN_xrActivateSpatialWorkspaceEXT pfnActivate = nullptr;
+	PFN_xrDeactivateSpatialWorkspaceEXT pfnDeactivate = nullptr;
+	PFN_xrGetSpatialWorkspaceStateEXT pfnGetState = nullptr;
+	PFN_xrAddWorkspaceCaptureClientEXT pfnAddCapture = nullptr;
+	PFN_xrRemoveWorkspaceCaptureClientEXT pfnRemoveCapture = nullptr;
+
+	struct PfnLookup {
+		const char *name;
+		PFN_xrVoidFunction *out;
+	};
+	PfnLookup lookups[] = {
+	    {"xrActivateSpatialWorkspaceEXT", reinterpret_cast<PFN_xrVoidFunction *>(&pfnActivate)},
+	    {"xrDeactivateSpatialWorkspaceEXT", reinterpret_cast<PFN_xrVoidFunction *>(&pfnDeactivate)},
+	    {"xrGetSpatialWorkspaceStateEXT", reinterpret_cast<PFN_xrVoidFunction *>(&pfnGetState)},
+	    {"xrAddWorkspaceCaptureClientEXT", reinterpret_cast<PFN_xrVoidFunction *>(&pfnAddCapture)},
+	    {"xrRemoveWorkspaceCaptureClientEXT", reinterpret_cast<PFN_xrVoidFunction *>(&pfnRemoveCapture)},
+	};
+	for (const auto &l : lookups) {
+		PFN_xrVoidFunction fn = nullptr;
+		XrResult lr = xrGetInstanceProcAddr(instance, l.name, &fn);
+		std::printf("[xrGetInstanceProcAddr(%-32s)] %s\n", l.name, xr_result_str(lr));
+		if (XR_FAILED(lr) || fn == nullptr) {
+			xrDestroyInstance(instance);
+			return XR_ERROR_FUNCTION_UNSUPPORTED;
+		}
+		*l.out = fn;
+	}
+
+	// 4. Get system + create a D3D11 device + session.
+	XrSystemGetInfo sysInfo = {XR_TYPE_SYSTEM_GET_INFO};
+	sysInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+	XrSystemId systemId = XR_NULL_SYSTEM_ID;
+	CHECK_XR(xrGetSystem(instance, &sysInfo, &systemId), "xrGetSystem");
+
+	PFN_xrGetD3D11GraphicsRequirementsKHR pfnGetGfxReq = nullptr;
+	CHECK_XR(xrGetInstanceProcAddr(instance, "xrGetD3D11GraphicsRequirementsKHR",
+	                               reinterpret_cast<PFN_xrVoidFunction *>(&pfnGetGfxReq)),
+	         "xrGetInstanceProcAddr(D3D11GraphicsReq)");
+
+	XrGraphicsRequirementsD3D11KHR gfxReq = {XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR};
+	CHECK_XR(pfnGetGfxReq(instance, systemId, &gfxReq), "xrGetD3D11GraphicsRequirementsKHR");
+
+	ComPtr<IDXGIFactory1> dxgiFactory;
+	if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(dxgiFactory.GetAddressOf())))) {
+		std::printf("FAIL: CreateDXGIFactory1\n");
+		xrDestroyInstance(instance);
+		return XR_ERROR_RUNTIME_FAILURE;
+	}
+	ComPtr<IDXGIAdapter1> adapter;
+	for (UINT i = 0; dxgiFactory->EnumAdapters1(i, adapter.ReleaseAndGetAddressOf()) == S_OK; ++i) {
+		DXGI_ADAPTER_DESC1 desc = {};
+		adapter->GetDesc1(&desc);
+		if (std::memcmp(&desc.AdapterLuid, &gfxReq.adapterLuid, sizeof(LUID)) == 0) {
+			break;
+		}
+		adapter.Reset();
+	}
+	if (!adapter) {
+		// Fall back to the default adapter; the runtime may accept it.
+		dxgiFactory->EnumAdapters1(0, adapter.ReleaseAndGetAddressOf());
+	}
+
+	ComPtr<ID3D11Device> device;
+	ComPtr<ID3D11DeviceContext> context;
+	D3D_FEATURE_LEVEL featureLevels[] = {D3D_FEATURE_LEVEL_11_0};
+	D3D_FEATURE_LEVEL chosen = D3D_FEATURE_LEVEL_11_0;
+	HRESULT hr = D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, featureLevels,
+	                               1, D3D11_SDK_VERSION, device.GetAddressOf(), &chosen,
+	                               context.GetAddressOf());
+	if (FAILED(hr)) {
+		std::printf("FAIL: D3D11CreateDevice hr=0x%08lx\n", (unsigned long)hr);
+		xrDestroyInstance(instance);
+		return XR_ERROR_RUNTIME_FAILURE;
+	}
+
+	XrGraphicsBindingD3D11KHR d3dBinding = {XR_TYPE_GRAPHICS_BINDING_D3D11_KHR};
+	d3dBinding.device = device.Get();
+
+	XrSessionCreateInfo sessInfo = {XR_TYPE_SESSION_CREATE_INFO};
+	sessInfo.next = &d3dBinding;
+	sessInfo.systemId = systemId;
+	XrSession session = XR_NULL_HANDLE;
+	CHECK_XR(xrCreateSession(instance, &sessInfo, &session), "xrCreateSession");
+
+	// 5. Walk the workspace lifecycle.
+	XrResult activate_r = pfnActivate(session);
+	std::printf("[xrActivateSpatialWorkspaceEXT             ] %s\n", xr_result_str(activate_r));
+
+	if (activate_r == XR_ERROR_FEATURE_UNSUPPORTED) {
+		std::printf("INFO: standalone launch — workspace orchestrator did not authorize this PID.\n");
+		std::printf("      Re-launch under displayxr-shell.exe (or another orchestrator) to exercise\n");
+		std::printf("      the success path. This deny is a valid Phase 2.A test outcome.\n");
+		xrDestroySession(session);
+		xrDestroyInstance(instance);
+		return XR_SUCCESS;
+	}
+	if (XR_FAILED(activate_r)) {
+		xrDestroySession(session);
+		xrDestroyInstance(instance);
+		return activate_r;
+	}
+
+	// Authorized path — exercise the full surface.
+	XrBool32 active = XR_FALSE;
+	CHECK_XR(pfnGetState(session, &active), "xrGetSpatialWorkspaceStateEXT");
+	std::printf("INFO: workspace active = %s\n", active ? "XR_TRUE" : "XR_FALSE");
+
+	HWND target = FindWindowA(nullptr, "Calculator");
+	if (!target) {
+		target = FindWindowA(nullptr, "Notepad");
+	}
+	if (!target) {
+		target = GetDesktopWindow(); // last-resort: a guaranteed valid HWND for the API smoke test
+		std::printf("INFO: no Calculator/Notepad window found; using desktop HWND for capture API smoke "
+		            "test.\n");
+	}
+
+	XrWorkspaceClientId clientId = XR_NULL_WORKSPACE_CLIENT_ID;
+	CHECK_XR(pfnAddCapture(session, (uint64_t)(uintptr_t)target, "workspace_minimal smoke test", &clientId),
+	         "xrAddWorkspaceCaptureClientEXT");
+	if (clientId == XR_NULL_WORKSPACE_CLIENT_ID) {
+		std::printf("FAIL: clientId is XR_NULL_WORKSPACE_CLIENT_ID after add\n");
+		xrDestroySession(session);
+		xrDestroyInstance(instance);
+		return XR_ERROR_RUNTIME_FAILURE;
+	}
+	std::printf("INFO: added capture client id=%u\n", (unsigned)clientId);
+
+	CHECK_XR(pfnRemoveCapture(session, clientId), "xrRemoveWorkspaceCaptureClientEXT");
+	CHECK_XR(pfnDeactivate(session), "xrDeactivateSpatialWorkspaceEXT");
+
+	xrDestroySession(session);
+	xrDestroyInstance(instance);
+	return XR_SUCCESS;
+}
+
+} // namespace
+
+int
+main()
+{
+	std::printf("workspace_minimal_d3d11_win — XR_EXT_spatial_workspace smoke test\n");
+	XrResult r = run_workspace_test();
+	if (XR_FAILED(r)) {
+		std::printf("RESULT: FAIL (%s)\n", xr_result_str(r));
+		return 1;
+	}
+	std::printf("RESULT: PASS\n");
+	return 0;
+}
