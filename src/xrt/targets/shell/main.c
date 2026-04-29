@@ -40,6 +40,8 @@
 #include <shellapi.h> // For Shell_NotifyIcon (system tray); PrivateExtractIconsA (Browse PE-icon extract)
 #include <commdlg.h>  // For GetOpenFileNameA (Phase 5.14 Browse tile)
 
+#include "displayxr_shell_resource.h" // IDI_DISPLAYXR_SHELL — embedded tray/PE icon
+
 // PNG encoding for the Browse-for-app PE icon → tile-icon conversion. Defined
 // here (not in shell_app_scan.c) because main.c owns the Browse flow and this
 // keeps the dependency in one TU. STB_IMAGE_WRITE_IMPLEMENTATION must be
@@ -1691,7 +1693,10 @@ tray_create(HWND hwnd)
 	g_nid.uID = 1;
 	g_nid.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE;
 	g_nid.uCallbackMessage = WM_TRAYICON;
-	g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+	g_nid.hIcon = LoadIconA(GetModuleHandleA(NULL), MAKEINTRESOURCEA(IDI_DISPLAYXR_SHELL));
+	if (g_nid.hIcon == NULL) {
+		g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+	}
 	strncpy(g_nid.szTip, "DisplayXR Shell (inactive)", sizeof(g_nid.szTip) - 1);
 	Shell_NotifyIconA(NIM_ADD, &g_nid);
 }

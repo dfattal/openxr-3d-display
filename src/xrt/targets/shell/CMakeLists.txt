@@ -1,13 +1,20 @@
 # Copyright 2026, Leia Inc.
 # SPDX-License-Identifier: BSL-1.0
 
-add_executable(displayxr-shell WIN32
+set(DISPLAYXR_SHELL_SOURCES
     main.c
     shell_pe_scan.c
     shell_pe_scan.h
     shell_app_scan.c
     shell_app_scan.h
+    displayxr_shell_resource.h
 )
+
+if(WIN32)
+    list(APPEND DISPLAYXR_SHELL_SOURCES displayxr_shell.rc)
+endif()
+
+add_executable(displayxr-shell WIN32 ${DISPLAYXR_SHELL_SOURCES})
 add_sanitizers(displayxr-shell)
 
 target_include_directories(displayxr-shell PRIVATE
