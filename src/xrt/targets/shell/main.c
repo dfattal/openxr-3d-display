@@ -79,6 +79,27 @@ static bool g_launcher_visible = false; // Phase 5.7: spatial launcher panel tog
 static HWND g_msg_hwnd = NULL;
 #endif
 
+// Phase 2.I: file-scope OpenXR state. Set in main() after shell_openxr_init
+// succeeds. Helpers throughout the shell dispatch through this pointer; once
+// non-NULL, the corresponding ipc_call_workspace_* / launcher_* / system_*
+// sites have been migrated to the public extension surface.
+static struct shell_openxr_state *g_xr = NULL;
+
+// Phase 2.I: convert struct xrt_pose → XrPosef. The two layouts are
+// field-compatible (quat + vec3) but live in different headers; the runtime
+// already proves this with a field-by-field translation in oxr_workspace.c.
+static inline void
+xrt_pose_to_xr_posef(const struct xrt_pose *in, XrPosef *out)
+{
+	out->orientation.x = in->orientation.x;
+	out->orientation.y = in->orientation.y;
+	out->orientation.z = in->orientation.z;
+	out->orientation.w = in->orientation.w;
+	out->position.x = in->position.x;
+	out->position.y = in->position.y;
+	out->position.z = in->position.z;
+}
+
 static void
 signal_handler(int sig)
 {
@@ -800,8 +821,10 @@ try_apply_poses(struct ipc_connection *ipc_c, struct app_entry *apps, int app_co
 				pose.position.y = apps[a].py;
 				pose.position.z = apps[a].pz;
 
-				r = ipc_call_workspace_set_window_pose(
-				    ipc_c, id, &pose,
+				XrPosef xrpose;
+				xrt_pose_to_xr_posef(&pose, &xrpose);
+				r = (xrt_result_t)g_xr->set_pose(
+				    g_xr->session, id, &xrpose,
 				    apps[a].width_m, apps[a].height_m);
 				if (r == XRT_SUCCESS) {
 					P("Applied pose to client %u: pos=(%.3f,%.3f,%.3f) size=%.3fx%.3f\n",
@@ -1027,7 +1050,7 @@ enumerate_and_adopt_windows(struct ipc_connection *ipc_c,
 		}
 
 		uint32_t cid = 0;
-		xrt_result_t r = ipc_call_workspace_add_capture_client(ipc_c, ce->hwnd, &cid);
+		xrt_result_t r = (xrt_result_t)g_xr->add_capture(g_xr->session, ce->hwnd, NULL, &cid);
 		if (r == XRT_SUCCESS) {
 			ce->client_id = cid;
 			ce->added = true;
@@ -1053,7 +1076,7 @@ cleanup_closed_captures(struct ipc_connection *ipc_c,
 		if (!captures[i].added) continue;
 		if (!IsWindow((HWND)(uintptr_t)captures[i].hwnd)) {
 			P("  Window closed: '%s' (client_id=%u)\n", captures[i].name, captures[i].client_id);
-			ipc_call_workspace_remove_capture_client(ipc_c, captures[i].client_id);
+			(void)g_xr->remove_capture(g_xr->session, captures[i].client_id);
 			// Shift remaining entries
 			for (int j = i; j < *capture_count - 1; j++) {
 				captures[j] = captures[j + 1];
@@ -1590,7 +1613,7 @@ shell_launch_registered_app(struct ipc_connection *ipc_c,
 			GetWindowTextA(found_hwnd, ce->name, sizeof(ce->name));
 
 			uint32_t cid = 0;
-			xrt_result_t r = ipc_call_workspace_add_capture_client(ipc_c, ce->hwnd, &cid);
+			xrt_result_t r = (xrt_result_t)g_xr->add_capture(g_xr->session, ce->hwnd, NULL, &cid);
 			if (r == XRT_SUCCESS) {
 				ce->client_id = cid;
 				ce->added = true;
@@ -1753,7 +1776,7 @@ tray_show_context_menu(HWND hwnd, bool shell_active)
  * writes a JSON sidecar with the metadata returned by the runtime.
  */
 static void
-capture_write_sidecar(const char *json_path, const struct ipc_capture_result *r)
+capture_write_sidecar(const char *json_path, const XrWorkspaceCaptureResultEXT *r)
 {
 	cJSON *root = cJSON_CreateObject();
 	if (root == NULL) {
@@ -1761,36 +1784,36 @@ capture_write_sidecar(const char *json_path, const struct ipc_capture_result *r)
 	}
 
 	cJSON_AddNumberToObject(root, "schema_version", 1);
-	cJSON_AddNumberToObject(root, "timestamp_ns", (double)r->timestamp_ns);
+	cJSON_AddNumberToObject(root, "timestamp_ns", (double)r->timestampNs);
 
 	cJSON *atlas = cJSON_AddObjectToObject(root, "atlas");
-	cJSON_AddNumberToObject(atlas, "width", r->atlas_width);
-	cJSON_AddNumberToObject(atlas, "height", r->atlas_height);
+	cJSON_AddNumberToObject(atlas, "width", r->atlasWidth);
+	cJSON_AddNumberToObject(atlas, "height", r->atlasHeight);
 
 	cJSON *eye = cJSON_AddObjectToObject(root, "eye");
-	cJSON_AddNumberToObject(eye, "width", r->eye_width);
-	cJSON_AddNumberToObject(eye, "height", r->eye_height);
+	cJSON_AddNumberToObject(eye, "width", r->eyeWidth);
+	cJSON_AddNumberToObject(eye, "height", r->eyeHeight);
 
 	cJSON *stereo = cJSON_AddObjectToObject(root, "stereo");
-	cJSON_AddNumberToObject(stereo, "tile_columns", r->tile_columns);
-	cJSON_AddNumberToObject(stereo, "tile_rows", r->tile_rows);
+	cJSON_AddNumberToObject(stereo, "tile_columns", r->tileColumns);
+	cJSON_AddNumberToObject(stereo, "tile_rows", r->tileRows);
 
 	cJSON *disp = cJSON_AddObjectToObject(root, "display_m");
-	cJSON_AddNumberToObject(disp, "width", r->display_width_m);
-	cJSON_AddNumberToObject(disp, "height", r->display_height_m);
+	cJSON_AddNumberToObject(disp, "width", r->displayWidthM);
+	cJSON_AddNumberToObject(disp, "height", r->displayHeightM);
 
 	cJSON *le = cJSON_AddArrayToObject(root, "eye_left_m");
-	cJSON_AddItemToArray(le, cJSON_CreateNumber(r->eye_left_m[0]));
-	cJSON_AddItemToArray(le, cJSON_CreateNumber(r->eye_left_m[1]));
-	cJSON_AddItemToArray(le, cJSON_CreateNumber(r->eye_left_m[2]));
+	cJSON_AddItemToArray(le, cJSON_CreateNumber(r->eyeLeftM[0]));
+	cJSON_AddItemToArray(le, cJSON_CreateNumber(r->eyeLeftM[1]));
+	cJSON_AddItemToArray(le, cJSON_CreateNumber(r->eyeLeftM[2]));
 
 	cJSON *re = cJSON_AddArrayToObject(root, "eye_right_m");
-	cJSON_AddItemToArray(re, cJSON_CreateNumber(r->eye_right_m[0]));
-	cJSON_AddItemToArray(re, cJSON_CreateNumber(r->eye_right_m[1]));
-	cJSON_AddItemToArray(re, cJSON_CreateNumber(r->eye_right_m[2]));
+	cJSON_AddItemToArray(re, cJSON_CreateNumber(r->eyeRightM[0]));
+	cJSON_AddItemToArray(re, cJSON_CreateNumber(r->eyeRightM[1]));
+	cJSON_AddItemToArray(re, cJSON_CreateNumber(r->eyeRightM[2]));
 
 	cJSON *views = cJSON_AddArrayToObject(root, "views_written");
-	if (r->views_written & IPC_CAPTURE_FLAG_ATLAS) {
+	if (r->viewsWritten & XR_WORKSPACE_CAPTURE_FLAG_ATLAS_BIT_EXT) {
 		cJSON_AddItemToArray(views, cJSON_CreateString("atlas"));
 	}
 
@@ -1831,32 +1854,32 @@ capture_frame(struct ipc_connection *ipc_c)
 	SYSTEMTIME st;
 	GetLocalTime(&st);
 
-	struct ipc_capture_request req = {0};
-	snprintf(req.path_prefix, sizeof(req.path_prefix),
+	XrWorkspaceCaptureRequestEXT req = {XR_TYPE_WORKSPACE_CAPTURE_REQUEST_EXT};
+	snprintf(req.pathPrefix, sizeof(req.pathPrefix),
 	         "%s\\capture_%04d-%02d-%02d_%02d-%02d-%02d",
 	         dir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-	req.flags = IPC_CAPTURE_FLAG_ATLAS;
+	req.flags = XR_WORKSPACE_CAPTURE_FLAG_ATLAS_BIT_EXT;
 
-	struct ipc_capture_result result = {0};
-	xrt_result_t r = ipc_call_workspace_capture_frame(ipc_c, &req, &result);
-	if (r != XRT_SUCCESS) {
-		PE("capture: workspace_capture_frame failed: %d\n", r);
+	XrWorkspaceCaptureResultEXT result = {XR_TYPE_WORKSPACE_CAPTURE_RESULT_EXT};
+	XrResult r = g_xr->capture_frame(g_xr->session, &req, &result);
+	if (r != XR_SUCCESS) {
+		PE("capture: xrCaptureWorkspaceFrameEXT failed: %d\n", r);
 		return;
 	}
 
-	if (result.views_written == 0) {
+	if (result.viewsWritten == 0) {
 		PE("capture: runtime returned 0 views written\n");
 		return;
 	}
 
 	char json_path[MAX_PATH];
-	snprintf(json_path, sizeof(json_path), "%s.json", req.path_prefix);
+	snprintf(json_path, sizeof(json_path), "%s.json", req.pathPrefix);
 	capture_write_sidecar(json_path, &result);
 
-	P("Capture saved: %s (views=0x%x atlas=%ux%u eye=%ux%u)\n",
-	  req.path_prefix, result.views_written,
-	  result.atlas_width, result.atlas_height,
-	  result.eye_width, result.eye_height);
+	P("Capture saved: %s (views=0x%llx atlas=%ux%u eye=%ux%u)\n",
+	  req.pathPrefix, (unsigned long long)result.viewsWritten,
+	  result.atlasWidth, result.atlasHeight,
+	  result.eyeWidth, result.eyeHeight);
 }
 
 // WIN32 subsystem entry point — no console window.
@@ -1934,10 +1957,13 @@ main(int argc, char *argv[])
 	// migration. The IPC connection above stays in place; subsequent
 	// commits (C8–C10) replace ipc_call_* sites with PFN calls one cluster
 	// at a time. After C10 the IPC connection itself goes away.
-	struct shell_openxr *xr = shell_openxr_init();
+	struct shell_openxr_state *xr = shell_openxr_init();
 	if (xr == NULL) {
-		PE("shell_openxr_init failed — continuing on internal IPC only.\n");
+		PE("shell_openxr_init failed — workspace + launcher extensions unavailable.\n");
+		ipc_client_connection_fini(&ipc_c);
+		return 1;
 	}
+	g_xr = xr;
 
 	// Load registered apps config (Phase 4C.9 + Phase 5.5 scanner merge)
 	registered_apps_load();
@@ -1993,7 +2019,7 @@ main(int argc, char *argv[])
 
 	if (start_active) {
 		P("Activating shell mode...\n");
-		xret = ipc_call_workspace_activate(&ipc_c);
+		xret = (xrt_result_t)g_xr->activate(g_xr->session);
 		if (xret != XRT_SUCCESS) {
 			PE("Warning: workspace_activate failed\n");
 		}
@@ -2003,7 +2029,7 @@ main(int argc, char *argv[])
 		// Add capture clients
 		for (int i = 0; i < capture_count; i++) {
 			uint32_t cid = 0;
-			xrt_result_t r = ipc_call_workspace_add_capture_client(&ipc_c, captures[i].hwnd, &cid);
+			xrt_result_t r = (xrt_result_t)g_xr->add_capture(g_xr->session, captures[i].hwnd, NULL, &cid);
 			if (r == XRT_SUCCESS) {
 				captures[i].client_id = cid;
 				captures[i].added = true;
@@ -2036,7 +2062,7 @@ main(int argc, char *argv[])
 #else
 	// Non-Windows: simple activate + poll (no hotkey/tray)
 	P("Activating shell mode...\n");
-	xret = ipc_call_workspace_activate(&ipc_c);
+	xret = (xrt_result_t)g_xr->activate(g_xr->session);
 	if (xret != XRT_SUCCESS) {
 		PE("Warning: workspace_activate failed\n");
 	}
@@ -2082,7 +2108,7 @@ main(int argc, char *argv[])
 					// --- Toggle shell active/inactive ---
 					if (g_shell_active) {
 						P("Deactivating shell...\n");
-						ipc_call_workspace_deactivate(&ipc_c);
+						(void)g_xr->deactivate(g_xr->session);
 
 						// Clear local capture tracking
 						for (int i = 0; i < capture_count; i++) {
@@ -2108,7 +2134,7 @@ main(int argc, char *argv[])
 						P("Shell deactivated — waiting in tray.\n");
 					} else {
 						P("Activating shell...\n");
-						xret = ipc_call_workspace_activate(&ipc_c);
+						xret = (xrt_result_t)g_xr->activate(g_xr->session);
 
 						// If IPC pipe is dead (service exited), reconnect.
 						// The IPC client lib auto-starts the service.
@@ -2123,7 +2149,7 @@ main(int argc, char *argv[])
 								Sleep(1000);
 							}
 							if (xret == XRT_SUCCESS) {
-								xret = ipc_call_workspace_activate(&ipc_c);
+								xret = (xrt_result_t)g_xr->activate(g_xr->session);
 								service_pid = find_service_pid();
 							}
 							if (xret != XRT_SUCCESS) {
@@ -2270,8 +2296,9 @@ main(int argc, char *argv[])
 		// Detect server-side deactivation (ESC closed the compositor window).
 		// The compositor sets workspace_mode=false — sync our state.
 		if (g_shell_active) {
-			bool server_active = false;
-			if (ipc_call_workspace_get_state(&ipc_c, &server_active) == XRT_SUCCESS) {
+			XrBool32 server_active_b = XR_FALSE;
+			if (g_xr->get_state(g_xr->session, &server_active_b) == XR_SUCCESS) {
+				bool server_active = (server_active_b == XR_TRUE);
 				if (!server_active) {
 					P("Shell deactivated by compositor (ESC) — returning to tray.\n");
 					capture_count = 0;
@@ -2472,7 +2499,7 @@ main(int argc, char *argv[])
 #ifdef _WIN32
 	// Deactivate shell if still active
 	if (g_shell_active) {
-		ipc_call_workspace_deactivate(&ipc_c);
+		(void)g_xr->deactivate(g_xr->session);
 	}
 
 	// Cleanup hotkey and tray

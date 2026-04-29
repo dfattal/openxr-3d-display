@@ -5,8 +5,10 @@
  * @brief  Shell-side OpenXR scaffolding (Phase 2.I) implementation.
  */
 
-#include "shell_openxr.h"
-
+// d3d11.h must come before openxr_platform.h so the platform header sees
+// ID3D11Device and emits XrGraphicsBindingD3D11KHR / requirements types.
+// shell_openxr.h pulls only core + extension headers; the D3D11 bindings
+// are private to this TU.
 #define WIN32_LEAN_AND_MEAN
 #include <Unknwn.h>
 #include <windows.h>
@@ -15,13 +17,13 @@
 #include <wrl/client.h>
 
 #define XR_USE_GRAPHICS_API_D3D11
-#include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
-#include <openxr/XR_EXT_spatial_workspace.h>
-#include <openxr/XR_EXT_app_launcher.h>
+
+#include "shell_openxr.h"
 
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 using Microsoft::WRL::ComPtr;
 
@@ -43,38 +45,16 @@ const char *xr_result_str(XrResult r)
 	}
 }
 
-} // namespace
-
-struct shell_openxr
+// Internal owner that combines the public state struct (which the
+// caller sees) with the C++ COM smart pointers that hold the D3D11
+// device. The two cannot live in shell_openxr_state because that struct
+// is referenced from pure-C translation units and ComPtr is C++-only.
+struct shell_openxr_owner
 {
+	shell_openxr_state          state{};
 	ComPtr<ID3D11Device>        d3d11_device;
 	ComPtr<ID3D11DeviceContext> d3d11_context;
-
-	XrInstance  instance = XR_NULL_HANDLE;
-	XrSystemId  system_id = XR_NULL_SYSTEM_ID;
-	XrSession   session = XR_NULL_HANDLE;
-
-	// All PFNs the shell calls. Unused PFNs (e.g. hit-test, input drain,
-	// pointer capture) are intentionally not resolved — the shell does not
-	// need them in this migration.
-	PFN_xrActivateSpatialWorkspaceEXT      activate = nullptr;
-	PFN_xrDeactivateSpatialWorkspaceEXT    deactivate = nullptr;
-	PFN_xrGetSpatialWorkspaceStateEXT      get_state = nullptr;
-	PFN_xrAddWorkspaceCaptureClientEXT     add_capture = nullptr;
-	PFN_xrRemoveWorkspaceCaptureClientEXT  remove_capture = nullptr;
-	PFN_xrSetWorkspaceClientWindowPoseEXT  set_pose = nullptr;
-	PFN_xrCaptureWorkspaceFrameEXT         capture_frame = nullptr;
-	PFN_xrClearLauncherAppsEXT             clear_launcher = nullptr;
-	PFN_xrAddLauncherAppEXT                add_launcher_app = nullptr;
-	PFN_xrSetLauncherVisibleEXT            set_launcher_visible = nullptr;
-	PFN_xrPollLauncherClickEXT             poll_launcher_click = nullptr;
-	PFN_xrSetLauncherRunningTileMaskEXT    set_running_tile_mask = nullptr;
-	PFN_xrSetWorkspaceFocusedClientEXT     set_focused = nullptr;
-	PFN_xrEnumerateWorkspaceClientsEXT     enumerate_clients = nullptr;
-	PFN_xrGetWorkspaceClientInfoEXT        get_client_info = nullptr;
 };
-
-namespace {
 
 bool resolve_pfn(XrInstance instance, const char *name, PFN_xrVoidFunction *out)
 {
@@ -125,14 +105,24 @@ bool create_d3d11(XrGraphicsRequirementsD3D11KHR &req, ComPtr<ID3D11Device> &dev
 
 } // namespace
 
-extern "C" struct shell_openxr *shell_openxr_init(void)
+extern "C" struct shell_openxr_state *shell_openxr_init(void)
 {
-	auto *s = new (std::nothrow) shell_openxr();
-	if (s == nullptr) {
+	auto *owner = new (std::nothrow) shell_openxr_owner();
+	if (owner == nullptr) {
 		return nullptr;
 	}
+	shell_openxr_state &s = owner->state;
 
-	// 1. Create instance with the two extensions plus the D3D11 enable.
+	// The hybrid runtime auto-selects between in-process native compositor
+	// and IPC mode based on env vars (see u_sandbox.c). The workspace
+	// extension requires IPC mode — the controller talks to the service
+	// over IPC. Force IPC for our own session via XRT_FORCE_MODE because
+	// u_sandbox.c reads that one through both getenv() and
+	// GetEnvironmentVariableA(), so it sees the value even though the
+	// runtime DLL has its own static CRT and would miss SetEnvironmentVariableA
+	// updates to DISPLAYXR_WORKSPACE_SESSION via getenv().
+	SetEnvironmentVariableA("XRT_FORCE_MODE", "ipc");
+
 	const char *exts[] = {
 	    XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME,
 	    XR_EXT_APP_LAUNCHER_EXTENSION_NAME,
@@ -148,101 +138,96 @@ extern "C" struct shell_openxr *shell_openxr_init(void)
 	ci.enabledExtensionCount = (uint32_t)(sizeof(exts) / sizeof(exts[0]));
 	ci.enabledExtensionNames = exts;
 
-	XrResult r = xrCreateInstance(&ci, &s->instance);
+	XrResult r = xrCreateInstance(&ci, &s.instance);
 	if (XR_FAILED(r)) {
 		PE("shell_openxr: xrCreateInstance failed: %s\n", xr_result_str(r));
-		shell_openxr_shutdown(s);
+		shell_openxr_shutdown(&s);
 		return nullptr;
 	}
 
-	// 2. Get the system + D3D11 graphics requirements.
 	XrSystemGetInfo sgi = {XR_TYPE_SYSTEM_GET_INFO};
 	sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
-	r = xrGetSystem(s->instance, &sgi, &s->system_id);
+	r = xrGetSystem(s.instance, &sgi, &s.system_id);
 	if (XR_FAILED(r)) {
 		PE("shell_openxr: xrGetSystem failed: %s\n", xr_result_str(r));
-		shell_openxr_shutdown(s);
+		shell_openxr_shutdown(&s);
 		return nullptr;
 	}
 
 	PFN_xrGetD3D11GraphicsRequirementsKHR pfnGfxReq = nullptr;
-	r = xrGetInstanceProcAddr(s->instance, "xrGetD3D11GraphicsRequirementsKHR",
+	r = xrGetInstanceProcAddr(s.instance, "xrGetD3D11GraphicsRequirementsKHR",
 	                          reinterpret_cast<PFN_xrVoidFunction *>(&pfnGfxReq));
 	if (XR_FAILED(r) || pfnGfxReq == nullptr) {
 		PE("shell_openxr: xrGetD3D11GraphicsRequirementsKHR resolve failed: %s\n", xr_result_str(r));
-		shell_openxr_shutdown(s);
+		shell_openxr_shutdown(&s);
 		return nullptr;
 	}
 	XrGraphicsRequirementsD3D11KHR gfxReq = {XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR};
-	r = pfnGfxReq(s->instance, s->system_id, &gfxReq);
+	r = pfnGfxReq(s.instance, s.system_id, &gfxReq);
 	if (XR_FAILED(r)) {
 		PE("shell_openxr: get graphics requirements failed: %s\n", xr_result_str(r));
-		shell_openxr_shutdown(s);
+		shell_openxr_shutdown(&s);
 		return nullptr;
 	}
 
-	// 3. Create a minimal D3D11 device. The shell does not render
-	//    swapchains; the binding exists only to satisfy
-	//    oxr_session_create_impl's validation of createInfo->next.
-	if (!create_d3d11(gfxReq, s->d3d11_device, s->d3d11_context)) {
-		shell_openxr_shutdown(s);
+	if (!create_d3d11(gfxReq, owner->d3d11_device, owner->d3d11_context)) {
+		shell_openxr_shutdown(&s);
 		return nullptr;
 	}
 
-	// 4. Create the session bound to the D3D11 device.
 	XrGraphicsBindingD3D11KHR gfxBinding = {XR_TYPE_GRAPHICS_BINDING_D3D11_KHR};
-	gfxBinding.device = s->d3d11_device.Get();
+	gfxBinding.device = owner->d3d11_device.Get();
 	XrSessionCreateInfo sci = {XR_TYPE_SESSION_CREATE_INFO};
 	sci.next = &gfxBinding;
-	sci.systemId = s->system_id;
-	r = xrCreateSession(s->instance, &sci, &s->session);
+	sci.systemId = s.system_id;
+	r = xrCreateSession(s.instance, &sci, &s.session);
 	if (XR_FAILED(r)) {
 		PE("shell_openxr: xrCreateSession failed: %s\n", xr_result_str(r));
-		shell_openxr_shutdown(s);
+		shell_openxr_shutdown(&s);
 		return nullptr;
 	}
 
-	// 5. Resolve the PFNs the shell will dispatch through. Failure of any
-	//    is a hard error — the runtime promised these by enabling the
-	//    extension.
 	struct PfnEntry {
 		const char *name;
 		PFN_xrVoidFunction *out;
 	};
 	PfnEntry entries[] = {
-	    {"xrActivateSpatialWorkspaceEXT",      reinterpret_cast<PFN_xrVoidFunction *>(&s->activate)},
-	    {"xrDeactivateSpatialWorkspaceEXT",    reinterpret_cast<PFN_xrVoidFunction *>(&s->deactivate)},
-	    {"xrGetSpatialWorkspaceStateEXT",      reinterpret_cast<PFN_xrVoidFunction *>(&s->get_state)},
-	    {"xrAddWorkspaceCaptureClientEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s->add_capture)},
-	    {"xrRemoveWorkspaceCaptureClientEXT",  reinterpret_cast<PFN_xrVoidFunction *>(&s->remove_capture)},
-	    {"xrSetWorkspaceClientWindowPoseEXT",  reinterpret_cast<PFN_xrVoidFunction *>(&s->set_pose)},
-	    {"xrCaptureWorkspaceFrameEXT",         reinterpret_cast<PFN_xrVoidFunction *>(&s->capture_frame)},
-	    {"xrClearLauncherAppsEXT",             reinterpret_cast<PFN_xrVoidFunction *>(&s->clear_launcher)},
-	    {"xrAddLauncherAppEXT",                reinterpret_cast<PFN_xrVoidFunction *>(&s->add_launcher_app)},
-	    {"xrSetLauncherVisibleEXT",            reinterpret_cast<PFN_xrVoidFunction *>(&s->set_launcher_visible)},
-	    {"xrPollLauncherClickEXT",             reinterpret_cast<PFN_xrVoidFunction *>(&s->poll_launcher_click)},
-	    {"xrSetLauncherRunningTileMaskEXT",    reinterpret_cast<PFN_xrVoidFunction *>(&s->set_running_tile_mask)},
-	    {"xrSetWorkspaceFocusedClientEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s->set_focused)},
-	    {"xrEnumerateWorkspaceClientsEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s->enumerate_clients)},
-	    {"xrGetWorkspaceClientInfoEXT",        reinterpret_cast<PFN_xrVoidFunction *>(&s->get_client_info)},
+	    {"xrActivateSpatialWorkspaceEXT",      reinterpret_cast<PFN_xrVoidFunction *>(&s.activate)},
+	    {"xrDeactivateSpatialWorkspaceEXT",    reinterpret_cast<PFN_xrVoidFunction *>(&s.deactivate)},
+	    {"xrGetSpatialWorkspaceStateEXT",      reinterpret_cast<PFN_xrVoidFunction *>(&s.get_state)},
+	    {"xrAddWorkspaceCaptureClientEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s.add_capture)},
+	    {"xrRemoveWorkspaceCaptureClientEXT",  reinterpret_cast<PFN_xrVoidFunction *>(&s.remove_capture)},
+	    {"xrSetWorkspaceClientWindowPoseEXT",  reinterpret_cast<PFN_xrVoidFunction *>(&s.set_pose)},
+	    {"xrCaptureWorkspaceFrameEXT",         reinterpret_cast<PFN_xrVoidFunction *>(&s.capture_frame)},
+	    {"xrClearLauncherAppsEXT",             reinterpret_cast<PFN_xrVoidFunction *>(&s.clear_launcher)},
+	    {"xrAddLauncherAppEXT",                reinterpret_cast<PFN_xrVoidFunction *>(&s.add_launcher_app)},
+	    {"xrSetLauncherVisibleEXT",            reinterpret_cast<PFN_xrVoidFunction *>(&s.set_launcher_visible)},
+	    {"xrPollLauncherClickEXT",             reinterpret_cast<PFN_xrVoidFunction *>(&s.poll_launcher_click)},
+	    {"xrSetLauncherRunningTileMaskEXT",    reinterpret_cast<PFN_xrVoidFunction *>(&s.set_running_tile_mask)},
+	    {"xrSetWorkspaceFocusedClientEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s.set_focused)},
+	    {"xrEnumerateWorkspaceClientsEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s.enumerate_clients)},
+	    {"xrGetWorkspaceClientInfoEXT",        reinterpret_cast<PFN_xrVoidFunction *>(&s.get_client_info)},
 	};
 	for (const auto &e : entries) {
-		if (!resolve_pfn(s->instance, e.name, e.out)) {
-			shell_openxr_shutdown(s);
+		if (!resolve_pfn(s.instance, e.name, e.out)) {
+			shell_openxr_shutdown(&s);
 			return nullptr;
 		}
 	}
 
 	P("shell_openxr: instance=%p session=%p (15 PFNs resolved)\n",
-	  (void *)s->instance, (void *)s->session);
-	return s;
+	  (void *)s.instance, (void *)s.session);
+	return &owner->state;
 }
 
-extern "C" void shell_openxr_shutdown(struct shell_openxr *s)
+extern "C" void shell_openxr_shutdown(struct shell_openxr_state *s)
 {
 	if (s == nullptr) {
 		return;
 	}
+	// shell_openxr_state is the first field of shell_openxr_owner so the
+	// pointer round-trips losslessly.
+	auto *owner = reinterpret_cast<shell_openxr_owner *>(s);
 	if (s->session != XR_NULL_HANDLE) {
 		xrDestroySession(s->session);
 		s->session = XR_NULL_HANDLE;
@@ -251,22 +236,5 @@ extern "C" void shell_openxr_shutdown(struct shell_openxr *s)
 		xrDestroyInstance(s->instance);
 		s->instance = XR_NULL_HANDLE;
 	}
-	delete s;
+	delete owner;
 }
-
-extern "C" void *shell_openxr_session(struct shell_openxr *s)              { return s ? (void *)s->session : nullptr; }
-extern "C" void *shell_openxr_pfn_activate(struct shell_openxr *s)         { return s ? (void *)s->activate : nullptr; }
-extern "C" void *shell_openxr_pfn_deactivate(struct shell_openxr *s)       { return s ? (void *)s->deactivate : nullptr; }
-extern "C" void *shell_openxr_pfn_get_state(struct shell_openxr *s)        { return s ? (void *)s->get_state : nullptr; }
-extern "C" void *shell_openxr_pfn_add_capture(struct shell_openxr *s)      { return s ? (void *)s->add_capture : nullptr; }
-extern "C" void *shell_openxr_pfn_remove_capture(struct shell_openxr *s)   { return s ? (void *)s->remove_capture : nullptr; }
-extern "C" void *shell_openxr_pfn_set_pose(struct shell_openxr *s)         { return s ? (void *)s->set_pose : nullptr; }
-extern "C" void *shell_openxr_pfn_capture_frame(struct shell_openxr *s)    { return s ? (void *)s->capture_frame : nullptr; }
-extern "C" void *shell_openxr_pfn_clear_launcher(struct shell_openxr *s)   { return s ? (void *)s->clear_launcher : nullptr; }
-extern "C" void *shell_openxr_pfn_add_launcher_app(struct shell_openxr *s) { return s ? (void *)s->add_launcher_app : nullptr; }
-extern "C" void *shell_openxr_pfn_set_launcher_visible(struct shell_openxr *s)  { return s ? (void *)s->set_launcher_visible : nullptr; }
-extern "C" void *shell_openxr_pfn_poll_launcher_click(struct shell_openxr *s)   { return s ? (void *)s->poll_launcher_click : nullptr; }
-extern "C" void *shell_openxr_pfn_set_running_tile_mask(struct shell_openxr *s) { return s ? (void *)s->set_running_tile_mask : nullptr; }
-extern "C" void *shell_openxr_pfn_set_focused(struct shell_openxr *s)      { return s ? (void *)s->set_focused : nullptr; }
-extern "C" void *shell_openxr_pfn_enumerate_clients(struct shell_openxr *s){ return s ? (void *)s->enumerate_clients : nullptr; }
-extern "C" void *shell_openxr_pfn_get_client_info(struct shell_openxr *s)  { return s ? (void *)s->get_client_info : nullptr; }
