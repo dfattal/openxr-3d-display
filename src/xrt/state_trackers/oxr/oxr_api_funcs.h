@@ -843,6 +843,18 @@ oxr_xrSetWorkspaceFocusedClientEXT(XrSession session, XrWorkspaceClientId client
 //! OpenXR API function @ep{xrGetWorkspaceFocusedClientEXT}
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetWorkspaceFocusedClientEXT(XrSession session, XrWorkspaceClientId *outClientId);
+//! OpenXR API function @ep{xrEnumerateWorkspaceInputEventsEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrEnumerateWorkspaceInputEventsEXT(XrSession session,
+                                       uint32_t capacityInput,
+                                       uint32_t *countOutput,
+                                       XrWorkspaceInputEventEXT *events);
+//! OpenXR API function @ep{xrEnableWorkspacePointerCaptureEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrEnableWorkspacePointerCaptureEXT(XrSession session, uint32_t button);
+//! OpenXR API function @ep{xrDisableWorkspacePointerCaptureEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDisableWorkspacePointerCaptureEXT(XrSession session);
 #endif
 
 #ifdef OXR_HAVE_EXT_app_launcher

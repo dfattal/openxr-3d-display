@@ -26,6 +26,12 @@
 #include "client/ipc_client.h"
 #include "ipc_client_generated.h"
 
+// Phase 2.D: the workspace input-event bridge translates wire events into
+// the public extension struct so the state tracker can pass its public-API
+// array through without seeing IPC types. Pulling the public header here
+// is fine — it lives outside the IPC layer's coupling concerns.
+#include <openxr/XR_EXT_spatial_workspace.h>
+
 #include <string.h>
 #include <stdio.h>
 #if !defined(XRT_OS_WINDOWS)
@@ -370,6 +376,121 @@ comp_ipc_client_compositor_workspace_get_focused_client(struct xrt_compositor *x
 		return XRT_ERROR_IPC_FAILURE;
 	}
 	return ipc_call_workspace_get_focused_client(icc->ipc_c, out_client_id);
+}
+
+xrt_result_t
+comp_ipc_client_compositor_workspace_enumerate_input_events(struct xrt_compositor *xc,
+                                                            uint32_t requested_capacity,
+                                                            uint32_t *out_count,
+                                                            void *out_events_buf,
+                                                            size_t event_stride,
+                                                            size_t event_buf_capacity)
+{
+	if (xc == NULL || out_count == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	*out_count = 0;
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	// When the caller has no buffer space we ask the server for zero
+	// events so the (destructive) drain doesn't lose anything. capacity=0
+	// is the only valid count-query because drained events are not
+	// returned by a subsequent call.
+	uint32_t cap = requested_capacity;
+	if (out_events_buf == NULL || event_buf_capacity == 0 || event_stride == 0) {
+		cap = 0;
+	}
+	if (cap > event_buf_capacity) {
+		cap = (uint32_t)event_buf_capacity;
+	}
+	if (cap > IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX) {
+		cap = IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX;
+	}
+
+	struct ipc_workspace_input_event_batch batch = {0};
+	xrt_result_t xret = ipc_call_workspace_enumerate_input_events(icc->ipc_c, cap, &batch);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	if (cap == 0 || out_events_buf == NULL) {
+		*out_count = 0;
+		return XRT_SUCCESS;
+	}
+
+	// Translate wire events → public XrWorkspaceInputEventEXT records.
+	// The caller's stride lets the bridge stay agnostic to the public
+	// struct's exact layout — but we know what fields it carries because
+	// the public header is part of the runtime ABI we own.
+	uint32_t copy = batch.count;
+	if (copy > cap) {
+		copy = cap;
+	}
+	uint8_t *dst = (uint8_t *)out_events_buf;
+	for (uint32_t i = 0; i < copy; i++) {
+		const struct ipc_workspace_input_event *src = &batch.events[i];
+		XrWorkspaceInputEventEXT *out =
+		    (XrWorkspaceInputEventEXT *)(dst + (size_t)i * event_stride);
+		memset(out, 0, sizeof(*out));
+		out->eventType = (XrWorkspaceInputEventTypeEXT)src->event_type;
+		out->timestampMs = src->timestamp_ms;
+		switch (src->event_type) {
+		case IPC_WORKSPACE_INPUT_EVENT_POINTER:
+			out->pointer.hitClientId = (XrWorkspaceClientId)src->u.pointer.hit_client_id;
+			out->pointer.hitRegion = (XrWorkspaceHitRegionEXT)src->u.pointer.hit_region;
+			out->pointer.localUV.x = src->u.pointer.local_u;
+			out->pointer.localUV.y = src->u.pointer.local_v;
+			out->pointer.cursorX = (int32_t)src->u.pointer.cursor_x;
+			out->pointer.cursorY = (int32_t)src->u.pointer.cursor_y;
+			out->pointer.button = src->u.pointer.button;
+			out->pointer.isDown = src->u.pointer.is_down ? XR_TRUE : XR_FALSE;
+			out->pointer.modifiers = src->u.pointer.modifiers;
+			break;
+		case IPC_WORKSPACE_INPUT_EVENT_POINTER_HOVER:
+			out->pointerHover.prevClientId =
+			    (XrWorkspaceClientId)src->u.pointer_hover.prev_client_id;
+			out->pointerHover.prevRegion =
+			    (XrWorkspaceHitRegionEXT)src->u.pointer_hover.prev_region;
+			out->pointerHover.currentClientId =
+			    (XrWorkspaceClientId)src->u.pointer_hover.curr_client_id;
+			out->pointerHover.currentRegion =
+			    (XrWorkspaceHitRegionEXT)src->u.pointer_hover.curr_region;
+			break;
+		case IPC_WORKSPACE_INPUT_EVENT_KEY:
+			out->key.vkCode = src->u.key.vk_code;
+			out->key.isDown = src->u.key.is_down ? XR_TRUE : XR_FALSE;
+			out->key.modifiers = src->u.key.modifiers;
+			break;
+		case IPC_WORKSPACE_INPUT_EVENT_SCROLL:
+			out->scroll.deltaY = src->u.scroll.delta_y;
+			out->scroll.cursorX = (int32_t)src->u.scroll.cursor_x;
+			out->scroll.cursorY = (int32_t)src->u.scroll.cursor_y;
+			out->scroll.modifiers = src->u.scroll.modifiers;
+			break;
+		default:
+			break;
+		}
+	}
+	*out_count = copy;
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+comp_ipc_client_compositor_workspace_pointer_capture_set(struct xrt_compositor *xc,
+                                                         bool enabled,
+                                                         uint32_t button)
+{
+	if (xc == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	return ipc_call_workspace_pointer_capture_set(icc->ipc_c, enabled, button);
 }
 
 /*

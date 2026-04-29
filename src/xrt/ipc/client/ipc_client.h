@@ -209,6 +209,28 @@ xrt_result_t
 comp_ipc_client_compositor_workspace_get_focused_client(struct xrt_compositor *xc, uint32_t *out_client_id);
 
 /*!
+ * Phase 2.D: drain the workspace public-event ring.
+ *
+ * The state tracker passes an opaque buffer + size so it does not need to
+ * include shared/ipc_protocol.h. The wire-format event size is
+ * @p event_stride bytes; capacity is @p event_capacity entries (clamped to
+ * IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX server-side). On return, @p out_count
+ * is the number of events actually written.
+ */
+xrt_result_t
+comp_ipc_client_compositor_workspace_enumerate_input_events(struct xrt_compositor *xc,
+                                                            uint32_t requested_capacity,
+                                                            uint32_t *out_count,
+                                                            void *out_events_buf,
+                                                            size_t event_stride,
+                                                            size_t event_buf_capacity);
+
+xrt_result_t
+comp_ipc_client_compositor_workspace_pointer_capture_set(struct xrt_compositor *xc,
+                                                         bool enabled,
+                                                         uint32_t button);
+
+/*!
  * Launcher bridges (XR_EXT_app_launcher).
  *
  * Same gating contract as the workspace_* family — only valid when `xc` is

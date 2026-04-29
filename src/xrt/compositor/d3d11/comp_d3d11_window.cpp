@@ -202,6 +202,17 @@ struct comp_d3d11_window
 	volatile LONG input_ring_write; //!< Next write index (WndProc thread)
 	volatile LONG input_ring_read;  //!< Next read index (compositor thread)
 
+	//! Phase 2.D: parallel ring for the public xrEnumerateWorkspaceInputEventsEXT
+	//! path. SPSC; producer is WndProc, consumer is the service-side drain that
+	//! enriches each pointer event with hit-test info before exposing on IPC.
+	struct workspace_public_event_raw workspace_public_ring[WORKSPACE_PUBLIC_RING_SIZE];
+	volatile LONG workspace_public_ring_write;
+	volatile LONG workspace_public_ring_read;
+
+	//! Phase 2.D: pointer-capture flag honored by WndProc click filtering.
+	volatile LONG workspace_pointer_capture_enabled;
+	volatile LONG workspace_pointer_capture_button;
+
 	//! Target HWND for SetForegroundWindow request (compositor writes, window thread reads).
 	//! NULL means no pending request. Window thread clears after calling SetForegroundWindow.
 	volatile HWND pending_foreground_hwnd;
@@ -245,6 +256,50 @@ input_ring_push(struct comp_d3d11_window *w,
 	w->input_ring[wr].mapped_y = mapped_y;
 	MemoryBarrier();
 	InterlockedExchange(&w->input_ring_write, next);
+}
+
+/*!
+ * Phase 2.D: push a raw event into the public-event ring (WndProc thread only).
+ * Drops events when the ring is full; the workspace controller's drain rate
+ * sets the bound, but losing input here is preferable to blocking WndProc.
+ */
+static void
+workspace_public_ring_push(struct comp_d3d11_window *w,
+                           uint32_t kind,
+                           int32_t cursor_x,
+                           int32_t cursor_y,
+                           uint32_t button_or_vk,
+                           uint32_t is_down,
+                           uint32_t modifiers,
+                           float scroll_delta_y)
+{
+	LONG wr = InterlockedCompareExchange(&w->workspace_public_ring_write, 0, 0);
+	LONG rd = InterlockedCompareExchange(&w->workspace_public_ring_read, 0, 0);
+	LONG next = (wr + 1) % WORKSPACE_PUBLIC_RING_SIZE;
+	if (next == rd) {
+		return;
+	}
+	struct workspace_public_event_raw *ev = &w->workspace_public_ring[wr];
+	ev->kind = kind;
+	ev->timestamp_ms = (uint32_t)GetTickCount();
+	ev->cursor_x = cursor_x;
+	ev->cursor_y = cursor_y;
+	ev->button_or_vk = button_or_vk;
+	ev->is_down = is_down;
+	ev->modifiers = modifiers;
+	ev->scroll_delta_y = scroll_delta_y;
+	MemoryBarrier();
+	InterlockedExchange(&w->workspace_public_ring_write, next);
+}
+
+static uint32_t
+workspace_compute_modifiers(void)
+{
+	uint32_t m = 0;
+	if (GetAsyncKeyState(VK_SHIFT) & 0x8000)   m |= 1u << 0;
+	if (GetAsyncKeyState(VK_CONTROL) & 0x8000) m |= 1u << 1;
+	if (GetAsyncKeyState(VK_MENU) & 0x8000)    m |= 1u << 2;
+	return m;
 }
 
 /*!
@@ -482,6 +537,20 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_SYSKEYUP:
 	case WM_CHAR:
 	case WM_SYSCHAR: {
+		// Phase 2.D: emit KEY events to the public-event ring before any
+		// suppression / forwarding logic so a workspace controller draining
+		// xrEnumerateWorkspaceInputEventsEXT sees the key regardless of
+		// whether the runtime forwards it. WM_CHAR/WM_SYSCHAR are post-
+		// translation duplicates of the original VK_* — skip them so the
+		// public surface reports physical keys only.
+		if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) {
+			workspace_public_ring_push(w, WORKSPACE_PUBLIC_EVENT_KEY, 0, 0,
+			                           (uint32_t)wParam, 1, workspace_compute_modifiers(), 0.0f);
+		} else if (message == WM_KEYUP || message == WM_SYSKEYUP) {
+			workspace_public_ring_push(w, WORKSPACE_PUBLIC_EVENT_KEY, 0, 0,
+			                           (uint32_t)wParam, 0, workspace_compute_modifiers(), 0.0f);
+		}
+
 		// Phase 5.12: when the workspace is suppressing input (launcher visible,
 		// resize drag, or within the post-launcher grace period) we eat the
 		// key entirely — don't forward, don't run qwerty. Otherwise the
@@ -606,6 +675,41 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_MBUTTONUP:
 	case WM_MOUSEMOVE:
 	case WM_MOUSEWHEEL: {
+		// Phase 2.D: emit POINTER and SCROLL events to the public-event ring
+		// before any filtering. SendInput-injected mouse events are still
+		// skipped here — they're the runtime's own forwarded clicks bouncing
+		// back, not new user input. Per-frame WM_MOUSEMOVE events are not
+		// emitted (Phase 2.D explicitly excludes per-frame motion; a
+		// controller wanting hover info polls xrWorkspaceHitTestEXT).
+		if (GetMessageExtraInfo() != (LPARAM)WORKSPACE_SENDINPUT_MARKER &&
+		    message != WM_MOUSEMOVE) {
+			int32_t cx = GET_X_LPARAM(lParam);
+			int32_t cy = GET_Y_LPARAM(lParam);
+			uint32_t mods = workspace_compute_modifiers();
+			if (message == WM_MOUSEWHEEL) {
+				int16_t delta_int = GET_WHEEL_DELTA_WPARAM(wParam);
+				float delta = (float)delta_int / (float)WHEEL_DELTA;
+				// WM_MOUSEWHEEL coords are screen-space; convert to client.
+				POINT clip = {cx, cy};
+				ScreenToClient(hWnd, &clip);
+				workspace_public_ring_push(w, WORKSPACE_PUBLIC_EVENT_SCROLL,
+				                           clip.x, clip.y, 0, 0, mods, delta);
+			} else {
+				uint32_t button = 0;
+				uint32_t is_down = 0;
+				switch (message) {
+				case WM_LBUTTONDOWN: button = 1; is_down = 1; break;
+				case WM_LBUTTONUP:   button = 1; is_down = 0; break;
+				case WM_RBUTTONDOWN: button = 2; is_down = 1; break;
+				case WM_RBUTTONUP:   button = 2; is_down = 0; break;
+				case WM_MBUTTONDOWN: button = 3; is_down = 1; break;
+				case WM_MBUTTONUP:   button = 3; is_down = 0; break;
+				}
+				workspace_public_ring_push(w, WORKSPACE_PUBLIC_EVENT_POINTER,
+				                           cx, cy, button, is_down, mods, 0.0f);
+			}
+		}
+
 		// Skip forwarding when workspace drag/resize is active or within the
 		// launcher grace period.
 		if (input_is_suppressed(w)) {
@@ -1381,6 +1485,39 @@ comp_d3d11_window_consume_input_events(struct comp_d3d11_window *window,
 		count++;
 	}
 	return count;
+}
+
+extern "C" uint32_t
+comp_d3d11_window_consume_workspace_public_events(struct comp_d3d11_window *window,
+                                                  struct workspace_public_event_raw *out_events,
+                                                  uint32_t max_events)
+{
+	if (window == NULL || out_events == NULL || max_events == 0) {
+		return 0;
+	}
+	uint32_t count = 0;
+	while (count < max_events) {
+		LONG rd = InterlockedCompareExchange(&window->workspace_public_ring_read, 0, 0);
+		LONG wr = InterlockedCompareExchange(&window->workspace_public_ring_write, 0, 0);
+		if (rd == wr) {
+			break;
+		}
+		MemoryBarrier();
+		out_events[count] = window->workspace_public_ring[rd];
+		InterlockedExchange(&window->workspace_public_ring_read, (rd + 1) % WORKSPACE_PUBLIC_RING_SIZE);
+		count++;
+	}
+	return count;
+}
+
+extern "C" void
+comp_d3d11_window_set_workspace_pointer_capture(struct comp_d3d11_window *window, bool enabled, uint32_t button)
+{
+	if (window == NULL) {
+		return;
+	}
+	InterlockedExchange(&window->workspace_pointer_capture_enabled, enabled ? 1 : 0);
+	InterlockedExchange(&window->workspace_pointer_capture_button, (LONG)button);
 }
 
 extern "C" void

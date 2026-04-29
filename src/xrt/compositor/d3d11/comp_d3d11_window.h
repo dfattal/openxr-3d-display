@@ -44,6 +44,38 @@ struct workspace_input_event
 #define WORKSPACE_INPUT_RING_SIZE 64
 
 /*!
+ * Phase 2.D: raw event captured by WndProc for the public-API event drain
+ * (xrEnumerateWorkspaceInputEventsEXT). The service-side drain enriches each
+ * raw POINTER event with the workspace hit-test (clientId, region, UV) before
+ * exposing it on the public surface; KEY and SCROLL events pass through with
+ * no extra geometry.
+ *
+ * Kept separate from `struct workspace_input_event` (the capture-client ring
+ * for SendInput dispatch) — this ring is parallel and consumed by a different
+ * code path. WndProc writes into both rings as appropriate.
+ */
+enum workspace_public_event_kind
+{
+	WORKSPACE_PUBLIC_EVENT_POINTER = 0,
+	WORKSPACE_PUBLIC_EVENT_KEY     = 2,
+	WORKSPACE_PUBLIC_EVENT_SCROLL  = 3,
+};
+
+struct workspace_public_event_raw
+{
+	uint32_t kind;            //!< enum workspace_public_event_kind
+	uint32_t timestamp_ms;    //!< Low 32 bits of GetTickCount.
+	int32_t  cursor_x;        //!< POINTER and SCROLL: client-area px; else 0.
+	int32_t  cursor_y;
+	uint32_t button_or_vk;    //!< POINTER: 1=L, 2=R, 3=M. KEY: VK code.
+	uint32_t is_down;         //!< POINTER and KEY: 1 = down, 0 = up.
+	uint32_t modifiers;       //!< bit0=SHIFT, bit1=CTRL, bit2=ALT.
+	float    scroll_delta_y;  //!< SCROLL only: wheel ticks; positive = up.
+};
+
+#define WORKSPACE_PUBLIC_RING_SIZE 32
+
+/*!
  * Create a self-owned window for the D3D11 compositor.
  *
  * This creates a window on a **dedicated thread**. The window thread
@@ -304,6 +336,33 @@ uint32_t
 comp_d3d11_window_consume_input_events(struct comp_d3d11_window *window,
                                        struct workspace_input_event *out_events,
                                        uint32_t max_events);
+
+/*!
+ * Phase 2.D: drain the public-event ring populated by WndProc for the
+ * xrEnumerateWorkspaceInputEventsEXT path. SPSC; the service-side drain is
+ * the sole consumer.
+ *
+ * @param window     The window object.
+ * @param out_events Array to receive raw events.
+ * @param max_events Maximum number of events to return.
+ * @return Number of events written.
+ */
+uint32_t
+comp_d3d11_window_consume_workspace_public_events(struct comp_d3d11_window *window,
+                                                  struct workspace_public_event_raw *out_events,
+                                                  uint32_t max_events);
+
+/*!
+ * Phase 2.D: set the pointer-capture flag honored by WndProc. While enabled
+ * for a button, button-up events outside any window are still emitted to the
+ * public-event ring (rather than being filtered as out-of-content).
+ *
+ * @param window  The window object.
+ * @param enabled true to enable capture, false to disable.
+ * @param button  Button index (1=L, 2=R, 3=M) when @p enabled is true.
+ */
+void
+comp_d3d11_window_set_workspace_pointer_capture(struct comp_d3d11_window *window, bool enabled, uint32_t button);
 
 /*!
  * Request SetForegroundWindow on the window thread.

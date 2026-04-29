@@ -445,6 +445,35 @@ comp_d3d11_service_workspace_hit_test(struct xrt_system_compositor *xsysc,
                                        float *out_local_v,
                                        uint32_t *out_hit_region);
 
+/*!
+ * Phase 2.D: drain the workspace public-event ring, enriching POINTER events
+ * with hit-test (clientId / region / UV). KEY and SCROLL events pass through.
+ * Up to @p capacity events are written into @p out_batch (max
+ * IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX). Caller passes the batch struct
+ * directly because the IPC handler already has it.
+ *
+ * @param xsysc      The system compositor.
+ * @param capacity   Max events the caller can accept (clamped to batch max).
+ * @param out_batch  The batch to populate (count + events array).
+ * @return true on success (including zero events); false only on usage error.
+ */
+struct ipc_workspace_input_event_batch;
+bool
+comp_d3d11_service_workspace_drain_input_events(struct xrt_system_compositor *xsysc,
+                                                 uint32_t capacity,
+                                                 struct ipc_workspace_input_event_batch *out_batch);
+
+/*!
+ * Phase 2.D: set the workspace pointer-capture flag. While enabled the WndProc
+ * does not filter out-of-content button-up events from the public ring.
+ *
+ * @return true on success; false if @p xsysc is invalid.
+ */
+bool
+comp_d3d11_service_workspace_pointer_capture_set(struct xrt_system_compositor *xsysc,
+                                                  bool enabled,
+                                                  uint32_t button);
+
 /*! @} */
 
 

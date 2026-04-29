@@ -11727,6 +11727,110 @@ hit_result_to_region(const struct workspace_hit_result &hit)
 }
 
 extern "C" bool
+comp_d3d11_service_workspace_drain_input_events(struct xrt_system_compositor *xsysc,
+                                                 uint32_t capacity,
+                                                 struct ipc_workspace_input_event_batch *out_batch)
+{
+	if (xsysc == nullptr || out_batch == nullptr) {
+		return false;
+	}
+	out_batch->count = 0;
+
+	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
+	struct d3d11_multi_compositor *mc = sys->multi_comp;
+	if (!sys->workspace_mode || mc == nullptr || mc->window == nullptr) {
+		return true; // No workspace active — zero events, success.
+	}
+
+	// Drain at most batch-max raw events from the window-side ring. The
+	// public batch struct caps at IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX (16);
+	// caller-requested capacity may be smaller.
+	uint32_t want = capacity < IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX
+	                  ? capacity
+	                  : IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX;
+	if (want == 0) {
+		return true;
+	}
+
+	struct workspace_public_event_raw raw[IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX];
+	uint32_t got = comp_d3d11_window_consume_workspace_public_events(mc->window, raw, want);
+	if (got == 0) {
+		return true;
+	}
+
+	std::lock_guard<std::recursive_mutex> lock(sys->render_mutex);
+
+	for (uint32_t i = 0; i < got; i++) {
+		const struct workspace_public_event_raw *r = &raw[i];
+		struct ipc_workspace_input_event *ev = &out_batch->events[out_batch->count];
+		memset(ev, 0, sizeof(*ev));
+		ev->event_type = r->kind;
+		ev->timestamp_ms = r->timestamp_ms;
+
+		switch (r->kind) {
+		case WORKSPACE_PUBLIC_EVENT_POINTER: {
+			ev->u.pointer.button = r->button_or_vk;
+			ev->u.pointer.is_down = r->is_down;
+			ev->u.pointer.modifiers = r->modifiers;
+			ev->u.pointer.cursor_x = (int64_t)r->cursor_x;
+			ev->u.pointer.cursor_y = (int64_t)r->cursor_y;
+
+			// Enrich with hit-test (run inside the same render-mutex
+			// region so geometry is stable across the batch).
+			POINT pt = {(LONG)r->cursor_x, (LONG)r->cursor_y};
+			struct workspace_hit_result hit = workspace_raycast_hit_test(sys, mc, pt);
+			ev->u.pointer.hit_region = hit_result_to_region(hit);
+			if (hit.slot >= 0) {
+				ev->u.pointer.hit_client_id = 1000u + (uint32_t)hit.slot;
+				if (hit.in_content) {
+					float win_w = mc->clients[hit.slot].window_width_m;
+					float win_h = mc->clients[hit.slot].window_height_m;
+					if (win_w > 0.0f) ev->u.pointer.local_u = hit.local_x_m / win_w;
+					if (win_h > 0.0f) ev->u.pointer.local_v = hit.local_y_m / win_h;
+				}
+			}
+			break;
+		}
+		case WORKSPACE_PUBLIC_EVENT_KEY:
+			ev->u.key.vk_code = r->button_or_vk;
+			ev->u.key.is_down = r->is_down;
+			ev->u.key.modifiers = r->modifiers;
+			break;
+		case WORKSPACE_PUBLIC_EVENT_SCROLL:
+			ev->u.scroll.delta_y = r->scroll_delta_y;
+			ev->u.scroll.cursor_x = (int64_t)r->cursor_x;
+			ev->u.scroll.cursor_y = (int64_t)r->cursor_y;
+			ev->u.scroll.modifiers = r->modifiers;
+			break;
+		default:
+			continue; // skip unknown event kinds
+		}
+		out_batch->count++;
+	}
+
+	return true;
+}
+
+extern "C" bool
+comp_d3d11_service_workspace_pointer_capture_set(struct xrt_system_compositor *xsysc,
+                                                  bool enabled,
+                                                  uint32_t button)
+{
+	if (xsysc == nullptr) {
+		return false;
+	}
+	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
+	struct d3d11_multi_compositor *mc = sys->multi_comp;
+	if (mc == nullptr || mc->window == nullptr) {
+		// Workspace not active — no-op success so callers don't need to
+		// special-case lifecycle ordering.
+		return true;
+	}
+	comp_d3d11_window_set_workspace_pointer_capture(mc->window, enabled, button);
+	return true;
+}
+
+extern "C" bool
 comp_d3d11_service_workspace_hit_test(struct xrt_system_compositor *xsysc,
                                        int32_t cursor_x,
                                        int32_t cursor_y,

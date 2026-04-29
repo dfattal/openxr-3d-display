@@ -343,6 +343,79 @@ struct ipc_launcher_app
 };
 
 /*!
+ * Phase 2.D: workspace input event wire format. Tagged union with
+ * event_type as the discriminator. Mirrors the public XrWorkspaceInputEventEXT
+ * but uses plain C types (no XR enum dependency in IPC headers). The state
+ * tracker translates between this wire form and the public form so the
+ * extension surface stays decoupled from IPC.
+ *
+ * Cursor coordinates are int64_t over the wire because the proto generator
+ * does not support int32_t (see ipcproto/common.py); the public surface
+ * uses int32_t and the state tracker truncates at the boundary.
+ *
+ * Sized to fit IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX events in IPC_BUF_SIZE.
+ *
+ * @ingroup ipc
+ */
+#define IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX 16
+
+enum ipc_workspace_input_event_type
+{
+	IPC_WORKSPACE_INPUT_EVENT_POINTER       = 0,
+	IPC_WORKSPACE_INPUT_EVENT_POINTER_HOVER = 1,
+	IPC_WORKSPACE_INPUT_EVENT_KEY           = 2,
+	IPC_WORKSPACE_INPUT_EVENT_SCROLL        = 3,
+};
+
+struct ipc_workspace_input_event
+{
+	uint32_t event_type;       //!< enum ipc_workspace_input_event_type
+	uint32_t timestamp_ms;     //!< Host monotonic ms, low 32 bits.
+	union
+	{
+		struct
+		{
+			uint32_t hit_client_id;
+			uint32_t hit_region;     //!< XrWorkspaceHitRegionEXT cast to uint32_t
+			float    local_u;
+			float    local_v;
+			int64_t  cursor_x;
+			int64_t  cursor_y;
+			uint32_t button;         //!< 1=L, 2=R, 3=M
+			uint32_t is_down;        //!< XrBool32 semantics
+			uint32_t modifiers;      //!< bit0=SHIFT, bit1=CTRL, bit2=ALT
+			uint32_t _pad;
+		} pointer;
+		struct
+		{
+			uint32_t prev_client_id;
+			uint32_t prev_region;
+			uint32_t curr_client_id;
+			uint32_t curr_region;
+		} pointer_hover;
+		struct
+		{
+			uint32_t vk_code;
+			uint32_t is_down;
+			uint32_t modifiers;
+		} key;
+		struct
+		{
+			float    delta_y;        //!< Wheel ticks; positive = scroll up
+			int64_t  cursor_x;
+			int64_t  cursor_y;
+			uint32_t modifiers;
+		} scroll;
+	} u;
+};
+
+struct ipc_workspace_input_event_batch
+{
+	uint32_t count;
+	struct ipc_workspace_input_event events[IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX];
+};
+
+/*!
  * Phase 8: 3D capture MVP. Bitmask of which views (sub-images) the shell
  * is requesting from the service compositor's combined atlas.
  *

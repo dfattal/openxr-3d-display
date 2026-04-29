@@ -276,6 +276,106 @@ typedef XrResult (XRAPI_PTR *PFN_xrGetWorkspaceFocusedClientEXT)(
     XrSession            session,
     XrWorkspaceClientId *outClientId);
 
+// ---- Input event drain + pointer capture (spec_version 4) ----
+
+typedef enum XrWorkspaceInputEventTypeEXT {
+    XR_WORKSPACE_INPUT_EVENT_POINTER_EXT       = 0,
+    XR_WORKSPACE_INPUT_EVENT_POINTER_HOVER_EXT = 1, // reserved; not yet emitted
+    XR_WORKSPACE_INPUT_EVENT_KEY_EXT           = 2,
+    XR_WORKSPACE_INPUT_EVENT_SCROLL_EXT        = 3,
+    XR_WORKSPACE_INPUT_EVENT_TYPE_MAX_ENUM_EXT = 0x7FFFFFFF
+} XrWorkspaceInputEventTypeEXT;
+
+/*!
+ * @brief One input event drained from the workspace input queue.
+ *
+ * Tagged C union — `eventType` selects the meaningful union member. Pointer
+ * events carry the workspace hit-test result (clientId / region / UV) the
+ * runtime computed at drain time, so the controller does not need to call
+ * xrWorkspaceHitTestEXT in the common case.
+ *
+ * Hardcoded MVP key policy (see xrEnumerateWorkspaceInputEventsEXT):
+ *   - TAB and DELETE are consumed by the runtime (never delivered to the
+ *     focused HWND, but still emitted on this queue for visibility).
+ *   - ESC is consumed when any window is maximized.
+ *   - Everything else is delivered via this queue AND forwarded to the
+ *     focused client's HWND.
+ *
+ * Per-frame mouse-move events are NOT emitted; controllers wanting hover
+ * feedback poll xrWorkspaceHitTestEXT directly.
+ */
+typedef struct XrWorkspaceInputEventEXT {
+    XrWorkspaceInputEventTypeEXT eventType;
+    uint32_t                     timestampMs;        // host monotonic ms (low 32 bits)
+    union {
+        struct {
+            XrWorkspaceClientId     hitClientId;
+            XrWorkspaceHitRegionEXT hitRegion;
+            XrVector2f              localUV;
+            int32_t                 cursorX;        // display pixels, top-left origin
+            int32_t                 cursorY;
+            uint32_t                button;          // 1=L, 2=R, 3=M
+            XrBool32                isDown;
+            uint32_t                modifiers;       // bit0=SHIFT, bit1=CTRL, bit2=ALT
+        } pointer;
+        struct {  // reserved for future region-transition events
+            XrWorkspaceClientId     prevClientId;
+            XrWorkspaceHitRegionEXT prevRegion;
+            XrWorkspaceClientId     currentClientId;
+            XrWorkspaceHitRegionEXT currentRegion;
+        } pointerHover;
+        struct {
+            uint32_t                vkCode;          // Win32 VK_* (cross-platform mapping TBD)
+            XrBool32                isDown;
+            uint32_t                modifiers;
+        } key;
+        struct {
+            float                   deltaY;          // wheel ticks (+ = up)
+            int32_t                 cursorX;
+            int32_t                 cursorY;
+            uint32_t                modifiers;
+        } scroll;
+    };
+} XrWorkspaceInputEventEXT;
+
+/*!
+ * @brief Drain pending workspace input events into a controller-supplied buffer.
+ *
+ * Up to @p capacityInput events are consumed from the workspace input queue
+ * and written into @p events. The runtime returns the actual number written
+ * via @p countOutput. Events are destructive — once drained, they will not
+ * appear on a subsequent call.
+ *
+ * Maximum events per RPC is implementation-defined and bounded by
+ * IPC_BUF_SIZE; pass at most 16 in @p capacityInput in the current
+ * implementation. A capacity of 0 returns 0 without draining.
+ *
+ * @param session       A valid workspace session.
+ * @param capacityInput The maximum number of events to drain.
+ * @param countOutput   Output: number of events actually written.
+ * @param events        Output array; may be NULL when capacityInput == 0.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrEnumerateWorkspaceInputEventsEXT)(
+    XrSession                  session,
+    uint32_t                   capacityInput,
+    uint32_t                  *countOutput,
+    XrWorkspaceInputEventEXT  *events);
+
+/*!
+ * @brief Begin pointer capture so events for @p button keep flowing even when
+ * the cursor leaves any window.
+ *
+ * Pair with xrDisableWorkspacePointerCaptureEXT to release. Used to
+ * implement controller-driven drag affordances (move, resize) without the
+ * runtime needing to know about drag policy.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrEnableWorkspacePointerCaptureEXT)(
+    XrSession session,
+    uint32_t  button);
+
+typedef XrResult (XRAPI_PTR *PFN_xrDisableWorkspacePointerCaptureEXT)(
+    XrSession session);
+
 #ifndef XR_NO_PROTOTYPES
 XRAPI_ATTR XrResult XRAPI_CALL xrActivateSpatialWorkspaceEXT(
     XrSession session);
@@ -331,6 +431,19 @@ XRAPI_ATTR XrResult XRAPI_CALL xrSetWorkspaceFocusedClientEXT(
 XRAPI_ATTR XrResult XRAPI_CALL xrGetWorkspaceFocusedClientEXT(
     XrSession            session,
     XrWorkspaceClientId *outClientId);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateWorkspaceInputEventsEXT(
+    XrSession                  session,
+    uint32_t                   capacityInput,
+    uint32_t                  *countOutput,
+    XrWorkspaceInputEventEXT  *events);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrEnableWorkspacePointerCaptureEXT(
+    XrSession session,
+    uint32_t  button);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrDisableWorkspacePointerCaptureEXT(
+    XrSession session);
 #endif
 
 #ifdef __cplusplus

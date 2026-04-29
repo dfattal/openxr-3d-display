@@ -30,6 +30,7 @@
 #include <openxr/XR_EXT_spatial_workspace.h>
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef OXR_HAVE_EXT_spatial_workspace
@@ -77,6 +78,17 @@ xrt_result_t
 comp_ipc_client_compositor_workspace_set_focused_client(struct xrt_compositor *xc, uint32_t client_id);
 xrt_result_t
 comp_ipc_client_compositor_workspace_get_focused_client(struct xrt_compositor *xc, uint32_t *out_client_id);
+xrt_result_t
+comp_ipc_client_compositor_workspace_enumerate_input_events(struct xrt_compositor *xc,
+                                                            uint32_t requested_capacity,
+                                                            uint32_t *out_count,
+                                                            void *out_events_buf,
+                                                            size_t event_stride,
+                                                            size_t event_buf_capacity);
+xrt_result_t
+comp_ipc_client_compositor_workspace_pointer_capture_set(struct xrt_compositor *xc,
+                                                         bool enabled,
+                                                         uint32_t button);
 
 
 /*
@@ -496,6 +508,90 @@ oxr_xrGetWorkspaceFocusedClientEXT(XrSession session, XrWorkspaceClientId *outCl
 	}
 	*outClientId = (XrWorkspaceClientId)client_id;
 	return XR_SUCCESS;
+}
+
+
+/*
+ * Input event drain + pointer capture (spec_version 4)
+ */
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrEnumerateWorkspaceInputEventsEXT(XrSession session,
+                                       uint32_t capacityInput,
+                                       uint32_t *countOutput,
+                                       XrWorkspaceInputEventEXT *events)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEnumerateWorkspaceInputEventsEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_spatial_workspace);
+	OXR_VERIFY_ARG_NOT_NULL(&log, countOutput);
+
+	if (capacityInput > 0 && events == NULL) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrEnumerateWorkspaceInputEventsEXT: events must not be NULL when capacityInput > 0");
+	}
+
+	if (!session_is_ipc_client(sess)) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "xrEnumerateWorkspaceInputEventsEXT requires an IPC-mode session");
+	}
+
+	uint32_t count = 0;
+	// Bridge translates wire events → XrWorkspaceInputEventEXT records and
+	// writes them into the caller-supplied array. Pass the array through
+	// as an opaque buffer so st_oxr does not need to peek inside.
+	xrt_result_t xret = comp_ipc_client_compositor_workspace_enumerate_input_events(
+	    &sess->xcn->base, capacityInput, &count, events, sizeof(XrWorkspaceInputEventEXT),
+	    (size_t)capacityInput);
+	if (xret != XRT_SUCCESS) {
+		return xret_to_xr_result(&log, xret, "workspace_enumerate_input_events");
+	}
+	*countOutput = count;
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrEnableWorkspacePointerCaptureEXT(XrSession session, uint32_t button)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrEnableWorkspacePointerCaptureEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_spatial_workspace);
+
+	if (!session_is_ipc_client(sess)) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "xrEnableWorkspacePointerCaptureEXT requires an IPC-mode session");
+	}
+
+	xrt_result_t xret = comp_ipc_client_compositor_workspace_pointer_capture_set(&sess->xcn->base, true, button);
+	return xret_to_xr_result(&log, xret, "workspace_pointer_capture_set(enabled)");
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDisableWorkspacePointerCaptureEXT(XrSession session)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrDisableWorkspacePointerCaptureEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_spatial_workspace);
+
+	if (!session_is_ipc_client(sess)) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "xrDisableWorkspacePointerCaptureEXT requires an IPC-mode session");
+	}
+
+	xrt_result_t xret = comp_ipc_client_compositor_workspace_pointer_capture_set(&sess->xcn->base, false, 0);
+	return xret_to_xr_result(&log, xret, "workspace_pointer_capture_set(disabled)");
 }
 
 #endif // OXR_HAVE_EXT_spatial_workspace

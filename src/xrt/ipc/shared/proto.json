@@ -168,6 +168,22 @@
 		]
 	},
 
+	"workspace_enumerate_input_events": {
+		"in": [
+			{"name": "capacity", "type": "uint32_t"}
+		],
+		"out": [
+			{"name": "batch", "type": "struct ipc_workspace_input_event_batch"}
+		]
+	},
+
+	"workspace_pointer_capture_set": {
+		"in": [
+			{"name": "enabled", "type": "bool"},
+			{"name": "button", "type": "uint32_t"}
+		]
+	},
+
 	"workspace_capture_frame": {
 		"in": [
 			{"name": "request", "type": "struct ipc_capture_request"}

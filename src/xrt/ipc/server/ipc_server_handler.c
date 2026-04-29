@@ -2682,6 +2682,62 @@ ipc_handle_workspace_get_focused_client(volatile struct ipc_client_state *_ics, 
 }
 
 xrt_result_t
+ipc_handle_workspace_enumerate_input_events(volatile struct ipc_client_state *_ics,
+                                            uint32_t capacity,
+                                            struct ipc_workspace_input_event_batch *out_batch)
+{
+	struct ipc_server *s = _ics->server;
+
+	unsigned long expected_pid = get_orchestrator_workspace_pid();
+	unsigned long caller_pid = (unsigned long)_ics->client_state.pid;
+	if (expected_pid != 0 && caller_pid != expected_pid) {
+		return XRT_ERROR_NOT_AUTHORIZED;
+	}
+
+	if (out_batch == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	out_batch->count = 0;
+
+#if defined(XRT_HAVE_D3D11_SERVICE_COMPOSITOR)
+	if (s->xsysc == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	bool ok = comp_d3d11_service_workspace_drain_input_events(s->xsysc, capacity, out_batch);
+	return ok ? XRT_SUCCESS : XRT_ERROR_IPC_FAILURE;
+#else
+	(void)s;
+	(void)capacity;
+	return XRT_ERROR_IPC_FAILURE;
+#endif
+}
+
+xrt_result_t
+ipc_handle_workspace_pointer_capture_set(volatile struct ipc_client_state *_ics, bool enabled, uint32_t button)
+{
+	struct ipc_server *s = _ics->server;
+
+	unsigned long expected_pid = get_orchestrator_workspace_pid();
+	unsigned long caller_pid = (unsigned long)_ics->client_state.pid;
+	if (expected_pid != 0 && caller_pid != expected_pid) {
+		return XRT_ERROR_NOT_AUTHORIZED;
+	}
+
+#if defined(XRT_HAVE_D3D11_SERVICE_COMPOSITOR)
+	if (s->xsysc == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	bool ok = comp_d3d11_service_workspace_pointer_capture_set(s->xsysc, enabled, button);
+	return ok ? XRT_SUCCESS : XRT_ERROR_IPC_FAILURE;
+#else
+	(void)s;
+	(void)enabled;
+	(void)button;
+	return XRT_ERROR_IPC_FAILURE;
+#endif
+}
+
+xrt_result_t
 ipc_handle_workspace_capture_frame(volatile struct ipc_client_state *_ics,
                                 const struct ipc_capture_request *request,
                                 struct ipc_capture_result *out_capture_result)
