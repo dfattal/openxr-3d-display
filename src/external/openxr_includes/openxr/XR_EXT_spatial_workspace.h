@@ -444,6 +444,62 @@ typedef XrResult (XRAPI_PTR *PFN_xrCaptureWorkspaceFrameEXT)(
     const XrWorkspaceCaptureRequestEXT  *request,
     XrWorkspaceCaptureResultEXT         *result);
 
+// ---- Client enumeration (spec_version 5) ----
+
+/*!
+ * @brief Per-client metadata returned by xrGetWorkspaceClientInfoEXT.
+ *
+ * Stable for the lifetime of the connection. Capture clients (adopted via
+ * xrAddWorkspaceCaptureClientEXT) report their controller-supplied name;
+ * OpenXR clients report the application_name they passed at xrCreateInstance.
+ */
+typedef struct XrWorkspaceClientInfoEXT {
+    XrStructureType         type;       // XR_TYPE_WORKSPACE_CLIENT_INFO_EXT
+    void* XR_MAY_ALIAS      next;
+    XrWorkspaceClientId     clientId;
+    XrWorkspaceClientTypeEXT clientType;
+    char                    name[XR_MAX_APPLICATION_NAME_SIZE];
+    uint64_t                pid;        // platform PID (DWORD on Windows, pid_t elsewhere)
+    XrBool32                isFocused;
+    XrBool32                isVisible;
+    uint32_t                zOrder;
+} XrWorkspaceClientInfoEXT;
+
+/*!
+ * @brief Enumerate workspace clients.
+ *
+ * Returns the OpenXR clients currently connected to the workspace. Capture
+ * clients (adopted via xrAddWorkspaceCaptureClientEXT) are tracked
+ * controller-side and are not returned here — the controller already knows
+ * their ids since it added them.
+ *
+ * Standard two-call enumerate idiom: pass capacityInput=0 to get the count,
+ * then pass an array sized to *countOutput on the second call.
+ *
+ * @param session       A valid workspace session.
+ * @param capacityInput Capacity of @p clientIds; 0 for count-query.
+ * @param countOutput   Output: number of clientIds available (or written).
+ * @param clientIds     Output array; may be NULL when capacityInput == 0.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrEnumerateWorkspaceClientsEXT)(
+    XrSession            session,
+    uint32_t             capacityInput,
+    uint32_t            *countOutput,
+    XrWorkspaceClientId *clientIds);
+
+/*!
+ * @brief Read metadata for a single workspace client.
+ *
+ * @param session   A valid workspace session.
+ * @param clientId  The client to query.
+ * @param info      Output: filled XrWorkspaceClientInfoEXT. Caller must set
+ *                  info->type = XR_TYPE_WORKSPACE_CLIENT_INFO_EXT before the call.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrGetWorkspaceClientInfoEXT)(
+    XrSession                  session,
+    XrWorkspaceClientId        clientId,
+    XrWorkspaceClientInfoEXT  *info);
+
 #ifndef XR_NO_PROTOTYPES
 XRAPI_ATTR XrResult XRAPI_CALL xrActivateSpatialWorkspaceEXT(
     XrSession session);
@@ -517,6 +573,17 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCaptureWorkspaceFrameEXT(
     XrSession                            session,
     const XrWorkspaceCaptureRequestEXT  *request,
     XrWorkspaceCaptureResultEXT         *result);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateWorkspaceClientsEXT(
+    XrSession            session,
+    uint32_t             capacityInput,
+    uint32_t            *countOutput,
+    XrWorkspaceClientId *clientIds);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrGetWorkspaceClientInfoEXT(
+    XrSession                  session,
+    XrWorkspaceClientId        clientId,
+    XrWorkspaceClientInfoEXT  *info);
 #endif
 
 #ifdef __cplusplus
