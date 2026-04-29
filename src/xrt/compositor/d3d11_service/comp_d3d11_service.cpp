@@ -488,7 +488,7 @@ struct d3d11_service_system
 	//! Last known 3D rendering mode index (for V-key toggle restore).
 	uint32_t last_3d_mode_index;
 
-	//! Shell mode: multi-compositor with shared window for all clients.
+	//! Workspace mode: multi-compositor with shared window for all clients.
 	//! Read from base.info.workspace_mode on first client connect.
 	bool workspace_mode;
 
@@ -552,7 +552,7 @@ resolve_active_view_dims(const struct d3d11_service_system *sys,
  * One tile represents the full physical display area, so the conversion
  * is m_per_px = display_m / tile_px. For the tile_px denominator use the
  * *active* per-view dims (rendering_modes[idx].view_{width,height}_pixels)
- * when running a non-legacy session — that way shell UI laid out in meters
+ * when running a non-legacy session — that way workspace UI laid out in meters
  * lands inside the active 1920×1080 region in stereo SBS instead of getting
  * sized for the 2160-tall atlas tile and overflowing the top (#158).
  */
@@ -613,7 +613,7 @@ struct d3d11_multi_client_slot
 	//! Client type: IPC (OpenXR app) or capture (2D window).
 	enum d3d11_client_type client_type;
 
-	//! App's HWND (from XR_EXT_win32_window_binding). Shell can resize via SetWindowPos.
+	//! App's HWND (from XR_EXT_win32_window_binding). Workspace can resize via SetWindowPos.
 	HWND app_hwnd;
 
 	//! Actual rendered content dimensions per view (from last layer_commit).
@@ -743,7 +743,7 @@ struct d3d11_multi_compositor
 	//! True after dismiss cleanup (EXIT_REQUEST sent, captures released).
 	bool dismiss_cleanup_done;
 
-	//! Shell deactivated (Ctrl+Space): window hidden, DP released, captures stopped.
+	//! Workspace deactivated (Ctrl+Space): window hidden, DP released, captures stopped.
 	//! Unlike window_dismissed, the multi-comp structure stays alive for re-activation.
 	bool suspended;
 
@@ -762,7 +762,7 @@ struct d3d11_multi_compositor
 	{
 		bool active;         //!< Currently dragging?
 		int32_t slot;        //!< Which slot is being dragged (-1 = none)
-		POINT start_cursor;  //!< Cursor position at drag start (shell-window client pixels)
+		POINT start_cursor;  //!< Cursor position at drag start (workspace-window client pixels)
 		float start_pos_x;   //!< Window pose.position.x at drag start (meters)
 		float start_pos_y;   //!< Window pose.position.y at drag start (meters)
 	} drag;
@@ -867,7 +867,7 @@ struct d3d11_multi_compositor
 
 	//! @name Capture client render timer
 	//! @{
-	std::thread capture_render_thread;              //!< Timer thread for shell rendering
+	std::thread capture_render_thread;              //!< Timer thread for workspace rendering
 	std::atomic<bool> capture_render_running{false}; //!< Thread run flag
 	uint32_t capture_client_count{0};               //!< Number of active capture-type slots
 	//! Wakeup event for the render thread: signaled on shutdown or when an
@@ -881,7 +881,7 @@ struct d3d11_multi_compositor
 
 
 	//! Tracks which capture HWND currently has foreground focus for SendInput.
-	//! NULL means no capture client is foreground (shell window is foreground).
+	//! NULL means no capture client is foreground (workspace window is foreground).
 	HWND current_foreground_capture;
 };
 
@@ -917,8 +917,8 @@ d3d11_service_semaphore_from_xrt(struct xrt_compositor_semaphore *xcsem)
 }
 
 // Write sys->workspace_mode and mirror the flag onto the multi-comp window so
-// its WndProc's ESC-close path can distinguish empty-shell (no focused app)
-// from true non-shell mode — see comp_d3d11_window.cpp ESC handling.
+// its WndProc's ESC-close path can distinguish empty-workspace (no focused app)
+// from true non-workspace mode — see comp_d3d11_window.cpp ESC handling.
 static inline void
 service_set_workspace_mode(struct d3d11_service_system *sys, bool active)
 {
@@ -1074,7 +1074,7 @@ broadcast_rendering_mode_change(struct d3d11_service_system *sys,
 /*!
  * Resolve per-view tile dimensions for layout / DP handoff / capture.
  *
- * Non-legacy sessions (shell + display-info-aware apps) use the true vendor
+ * Non-legacy sessions (workspace + display-info-aware apps) use the true vendor
  * scale from the active rendering mode — for stereo on 4K this is 1920×1080
  * per view. Legacy sessions fall back to the system's compromise dims
  * (display / tile count), preserving existing behavior for apps that aren't
@@ -1426,8 +1426,8 @@ create_layer_resources(struct d3d11_service_system *sys)
 		return false;
 	}
 
-	// Set default full-viewport scissor rect so non-shell rendering isn't clipped.
-	// Shell mode overrides this per-tile in multi_compositor_render().
+	// Set default full-viewport scissor rect so non-workspace rendering isn't clipped.
+	// Workspace mode overrides this per-tile in multi_compositor_render().
 	{
 		D3D11_RECT full_scissor = {0, 0, 16384, 16384}; // Large enough for any display
 		sys->context->RSSetScissorRects(1, &full_scissor);
@@ -1984,7 +1984,7 @@ init_client_render_resources(struct d3d11_service_system *sys,
 
 	HRESULT hr;
 
-	// Shell mode: only create atlas texture. No window, swap chain, or DP.
+	// Workspace mode: only create atlas texture. No window, swap chain, or DP.
 	// The multi-compositor owns those shared resources.
 	// Atlas sized to native display (app HWND is fullscreen, renders at native * scale).
 	if (sys->workspace_mode) {
@@ -2016,7 +2016,7 @@ init_client_render_resources(struct d3d11_service_system *sys,
 
 		hr = sys->device->CreateTexture2D(&atlas_desc, nullptr, res->atlas_texture.put());
 		if (FAILED(hr)) {
-			U_LOG_E("Shell mode: failed to create atlas texture (hr=0x%08X)", hr);
+			U_LOG_E("Workspace mode: failed to create atlas texture (hr=0x%08X)", hr);
 			return XRT_ERROR_D3D11;
 		}
 
@@ -2050,7 +2050,7 @@ init_client_render_resources(struct d3d11_service_system *sys,
 		sys->device->CreateRenderTargetView(
 		    res->atlas_texture.get(), &unorm_rtv_desc, res->atlas_rtv.put());
 
-		U_LOG_W("Shell mode: created atlas-only resources for client (%ux%u)",
+		U_LOG_W("Workspace mode: created atlas-only resources for client (%ux%u)",
 		        atlas_w, atlas_h);
 		return XRT_SUCCESS;
 	}
@@ -2181,11 +2181,11 @@ init_client_render_resources(struct d3d11_service_system *sys,
 	U_LOG_W("Created stereo render target for client (%ux%u)", sys->display_width, sys->display_height);
 
 	// Create display processor via factory (set by the target builder at init time).
-	// Phase 6.1 (#140): skip per-client DP creation when shell mode is active.
+	// Phase 6.1 (#140): skip per-client DP creation when workspace mode is active.
 	// The multi-compositor already owns a shared DP for the combined atlas;
 	// creating a SECOND DP instance causes the SR SDK to recalibrate its
 	// weaver, producing a multi-second stretched-left-eye artifact. The
-	// per-client DP is only needed for standalone (non-shell) rendering.
+	// per-client DP is only needed for standalone (non-workspace) rendering.
 	if (sys->base.info.dp_factory_d3d11 != NULL && !sys->workspace_mode) {
 		auto factory = (xrt_dp_factory_d3d11_fn_t)sys->base.info.dp_factory_d3d11;
 		xrt_result_t dp_ret = factory(sys->device.get(), sys->context.get(), res->hwnd, &res->display_processor);
@@ -2533,7 +2533,7 @@ compositor_create_swapchain(struct xrt_compositor *xc,
 	struct d3d11_service_system *sys = c->sys;
 
 	// Strip protected content flag — not needed for service-side shared textures.
-	// D3D12 client rejects this flag, but it's meaningless for shell mode.
+	// D3D12 client rejects this flag, but it's meaningless for workspace mode.
 	struct xrt_swapchain_create_info local_info = *info;
 	local_info.create = (enum xrt_swapchain_create_flags)(local_info.create & ~XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT);
 	info = &local_info;
@@ -3852,7 +3852,7 @@ multi_compositor_register_client(struct d3d11_service_system *sys, struct d3d11_
 			mc->regrid_pending_ns = os_monotonic_get_ns() + 500000000ULL;
 
 			// Ensure render timer is running. Normally started on capture client
-			// connect, but pure 3D IPC sessions need it too — otherwise shell UI
+			// connect, but pure 3D IPC sessions need it too — otherwise workspace UI
 			// (drag, rotation) only repaints at the app's framerate (very slow on iGPU).
 			capture_render_thread_start(sys);
 
@@ -4043,7 +4043,7 @@ multi_compositor_add_capture_client(struct d3d11_service_system *sys, HWND hwnd,
 			mc->clients[i].saved_exstyle = (LONG)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
 
 			// NOTE: Off-screen move disabled — causes partial black in capture.
-			// The captured window stays on the desktop, occluded by the shell's
+			// The captured window stays on the desktop, occluded by the workspace's
 			// fullscreen window. Capture API gets content regardless.
 
 			// Compute initial size from HWND DPI
@@ -4207,7 +4207,7 @@ multi_compositor_remove_capture_client(struct d3d11_service_system *sys, int slo
 	         slot_index, mc->client_count, mc->capture_client_count);
 
 	// Stop render timer only when all clients (capture and IPC) are gone.
-	// IPC-only sessions now also rely on this thread for smooth shell UI.
+	// IPC-only sessions now also rely on this thread for smooth workspace UI.
 	if (mc->capture_client_count == 0 && mc->client_count == 0) {
 		// Don't join from render thread — stop async
 		mc->capture_render_running.store(false);
@@ -4272,14 +4272,14 @@ multi_compositor_destroy(struct d3d11_multi_compositor *mc)
 /*!
  * Lazily create the multi-compositor window, swap chain, combined atlas, and DP.
  *
- * Called on first layer_commit in shell mode. By this time the target builder
+ * Called on first layer_commit in workspace mode. By this time the target builder
  * has already set dp_factory_d3d11.
  */
 static xrt_result_t
 multi_compositor_ensure_output(struct d3d11_service_system *sys)
 {
 	// Serialize multi-comp init — multiple IPC client threads can call this
-	// concurrently when clients connect simultaneously (e.g., shell launching
+	// concurrently when clients connect simultaneously (e.g., workspace launching
 	// D3D11 + VK apps). Without this lock, both threads create the display
 	// processor, causing SR SDK state corruption and crash.
 	std::lock_guard<std::recursive_mutex> lock(sys->render_mutex);
@@ -4316,7 +4316,7 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 	}
 	mc->hwnd = (HWND)comp_d3d11_window_get_hwnd(mc->window);
 	sys->compositor_hwnd = mc->hwnd;
-	// Seed the window's shell-mode flag from current sys state (service_set_workspace_mode
+	// Seed the window's workspace-mode flag from current sys state (service_set_workspace_mode
 	// no-ops while multi_comp is null, so earlier activation hasn't reached the window).
 	comp_d3d11_window_set_shell_mode_active(mc->window, sys->workspace_mode);
 
@@ -4681,7 +4681,7 @@ static void launcher_set_visible(struct d3d11_service_system *sys,
 
 // Phase 5.13: pop a Win32 context menu at the cursor for a launcher tile.
 // Launch fires the tile like a click; Remove sets hidden_tile_mask so the
-// tile disappears from the grid until the shell re-pushes its registry.
+// tile disappears from the grid until the workspace re-pushes its registry.
 //
 // TrackPopupMenu only runs on the thread that owns the target window, so
 // we dispatch via comp_d3d11_window_show_launcher_context_menu which
@@ -4703,8 +4703,8 @@ launcher_show_context_menu(struct d3d11_service_system *sys,
 		U_LOG_W("Launcher: context menu launch full=%d", full_idx);
 		break;
 	case LAUNCHER_CTX_MENU_RESULT_REMOVE:
-		// Phase 6.6: signal the shell to permanently remove this app from
-		// registered_apps.json. The shell's poll loop picks up the index,
+		// Phase 6.6: signal the workspace to permanently remove this app from
+		// registered_apps.json. The workspace's poll loop picks up the index,
 		// deletes the entry, saves, and re-pushes the registry. The
 		// launcher hides so the re-pushed list renders cleanly.
 		sys->pending_launcher_remove_full_index = full_idx;
@@ -4746,7 +4746,7 @@ launcher_set_visible(struct d3d11_service_system *sys,
 	// Phase 5.12: when opening, force keyboard focus onto the compositor
 	// window. Without this, keys still route to whichever app previously
 	// had focus (the cube) and never reach the WndProc that the launcher's
-	// input-suppress gate lives in. The shell process grants us
+	// input-suppress gate lives in. The workspace process grants us
 	// foreground-activation permission via AllowSetForegroundWindow before
 	// firing this IPC.
 	if (visible && mc->hwnd != nullptr) {
@@ -4787,7 +4787,7 @@ launcher_build_visible_list(const struct d3d11_service_system *sys,
  * Phase 5.9 / 5.13 / 5.14: hit test the launcher grid against a cursor.
  *
  * The launcher panel sits at z=0 in display coordinates (zero-disparity plane),
- * so the cursor position on the shell window converts directly to display
+ * so the cursor position on the workspace window converts directly to display
  * meters — no eye-projection raycast needed. Mirrors the layout math used by
  * the render pass so the visible tiles align with the hit boxes.
  *
@@ -4892,7 +4892,7 @@ launcher_hit_test(struct d3d11_service_system *sys, POINT cursor_px, uint32_t n_
 
 /*!
  * Spatial raycast hit-test: cast a ray from the user's eye through the mouse
- * cursor position on the display surface, and intersect with shell window planes.
+ * cursor position on the display surface, and intersect with workspace window planes.
  *
  * Each window is a 3D rectangle defined by (pose, width_m, height_m).
  * The display is at Z=0 with known physical dimensions.
@@ -5011,8 +5011,8 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 		float win_top = win_y + win_h / 2.0f;
 
 		// Extended bounds including title bar (above content).
-		// Capture clients have no shell title bar — their native chrome is in the content.
-		// Maximized (fullscreen) windows also skip the shell title bar.
+		// Capture clients have no workspace title bar — their native chrome is in the content.
+		// Maximized (fullscreen) windows also skip the workspace title bar.
 		bool has_shell_title_bar = (mc->clients[s].client_type != CLIENT_TYPE_CAPTURE &&
 		                            !mc->clients[s].maximized);
 		float ext_top = win_top + (has_shell_title_bar ? title_bar_h_m : 0.0f);
@@ -5038,7 +5038,7 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 			} else {
 				// Capture clients: map the top strip of captured content as
 				// a drag zone (where the native title bar is). Use the same
-				// height as the shell title bar for consistency.
+				// height as the workspace title bar for consistency.
 				result.in_title_bar = in_window && (local_y < title_bar_h_m);
 				result.in_content = in_window && (local_y >= title_bar_h_m);
 			}
@@ -5617,7 +5617,7 @@ capture_slot_update_srv(struct d3d11_service_system *sys,
  * Render all client atlases into the combined atlas using Level 2 Kooima,
  * then run DP process_atlas and present.
  *
- * Called from compositor_layer_commit in shell mode.
+ * Called from compositor_layer_commit in workspace mode.
  */
 static void
 multi_compositor_render(struct d3d11_service_system *sys)
@@ -5634,14 +5634,14 @@ multi_compositor_render(struct d3d11_service_system *sys)
 	}
 
 	if (mc->suspended) {
-		// Shell deactivated — don't render, wait for re-activation.
+		// Workspace deactivated — don't render, wait for re-activation.
 		return;
 	}
 
 	if (mc->window_dismissed) {
-		// Shell window closed (ESC / close button). Behaves like deactivate:
+		// Workspace window closed (ESC / close button). Behaves like deactivate:
 		// restore 2D windows, send LOSS_PENDING (not EXIT_REQUEST) to IPC
-		// clients. The shell can re-activate via Ctrl+Space.
+		// clients. The workspace can re-activate via Ctrl+Space.
 		if (!mc->dismiss_cleanup_done) {
 			mc->dismiss_cleanup_done = true;
 
@@ -5708,7 +5708,7 @@ multi_compositor_render(struct d3d11_service_system *sys)
 							        app_hwnd, &res->display_processor);
 							// Phase 6.1 (#140): don't call request_display_mode
 							// here — same SR SDK recalibration issue as the
-							// shell activation path. Let the DP come up in the
+							// workspace activation path. Let the DP come up in the
 							// current mode; the V key toggle still works.
 						}
 						U_LOG_W("Dismiss: hot-switched slot %d to standalone", i);
@@ -5724,16 +5724,16 @@ multi_compositor_render(struct d3d11_service_system *sys)
 				xrt_display_processor_d3d11_destroy(&mc->display_processor);
 			}
 
-			U_LOG_W("Multi-comp: shell dismissed — captures restored, IPC clients hot-switched");
+			U_LOG_W("Multi-comp: workspace dismissed — captures restored, IPC clients hot-switched");
 		}
 		return;
 	}
 
 	// Check window validity — ESC or close button triggers deactivate (suspend),
-	// not the old permanent dismiss. The shell can re-activate via Ctrl+Space.
+	// not the old permanent dismiss. The workspace can re-activate via Ctrl+Space.
 	if (mc->window != nullptr && !comp_d3d11_window_is_valid(mc->window)) {
-		U_LOG_W("Multi-comp: window closed (ESC) — deactivating shell");
-		// Set workspace_mode flags to false so the shell process detects the change
+		U_LOG_W("Multi-comp: window closed (ESC) — deactivating workspace");
+		// Set workspace_mode flags to false so the workspace process detects the change
 		service_set_workspace_mode(sys, false);
 		sys->base.info.workspace_mode = false;
 		// Run the full deactivate path (capture teardown, DP release, etc.)
@@ -5790,7 +5790,7 @@ multi_compositor_render(struct d3d11_service_system *sys)
 				sys->pending_launcher_click_index = IPC_LAUNCHER_ACTION_BROWSE;
 				launcher_set_visible(sys, mc, false);
 				// Phase 5.14: see corresponding AllowSetForegroundWindow
-				// call in the LMB click path — grants the shell's file
+				// call in the LMB click path — grants the workspace's file
 				// dialog permission to pop to the front.
 				AllowSetForegroundWindow(ASFW_ANY);
 				U_LOG_W("Launcher: Enter on Browse tile");
@@ -6141,7 +6141,7 @@ after_key_shortcuts:
 					sys->pending_launcher_click_index = IPC_LAUNCHER_ACTION_BROWSE;
 					launcher_set_visible(sys, mc, false);
 					// Phase 5.14: grant any process foreground-activation
-					// permission so the shell's GetOpenFileNameA dialog can
+					// permission so the workspace's GetOpenFileNameA dialog can
 					// pop to the front. The service currently has foreground
 					// from the click, so it has the right to grant this.
 					AllowSetForegroundWindow(ASFW_ANY);
@@ -6562,7 +6562,7 @@ after_key_shortcuts:
 		(void)0; // label target for the launcher-visible fast-path above.
 	}
 
-	// Scroll wheel (shell consumes only when modifier held; plain scroll is
+	// Scroll wheel (workspace consumes only when modifier held; plain scroll is
 	// forwarded to the focused app by the WndProc):
 	//   Shift+Scroll → Z-depth
 	//   Ctrl+Scroll  → resize
@@ -6995,7 +6995,7 @@ after_key_shortcuts:
 	// Windows farther from viewer (lower Z) render first, closer windows on top.
 	// IPC clients are excluded until they have committed at least one
 	// projection layer — their per-client atlas is uninitialized GPU memory
-	// in shell mode (see comment at the atlas-clear gate around :8845), and
+	// in workspace mode (see comment at the atlas-clear gate around :8845), and
 	// `content_view_w/_h` are zero until the first commit. Drawing them at
 	// intermediate entry-animation sizes during Chrome WebGL initialization
 	// produces a narrow black rectangle that jumps to full size when the
@@ -7066,15 +7066,15 @@ after_key_shortcuts:
 
 			// Pick UNORM vs SRGB-typed SRV onto the per-client atlas
 			// based on whether the client's most-recent swapchain was
-			// SRGB-encoded. Atlas storage is TYPELESS in shell mode (see
+			// SRGB-encoded. Atlas storage is TYPELESS in workspace mode (see
 			// init_client_render_resources), so both views were created
 			// up-front. The SRGB-SRV path makes the GPU auto-linearize
 			// on sample — the multi-comp shader (passthrough at
 			// convert_srgb=0) then writes linear values to the combined
 			// atlas, which is what the DP weaver expects. Falls back to
-			// the UNORM SRV if the SRGB SRV isn't available (non-shell
+			// the UNORM SRV if the SRGB SRV isn't available (non-workspace
 			// atlas storage is UNORM and only atlas_srv exists; not
-			// expected to reach here in non-shell mode but stays robust).
+			// expected to reach here in non-workspace mode but stays robust).
 			if (cc->atlas_holds_srgb_bytes && cc->render.atlas_srv_srgb) {
 				slot_srv = cc->render.atlas_srv_srgb.get();
 			} else {
@@ -7181,7 +7181,7 @@ after_key_shortcuts:
 			// each tile at `slot_w_atlas × slot_h_atlas` stride — same
 			// stride compositor_layer_commit writes at, derived from
 			// atlas/tile_columns NOT sys->view_width
-			// (`feedback_atlas_stride_invariant`: in shell mode the
+			// (`feedback_atlas_stride_invariant`: in workspace mode the
 			// per-client atlas is created at native pixel dims while
 			// sys->view_width tracks the SCALED view dim; they diverge).
 			// Content within each tile may be smaller than the slot
@@ -7481,7 +7481,7 @@ after_key_shortcuts:
 
 		// Draw title bar for this slot (inside render_order loop for correct z-order).
 		// Skip for capture clients — their captured content includes the native
-		// window chrome (title bar, tabs, toolbar), so adding a shell title bar
+		// window chrome (title bar, tabs, toolbar), so adding a workspace title bar
 		// would be redundant.
 		if (mc->clients[s].client_type != CLIENT_TYPE_CAPTURE)
 		{
@@ -8492,7 +8492,7 @@ after_key_shortcuts:
 
 			// 4) Tile grid — 4-column wrapping. Each row also reserves space
 			// below the tile for its label. If the registry is empty (e.g.
-			// scanner found no sidecars and shell hasn't pushed yet), show
+			// scanner found no sidecars and workspace hasn't pushed yet), show
 			// an empty-state hint instead of a blank grid.
 			float label_scale = section_scale * 0.425f;
 			float label_h = (float)mc->font_glyph_h * label_scale;
@@ -9099,7 +9099,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	}
 
 	// Clear stereo render target.
-	// In shell mode, skip the clear — the blit overwrites the same tile positions
+	// In workspace mode, skip the clear — the blit overwrites the same tile positions
 	// each frame, so previous content is a safe fallback. Clearing to black here
 	// creates a race: if multi_compositor_render reads this atlas between the clear
 	// and the blit, the window flashes black.
@@ -9178,7 +9178,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 				                                head->hmd->active_rendering_mode_index);
 			}
 			// Switch display mode on the active DP.
-			// In shell mode, the multi-comp owns the DP (per-client has none).
+			// In workspace mode, the multi-comp owns the DP (per-client has none).
 			struct xrt_display_processor_d3d11 *dp = nullptr;
 			if (sys->workspace_mode && sys->multi_comp != nullptr) {
 				dp = sys->multi_comp->display_processor;
@@ -9314,7 +9314,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	bool bridge_override = false;
 	uint32_t active_vw = sys->view_width;
 	uint32_t active_vh = sys->view_height;
-	// Bridge-override also runs in shell mode (Stage 3): the bridge pushes
+	// Bridge-override also runs in workspace mode (Stage 3): the bridge pushes
 	// slot-sized DXR_BridgeViewW/H so the blit crops exactly what the
 	// sample rendered in each tile. Without this the non-override path
 	// uses Chrome's submitted sub.rect.extent — which is the full Chrome
@@ -9322,7 +9322,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	// slot × viewScale. Multi-comp then reads a super-set rect from the
 	// per-client atlas; only the top-left ~slot×viewScale portion is real
 	// content, the rest is clear color → scene occupies only that fraction
-	// of the shell slot after the shader's source→dest scale.
+	// of the workspace slot after the shader's source→dest scale.
 	if (bridge_live) {
 		uint32_t bvw = 0, bvh = 0;
 		// Prefer the CURRENT frame's live HWND (c->render.hwnd) over the
@@ -9578,10 +9578,10 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 			// Tile layout for atlas placement. The slot stride is
 			// derived from the actual per-client atlas size, not from
-			// `sys->view_width` — in shell mode the per-client atlas is
+			// `sys->view_width` — in workspace mode the per-client atlas is
 			// created at native display pixels (e.g. 3840 wide) while
 			// `sys->view_width` tracks the SCALED runtime view dim
-			// (e.g. 960). They DIVERGE in shell mode and using
+			// (e.g. 960). They DIVERGE in workspace mode and using
 			// `sys->view_width` as the tile stride forces a downsample
 			// of any source larger than the scaled view but smaller than
 			// the native slot — costing resolution and distorting aspect.
@@ -9602,7 +9602,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			                     &tile_x, &tile_y);
 
 			// Scale only when source exceeds the slot. Handle apps in
-			// shell with reasonable HWND sizes typically render below the
+			// workspace with reasonable HWND sizes typically render below the
 			// native slot dim → raw copy at full source resolution.
 			float tile_w = static_cast<float>(layout_vw);
 			float tile_h = static_cast<float>(layout_vh);
@@ -9612,10 +9612,10 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 			// Color-space handling diverges between modes
 			// (`feedback_srgb_blit_paths`):
-			//   - non-shell SRGB: sample through SRGB SRV → linearize on
+			//   - non-workspace SRGB: sample through SRGB SRV → linearize on
 			//     sample → write linear bytes to atlas. The DP expects
 			//     linear input.
-			//   - shell mode:     atlas stays gamma-encoded;
+			//   - workspace mode:     atlas stays gamma-encoded;
 			//     multi_compositor_render reads it as-is and the multi-comp
 			//     pipeline downstream handles color space. Linearizing here
 			//     would double-handle gamma.
@@ -9625,7 +9625,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			bool use_scale_shader = can_shader_blit && needs_scale && sys->workspace_mode;
 
 			if (use_srgb_shader) {
-				// Non-shell SRGB: shader blit with SRGB SRV for linearization.
+				// Non-workspace SRGB: shader blit with SRGB SRV for linearization.
 				// The GPU auto-linearizes when sampling through an SRGB SRV.
 				// The DP expects linear input — without this, colors are washed out.
 				wil::com_ptr<ID3D11ShaderResourceView> srgb_srv;
@@ -9653,7 +9653,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 					    layer->data.proj.v[eye].sub.array_index, &box);
 				}
 			} else if (use_scale_shader) {
-				// Shell mode + oversized client content: scale through the
+				// Workspace mode + oversized client content: scale through the
 				// shader using the default (non-SRGB) SRV so sampling reads
 				// raw bytes and writes them unmodified — keeps the per-client
 				// atlas in gamma space, matching the raw-copy path that
@@ -9665,9 +9665,9 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 				    (float)tile_x, (float)tile_y,
 				    dst_w, dst_h, false);
 			} else {
-				// Non-SRGB, or shell mode with content already fitting the
+				// Non-SRGB, or workspace mode with content already fitting the
 				// tile, or shader unavailable: raw byte copy. Multi-comp
-				// (shell) and non-SRGB DP handle the rest as today.
+				// (workspace) and non-SRGB DP handle the rest as today.
 				D3D11_BOX box = {};
 				box.left = static_cast<UINT>(src_x);
 				box.top = static_cast<UINT>(src_y);
@@ -9869,9 +9869,9 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		}
 	}
 
-	// Shell mode: per-client atlas rendering is done. The multi-compositor
+	// Workspace mode: per-client atlas rendering is done. The multi-compositor
 	// composites all client atlases into the combined atlas and presents.
-	// --- Lazy reverse hot-switch (shell re-activated) ---
+	// --- Lazy reverse hot-switch (workspace re-activated) ---
 	// Tear down per-client standalone resources on the app's own thread.
 	// Hide the HWND last (sends WM but app's main thread isn't blocked here
 	// since we're about to return from this layer_commit).
@@ -9890,7 +9890,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		}
 		c->render.hwnd = nullptr;
 
-		// Hide the app's HWND (shell composites the content).
+		// Hide the app's HWND (workspace composites the content).
 		if (c->app_hwnd != nullptr && IsWindow(c->app_hwnd)) {
 			ShowWindowAsync(c->app_hwnd, SW_HIDE);
 		}
@@ -9912,9 +9912,9 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		return XRT_SUCCESS;
 	}
 
-	// --- Lazy standalone init (hot-switch from shell → standalone) ---
-	// Shell was deactivated: workspace_mode is false but this client was created
-	// in shell mode (no swap chain, no DP). Create standalone resources now,
+	// --- Lazy standalone init (hot-switch from workspace → standalone) ---
+	// Workspace was deactivated: workspace_mode is false but this client was created
+	// in workspace mode (no swap chain, no DP). Create standalone resources now,
 	// on the app's own IPC thread — safe from WM deadlocks.
 	if (!c->render.swap_chain) {
 		U_LOG_W("Hot-switch check: swap_chain=NULL, app_hwnd=%p, workspace_mode=%d",
@@ -10135,9 +10135,9 @@ compositor_destroy(struct xrt_compositor *xc)
 
 	// Unregister from multi-compositor before cleanup.
 	// Always unregister if there's a multi_comp — the client may have been
-	// registered in shell mode but is now closing in standalone mode (after
+	// registered in workspace mode but is now closing in standalone mode (after
 	// hot-switch). Without this, the slot stays stale and shows a ghost
-	// remnant on shell re-activate.
+	// remnant on workspace re-activate.
 	if (sys->multi_comp != nullptr) {
 		std::lock_guard<std::recursive_mutex> lock(sys->render_mutex);
 		multi_compositor_unregister_client(sys, c);
@@ -10247,11 +10247,11 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 	}
 
 	if (!is_headless_relay) {
-		// Activate shell mode from system compositor info (set by ipc_server_process.c
+		// Activate workspace mode from system compositor info (set by ipc_server_process.c
 		// after init_all, before any client connects)
 		if (sys->base.info.workspace_mode && !sys->workspace_mode) {
 			service_set_workspace_mode(sys, true);
-			U_LOG_W("Shell mode activated for D3D11 service system");
+			U_LOG_W("Workspace mode activated for D3D11 service system");
 		}
 
 		xrt_result_t res_ret = init_client_render_resources(sys, external_hwnd, sys->xsysd, &c->render);
@@ -10262,11 +10262,11 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 		}
 	}
 
-	// Register with multi-compositor in shell mode. Skip bridge-relay
+	// Register with multi-compositor in workspace mode. Skip bridge-relay
 	// sessions — they're headless metadata channels (no graphics, no
 	// content to display) and a phantom slot keeps mc->client_count > 0
 	// after Chrome's WebXR session ends, which in turn suppresses the
-	// empty-shell "Press Ctrl+L" hint (gated on client_count == 0) and
+	// empty-workspace "Press Ctrl+L" hint (gated on client_count == 0) and
 	// can occlude the launcher when the user summons it post-exit.
 	// compositor_destroy's unregister call is already a no-op on a
 	// never-registered compositor (its loop won't find a matching slot).
@@ -10277,7 +10277,7 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 		// when the client calls xrLocateViews (before the first layer_commit).
 		xrt_result_t mc_ret = multi_compositor_ensure_output(sys);
 		if (mc_ret != XRT_SUCCESS) {
-			U_LOG_E("Shell mode: failed to create multi-comp output");
+			U_LOG_E("Workspace mode: failed to create multi-comp output");
 			fini_client_render_resources(&c->render);
 			delete c;
 			return mc_ret;
@@ -10288,13 +10288,13 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 			slot = multi_compositor_register_client(sys, c);
 		}
 		if (slot < 0) {
-			U_LOG_E("Shell mode: max clients (%d) reached", D3D11_MULTI_MAX_CLIENTS);
+			U_LOG_E("Workspace mode: max clients (%d) reached", D3D11_MULTI_MAX_CLIENTS);
 			fini_client_render_resources(&c->render);
 			delete c;
 			return XRT_ERROR_D3D11;
 		}
 
-		// Store app's HWND in the slot (for future shell commands: resize, input forwarding).
+		// Store app's HWND in the slot (for future workspace commands: resize, input forwarding).
 		// HWND resize is done CLIENT-SIDE in oxr_session_create (before the IPC call)
 		// because cross-process SetWindowPos deadlocks when called from the IPC handler.
 		sys->multi_comp->clients[slot].app_hwnd = (HWND)external_hwnd;
@@ -10765,7 +10765,7 @@ comp_d3d11_service_get_predicted_eye_positions(struct xrt_system_compositor *xsy
 	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
 
 	// Get display processor for eye position prediction.
-	// In shell mode, use the multi-comp's DP (per-client compositors have no DP).
+	// In workspace mode, use the multi-comp's DP (per-client compositors have no DP).
 	// In normal mode, use the active compositor's DP.
 	struct xrt_display_processor_d3d11 *dp = nullptr;
 	if (sys->workspace_mode && sys->multi_comp != nullptr) {
@@ -10941,7 +10941,7 @@ comp_d3d11_service_get_display_dimensions(struct xrt_system_compositor *xsysc,
 	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
 
 	// Try to get display dimensions from display processor.
-	// In shell mode, use multi-comp's DP; in normal mode, use active compositor's DP.
+	// In workspace mode, use multi-comp's DP; in normal mode, use active compositor's DP.
 	struct xrt_display_processor_d3d11 *dp = nullptr;
 	if (sys->workspace_mode && sys->multi_comp != nullptr) {
 		dp = sys->multi_comp->display_processor;
@@ -10983,7 +10983,7 @@ comp_d3d11_service_get_window_metrics(struct xrt_system_compositor *xsysc,
 
 	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
 
-	// In shell mode, use multi-comp's window and DP.
+	// In workspace mode, use multi-comp's window and DP.
 	// In normal mode, use the active compositor's.
 	struct xrt_display_processor_d3d11 *dp = nullptr;
 	HWND metrics_hwnd = nullptr;
@@ -11031,10 +11031,10 @@ comp_d3d11_service_get_window_metrics(struct xrt_system_compositor *xsysc,
 		return false;
 	}
 
-	// In non-shell standalone mode (hot-switched), the app owns the full
+	// In non-workspace standalone mode (hot-switched), the app owns the full
 	// display — use display dimensions directly. The DP renders to the full
 	// display regardless of HWND decorations.
-	// In shell mode, this function isn't called (get_client_window_metrics
+	// In workspace mode, this function isn't called (get_client_window_metrics
 	// handles per-window Kooima).
 	uint32_t win_px_w = disp_px_w;
 	uint32_t win_px_h = disp_px_h;
@@ -11569,8 +11569,8 @@ comp_d3d11_service_get_client_window_metrics(struct xrt_system_compositor *xsysc
 bool
 comp_d3d11_service_owns_window(struct xrt_system_compositor *xsysc)
 {
-	// Shell mode: per-client compositors don't own windows (multi-comp does).
-	// The shell app provides its own HWND and does its own Kooima projection.
+	// Workspace mode: per-client compositors don't own windows (multi-comp does).
+	// The workspace app provides its own HWND and does its own Kooima projection.
 	// Returning false ensures the IPC view pose path uses the display-centric
 	// Kooima with real DP eye tracking, not the camera-centric qwerty path.
 	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
@@ -11578,7 +11578,7 @@ comp_d3d11_service_owns_window(struct xrt_system_compositor *xsysc)
 		return false;
 	}
 
-	// Non-shell mode: check the active compositor's actual ownership.
+	// Non-workspace mode: check the active compositor's actual ownership.
 	// After hot-switch, handle apps still use their external HWND
 	// (owns_window=false), not a Monado-owned one. This must return false
 	// so the IPC view pose path takes the display-centric branch.
@@ -11646,7 +11646,7 @@ comp_d3d11_service_add_capture_client(struct xrt_system_compositor *xsysc,
 	// on first IPC client layer_commit, but capture clients may arrive first).
 	xrt_result_t ret = multi_compositor_ensure_output(sys);
 	if (ret != XRT_SUCCESS || sys->multi_comp == nullptr) {
-		U_LOG_E("Shell: add_capture_client — failed to init multi-compositor (ret=%d)",
+		U_LOG_E("Workspace: add_capture_client — failed to init multi-compositor (ret=%d)",
 		         (int)ret);
 		return -1;
 	}
@@ -11812,16 +11812,16 @@ comp_d3d11_service_ensure_workspace_window(struct xrt_system_compositor *xsysc)
 	struct d3d11_service_system *sys = d3d11_service_system_from_xrt(xsysc);
 	if (!sys->workspace_mode) {
 		service_set_workspace_mode(sys, true);
-		U_LOG_W("Shell mode activated for D3D11 service system (via ensure_workspace_window)");
+		U_LOG_W("Workspace mode activated for D3D11 service system (via ensure_workspace_window)");
 	}
 
 	std::lock_guard<std::recursive_mutex> lock(sys->render_mutex);
 
-	// If shell was suspended (deactivated via Ctrl+Space), resume it:
+	// If workspace was suspended (deactivated via Ctrl+Space), resume it:
 	// show window, recreate DP, restart render thread.
 	if (sys->multi_comp != nullptr && sys->multi_comp->suspended) {
 		struct d3d11_multi_compositor *mc = sys->multi_comp;
-		U_LOG_W("Shell: resuming from suspended state");
+		U_LOG_W("Workspace: resuming from suspended state");
 
 		mc->suspended = false;
 		service_set_workspace_mode(sys, true);
@@ -11839,10 +11839,10 @@ comp_d3d11_service_ensure_workspace_window(struct xrt_system_compositor *xsysc)
 				continue;
 			}
 			slot->compositor->pending_workspace_reentry = true;
-			U_LOG_W("Shell resume: flagged slot %d for lazy reverse hot-switch", i);
+			U_LOG_W("Workspace resume: flagged slot %d for lazy reverse hot-switch", i);
 		}
 
-		// Show the shell window again
+		// Show the workspace window again
 		if (mc->hwnd != nullptr) {
 			ShowWindow(mc->hwnd, SW_SHOW);
 			SetForegroundWindow(mc->hwnd);
@@ -11855,12 +11855,12 @@ comp_d3d11_service_ensure_workspace_window(struct xrt_system_compositor *xsysc)
 			    sys->device.get(), sys->context.get(), mc->hwnd, &mc->display_processor);
 
 			if (dp_ret == XRT_SUCCESS && mc->display_processor != nullptr) {
-				U_LOG_W("Shell resume: display processor recreated");
+				U_LOG_W("Workspace resume: display processor recreated");
 				if (mc->window != nullptr) {
 					comp_d3d11_window_set_shell_dp(mc->window, mc->display_processor);
 				}
 			} else {
-				U_LOG_E("Shell resume: failed to recreate display processor");
+				U_LOG_E("Workspace resume: failed to recreate display processor");
 			}
 		}
 
@@ -11869,15 +11869,15 @@ comp_d3d11_service_ensure_workspace_window(struct xrt_system_compositor *xsysc)
 			capture_render_thread_start(sys);
 		}
 
-		U_LOG_W("Shell: resumed — window shown, DP recreated, render running");
+		U_LOG_W("Workspace: resumed — window shown, DP recreated, render running");
 		return true;
 	}
 
-	// If a previous shell session was dismissed (ESC), tear down its window
+	// If a previous workspace session was dismissed (ESC), tear down its window
 	// and resources so ensure_output creates a fresh one.
 	if (sys->multi_comp != nullptr && sys->multi_comp->window_dismissed) {
 		struct d3d11_multi_compositor *mc = sys->multi_comp;
-		U_LOG_W("Shell: resetting dismissed state from previous session");
+		U_LOG_W("Workspace: resetting dismissed state from previous session");
 
 		// Tear down window and GPU resources (same order as multi_compositor_destroy)
 		if (mc->display_processor != nullptr) {
@@ -11900,17 +11900,17 @@ comp_d3d11_service_ensure_workspace_window(struct xrt_system_compositor *xsysc)
 
 	xrt_result_t ret = multi_compositor_ensure_output(sys);
 	if (ret != XRT_SUCCESS || sys->multi_comp == nullptr) {
-		U_LOG_E("Shell: failed to create shell window (ret=%d)", (int)ret);
+		U_LOG_E("Workspace: failed to create workspace window (ret=%d)", (int)ret);
 		return false;
 	}
 
-	// Start render timer so the empty shell window refreshes
+	// Start render timer so the empty workspace window refreshes
 	// (same mechanism as capture-only rendering).
 	if (!sys->multi_comp->capture_render_running.load()) {
 		capture_render_thread_start(sys);
 	}
 
-	U_LOG_W("Shell: window created for empty shell (ready for Ctrl+O)");
+	U_LOG_W("Workspace: window created for empty workspace (ready for Ctrl+O)");
 	return true;
 }
 
@@ -11933,16 +11933,16 @@ comp_d3d11_service_deactivate_workspace(struct xrt_system_compositor *xsysc)
 
 		mc = sys->multi_comp;
 		if (mc == nullptr) {
-			U_LOG_W("Shell deactivate: no multi-comp — nothing to do");
+			U_LOG_W("Workspace deactivate: no multi-comp — nothing to do");
 			return;
 		}
 
 		if (mc->suspended) {
-			U_LOG_W("Shell deactivate: already suspended");
+			U_LOG_W("Workspace deactivate: already suspended");
 			return;
 		}
 
-		U_LOG_W("Shell deactivate: beginning teardown");
+		U_LOG_W("Workspace deactivate: beginning teardown");
 
 		// Clear the compositor's local workspace_mode flag so layer_commit
 		// takes the standalone path instead of the (now suspended) multi-comp.
@@ -11967,7 +11967,7 @@ comp_d3d11_service_deactivate_workspace(struct xrt_system_compositor *xsysc)
 			SetWindowLongPtr(slot->app_hwnd, GWL_EXSTYLE, slot->saved_exstyle);
 			SetWindowPos(slot->app_hwnd, HWND_TOP, 0, 0, 0, 0,
 			             SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-			U_LOG_W("Shell deactivate: restored 2D window HWND=%p", (void *)slot->app_hwnd);
+			U_LOG_W("Workspace deactivate: restored 2D window HWND=%p", (void *)slot->app_hwnd);
 		}
 
 		slot->active = false;
@@ -11999,7 +11999,7 @@ comp_d3d11_service_deactivate_workspace(struct xrt_system_compositor *xsysc)
 	if (mc->capture_render_thread.joinable()) {
 		mc->capture_render_thread.join();
 	}
-	U_LOG_W("Shell deactivate: render thread joined");
+	U_LOG_W("Workspace deactivate: render thread joined");
 
 	// Re-acquire for final cleanup (DP destroy, hide window).
 	{
@@ -12182,7 +12182,7 @@ comp_d3d11_service_set_launcher_visible(struct xrt_system_compositor *xsysc, boo
 
 // Apply a named layout preset. Mirrors the Ctrl+1/2/3 hotkey dispatch
 // in the event loop so MCP agents trigger the same code path a user
-// would. Returns false on unknown name or when shell mode is not active.
+// would. Returns false on unknown name or when workspace mode is not active.
 bool
 comp_d3d11_service_apply_layout_preset(struct xrt_system_compositor *xsysc,
                                         const char *preset_name)
