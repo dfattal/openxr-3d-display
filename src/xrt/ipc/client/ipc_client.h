@@ -193,6 +193,14 @@ comp_ipc_client_compositor_workspace_set_window_visibility(struct xrt_compositor
                                                            uint32_t client_id,
                                                            bool visible);
 
+xrt_result_t
+comp_ipc_client_compositor_workspace_hit_test(struct xrt_compositor *xc,
+                                              int32_t cursor_x,
+                                              int32_t cursor_y,
+                                              uint32_t *out_client_id,
+                                              float *out_local_u,
+                                              float *out_local_v);
+
 /*!
  * Launcher bridges (XR_EXT_app_launcher).
  *

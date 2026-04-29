@@ -325,6 +325,25 @@ comp_ipc_client_compositor_workspace_set_window_visibility(struct xrt_compositor
 	return ipc_call_workspace_set_window_visibility(icc->ipc_c, client_id, visible);
 }
 
+xrt_result_t
+comp_ipc_client_compositor_workspace_hit_test(struct xrt_compositor *xc,
+                                              int32_t cursor_x,
+                                              int32_t cursor_y,
+                                              uint32_t *out_client_id,
+                                              float *out_local_u,
+                                              float *out_local_v)
+{
+	if (xc == NULL || out_client_id == NULL || out_local_u == NULL || out_local_v == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	return ipc_call_workspace_hit_test(icc->ipc_c, cursor_x, cursor_y, out_client_id, out_local_u,
+	                                   out_local_v);
+}
+
 /*
  * Launcher bridges (XR_EXT_app_launcher).
  *
