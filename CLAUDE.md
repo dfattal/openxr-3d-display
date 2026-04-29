@@ -387,18 +387,18 @@ See `docs/reference/debug-logging.md` for full conventions.
 
 The D3D11 service compositor supports file-triggered screenshots of its combined atlas (full-resolution SBS back buffer). This reads the D3D11 texture directly — no DPI issues, no PrintWindow limitations.
 
-**Trigger:** Create `%TEMP%\shell_screenshot_trigger`. The compositor checks every frame, captures the atlas, writes `%TEMP%\shell_screenshot.png`, and deletes the trigger.
+**Trigger:** Create `%TEMP%\workspace_screenshot_trigger`. The compositor checks every frame, captures the atlas, writes `%TEMP%\workspace_screenshot.png`, and deletes the trigger.
 
 ```bash
 # 1. Clean old capture
-rm -f "/c/Users/SPARKS~1/AppData/Local/Temp/shell_screenshot.png"
+rm -f "/c/Users/SPARKS~1/AppData/Local/Temp/workspace_screenshot.png"
 # 2. Trigger capture
-touch "/c/Users/SPARKS~1/AppData/Local/Temp/shell_screenshot_trigger"
+touch "/c/Users/SPARKS~1/AppData/Local/Temp/workspace_screenshot_trigger"
 # 3. Wait for compositor to process
 sleep 3
 # 4. View result (3840x2160 SBS atlas)
 ```
-Then use the Read tool on `C:\Users\SPARKS~1\AppData\Local\Temp\shell_screenshot.png`.
+Then use the Read tool on `C:\Users\SPARKS~1\AppData\Local\Temp\workspace_screenshot.png`.
 
 **Toggle launcher programmatically (Ctrl+L):** The shell uses RegisterHotKey with a message-only window. Toggle via PostMessage:
 ```powershell

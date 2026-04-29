@@ -8839,16 +8839,17 @@ after_key_shortcuts:
 	}
 
 	// Phase 8: screenshot file-trigger now routes through the same capture path
-	// as the shell-driven Ctrl+Shift+3 IPC call. Create %TEMP%\shell_screenshot_trigger
-	// to drop %TEMP%\shell_screenshot_sbs.png on the next frame.
+	// as the workspace-driven Ctrl+Shift+3 IPC call. Create
+	// %TEMP%\workspace_screenshot_trigger to drop %TEMP%\workspace_screenshot_atlas.png
+	// on the next frame.
 	{
 		static char ss_trigger[MAX_PATH] = {};
 		static char ss_prefix[MAX_PATH] = {};
 		if (!ss_trigger[0]) {
 			const char *tmp = getenv("TEMP");
 			if (!tmp) tmp = "C:\\Temp";
-			snprintf(ss_trigger, sizeof(ss_trigger), "%s\\shell_screenshot_trigger", tmp);
-			snprintf(ss_prefix, sizeof(ss_prefix), "%s\\shell_screenshot", tmp);
+			snprintf(ss_trigger, sizeof(ss_trigger), "%s\\workspace_screenshot_trigger", tmp);
+			snprintf(ss_prefix, sizeof(ss_prefix), "%s\\workspace_screenshot", tmp);
 		}
 		if (mc->combined_atlas &&
 		    GetFileAttributesA(ss_trigger) != INVALID_FILE_ATTRIBUTES) {
