@@ -52,7 +52,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(start_windowed, "XRT_COMPOSITOR_START_WINDOWED", fals
 
 // Marker for SendInput-injected mouse events — WndProc skips re-forwarding these.
 // Used to break the loop: WndProc→SendInput→WM_LBUTTONDOWN→WndProc.
-#define SHELL_SENDINPUT_MARKER 0xD15B1A7E
+#define WORKSPACE_SENDINPUT_MARKER 0xD15B1A7E
 
 // Qwerty input is always enabled for non-session-target apps (DisplayXR-owned window)
 // DEBUG_GET_ONCE_BOOL_OPTION(qwerty_enable, "QWERTY_ENABLE", false)
@@ -198,7 +198,7 @@ struct comp_d3d11_window
 
 	//! Ring buffer for capture client input events (WndProc writes, render thread reads).
 	//! Lock-free SPSC: WndProc is the single producer, render loop is the single consumer.
-	struct shell_input_event input_ring[SHELL_INPUT_RING_SIZE];
+	struct workspace_input_event input_ring[WORKSPACE_INPUT_RING_SIZE];
 	volatile LONG input_ring_write; //!< Next write index (WndProc thread)
 	volatile LONG input_ring_read;  //!< Next read index (compositor thread)
 
@@ -214,8 +214,8 @@ struct comp_d3d11_window
 static void set_fullscreen(HWND hWnd, bool fullscreen);
 
 // Custom message IDs (posted to window thread from compositor thread)
-#define WM_SHELL_SET_FOREGROUND (WM_USER + 100)
-#define WM_SHELL_LAUNCH_APP    (WM_USER + 101)
+#define WM_WORKSPACE_SET_FOREGROUND (WM_USER + 100)
+#define WM_WORKSPACE_LAUNCH_APP    (WM_USER + 101)
 
 #include <commdlg.h> // GetOpenFileNameA
 
@@ -233,7 +233,7 @@ input_ring_push(struct comp_d3d11_window *w,
 {
 	LONG wr = InterlockedCompareExchange(&w->input_ring_write, 0, 0);
 	LONG rd = InterlockedCompareExchange(&w->input_ring_read, 0, 0);
-	LONG next = (wr + 1) % SHELL_INPUT_RING_SIZE;
+	LONG next = (wr + 1) % WORKSPACE_INPUT_RING_SIZE;
 	if (next == rd) {
 		// Buffer full — drop event
 		return;
@@ -252,7 +252,7 @@ input_ring_push(struct comp_d3d11_window *w,
  * These keys are NOT forwarded to the focused app in workspace mode.
  */
 static bool
-is_shell_reserved_key(WPARAM vk)
+is_workspace_reserved_key(WPARAM vk)
 {
 	// Only true workspace-management keys are reserved.
 	// V, P, 0-9 are forwarded to the app (it may use them for its own purposes).
@@ -515,7 +515,7 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				                     message, wParam, lParam, &handled);
 			}
 #endif
-			if (is_shell_reserved_key(wParam)) {
+			if (is_workspace_reserved_key(wParam)) {
 				// Workspace-only keys (TAB, DELETE) → don't forward to app
 				return 0;
 			}
@@ -614,7 +614,7 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 		// Skip re-forwarding of SendInput-injected mouse events (prevents
 		// WndProc→SendInput→WM_LBUTTONDOWN→WndProc infinite loop).
-		if (GetMessageExtraInfo() == (LPARAM)SHELL_SENDINPUT_MARKER) {
+		if (GetMessageExtraInfo() == (LPARAM)WORKSPACE_SENDINPUT_MARKER) {
 			return DefWindowProcW(hWnd, message, wParam, lParam);
 		}
 
@@ -744,7 +744,7 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 							INPUT inp = {};
 							inp.type = INPUT_MOUSE;
 							inp.mi.dwFlags = flags;
-							inp.mi.dwExtraInfo = SHELL_SENDINPUT_MARKER;
+							inp.mi.dwExtraInfo = WORKSPACE_SENDINPUT_MARKER;
 							SendInput(1, &inp, sizeof(INPUT));
 						}
 					}
@@ -778,7 +778,7 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 
-	case WM_SHELL_SET_FOREGROUND: {
+	case WM_WORKSPACE_SET_FOREGROUND: {
 		// Cross-thread foreground request from compositor.
 		// wParam = target HWND. NULL means restore workspace window.
 		HWND target = (HWND)wParam;
@@ -791,7 +791,7 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		return 0;
 	}
 
-	case WM_SHELL_LAUNCH_APP: {
+	case WM_WORKSPACE_LAUNCH_APP: {
 		// Open file dialog and launch selected app.
 		// Runs on window thread (modal dialog, blocks message pump).
 		// Compositor thread continues rendering independently.
@@ -1361,7 +1361,7 @@ comp_d3d11_window_set_workspace_dp(struct comp_d3d11_window *window, void *dp)
 
 extern "C" uint32_t
 comp_d3d11_window_consume_input_events(struct comp_d3d11_window *window,
-                                       struct shell_input_event *out_events,
+                                       struct workspace_input_event *out_events,
                                        uint32_t max_events)
 {
 	if (window == NULL || out_events == NULL || max_events == 0) {
@@ -1377,7 +1377,7 @@ comp_d3d11_window_consume_input_events(struct comp_d3d11_window *window,
 		}
 		MemoryBarrier();
 		out_events[count] = window->input_ring[rd];
-		InterlockedExchange(&window->input_ring_read, (rd + 1) % SHELL_INPUT_RING_SIZE);
+		InterlockedExchange(&window->input_ring_read, (rd + 1) % WORKSPACE_INPUT_RING_SIZE);
 		count++;
 	}
 	return count;
@@ -1393,7 +1393,7 @@ comp_d3d11_window_request_foreground(struct comp_d3d11_window *window,
 
 	InterlockedExchange(&window->foreground_done, 0);
 	// Post to window thread — it owns the current foreground window
-	PostMessageW(window->hwnd, WM_SHELL_SET_FOREGROUND, (WPARAM)target_hwnd, 0);
+	PostMessageW(window->hwnd, WM_WORKSPACE_SET_FOREGROUND, (WPARAM)target_hwnd, 0);
 
 	// Wait for completion (with timeout to avoid deadlock)
 	for (int i = 0; i < 100; i++) {
@@ -1410,5 +1410,5 @@ comp_d3d11_window_request_app_launch(struct comp_d3d11_window *window)
 	if (window == NULL || window->hwnd == NULL) {
 		return;
 	}
-	PostMessageW(window->hwnd, WM_SHELL_LAUNCH_APP, 0, 0);
+	PostMessageW(window->hwnd, WM_WORKSPACE_LAUNCH_APP, 0, 0);
 }

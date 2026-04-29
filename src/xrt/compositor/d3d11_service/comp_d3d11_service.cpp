@@ -3559,8 +3559,8 @@ multi_compositor_dispatch_capture_input(struct d3d11_multi_compositor *mc)
 		return;
 	}
 
-	struct shell_input_event events[SHELL_INPUT_RING_SIZE];
-	uint32_t count = comp_d3d11_window_consume_input_events(mc->window, events, SHELL_INPUT_RING_SIZE);
+	struct workspace_input_event events[WORKSPACE_INPUT_RING_SIZE];
+	uint32_t count = comp_d3d11_window_consume_input_events(mc->window, events, WORKSPACE_INPUT_RING_SIZE);
 	if (count == 0) {
 		return;
 	}
@@ -3584,11 +3584,11 @@ multi_compositor_dispatch_capture_input(struct d3d11_multi_compositor *mc)
 	int vs_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
 	int vs_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
 
-	INPUT inputs[SHELL_INPUT_RING_SIZE];
+	INPUT inputs[WORKSPACE_INPUT_RING_SIZE];
 	uint32_t input_count = 0;
 
 	for (uint32_t i = 0; i < count; i++) {
-		struct shell_input_event *ev = &events[i];
+		struct workspace_input_event *ev = &events[i];
 		INPUT *inp = &inputs[input_count];
 		memset(inp, 0, sizeof(INPUT));
 

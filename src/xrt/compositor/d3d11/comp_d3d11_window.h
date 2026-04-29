@@ -32,7 +32,7 @@ struct xrt_system_devices;
  * The WndProc pushes these into a ring buffer instead of PostMessage for
  * capture clients; the compositor thread drains them and calls SendInput.
  */
-struct shell_input_event
+struct workspace_input_event
 {
 	uint32_t message; //!< WM_KEYDOWN, WM_CHAR, WM_LBUTTONDOWN, etc.
 	uint64_t wParam;
@@ -41,7 +41,7 @@ struct shell_input_event
 	int32_t mapped_y;
 };
 
-#define SHELL_INPUT_RING_SIZE 64
+#define WORKSPACE_INPUT_RING_SIZE 64
 
 /*!
  * Create a self-owned window for the D3D11 compositor.
@@ -302,7 +302,7 @@ comp_d3d11_window_set_workspace_dp(struct comp_d3d11_window *window, void *dp);
  */
 uint32_t
 comp_d3d11_window_consume_input_events(struct comp_d3d11_window *window,
-                                       struct shell_input_event *out_events,
+                                       struct workspace_input_event *out_events,
                                        uint32_t max_events);
 
 /*!
