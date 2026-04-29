@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 #define XR_EXT_spatial_workspace 1
-#define XR_EXT_spatial_workspace_SPEC_VERSION 4
+#define XR_EXT_spatial_workspace_SPEC_VERSION 5
 #define XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME "XR_EXT_spatial_workspace"
 
 // Provisional XrStructureType values. The 1000999100..104 range is reserved for
@@ -376,6 +376,74 @@ typedef XrResult (XRAPI_PTR *PFN_xrEnableWorkspacePointerCaptureEXT)(
 typedef XrResult (XRAPI_PTR *PFN_xrDisableWorkspacePointerCaptureEXT)(
     XrSession session);
 
+// ---- Frame capture (spec_version 5) ----
+
+#define XR_WORKSPACE_CAPTURE_PATH_MAX_EXT 256
+
+typedef XrFlags64 XrWorkspaceCaptureFlagsEXT;
+
+// Bitmask of which view variants the runtime should write. ATLAS is the
+// combined side-by-side back buffer the compositor presents to the display
+// processor; future flags may select per-eye images, depth, etc.
+static const XrWorkspaceCaptureFlagsEXT XR_WORKSPACE_CAPTURE_FLAG_ATLAS_BIT_EXT = 0x00000001u;
+
+/*!
+ * @brief Request struct for xrCaptureWorkspaceFrameEXT.
+ *
+ * The runtime appends format-specific suffixes (e.g. "_atlas.png") to
+ * @c pathPrefix. The IPC schema only carries POD types so the prefix is
+ * an in-struct char array rather than a separately-allocated string.
+ */
+typedef struct XrWorkspaceCaptureRequestEXT {
+    XrStructureType            type;       // XR_TYPE_WORKSPACE_CAPTURE_REQUEST_EXT
+    void* XR_MAY_ALIAS         next;
+    char                       pathPrefix[XR_WORKSPACE_CAPTURE_PATH_MAX_EXT];
+    XrWorkspaceCaptureFlagsEXT flags;
+} XrWorkspaceCaptureRequestEXT;
+
+/*!
+ * @brief Result returned by xrCaptureWorkspaceFrameEXT.
+ *
+ * The metadata is intended to support a sidecar JSON describing the capture
+ * (atlas/eye dimensions, stereo layout, display physical size, eye poses at
+ * capture time).
+ */
+typedef struct XrWorkspaceCaptureResultEXT {
+    XrStructureType            type;       // XR_TYPE_WORKSPACE_CAPTURE_RESULT_EXT
+    void* XR_MAY_ALIAS         next;
+    uint64_t                   timestampNs;
+    uint32_t                   atlasWidth;
+    uint32_t                   atlasHeight;
+    uint32_t                   eyeWidth;
+    uint32_t                   eyeHeight;
+    XrWorkspaceCaptureFlagsEXT viewsWritten; // Subset of request flags actually written.
+    uint32_t                   tileColumns;
+    uint32_t                   tileRows;
+    float                      displayWidthM;
+    float                      displayHeightM;
+    float                      eyeLeftM[3];
+    float                      eyeRightM[3];
+} XrWorkspaceCaptureResultEXT;
+
+/*!
+ * @brief Capture the current workspace composite frame to disk.
+ *
+ * The runtime reads the D3D11 composite back buffer at the next safe
+ * moment, writes the requested view variants to files named after
+ * @c request->pathPrefix, and fills @c result with metadata describing
+ * the capture. Used by workspace controllers to implement screenshot /
+ * recording features without giving them direct access to client
+ * swapchains.
+ *
+ * @param session A valid workspace session.
+ * @param request The capture request (path prefix + flags).
+ * @param result  Output: capture metadata.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrCaptureWorkspaceFrameEXT)(
+    XrSession                            session,
+    const XrWorkspaceCaptureRequestEXT  *request,
+    XrWorkspaceCaptureResultEXT         *result);
+
 #ifndef XR_NO_PROTOTYPES
 XRAPI_ATTR XrResult XRAPI_CALL xrActivateSpatialWorkspaceEXT(
     XrSession session);
@@ -444,6 +512,11 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnableWorkspacePointerCaptureEXT(
 
 XRAPI_ATTR XrResult XRAPI_CALL xrDisableWorkspacePointerCaptureEXT(
     XrSession session);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrCaptureWorkspaceFrameEXT(
+    XrSession                            session,
+    const XrWorkspaceCaptureRequestEXT  *request,
+    XrWorkspaceCaptureResultEXT         *result);
 #endif
 
 #ifdef __cplusplus
