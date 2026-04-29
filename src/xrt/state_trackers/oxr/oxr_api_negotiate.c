@@ -439,6 +439,14 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrEnumerateDisplayRenderingModesEXT, EXT_display_info);
 #endif
 
+#ifdef OXR_HAVE_EXT_spatial_workspace
+	ENTRY_IF_EXT(xrActivateSpatialWorkspaceEXT, EXT_spatial_workspace);
+	ENTRY_IF_EXT(xrDeactivateSpatialWorkspaceEXT, EXT_spatial_workspace);
+	ENTRY_IF_EXT(xrGetSpatialWorkspaceStateEXT, EXT_spatial_workspace);
+	ENTRY_IF_EXT(xrAddWorkspaceCaptureClientEXT, EXT_spatial_workspace);
+	ENTRY_IF_EXT(xrRemoveWorkspaceCaptureClientEXT, EXT_spatial_workspace);
+#endif
+
 	// xrSetSharedTextureOutputRectEXT — canvas sub-rect, part of window binding extensions
 #ifdef OXR_HAVE_EXT_win32_window_binding
 	ENTRY_IF_EXT(xrSetSharedTextureOutputRectEXT, EXT_win32_window_binding);

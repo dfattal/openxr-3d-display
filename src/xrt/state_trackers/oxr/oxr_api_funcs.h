@@ -793,6 +793,27 @@ oxr_xrEnumerateDisplayRenderingModesEXT(XrSession session,
 
 #endif
 
+#ifdef OXR_HAVE_EXT_spatial_workspace
+//! OpenXR API function @ep{xrActivateSpatialWorkspaceEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrActivateSpatialWorkspaceEXT(XrSession session);
+//! OpenXR API function @ep{xrDeactivateSpatialWorkspaceEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDeactivateSpatialWorkspaceEXT(XrSession session);
+//! OpenXR API function @ep{xrGetSpatialWorkspaceStateEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetSpatialWorkspaceStateEXT(XrSession session, XrBool32 *out_active);
+//! OpenXR API function @ep{xrAddWorkspaceCaptureClientEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrAddWorkspaceCaptureClientEXT(XrSession session,
+                                   uint64_t nativeWindow,
+                                   const char *nameOptional,
+                                   XrWorkspaceClientId *outClientId);
+//! OpenXR API function @ep{xrRemoveWorkspaceCaptureClientEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrRemoveWorkspaceCaptureClientEXT(XrSession session, XrWorkspaceClientId clientId);
+#endif
+
 // xrSetSharedTextureOutputRectEXT — canvas sub-rect, part of window binding extensions
 #if defined(OXR_HAVE_EXT_win32_window_binding) || defined(OXR_HAVE_EXT_cocoa_window_binding)
 //! OpenXR API function @ep{xrSetSharedTextureOutputRectEXT}

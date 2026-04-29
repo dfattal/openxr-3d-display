@@ -562,6 +562,18 @@
 
 
 /*
+ * XR_EXT_spatial_workspace
+ */
+#if defined(XR_EXT_spatial_workspace)
+#define OXR_HAVE_EXT_spatial_workspace
+#define OXR_EXTENSION_SUPPORT_EXT_spatial_workspace(_) \
+    _(EXT_spatial_workspace, EXT_SPATIAL_WORKSPACE)
+#else
+#define OXR_EXTENSION_SUPPORT_EXT_spatial_workspace(_)
+#endif
+
+
+/*
  * XR_BD_controller_interaction
  */
 #if defined(XR_BD_controller_interaction) && defined(XRT_FEATURE_OPENXR_INTERACTION_BYTEDANCE)
@@ -1037,6 +1049,7 @@
     OXR_EXTENSION_SUPPORT_EXT_cocoa_window_binding(_) \
     OXR_EXTENSION_SUPPORT_EXT_macos_gl_binding(_) \
     OXR_EXTENSION_SUPPORT_EXT_display_info(_) \
+    OXR_EXTENSION_SUPPORT_EXT_spatial_workspace(_) \
     OXR_EXTENSION_SUPPORT_BD_controller_interaction(_) \
     OXR_EXTENSION_SUPPORT_FB_body_tracking(_) \
     OXR_EXTENSION_SUPPORT_FB_composition_layer_alpha_blend(_) \
