@@ -43,9 +43,16 @@ target_include_directories(displayxr-shell PRIVATE
     ${CMAKE_SOURCE_DIR}/src/external/openxr_includes   # XR_EXT_spatial_workspace.h, XR_EXT_app_launcher.h
 )
 
-# Phase 2.I C10: shell no longer links ipc_client — all service comms go
-# through the OpenXR loader + the runtime's IPC client.
-target_link_libraries(displayxr-shell PRIVATE aux_util OpenXR::openxr_loader)
+# Shell consumes only public OpenXR + extension headers + the loader,
+# plus cJSON for parsing app-sidecar JSON config (a stable third-party
+# library, not internal to the runtime project). Decoupled from
+# aux_util / ipc_client / xrt_* headers so this binary can move to its
+# own repo.
+if(XRT_HAVE_SYSTEM_CJSON)
+    target_link_libraries(displayxr-shell PRIVATE OpenXR::openxr_loader cJSON::cJSON)
+else()
+    target_link_libraries(displayxr-shell PRIVATE OpenXR::openxr_loader xrt-external-cjson)
+endif()
 
 if(WIN32)
     # Dbghelp: ImageDirectoryEntryToData (PE import scan)

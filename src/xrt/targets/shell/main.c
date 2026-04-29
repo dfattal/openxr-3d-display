@@ -15,10 +15,6 @@
  * @ingroup ipc
  */
 
-#include "xrt/xrt_results.h"
-#include "xrt/xrt_defines.h"
-#include "util/u_logging.h"
-
 #include "shell_app_scan.h"
 #include "shell_openxr.h"
 
@@ -80,24 +76,9 @@ static HWND g_msg_hwnd = NULL;
 // sites have been migrated to the public extension surface.
 static struct shell_openxr_state *g_xr = NULL;
 
-// Phase 2.I: convert struct xrt_pose → XrPosef. The two layouts are
-// field-compatible (quat + vec3) but live in different headers; the runtime
-// already proves this with a field-by-field translation in oxr_workspace.c.
-static inline void
-xrt_pose_to_xr_posef(const struct xrt_pose *in, XrPosef *out)
-{
-	out->orientation.x = in->orientation.x;
-	out->orientation.y = in->orientation.y;
-	out->orientation.z = in->orientation.z;
-	out->orientation.w = in->orientation.w;
-	out->position.x = in->position.x;
-	out->position.y = in->position.y;
-	out->position.z = in->position.z;
-}
-
-// Phase 2.I C10: cap on locally-buffered enumerate. IPC_MAX_CLIENTS is 8 in
-// the wire format (struct ipc_client_list); 16 keeps headroom for a future
-// raise without touching the shell.
+// Cap on locally-buffered enumerate. The current wire IPC_MAX_CLIENTS is
+// 8 server-side; 16 keeps headroom for a future raise without touching
+// the shell.
 #define SHELL_MAX_CLIENTS 16
 
 // Drain the workspace client id list from the runtime. Returns the number
@@ -840,17 +821,14 @@ try_apply_poses(struct app_entry *apps, int app_count,
 		// Find the first app that hasn't had its pose applied yet
 		for (int a = 0; a < app_count; a++) {
 			if (apps[a].has_pose && !apps[a].pose_applied) {
-				struct xrt_pose pose;
-				pose.orientation.x = 0;
-				pose.orientation.y = 0;
-				pose.orientation.z = 0;
-				pose.orientation.w = 1;
-				pose.position.x = apps[a].px;
-				pose.position.y = apps[a].py;
-				pose.position.z = apps[a].pz;
-
 				XrPosef xrpose;
-				xrt_pose_to_xr_posef(&pose, &xrpose);
+				xrpose.orientation.x = 0.0f;
+				xrpose.orientation.y = 0.0f;
+				xrpose.orientation.z = 0.0f;
+				xrpose.orientation.w = 1.0f;
+				xrpose.position.x = apps[a].px;
+				xrpose.position.y = apps[a].py;
+				xrpose.position.z = apps[a].pz;
 				XrResult r = g_xr->set_pose(
 				    g_xr->session, id, &xrpose,
 				    apps[a].width_m, apps[a].height_m);
@@ -1075,8 +1053,8 @@ enumerate_and_adopt_windows(struct capture_entry *captures,
 		}
 
 		uint32_t cid = 0;
-		xrt_result_t r = (xrt_result_t)g_xr->add_capture(g_xr->session, ce->hwnd, NULL, &cid);
-		if (r == XRT_SUCCESS) {
+		XrResult r = g_xr->add_capture(g_xr->session, ce->hwnd, NULL, &cid);
+		if (r == XR_SUCCESS) {
 			ce->client_id = cid;
 			ce->added = true;
 			(*capture_count)++;
@@ -1631,8 +1609,8 @@ shell_launch_registered_app(struct registered_app *rapp,
 			GetWindowTextA(found_hwnd, ce->name, sizeof(ce->name));
 
 			uint32_t cid = 0;
-			xrt_result_t r = (xrt_result_t)g_xr->add_capture(g_xr->session, ce->hwnd, NULL, &cid);
-			if (r == XRT_SUCCESS) {
+			XrResult r = g_xr->add_capture(g_xr->session, ce->hwnd, NULL, &cid);
+			if (r == XR_SUCCESS) {
 				ce->client_id = cid;
 				ce->added = true;
 				(*capture_count)++;
@@ -1945,7 +1923,7 @@ main(int argc, char *argv[])
 	// if it isn't already running. The shell never manages an IPC connection
 	// directly anymore.
 	P("Connecting to service via OpenXR runtime...\n");
-	xrt_result_t xret = XRT_SUCCESS;
+	XrResult xret = XR_SUCCESS;
 	struct shell_openxr_state *xr = shell_openxr_init();
 	if (xr == NULL) {
 		PE("shell_openxr_init failed — workspace + launcher extensions unavailable.\n");
@@ -2008,8 +1986,8 @@ main(int argc, char *argv[])
 
 	if (start_active) {
 		P("Activating shell mode...\n");
-		xret = (xrt_result_t)g_xr->activate(g_xr->session);
-		if (xret != XRT_SUCCESS) {
+		xret = g_xr->activate(g_xr->session);
+		if (xret != XR_SUCCESS) {
 			PE("Warning: workspace_activate failed\n");
 		}
 		g_shell_active = true;
@@ -2018,8 +1996,8 @@ main(int argc, char *argv[])
 		// Add capture clients
 		for (int i = 0; i < capture_count; i++) {
 			uint32_t cid = 0;
-			xrt_result_t r = (xrt_result_t)g_xr->add_capture(g_xr->session, captures[i].hwnd, NULL, &cid);
-			if (r == XRT_SUCCESS) {
+			XrResult r = g_xr->add_capture(g_xr->session, captures[i].hwnd, NULL, &cid);
+			if (r == XR_SUCCESS) {
 				captures[i].client_id = cid;
 				captures[i].added = true;
 				P("  Capture: HWND=0x%llx '%s' → client_id=%u\n",
@@ -2051,8 +2029,8 @@ main(int argc, char *argv[])
 #else
 	// Non-Windows: simple activate + poll (no hotkey/tray)
 	P("Activating shell mode...\n");
-	xret = (xrt_result_t)g_xr->activate(g_xr->session);
-	if (xret != XRT_SUCCESS) {
+	xret = g_xr->activate(g_xr->session);
+	if (xret != XR_SUCCESS) {
 		PE("Warning: workspace_activate failed\n");
 	}
 	bool auto_adopt = false;
@@ -2123,7 +2101,7 @@ main(int argc, char *argv[])
 						P("Shell deactivated — waiting in tray.\n");
 					} else {
 						P("Activating shell...\n");
-						xret = (xrt_result_t)g_xr->activate(g_xr->session);
+						xret = g_xr->activate(g_xr->session);
 
 						// Phase 2.I C10: the shell no longer owns its own IPC
 						// connection — the runtime DLL does, and rebuilding
@@ -2131,7 +2109,7 @@ main(int argc, char *argv[])
 						// future improvement). On activate failure today we
 						// just bail and let the user re-trigger Ctrl+Space
 						// once the service is healthy again.
-						if (xret != XRT_SUCCESS) {
+						if (xret != XR_SUCCESS) {
 							PE("workspace_activate failed (%d) — service may be down. "
 							   "Restart the service and press Ctrl+Space to retry.\n",
 							   xret);
