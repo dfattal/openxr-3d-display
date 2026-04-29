@@ -208,35 +208,44 @@ typedef XrResult (XRAPI_PTR *PFN_xrSetWorkspaceClientVisibilityEXT)(
     XrWorkspaceClientId  clientId,
     XrBool32             visible);
 
-// ---- Hit-test (spec_version 3) ----
+// ---- Hit-test (spec_version 3, region out added in spec_version 4) ----
 
 /*!
  * @brief Spatial raycast hit-test against workspace windows.
  *
  * Translates a screen-space cursor (display pixels, origin top-left) to a
- * client window content hit. The runtime intersects an eye→cursor ray
- * with each workspace client's window quad; the closest content hit
- * (excluding chrome and edge-resize zones — those stay runtime-policy
- * until Phase 2.C migrates chrome) wins.
+ * client window hit. The runtime intersects an eye→cursor ray with each
+ * workspace client's window quad and reports both the hit clientId and a
+ * region classification (XrWorkspaceHitRegionEXT). The runtime classifies
+ * geometry; the controller decides what each region means (focus on
+ * CONTENT, drag on TITLE_BAR, close on CLOSE_BUTTON, resize on the
+ * EDGE_RESIZE_* values, etc.).
  *
- * @param session      A valid workspace session.
- * @param cursorX      Cursor X in display pixels (origin top-left).
- * @param cursorY      Cursor Y in display pixels.
- * @param outClientId  Output: clientId of the hit window, or
- *                     XR_NULL_WORKSPACE_CLIENT_ID for miss / chrome hit.
- * @param outLocalUV   Output: U,V on the window quad in [0,1] range, origin
- *                     top-left. Both 0,0 on miss.
+ * @param session       A valid workspace session.
+ * @param cursorX       Cursor X in display pixels (origin top-left).
+ * @param cursorY       Cursor Y in display pixels.
+ * @param outClientId   Output: clientId of the hit window, or
+ *                      XR_NULL_WORKSPACE_CLIENT_ID on background miss.
+ * @param outLocalUV    Output: U,V on the content quad in [0,1] range,
+ *                      origin top-left. Meaningful only when
+ *                      *outHitRegion == CONTENT_EXT; 0,0 otherwise.
+ * @param outHitRegion  Output: classification of the hit. May be
+ *                      BACKGROUND_EXT (miss), CONTENT_EXT, TITLE_BAR_EXT,
+ *                      a button, an EDGE_RESIZE_* value, TASKBAR_EXT, or
+ *                      LAUNCHER_TILE_EXT.
  *
- * The workspace controller calls this from its input handler, then decides
- * what the hit means (focus, drag, right-click forward, etc.). The runtime
- * does NOT classify hits — that is policy.
+ * NOTE — hardcoded MVP key policy (consumed by xrEnumerateWorkspaceInputEventsEXT
+ * documentation): TAB and DELETE are consumed by the runtime; ESC is
+ * consumed when any window is maximized; everything else is delivered via
+ * input event AND forwarded to the focused HWND.
  */
 typedef XrResult (XRAPI_PTR *PFN_xrWorkspaceHitTestEXT)(
-    XrSession            session,
-    int32_t              cursorX,
-    int32_t              cursorY,
-    XrWorkspaceClientId *outClientId,
-    XrVector2f          *outLocalUV);
+    XrSession                session,
+    int32_t                  cursorX,
+    int32_t                  cursorY,
+    XrWorkspaceClientId     *outClientId,
+    XrVector2f              *outLocalUV,
+    XrWorkspaceHitRegionEXT *outHitRegion);
 
 #ifndef XR_NO_PROTOTYPES
 XRAPI_ATTR XrResult XRAPI_CALL xrActivateSpatialWorkspaceEXT(
@@ -279,11 +288,12 @@ XRAPI_ATTR XrResult XRAPI_CALL xrSetWorkspaceClientVisibilityEXT(
     XrBool32             visible);
 
 XRAPI_ATTR XrResult XRAPI_CALL xrWorkspaceHitTestEXT(
-    XrSession            session,
-    int32_t              cursorX,
-    int32_t              cursorY,
-    XrWorkspaceClientId *outClientId,
-    XrVector2f          *outLocalUV);
+    XrSession                session,
+    int32_t                  cursorX,
+    int32_t                  cursorY,
+    XrWorkspaceClientId     *outClientId,
+    XrVector2f              *outLocalUV,
+    XrWorkspaceHitRegionEXT *outHitRegion);
 #endif
 
 #ifdef __cplusplus

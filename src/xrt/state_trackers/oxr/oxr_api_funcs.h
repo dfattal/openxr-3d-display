@@ -835,7 +835,8 @@ oxr_xrWorkspaceHitTestEXT(XrSession session,
                           int32_t cursorX,
                           int32_t cursorY,
                           XrWorkspaceClientId *outClientId,
-                          XrVector2f *outLocalUV);
+                          XrVector2f *outLocalUV,
+                          XrWorkspaceHitRegionEXT *outHitRegion);
 #endif
 
 #ifdef OXR_HAVE_EXT_app_launcher

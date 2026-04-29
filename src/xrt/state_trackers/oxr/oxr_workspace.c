@@ -406,7 +406,8 @@ oxr_xrWorkspaceHitTestEXT(XrSession session,
                           int32_t cursorX,
                           int32_t cursorY,
                           XrWorkspaceClientId *outClientId,
-                          XrVector2f *outLocalUV)
+                          XrVector2f *outLocalUV,
+                          XrWorkspaceHitRegionEXT *outHitRegion)
 {
 	OXR_TRACE_MARKER();
 
@@ -417,6 +418,7 @@ oxr_xrWorkspaceHitTestEXT(XrSession session,
 	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_spatial_workspace);
 	OXR_VERIFY_ARG_NOT_NULL(&log, outClientId);
 	OXR_VERIFY_ARG_NOT_NULL(&log, outLocalUV);
+	OXR_VERIFY_ARG_NOT_NULL(&log, outHitRegion);
 
 	if (!session_is_ipc_client(sess)) {
 		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
@@ -425,8 +427,7 @@ oxr_xrWorkspaceHitTestEXT(XrSession session,
 
 	uint32_t client_id = 0;
 	float u = 0.0f, v = 0.0f;
-	uint32_t region = 0; // discarded — Phase 2.D Commit 3 surfaces this through a
-	                     // public-API parameter; this commit only plumbs the wire.
+	uint32_t region = 0;
 	xrt_result_t xret = comp_ipc_client_compositor_workspace_hit_test(&sess->xcn->base, cursorX, cursorY,
 	                                                                  &client_id, &u, &v, &region);
 	if (xret != XRT_SUCCESS) {
@@ -435,6 +436,7 @@ oxr_xrWorkspaceHitTestEXT(XrSession session,
 	*outClientId = (XrWorkspaceClientId)client_id;
 	outLocalUV->x = u;
 	outLocalUV->y = v;
+	*outHitRegion = (XrWorkspaceHitRegionEXT)region;
 	return XR_SUCCESS;
 }
 

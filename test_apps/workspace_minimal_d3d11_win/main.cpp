@@ -301,25 +301,30 @@ run_workspace_test()
 		vr = pfnSetClientVisibility(session, clientId, XR_TRUE);
 		std::printf("[xrSetWorkspaceClientVisibilityEXT(TRUE)    ] %s\n", xr_result_str(vr));
 
-		// Hit-test smoke (Phase 2.F): probe two cursor positions — one
+		// Hit-test smoke (Phase 2.F + 2.D): probe two cursor positions — one
 		// near display center (likely to hit a window if any are positioned
-		// there) and one far off-screen (guaranteed miss). Whether the
-		// near-center probe lands a hit depends on runtime layout state;
-		// either response proves dispatch reached the IPC layer.
+		// there) and one far off-screen (guaranteed miss). Region output
+		// added in Phase 2.D. Off-screen probe MUST report BACKGROUND_EXT.
 		XrWorkspaceClientId hitId = XR_NULL_WORKSPACE_CLIENT_ID;
 		XrVector2f hitUV = {};
-		XrResult hr = pfnHitTest(session, 1920, 1080, &hitId, &hitUV);
-		std::printf("[xrWorkspaceHitTestEXT(1920,1080)           ] %s clientId=%u uv=(%.3f,%.3f)\n",
-		            xr_result_str(hr), (unsigned)hitId, hitUV.x, hitUV.y);
+		XrWorkspaceHitRegionEXT hitRegion = XR_WORKSPACE_HIT_REGION_BACKGROUND_EXT;
+		XrResult hr = pfnHitTest(session, 1920, 1080, &hitId, &hitUV, &hitRegion);
+		std::printf("[xrWorkspaceHitTestEXT(1920,1080)           ] %s clientId=%u uv=(%.3f,%.3f) region=%d\n",
+		            xr_result_str(hr), (unsigned)hitId, hitUV.x, hitUV.y, (int)hitRegion);
 
 		hitId = 0xFFFFFFFFu;
 		hitUV = {0.5f, 0.5f}; // sentinel; should be overwritten to (0,0) on miss
-		hr = pfnHitTest(session, -1, -1, &hitId, &hitUV);
-		std::printf("[xrWorkspaceHitTestEXT(-1,-1)               ] %s clientId=%u uv=(%.3f,%.3f)\n",
-		            xr_result_str(hr), (unsigned)hitId, hitUV.x, hitUV.y);
+		hitRegion = (XrWorkspaceHitRegionEXT)0x7F; // sentinel
+		hr = pfnHitTest(session, -1, -1, &hitId, &hitUV, &hitRegion);
+		std::printf("[xrWorkspaceHitTestEXT(-1,-1)               ] %s clientId=%u uv=(%.3f,%.3f) region=%d\n",
+		            xr_result_str(hr), (unsigned)hitId, hitUV.x, hitUV.y, (int)hitRegion);
 		if (hr == XR_SUCCESS && hitId != XR_NULL_WORKSPACE_CLIENT_ID) {
 			std::printf("FAIL: off-screen hit-test reported a hit (clientId=%u)\n",
 			            (unsigned)hitId);
+		}
+		if (hr == XR_SUCCESS && hitRegion != XR_WORKSPACE_HIT_REGION_BACKGROUND_EXT) {
+			std::printf("FAIL: off-screen hit-test region=%d, expected BACKGROUND_EXT(0)\n",
+			            (int)hitRegion);
 		}
 	}
 
