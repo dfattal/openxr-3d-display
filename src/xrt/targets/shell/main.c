@@ -25,6 +25,7 @@
 #include "util/u_logging.h"
 
 #include "shell_app_scan.h"
+#include "shell_openxr.h"
 
 #include <cjson/cJSON.h>
 
@@ -1927,6 +1928,17 @@ main(int argc, char *argv[])
 
 	P("Connected to service.\n");
 
+	// Phase 2.I C7: bootstrap as an OpenXR client. The shell now creates an
+	// XrInstance + XrSession with the workspace + launcher extensions
+	// enabled and resolves every PFN it will dispatch through during the
+	// migration. The IPC connection above stays in place; subsequent
+	// commits (C8–C10) replace ipc_call_* sites with PFN calls one cluster
+	// at a time. After C10 the IPC connection itself goes away.
+	struct shell_openxr *xr = shell_openxr_init();
+	if (xr == NULL) {
+		PE("shell_openxr_init failed — continuing on internal IPC only.\n");
+	}
+
 	// Load registered apps config (Phase 4C.9 + Phase 5.5 scanner merge)
 	registered_apps_load();
 
@@ -2479,6 +2491,7 @@ main(int argc, char *argv[])
 	}
 #endif
 
+	shell_openxr_shutdown(xr);
 	ipc_client_connection_fini(&ipc_c);
 	return 0;
 }

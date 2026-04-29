@@ -7,8 +7,29 @@ set(DISPLAYXR_SHELL_SOURCES
     shell_pe_scan.h
     shell_app_scan.c
     shell_app_scan.h
+    shell_openxr.cpp
+    shell_openxr.h
     displayxr_shell_resource.h
 )
+
+# Phase 2.I: shell migrates onto the public OpenXR extensions. Discover
+# the OpenXR loader the same way webxr_bridge does (via OpenXR_ROOT
+# passed from scripts/build_windows.bat). The shell does not render
+# swapchains; it only needs xrCreate{Instance,Session} + xrGetInstanceProcAddr.
+find_package(OpenXR CONFIG QUIET)
+if(NOT OpenXR_FOUND)
+    if(DEFINED OpenXR_ROOT AND EXISTS "${OpenXR_ROOT}/x64/lib/openxr_loader.lib")
+        add_library(OpenXR::openxr_loader SHARED IMPORTED)
+        set_target_properties(OpenXR::openxr_loader PROPERTIES
+            IMPORTED_IMPLIB "${OpenXR_ROOT}/x64/lib/openxr_loader.lib"
+            IMPORTED_LOCATION "${OpenXR_ROOT}/x64/bin/openxr_loader.dll"
+        )
+        set(OpenXR_FOUND TRUE)
+    endif()
+endif()
+if(NOT OpenXR_FOUND)
+    message(FATAL_ERROR "displayxr-shell requires the OpenXR loader (Phase 2.I migration)")
+endif()
 
 if(WIN32)
     list(APPEND DISPLAYXR_SHELL_SOURCES displayxr_shell.rc)
@@ -20,14 +41,17 @@ add_sanitizers(displayxr-shell)
 target_include_directories(displayxr-shell PRIVATE
     ipc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../external/stb  # stb_image_write.h (Browse-for-app icon extract)
+    ${CMAKE_SOURCE_DIR}/src/external/openxr_includes   # XR_EXT_spatial_workspace.h, XR_EXT_app_launcher.h
 )
 
-target_link_libraries(displayxr-shell PRIVATE aux_util ipc_client)
+target_link_libraries(displayxr-shell PRIVATE aux_util ipc_client OpenXR::openxr_loader)
 
 if(WIN32)
     # Dbghelp: ImageDirectoryEntryToData (PE import scan)
     # Comdlg32: GetOpenFileNameA (Phase 5.14 Browse-for-app tile)
-    target_link_libraries(displayxr-shell PRIVATE dbghelp comdlg32)
+    # D3D11/DXGI: shell_openxr.cpp creates a minimal D3D11 device for the
+    #     graphics-binding requirement of XrSessionCreateInfo.
+    target_link_libraries(displayxr-shell PRIVATE dbghelp comdlg32 d3d11 dxgi)
 endif()
 
 install(TARGETS displayxr-shell RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
