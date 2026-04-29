@@ -11421,7 +11421,7 @@ comp_d3d11_service_set_client_window_pose(struct xrt_system_compositor *xsysc,
 
 	mc->clients[slot].hwnd_resize_pending = true;
 
-	U_LOG_W("Shell: set window pose slot %d pos=(%.3f,%.3f,%.3f) size=%.3fx%.3f → rect=(%u,%u,%u,%u)",
+	U_LOG_W("Workspace: set window pose slot %d pos=(%.3f,%.3f,%.3f) size=%.3fx%.3f → rect=(%u,%u,%u,%u)",
 	        slot, pose->position.x, pose->position.y, pose->position.z,
 	        width_m, height_m,
 	        mc->clients[slot].window_rect_x, mc->clients[slot].window_rect_y,
@@ -11449,7 +11449,7 @@ comp_d3d11_service_set_client_visibility(struct xrt_system_compositor *xsysc,
 	if (slot < 0) return false;
 
 	mc->clients[slot].minimized = !visible;
-	U_LOG_W("Shell: set_visibility slot %d visible=%d", slot, visible);
+	U_LOG_W("Workspace: set_visibility slot %d visible=%d", slot, visible);
 
 	if (!visible && slot == mc->focused_slot) {
 		mc->focused_slot = -1;
