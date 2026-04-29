@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 #define XR_EXT_spatial_workspace 1
-#define XR_EXT_spatial_workspace_SPEC_VERSION 1
+#define XR_EXT_spatial_workspace_SPEC_VERSION 2
 #define XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME "XR_EXT_spatial_workspace"
 
 // Provisional XrStructureType values. The 1000999100..104 range is reserved for
@@ -127,6 +127,58 @@ typedef XrResult (XRAPI_PTR *PFN_xrRemoveWorkspaceCaptureClientEXT)(
     XrSession           session,
     XrWorkspaceClientId clientId);
 
+// ---- Window pose + visibility (spec_version 2) ----
+
+/*!
+ * @brief Set position, orientation, and physical size of a client's window.
+ *
+ * The runtime composites the named client's swapchain into a quad at this
+ * pose; the next frame reflects the change. Pose origin is the display
+ * center; +x right, +y up, +z toward the viewer. Width and height are the
+ * quad's physical extent in meters — the runtime stretches the client's
+ * atlas to fit.
+ *
+ * @return XR_SUCCESS on success,
+ *         XR_ERROR_VALIDATION_FAILURE if clientId is unknown or not a
+ *         positionable client (some platform-internal clients may be
+ *         excluded), XR_ERROR_FEATURE_UNSUPPORTED if the session is not
+ *         the active workspace.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrSetWorkspaceClientWindowPoseEXT)(
+    XrSession            session,
+    XrWorkspaceClientId  clientId,
+    const XrPosef       *pose,
+    float                widthMeters,
+    float                heightMeters);
+
+/*!
+ * @brief Read back the current pose and physical size of a client's window.
+ *
+ * Useful for controllers that need to preserve relative layout when one
+ * client moves, or for restoring saved workspaces. All output pointers
+ * must be non-NULL.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrGetWorkspaceClientWindowPoseEXT)(
+    XrSession            session,
+    XrWorkspaceClientId  clientId,
+    XrPosef             *outPose,
+    float               *outWidthMeters,
+    float               *outHeightMeters);
+
+/*!
+ * @brief Show or hide a client's window without destroying it.
+ *
+ * A hidden client keeps running but does not contribute to the composite —
+ * standard "minimize" semantics. The client may continue rendering frames
+ * that the runtime drops, or its render thread may pause; that is a
+ * client-side concern. xrGetSpatialWorkspaceClientVisibilityEXT (future)
+ * would expose readback; Phase 2.C ships set-only.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrSetWorkspaceClientVisibilityEXT)(
+    XrSession            session,
+    XrWorkspaceClientId  clientId,
+    XrBool32             visible);
+
 #ifndef XR_NO_PROTOTYPES
 XRAPI_ATTR XrResult XRAPI_CALL xrActivateSpatialWorkspaceEXT(
     XrSession session);
@@ -147,6 +199,25 @@ XRAPI_ATTR XrResult XRAPI_CALL xrAddWorkspaceCaptureClientEXT(
 XRAPI_ATTR XrResult XRAPI_CALL xrRemoveWorkspaceCaptureClientEXT(
     XrSession           session,
     XrWorkspaceClientId clientId);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrSetWorkspaceClientWindowPoseEXT(
+    XrSession            session,
+    XrWorkspaceClientId  clientId,
+    const XrPosef       *pose,
+    float                widthMeters,
+    float                heightMeters);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrGetWorkspaceClientWindowPoseEXT(
+    XrSession            session,
+    XrWorkspaceClientId  clientId,
+    XrPosef             *outPose,
+    float               *outWidthMeters,
+    float               *outHeightMeters);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrSetWorkspaceClientVisibilityEXT(
+    XrSession            session,
+    XrWorkspaceClientId  clientId,
+    XrBool32             visible);
 #endif
 
 #ifdef __cplusplus
