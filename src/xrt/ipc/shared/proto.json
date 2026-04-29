@@ -156,6 +156,18 @@
 		]
 	},
 
+	"workspace_set_focused_client": {
+		"in": [
+			{"name": "client_id", "type": "uint32_t"}
+		]
+	},
+
+	"workspace_get_focused_client": {
+		"out": [
+			{"name": "client_id", "type": "uint32_t"}
+		]
+	},
+
 	"workspace_capture_frame": {
 		"in": [
 			{"name": "request", "type": "struct ipc_capture_request"}

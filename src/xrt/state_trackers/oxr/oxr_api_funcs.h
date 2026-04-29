@@ -837,6 +837,12 @@ oxr_xrWorkspaceHitTestEXT(XrSession session,
                           XrWorkspaceClientId *outClientId,
                           XrVector2f *outLocalUV,
                           XrWorkspaceHitRegionEXT *outHitRegion);
+//! OpenXR API function @ep{xrSetWorkspaceFocusedClientEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetWorkspaceFocusedClientEXT(XrSession session, XrWorkspaceClientId clientId);
+//! OpenXR API function @ep{xrGetWorkspaceFocusedClientEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetWorkspaceFocusedClientEXT(XrSession session, XrWorkspaceClientId *outClientId);
 #endif
 
 #ifdef OXR_HAVE_EXT_app_launcher

@@ -202,6 +202,12 @@ comp_ipc_client_compositor_workspace_hit_test(struct xrt_compositor *xc,
                                               float *out_local_v,
                                               uint32_t *out_hit_region);
 
+xrt_result_t
+comp_ipc_client_compositor_workspace_set_focused_client(struct xrt_compositor *xc, uint32_t client_id);
+
+xrt_result_t
+comp_ipc_client_compositor_workspace_get_focused_client(struct xrt_compositor *xc, uint32_t *out_client_id);
+
 /*!
  * Launcher bridges (XR_EXT_app_launcher).
  *

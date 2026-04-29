@@ -346,6 +346,32 @@ comp_ipc_client_compositor_workspace_hit_test(struct xrt_compositor *xc,
 	                                   out_local_v, out_hit_region);
 }
 
+xrt_result_t
+comp_ipc_client_compositor_workspace_set_focused_client(struct xrt_compositor *xc, uint32_t client_id)
+{
+	if (xc == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	return ipc_call_workspace_set_focused_client(icc->ipc_c, client_id);
+}
+
+xrt_result_t
+comp_ipc_client_compositor_workspace_get_focused_client(struct xrt_compositor *xc, uint32_t *out_client_id)
+{
+	if (xc == NULL || out_client_id == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	return ipc_call_workspace_get_focused_client(icc->ipc_c, out_client_id);
+}
+
 /*
  * Launcher bridges (XR_EXT_app_launcher).
  *

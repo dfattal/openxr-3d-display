@@ -247,6 +247,35 @@ typedef XrResult (XRAPI_PTR *PFN_xrWorkspaceHitTestEXT)(
     XrVector2f              *outLocalUV,
     XrWorkspaceHitRegionEXT *outHitRegion);
 
+// ---- Focus control (spec_version 4) ----
+
+/*!
+ * @brief Set the workspace's focused client.
+ *
+ * The runtime forwards keyboard input (other than runtime-reserved keys
+ * TAB/DELETE/ESC) and click-through events to the focused client's HWND.
+ * The workspace controller decides who gets focus from its interpretation
+ * of pointer events drained via xrEnumerateWorkspaceInputEventsEXT.
+ *
+ * @param session   A valid workspace session.
+ * @param clientId  The client to focus, or XR_NULL_WORKSPACE_CLIENT_ID
+ *                  to clear focus (no client receives forwarded input).
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrSetWorkspaceFocusedClientEXT)(
+    XrSession           session,
+    XrWorkspaceClientId clientId);
+
+/*!
+ * @brief Read the workspace's currently focused client.
+ *
+ * @param session       A valid workspace session.
+ * @param outClientId   Output: the focused clientId, or
+ *                      XR_NULL_WORKSPACE_CLIENT_ID if no client is focused.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrGetWorkspaceFocusedClientEXT)(
+    XrSession            session,
+    XrWorkspaceClientId *outClientId);
+
 #ifndef XR_NO_PROTOTYPES
 XRAPI_ATTR XrResult XRAPI_CALL xrActivateSpatialWorkspaceEXT(
     XrSession session);
@@ -294,6 +323,14 @@ XRAPI_ATTR XrResult XRAPI_CALL xrWorkspaceHitTestEXT(
     XrWorkspaceClientId     *outClientId,
     XrVector2f              *outLocalUV,
     XrWorkspaceHitRegionEXT *outHitRegion);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrSetWorkspaceFocusedClientEXT(
+    XrSession           session,
+    XrWorkspaceClientId clientId);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrGetWorkspaceFocusedClientEXT(
+    XrSession            session,
+    XrWorkspaceClientId *outClientId);
 #endif
 
 #ifdef __cplusplus

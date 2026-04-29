@@ -2627,6 +2627,61 @@ ipc_handle_workspace_hit_test(volatile struct ipc_client_state *_ics,
 }
 
 xrt_result_t
+ipc_handle_workspace_set_focused_client(volatile struct ipc_client_state *_ics, uint32_t client_id)
+{
+	struct ipc_server *s = _ics->server;
+
+	// PID-auth gate matches workspace_activate / workspace_hit_test. Focus
+	// is policy controlled by the workspace; only the registered controller
+	// may set it.
+	unsigned long expected_pid = get_orchestrator_workspace_pid();
+	unsigned long caller_pid = (unsigned long)_ics->client_state.pid;
+	if (expected_pid != 0 && caller_pid != expected_pid) {
+		return XRT_ERROR_NOT_AUTHORIZED;
+	}
+
+	// XR_NULL_WORKSPACE_CLIENT_ID (0) clears focus. The internal helper
+	// ipc_server_set_active_client looks up by id and would fail for 0;
+	// we directly reset the active-client indices instead.
+	if (client_id == 0) {
+		os_mutex_lock(&s->global_state.lock);
+		s->global_state.active_client_index = -1;
+		s->global_state.last_active_client_index = -1;
+		os_mutex_unlock(&s->global_state.lock);
+		return XRT_SUCCESS;
+	}
+
+	return ipc_server_set_active_client(s, client_id);
+}
+
+xrt_result_t
+ipc_handle_workspace_get_focused_client(volatile struct ipc_client_state *_ics, uint32_t *out_client_id)
+{
+	struct ipc_server *s = _ics->server;
+
+	unsigned long expected_pid = get_orchestrator_workspace_pid();
+	unsigned long caller_pid = (unsigned long)_ics->client_state.pid;
+	if (expected_pid != 0 && caller_pid != expected_pid) {
+		return XRT_ERROR_NOT_AUTHORIZED;
+	}
+
+	if (out_client_id == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	*out_client_id = 0;
+
+	os_mutex_lock(&s->global_state.lock);
+	int idx = s->global_state.active_client_index;
+	if (idx >= 0 && idx < IPC_MAX_CLIENTS) {
+		volatile struct ipc_client_state *ics = &s->threads[idx].ics;
+		*out_client_id = ics->client_state.id;
+	}
+	os_mutex_unlock(&s->global_state.lock);
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
 ipc_handle_workspace_capture_frame(volatile struct ipc_client_state *_ics,
                                 const struct ipc_capture_request *request,
                                 struct ipc_capture_result *out_capture_result)

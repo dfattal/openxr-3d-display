@@ -73,6 +73,10 @@ comp_ipc_client_compositor_workspace_hit_test(struct xrt_compositor *xc,
                                               float *out_local_u,
                                               float *out_local_v,
                                               uint32_t *out_hit_region);
+xrt_result_t
+comp_ipc_client_compositor_workspace_set_focused_client(struct xrt_compositor *xc, uint32_t client_id);
+xrt_result_t
+comp_ipc_client_compositor_workspace_get_focused_client(struct xrt_compositor *xc, uint32_t *out_client_id);
 
 
 /*
@@ -437,6 +441,60 @@ oxr_xrWorkspaceHitTestEXT(XrSession session,
 	outLocalUV->x = u;
 	outLocalUV->y = v;
 	*outHitRegion = (XrWorkspaceHitRegionEXT)region;
+	return XR_SUCCESS;
+}
+
+
+/*
+ * Focus control (spec_version 4)
+ */
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetWorkspaceFocusedClientEXT(XrSession session, XrWorkspaceClientId clientId)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrSetWorkspaceFocusedClientEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_spatial_workspace);
+
+	// XR_NULL_WORKSPACE_CLIENT_ID is valid here — clears focus.
+
+	if (!session_is_ipc_client(sess)) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "xrSetWorkspaceFocusedClientEXT requires an IPC-mode session");
+	}
+
+	xrt_result_t xret = comp_ipc_client_compositor_workspace_set_focused_client(&sess->xcn->base,
+	                                                                            (uint32_t)clientId);
+	return xret_to_xr_result(&log, xret, "workspace_set_focused_client");
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetWorkspaceFocusedClientEXT(XrSession session, XrWorkspaceClientId *outClientId)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetWorkspaceFocusedClientEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_spatial_workspace);
+	OXR_VERIFY_ARG_NOT_NULL(&log, outClientId);
+
+	if (!session_is_ipc_client(sess)) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "xrGetWorkspaceFocusedClientEXT requires an IPC-mode session");
+	}
+
+	uint32_t client_id = 0;
+	xrt_result_t xret = comp_ipc_client_compositor_workspace_get_focused_client(&sess->xcn->base, &client_id);
+	if (xret != XRT_SUCCESS) {
+		return xret_to_xr_result(&log, xret, "workspace_get_focused_client");
+	}
+	*outClientId = (XrWorkspaceClientId)client_id;
 	return XR_SUCCESS;
 }
 
