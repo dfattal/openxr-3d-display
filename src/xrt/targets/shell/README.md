@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/displayxr-shell-logo-white.png">
+    <img alt="DisplayXR Shell" src="assets/displayxr-shell-logo-black.png" width="160">
+  </picture>
+</p>
+
 # DisplayXR Shell
 
 Spatial shell and 3D window manager for [DisplayXR](https://github.com/DisplayXR/displayxr-runtime). Turns a tracked 3D display into a multi-app spatial desktop where windows float in 3D space with correct stereo rendering.
