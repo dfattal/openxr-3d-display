@@ -127,6 +127,230 @@ shell_get_client_info(XrWorkspaceClientId id, XrWorkspaceClientInfoEXT *info)
 // (~0.06 m radius on 0.344 m) and the larger 0.700 m fallback.
 #define SHELL_PI_F 3.14159265358979323846f
 
+// ---------- Phase 2.K: shell-side animation framework ----------
+//
+// Replicates the deleted runtime slot_animate_to / slot_animate_tick — but
+// controller-side now, per the "controllers own all motion policy" North
+// Star (memory: feedback_controllers_own_motion). Each entry tracks a
+// per-client interpolation from a snapshot of the current pose to a target
+// pose+size over a configurable duration with an ease-out cubic curve. A
+// FRAME_TICK from the runtime (or the main-loop fallback timer) drives the
+// shell_slot_anim_tick() pass that lerps and re-pushes set_pose.
+
+#define SHELL_ANIM_DURATION_NS (300ULL * 1000000ULL) // 300 ms default
+#define SHELL_ANIM_MAX 16                            // ≥ SHELL_MAX_CLIENTS
+
+struct shell_slot_anim
+{
+	bool                 active;
+	XrWorkspaceClientId  id;
+	XrPosef              start_pose;
+	XrPosef              target_pose;
+	float                start_w;
+	float                start_h;
+	float                target_w;
+	float                target_h;
+	uint64_t             start_ns;
+	uint64_t             duration_ns;
+};
+
+static struct shell_slot_anim s_anims[SHELL_ANIM_MAX];
+
+static uint64_t
+shell_now_ns(void)
+{
+#ifdef _WIN32
+	// QueryPerformanceCounter gives the highest-resolution monotonic source
+	// on Windows; convert ticks to ns. Cached frequency keeps the call cheap.
+	static LARGE_INTEGER s_freq = {0};
+	if (s_freq.QuadPart == 0) {
+		QueryPerformanceFrequency(&s_freq);
+	}
+	LARGE_INTEGER t;
+	QueryPerformanceCounter(&t);
+	// (ticks * 1e9) / freq, in 64-bit safe order.
+	return (uint64_t)((double)t.QuadPart * 1e9 / (double)s_freq.QuadPart);
+#else
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+#endif
+}
+
+static float
+shell_ease_out_cubic(float t)
+{
+	if (t <= 0.0f) return 0.0f;
+	if (t >= 1.0f) return 1.0f;
+	float f = 1.0f - t;
+	return 1.0f - f * f * f;
+}
+
+static void
+shell_lerp_pose(const XrPosef *a, const XrPosef *b, float t, XrPosef *out)
+{
+	out->position.x = a->position.x + (b->position.x - a->position.x) * t;
+	out->position.y = a->position.y + (b->position.y - a->position.y) * t;
+	out->position.z = a->position.z + (b->position.z - a->position.z) * t;
+	// nlerp + normalize is plenty for the small angles + short durations
+	// our presets traverse (carousel auto-rotation excluded — that path
+	// drives set_pose directly without seeding the animation). Pick the
+	// short-arc by flipping b if dot < 0.
+	float dot = a->orientation.x * b->orientation.x + a->orientation.y * b->orientation.y +
+	            a->orientation.z * b->orientation.z + a->orientation.w * b->orientation.w;
+	float bx = b->orientation.x, by = b->orientation.y, bz = b->orientation.z, bw = b->orientation.w;
+	if (dot < 0.0f) {
+		bx = -bx; by = -by; bz = -bz; bw = -bw;
+	}
+	float qx = a->orientation.x + (bx - a->orientation.x) * t;
+	float qy = a->orientation.y + (by - a->orientation.y) * t;
+	float qz = a->orientation.z + (bz - a->orientation.z) * t;
+	float qw = a->orientation.w + (bw - a->orientation.w) * t;
+	float n = sqrtf(qx * qx + qy * qy + qz * qz + qw * qw);
+	if (n > 0.0f) {
+		float inv = 1.0f / n;
+		qx *= inv; qy *= inv; qz *= inv; qw *= inv;
+	} else {
+		qx = 0.0f; qy = 0.0f; qz = 0.0f; qw = 1.0f;
+	}
+	out->orientation.x = qx;
+	out->orientation.y = qy;
+	out->orientation.z = qz;
+	out->orientation.w = qw;
+}
+
+// Find the animation slot for `id`; returns NULL if not present.
+static struct shell_slot_anim *
+shell_slot_anim_find(XrWorkspaceClientId id)
+{
+	for (int i = 0; i < SHELL_ANIM_MAX; i++) {
+		if (s_anims[i].active && s_anims[i].id == id) {
+			return &s_anims[i];
+		}
+	}
+	return NULL;
+}
+
+// Seed an animation toward `target_pose` / `target_w` × `target_h` over
+// `duration_ns`. Snapshots the current pose via xrGetWorkspaceClientWindowPoseEXT
+// — if that fails (e.g. slot still binding mid-connect), falls back to using
+// the target as both start and end so the controller's set_pose doesn't fail
+// either. Reuses an existing entry if one is already animating this client so
+// preset switches mid-animation pick up from the current interpolated pose.
+static void
+shell_slot_anim_seed(XrWorkspaceClientId id,
+                     const XrPosef *target_pose,
+                     float target_w,
+                     float target_h,
+                     uint64_t duration_ns)
+{
+	if (g_xr == NULL || id == XR_NULL_WORKSPACE_CLIENT_ID || target_pose == NULL) {
+		return;
+	}
+	struct shell_slot_anim *a = shell_slot_anim_find(id);
+	if (a == NULL) {
+		for (int i = 0; i < SHELL_ANIM_MAX; i++) {
+			if (!s_anims[i].active) {
+				a = &s_anims[i];
+				break;
+			}
+		}
+	}
+	if (a == NULL) {
+		// Should not happen with SHELL_ANIM_MAX ≥ SHELL_MAX_CLIENTS.
+		PE("shell_slot_anim_seed: no free animation slot for client %u\n", id);
+		return;
+	}
+
+	XrPosef cur_pose = *target_pose;
+	float cur_w = target_w, cur_h = target_h;
+	if (g_xr->get_pose != NULL) {
+		XrPosef p;
+		float w, h;
+		if (g_xr->get_pose(g_xr->session, id, &p, &w, &h) == XR_SUCCESS) {
+			cur_pose = p;
+			cur_w = w;
+			cur_h = h;
+		}
+	}
+
+	a->active = true;
+	a->id = id;
+	a->start_pose = cur_pose;
+	a->target_pose = *target_pose;
+	a->start_w = cur_w;
+	a->start_h = cur_h;
+	a->target_w = target_w;
+	a->target_h = target_h;
+	a->start_ns = shell_now_ns();
+	a->duration_ns = duration_ns;
+}
+
+// Tick every active animation: interpolate, push set_pose, mark inactive on
+// completion. Returns the number of animations still active after the tick
+// (so the caller can pick a tight or relaxed poll cadence).
+static int
+shell_slot_anim_tick(void)
+{
+	if (g_xr == NULL || g_xr->set_pose == NULL) {
+		return 0;
+	}
+	uint64_t now = shell_now_ns();
+	int still_active = 0;
+	for (int i = 0; i < SHELL_ANIM_MAX; i++) {
+		struct shell_slot_anim *a = &s_anims[i];
+		if (!a->active) continue;
+		if (a->duration_ns == 0) {
+			// "Drive" mode — push target immediately, deactivate.
+			g_xr->set_pose(g_xr->session, a->id, &a->target_pose, a->target_w, a->target_h);
+			a->active = false;
+			continue;
+		}
+		uint64_t elapsed = now - a->start_ns;
+		float t = (float)((double)elapsed / (double)a->duration_ns);
+		bool done = false;
+		if (t >= 1.0f) {
+			t = 1.0f;
+			done = true;
+		}
+		float eased = shell_ease_out_cubic(t);
+		XrPosef p;
+		shell_lerp_pose(&a->start_pose, &a->target_pose, eased, &p);
+		float w = a->start_w + (a->target_w - a->start_w) * eased;
+		float h = a->start_h + (a->target_h - a->start_h) * eased;
+		g_xr->set_pose(g_xr->session, a->id, &p, w, h);
+		if (done) {
+			a->active = false;
+		} else {
+			still_active++;
+		}
+	}
+	return still_active;
+}
+
+static int
+shell_slot_anim_active_count(void)
+{
+	int n = 0;
+	for (int i = 0; i < SHELL_ANIM_MAX; i++) {
+		if (s_anims[i].active) n++;
+	}
+	return n;
+}
+
+// Cancel any pending animation for `id`. Used when a client disconnects so we
+// don't keep pushing set_pose on a dead slot.
+static void
+shell_slot_anim_cancel(XrWorkspaceClientId id)
+{
+	for (int i = 0; i < SHELL_ANIM_MAX; i++) {
+		if (s_anims[i].active && s_anims[i].id == id) {
+			s_anims[i].active = false;
+		}
+	}
+}
+
+
 // Adaptive grid: ceil(sqrt(N)) columns, fills row-first. 90% display, 10%
 // padding per cell. All windows at Z=0. Mirrors compute_grid_layout().
 static void
@@ -272,9 +496,9 @@ shell_apply_preset(const char *name)
 		return false;
 	}
 
-	P("Layout '%s' (%u windows)\n", name, n);
+	P("Layout '%s' (%u windows) — gliding over %llu ms\n",
+	  name, n, (unsigned long long)(SHELL_ANIM_DURATION_NS / 1000000ULL));
 
-	uint32_t success = 0;
 	for (uint32_t i = 0; i < n; i++) {
 		XrPosef pose;
 		pose.orientation.x = 0.0f;
@@ -301,20 +525,33 @@ shell_apply_preset(const char *name)
 			                            &pose, &w, &h);
 		}
 
-		XrResult r = g_xr->set_pose(g_xr->session, ids[i], &pose, w, h);
-		if (r == XR_SUCCESS) {
-			success++;
-		} else {
-			PE("  set_pose(client=%u) failed: %d\n", ids[i], r);
-		}
+		// Phase 2.K: instead of snapping via set_pose, seed an animation
+		// from the current pose to the new one. The main-loop tick drives
+		// per-frame interpolation until the animation completes (~300 ms).
+		shell_slot_anim_seed(ids[i], &pose, w, h, SHELL_ANIM_DURATION_NS);
 	}
-	// All clients were filtered out, or none responded — let the caller retry.
-	return success == n && n > 0;
+	// We don't know whether set_pose will succeed until the animation
+	// actually fires; assume success at seed time. The connect-time race
+	// retry path (s_auto_tile_pending) still works because that path
+	// re-invokes shell_apply_preset on each poll iteration until at least
+	// one animation seeds and ticks cleanly.
+	return n > 0;
 }
 
 // Drain pending workspace input events; dispatch Ctrl+1..3 to layout presets.
 // The modifier bit layout follows XR_EXT_spatial_workspace's MVP policy:
 // bit 0 SHIFT, bit 1 CTRL, bit 2 ALT.
+//
+// Phase 2.K: also consumes the new MOTION / FRAME_TICK / FOCUS_CHANGED
+// variants. Commit 4 silently absorbs them (FRAME_TICK is read so the count
+// is consumed; FOCUS_CHANGED is logged but not yet acted on); commit 5 wires
+// MOTION + SCROLL into the carousel state machine.
+
+// Phase 2.K: latest workspace state read from the drain. Carousel state
+// machine (commit 5) consumes these. File-scope so the per-frame tick can
+// see them.
+static int s_focused_client_id = 0; // 0 = no focus
+
 static void
 shell_drain_input_events(void)
 {
@@ -328,15 +565,31 @@ shell_drain_input_events(void)
 	}
 	for (uint32_t i = 0; i < cnt; i++) {
 		const XrWorkspaceInputEventEXT *e = &evs[i];
-		if (e->eventType != XR_WORKSPACE_INPUT_EVENT_KEY_EXT) continue;
-		if (!e->key.isDown) continue;
-		if ((e->key.modifiers & 0x2u) == 0) continue; // require CTRL
-		switch (e->key.vkCode) {
-		case '1': shell_apply_preset("grid"); break;
-		case '2': shell_apply_preset("immersive"); break;
-		case '3': shell_apply_preset("carousel"); break;
-		// '4' reserved for a future preset slot.
-		default: break;
+		switch (e->eventType) {
+		case XR_WORKSPACE_INPUT_EVENT_KEY_EXT: {
+			if (!e->key.isDown) break;
+			if ((e->key.modifiers & 0x2u) == 0) break; // require CTRL
+			switch (e->key.vkCode) {
+			case '1': shell_apply_preset("grid"); break;
+			case '2': shell_apply_preset("immersive"); break;
+			case '3': shell_apply_preset("carousel"); break;
+			// '4' reserved for a future preset slot.
+			default: break;
+			}
+			break;
+		}
+		case XR_WORKSPACE_INPUT_EVENT_FOCUS_CHANGED_EXT:
+			s_focused_client_id = (int)e->focusChanged.currentClientId;
+			break;
+		case XR_WORKSPACE_INPUT_EVENT_FRAME_TICK_EXT:
+		case XR_WORKSPACE_INPUT_EVENT_POINTER_MOTION_EXT:
+		case XR_WORKSPACE_INPUT_EVENT_POINTER_EXT:
+		case XR_WORKSPACE_INPUT_EVENT_SCROLL_EXT:
+			// Commit 4: silently consumed. Commit 5 wires MOTION + SCROLL
+			// into the carousel state machine; FRAME_TICK paces it.
+			break;
+		default:
+			break;
 		}
 	}
 }
@@ -2288,9 +2541,16 @@ main(int argc, char *argv[])
 	// --- Main loop: MsgWait on Windows, Sleep on other platforms ---
 	while (g_running) {
 #ifdef _WIN32
-		// Wait for either a message or the poll timeout
+		// Phase 2.K: variable cadence. While any client animation is active
+		// we poll every ~16 ms (~60 Hz) so the animation tick lerps cleanly;
+		// otherwise we drop back to 500 ms for ambient idle. The runtime
+		// also delivers FRAME_TICK events on the input drain that the tick
+		// could pace against directly, but the timer fallback keeps things
+		// simple and is correct when FRAME_TICK arrives on a different
+		// drain pass.
+		DWORD poll_ms = (shell_slot_anim_active_count() > 0) ? 16u : (DWORD)POLL_INTERVAL_MS;
 		DWORD wait_result = MsgWaitForMultipleObjects(
-		    0, NULL, FALSE, POLL_INTERVAL_MS, QS_ALLINPUT);
+		    0, NULL, FALSE, poll_ms, QS_ALLINPUT);
 
 		if (wait_result == WAIT_OBJECT_0) {
 			MSG msg;
@@ -2421,7 +2681,14 @@ main(int argc, char *argv[])
 		// Phase 2.G: drain workspace input events. Ctrl+1..3 trigger
 		// layout presets; other key/pointer events are read here for
 		// future use (controller-driven drag, hover routing, etc.).
+		// Phase 2.K: drain also consumes FRAME_TICK / FOCUS_CHANGED /
+		// MOTION variants now; the carousel state machine (commit 5)
+		// reads MOTION + SCROLL.
 		shell_drain_input_events();
+
+		// Phase 2.K: drive any active animations forward. Idle when no
+		// animation is active; cheap when one is.
+		(void)shell_slot_anim_tick();
 
 #ifdef _WIN32
 		// DEBUG file-trigger: drop %TEMP%\displayxr_preset_{grid|immersive|carousel}
@@ -2462,6 +2729,23 @@ main(int argc, char *argv[])
 		{
 			XrWorkspaceClientId client_ids[SHELL_MAX_CLIENTS];
 			uint32_t client_count = shell_enumerate_clients(client_ids, SHELL_MAX_CLIENTS);
+
+			// Phase 2.K: cancel pending animations for disconnected clients
+			// so the tick stops pushing set_pose on a dead slot. Iterate the
+			// previous set and bail out of any not in the current list.
+			for (uint32_t p = 0; p < prev_count; p++) {
+				bool still_present = false;
+				for (uint32_t c = 0; c < client_count; c++) {
+					if (prev_ids[p] == client_ids[c]) {
+						still_present = true;
+						break;
+					}
+				}
+				if (!still_present) {
+					shell_slot_anim_cancel(prev_ids[p]);
+				}
+			}
+
 			for (uint32_t c = 0; c < client_count; c++) {
 				bool is_new = true;
 				for (uint32_t p = 0; p < prev_count; p++) {

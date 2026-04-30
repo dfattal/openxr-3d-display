@@ -48,6 +48,7 @@ struct shell_openxr_state
 	PFN_xrAddWorkspaceCaptureClientEXT     add_capture;
 	PFN_xrRemoveWorkspaceCaptureClientEXT  remove_capture;
 	PFN_xrSetWorkspaceClientWindowPoseEXT  set_pose;
+	PFN_xrGetWorkspaceClientWindowPoseEXT  get_pose;
 	PFN_xrCaptureWorkspaceFrameEXT         capture_frame;
 	PFN_xrClearLauncherAppsEXT             clear_launcher;
 	PFN_xrAddLauncherAppEXT                add_launcher_app;
@@ -58,6 +59,12 @@ struct shell_openxr_state
 	PFN_xrEnumerateWorkspaceClientsEXT     enumerate_clients;
 	PFN_xrGetWorkspaceClientInfoEXT        get_client_info;
 	PFN_xrEnumerateWorkspaceInputEventsEXT enumerate_input_events;
+	// Phase 2.K: pointer capture + lifecycle requests for controller-driven
+	// motion policy.
+	PFN_xrEnableWorkspacePointerCaptureEXT     enable_pointer_capture;
+	PFN_xrDisableWorkspacePointerCaptureEXT    disable_pointer_capture;
+	PFN_xrRequestWorkspaceClientExitEXT        request_client_exit;
+	PFN_xrRequestWorkspaceClientFullscreenEXT  request_client_fullscreen;
 
 	// Physical display size in meters, pulled from XR_EXT_display_info during
 	// init. Falls back to LP-3D dims (0.700 × 0.394 m) if the extension is

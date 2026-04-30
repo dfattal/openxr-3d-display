@@ -144,17 +144,23 @@ extern "C" struct shell_openxr_state *shell_openxr_init(void)
 	    {"xrGetSpatialWorkspaceStateEXT",      reinterpret_cast<PFN_xrVoidFunction *>(&s->get_state)},
 	    {"xrAddWorkspaceCaptureClientEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s->add_capture)},
 	    {"xrRemoveWorkspaceCaptureClientEXT",  reinterpret_cast<PFN_xrVoidFunction *>(&s->remove_capture)},
-	    {"xrSetWorkspaceClientWindowPoseEXT",  reinterpret_cast<PFN_xrVoidFunction *>(&s->set_pose)},
-	    {"xrCaptureWorkspaceFrameEXT",         reinterpret_cast<PFN_xrVoidFunction *>(&s->capture_frame)},
-	    {"xrClearLauncherAppsEXT",             reinterpret_cast<PFN_xrVoidFunction *>(&s->clear_launcher)},
-	    {"xrAddLauncherAppEXT",                reinterpret_cast<PFN_xrVoidFunction *>(&s->add_launcher_app)},
-	    {"xrSetLauncherVisibleEXT",            reinterpret_cast<PFN_xrVoidFunction *>(&s->set_launcher_visible)},
-	    {"xrPollLauncherClickEXT",             reinterpret_cast<PFN_xrVoidFunction *>(&s->poll_launcher_click)},
-	    {"xrSetLauncherRunningTileMaskEXT",    reinterpret_cast<PFN_xrVoidFunction *>(&s->set_running_tile_mask)},
-	    {"xrSetWorkspaceFocusedClientEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s->set_focused)},
-	    {"xrEnumerateWorkspaceClientsEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s->enumerate_clients)},
-	    {"xrGetWorkspaceClientInfoEXT",        reinterpret_cast<PFN_xrVoidFunction *>(&s->get_client_info)},
-	    {"xrEnumerateWorkspaceInputEventsEXT", reinterpret_cast<PFN_xrVoidFunction *>(&s->enumerate_input_events)},
+	    {"xrSetWorkspaceClientWindowPoseEXT",       reinterpret_cast<PFN_xrVoidFunction *>(&s->set_pose)},
+	    {"xrGetWorkspaceClientWindowPoseEXT",       reinterpret_cast<PFN_xrVoidFunction *>(&s->get_pose)},
+	    {"xrCaptureWorkspaceFrameEXT",              reinterpret_cast<PFN_xrVoidFunction *>(&s->capture_frame)},
+	    {"xrClearLauncherAppsEXT",                  reinterpret_cast<PFN_xrVoidFunction *>(&s->clear_launcher)},
+	    {"xrAddLauncherAppEXT",                     reinterpret_cast<PFN_xrVoidFunction *>(&s->add_launcher_app)},
+	    {"xrSetLauncherVisibleEXT",                 reinterpret_cast<PFN_xrVoidFunction *>(&s->set_launcher_visible)},
+	    {"xrPollLauncherClickEXT",                  reinterpret_cast<PFN_xrVoidFunction *>(&s->poll_launcher_click)},
+	    {"xrSetLauncherRunningTileMaskEXT",         reinterpret_cast<PFN_xrVoidFunction *>(&s->set_running_tile_mask)},
+	    {"xrSetWorkspaceFocusedClientEXT",          reinterpret_cast<PFN_xrVoidFunction *>(&s->set_focused)},
+	    {"xrEnumerateWorkspaceClientsEXT",          reinterpret_cast<PFN_xrVoidFunction *>(&s->enumerate_clients)},
+	    {"xrGetWorkspaceClientInfoEXT",             reinterpret_cast<PFN_xrVoidFunction *>(&s->get_client_info)},
+	    {"xrEnumerateWorkspaceInputEventsEXT",      reinterpret_cast<PFN_xrVoidFunction *>(&s->enumerate_input_events)},
+	    // Phase 2.K additions
+	    {"xrEnableWorkspacePointerCaptureEXT",      reinterpret_cast<PFN_xrVoidFunction *>(&s->enable_pointer_capture)},
+	    {"xrDisableWorkspacePointerCaptureEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s->disable_pointer_capture)},
+	    {"xrRequestWorkspaceClientExitEXT",         reinterpret_cast<PFN_xrVoidFunction *>(&s->request_client_exit)},
+	    {"xrRequestWorkspaceClientFullscreenEXT",   reinterpret_cast<PFN_xrVoidFunction *>(&s->request_client_fullscreen)},
 	};
 	for (const auto &e : entries) {
 		if (!resolve_pfn(s->instance, e.name, e.out)) {
@@ -163,7 +169,7 @@ extern "C" struct shell_openxr_state *shell_openxr_init(void)
 		}
 	}
 
-	P("shell_openxr: instance=%p session=%p (16 PFNs resolved, no graphics binding)\n",
+	P("shell_openxr: instance=%p session=%p (21 PFNs resolved, no graphics binding)\n",
 	  (void *)s->instance, (void *)s->session);
 	return s;
 }
