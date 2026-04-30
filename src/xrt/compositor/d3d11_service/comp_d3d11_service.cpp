@@ -5053,40 +5053,65 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 		float win_bottom = win_y - win_h / 2.0f;
 		float win_top = win_y + win_h / 2.0f;
 
-		// Extended bounds including title bar (above content).
-		// Capture clients have no workspace title bar — their native chrome is in the content.
-		// Maximized (fullscreen) windows also skip the workspace title bar.
+		// Phase 2.K Commit 8.B: floating-pill geometry — must mirror the
+		// render code so click-targets line up with what the user sees.
+		// Pill is 75% of content width (centered) and floats above the
+		// content quad with a half-tb-height gap. Buttons live at the
+		// pill's right edge (not the content's right edge).
 		bool has_workspace_title_bar = (mc->clients[s].client_type != CLIENT_TYPE_CAPTURE &&
 		                            !mc->clients[s].maximized);
-		float ext_top = win_top + (has_workspace_title_bar ? title_bar_h_m : 0.0f);
+		const float PILL_W_FRAC_HT = 0.75f;
+		float pill_w_m = win_w * PILL_W_FRAC_HT;
+		float pill_left = win_x - pill_w_m / 2.0f;
+		float pill_right = win_x + pill_w_m / 2.0f;
+		float pill_gap_m = title_bar_h_m * 0.5f;
+		float pill_bot = win_top + (has_workspace_title_bar ? pill_gap_m : 0.0f);
+		float pill_top = pill_bot + (has_workspace_title_bar ? title_bar_h_m : 0.0f);
+
+		// Outer hover bounds (content + gap + pill). Resize zones extend
+		// outward from the content rect on all four sides.
+		float ext_top = has_workspace_title_bar ? pill_top : win_top;
 
 		// Check if hit is within extended window bounds (including resize zone)
 		if (hit_x >= win_left - resize_zone_m && hit_x < win_right + resize_zone_m &&
 		    hit_y >= win_bottom - resize_zone_m && hit_y < ext_top + resize_zone_m) {
 
-			// Window-local coordinates: (0,0) = top of title bar (or content top for capture), positive down/right
+			// Window-local coordinates relative to top of the pill (or
+			// content for capture clients), positive down/right.
 			float local_x = hit_x - win_left;
-			float local_y = ext_top - hit_y; // Positive downward from top
+			float local_y = ext_top - hit_y;
 
 			result.slot = s;
 			result.local_x_m = local_x;
 			result.local_y_m = local_y;
 
-			// Classify hit region
-			bool in_window = (hit_x >= win_left && hit_x < win_right &&
-			                  hit_y >= win_bottom && hit_y < ext_top);
+			// Classify hit region.
 			if (has_workspace_title_bar) {
-				result.in_title_bar = in_window && (local_y < title_bar_h_m);
-				result.in_content = in_window && (local_y >= title_bar_h_m);
+				bool in_pill = (hit_x >= pill_left && hit_x < pill_right &&
+				                hit_y >= pill_bot && hit_y < pill_top);
+				bool in_content = (hit_x >= win_left && hit_x < win_right &&
+				                   hit_y >= win_bottom && hit_y < win_top);
+				result.in_title_bar = in_pill;
+				result.in_content = in_content;
 			} else {
-				// Capture clients: map the top strip of captured content as
-				// a drag zone (where the native title bar is). Use the same
-				// height as the workspace title bar for consistency.
+				// Capture clients: top strip of content acts as drag zone.
+				bool in_window = (hit_x >= win_left && hit_x < win_right &&
+				                  hit_y >= win_bottom && hit_y < win_top);
 				result.in_title_bar = in_window && (local_y < title_bar_h_m);
 				result.in_content = in_window && (local_y >= title_bar_h_m);
 			}
 
-			if (result.in_title_bar) {
+			if (result.in_title_bar && has_workspace_title_bar) {
+				// Buttons live at the pill's right edge — local-x is
+				// measured relative to the pill, not the window.
+				float pill_local_x = hit_x - pill_left;
+				result.in_close_btn = (pill_local_x >= pill_w_m - btn_w_m);
+				result.in_minimize_btn = !result.in_close_btn &&
+				                         (pill_local_x >= pill_w_m - 2.0f * btn_w_m);
+				result.in_maximize_btn = !result.in_close_btn && !result.in_minimize_btn &&
+				                         (pill_local_x >= pill_w_m - 3.0f * btn_w_m);
+			} else if (result.in_title_bar) {
+				// Capture-client compatibility (buttons relative to window).
 				result.in_close_btn = (local_x >= win_w - btn_w_m);
 				result.in_minimize_btn = !result.in_close_btn &&
 				                         (local_x >= win_w - 2.0f * btn_w_m);
@@ -5102,8 +5127,10 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 			if (hit_y >= ext_top - resize_zone_m) result.edge_flags |= RESIZE_TOP;
 
 			// If we're inside the window (not just in resize zone), clear edge flags
-			// unless we're actually on the edge
-			if (in_window && result.edge_flags == RESIZE_NONE) {
+			// unless we're actually on the edge.
+			bool inside_outer = (hit_x >= win_left && hit_x < win_right &&
+			                     hit_y >= win_bottom && hit_y < ext_top);
+			if (inside_outer && result.edge_flags == RESIZE_NONE) {
 				result.edge_flags = RESIZE_NONE;
 			}
 
@@ -7088,9 +7115,13 @@ after_key_shortcuts:
 				cb->quad_mode = use_quad ? 1.0f : 0.0f;
 				cb->dst_rect_wh[0] = dest_px_w;
 				cb->dst_rect_wh[1] = dest_px_h;
-				// Round bottom-left + bottom-right corners of content window
-				cb->corner_radius = -0.03f;  // fraction of content height (subtle)
-				cb->corner_aspect = mc->clients[s].window_width_m / mc->clients[s].window_height_m;
+				// Phase 2.K Commit 8.B: round all four corners of the
+				// content quad to coordinate with the new floating pill
+				// chrome. Shader sign convention: corner_radius < 0 with
+				// corner_aspect < 0 means all-four. Radius is fraction of
+				// content height — 5% reads as a soft, deliberate corner.
+				cb->corner_radius = -0.05f;
+				cb->corner_aspect = -(mc->clients[s].window_width_m / mc->clients[s].window_height_m);
 				cb->edge_feather = UI_EDGE_FEATHER_PX / dest_px_h;
 				cb->glow_intensity = 0.0f;
 				if (use_quad) {
@@ -7156,6 +7187,18 @@ after_key_shortcuts:
 			float wcy = mc->clients[s].window_pose.position.y;
 			float wcz = mc->clients[s].window_pose.position.z;
 
+			// Phase 2.K Commit 8.B: floating-pill geometry. Pill is 75% of
+			// the content's width (centered) and floats above the content
+			// quad with a half-tb-height gap. All four corners are fully
+			// rounded (radius = 50% of pill height) so the pill reads as
+			// a true pill shape.
+			const float PILL_W_FRAC = 0.75f;
+			const float pill_hw = win_hw * PILL_W_FRAC;
+			const float pill_gap_m = tb_h_m * 0.5f;
+			const float pill_top_m = win_hh + pill_gap_m + tb_h_m;
+			const float pill_bot_m = win_hh + pill_gap_m;
+			const float pill_gap_frac = tb_h_frac * 0.5f; // mirrors pill_gap_m in atlas frac
+
 			if (tb_h_frac > 0.0f) {
 				for (uint32_t v2 = 0; v2 < num_views && v2 < XRT_MAX_VIEWS; v2++) {
 					uint32_t col2 = v2 % sys->tile_columns;
@@ -7169,10 +7212,17 @@ after_key_shortcuts:
 					float wfx = (float)eye_rect_x[eye_idx2] / (float)ca_w;
 					float wfy = (float)eye_rect_y[eye_idx2] / (float)ca_h;
 					float wfw = (float)eye_rect_w[eye_idx2] / (float)ca_w;
-					float tb_fy = wfy - tb_h_frac;
-					float tox = col2 * half_w + wfx * half_w;
+					// Phase 2.K Commit 8.B: pill axis-aligned dst-rect.
+					// `tox/tow` cover the pill (75% of content width,
+					// horizontally centered above the content); `toy`
+					// adds the pill_gap_frac so the pill floats above
+					// rather than attaches.
+					float pill_w_frac = wfw * PILL_W_FRAC;
+					float pill_x_frac = wfx + wfw * (1.0f - PILL_W_FRAC) * 0.5f;
+					float tb_fy = wfy - tb_h_frac - pill_gap_frac;
+					float tox = col2 * half_w + pill_x_frac * half_w;
 					float toy = row2 * half_h + tb_fy * half_h;
-					float tow = wfw * half_w;
+					float tow = pill_w_frac * half_w;
 					float toh = tb_h_frac * half_h;
 
 					// Scissor rect clips to tile bounds — uniform overflow on all edges.
@@ -7231,25 +7281,34 @@ after_key_shortcuts:
 							} \
 						} while(0)
 
-					// Title bar background
+					// Phase 2.K Commit 8.B: pill background. All four
+					// corners fully rounded (radius = 50% of pill height,
+					// negative+negative-aspect = "all four corners" per
+					// shader convention in d3d11_service_shaders.h:
+					// blit_ps_hlsl). Slightly more transparent than the
+					// old solid bar so the frosted-glass look reads.
 					{
 						D3D11_MAPPED_SUBRESOURCE mapped;
 						if (SUCCEEDED(sys->context->Map(sys->blit_constant_buffer.get(), 0,
 						              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 							BlitConstants *cb = static_cast<BlitConstants *>(mapped.pData);
-							cb->src_rect[0] = 0.18f; cb->src_rect[1] = 0.20f;
-							cb->src_rect[2] = 0.25f; cb->src_rect[3] = 1.0f;
+							// Solid color RGB packed in src_rect.xyz (convert_srgb=2.0
+							// reads it). Slightly cooler tint, ~70% alpha for the
+							// frosted feel; alpha is applied via the shader's edge
+							// math + the dst alpha channel.
+							cb->src_rect[0] = 0.20f; cb->src_rect[1] = 0.22f;
+							cb->src_rect[2] = 0.28f; cb->src_rect[3] = 0.70f;
 							cb->src_size[0] = 1; cb->src_size[1] = 1;
 							cb->dst_size[0] = (float)ca_w; cb->dst_size[1] = (float)ca_h;
 							cb->convert_srgb = 2.0f;
-							cb->corner_radius = 0.35f;
-							// Pass width/height aspect ratio for circular corners
-							cb->corner_aspect = mc->clients[s].window_width_m / UI_TITLE_BAR_H_M;
+							// All four corners, full pill curve.
+							cb->corner_radius = -0.5f;
+							cb->corner_aspect = -((mc->clients[s].window_width_m * PILL_W_FRAC) / UI_TITLE_BAR_H_M);
 							cb->edge_feather = UI_EDGE_FEATHER_PX / toh;
 							cb->glow_intensity = 0.0f;
-							// Title bar: full width, above content (rounded top corners)
+							// Pill: 75% width centered, gap above content.
 							CHROME_BLIT_POS(cb,
-							    -win_hw, win_hh + tb_h_m, win_hw, win_hh,
+							    -pill_hw, pill_top_m, pill_hw, pill_bot_m,
 							    tox, toy, tow, toh);
 							sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 							sys->context->Draw(4, 0);
@@ -7276,7 +7335,7 @@ after_key_shortcuts:
 							cb->glow_intensity = 0.0f;
 							float btn_x = tox + tow - (float)CLOSE_BTN_WIDTH_PX;
 							CHROME_BLIT_POS(cb,
-							    win_hw - btn_w_m_val, win_hh + tb_h_m, win_hw, win_hh,
+							    pill_hw - btn_w_m_val, pill_top_m, pill_hw, pill_bot_m,
 							    btn_x, toy, (float)CLOSE_BTN_WIDTH_PX, toh);
 							sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 							sys->context->Draw(4, 0);
@@ -7300,7 +7359,7 @@ after_key_shortcuts:
 							cb->edge_feather = 0.0f; cb->glow_intensity = 0.0f;
 							float min_x = tox + tow - 2.0f * (float)CLOSE_BTN_WIDTH_PX;
 							CHROME_BLIT_POS(cb,
-							    win_hw - 2*btn_w_m_val, win_hh + tb_h_m, win_hw - btn_w_m_val, win_hh,
+							    pill_hw - 2*btn_w_m_val, pill_top_m, pill_hw - btn_w_m_val, pill_bot_m,
 							    min_x, toy, (float)CLOSE_BTN_WIDTH_PX, toh);
 							sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 							sys->context->Draw(4, 0);
@@ -7324,7 +7383,7 @@ after_key_shortcuts:
 							cb->edge_feather = 0.0f; cb->glow_intensity = 0.0f;
 							float max_x = tox + tow - 3.0f * (float)CLOSE_BTN_WIDTH_PX;
 							CHROME_BLIT_POS(cb,
-							    win_hw - 3*btn_w_m_val, win_hh + tb_h_m, win_hw - 2*btn_w_m_val, win_hh,
+							    pill_hw - 3*btn_w_m_val, pill_top_m, pill_hw - 2*btn_w_m_val, pill_bot_m,
 							    max_x, toy, (float)CLOSE_BTN_WIDTH_PX, toh);
 							sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 							sys->context->Draw(4, 0);
@@ -7377,10 +7436,11 @@ after_key_shortcuts:
 								cb->convert_srgb = 0.0f;
 								cb->corner_radius = 0; cb->corner_aspect = 0;
 								cb->edge_feather = 0.0f; cb->glow_intensity = 0.0f;
-								// Proportional glyph positioning
+								// Proportional glyph positioning — anchored
+								// to the pill (not the window) under 8.B.
 								float m_per_px = glyph_w_m / ((float)GLYPH_W > 0 ? (float)GLYPH_W : 1.0f);
-								float gl_left = -win_hw + glyph_w_m + px_cursor * m_per_px;
-								float gl_top = win_hh + tb_h_m - glyph_vpad_m;
+								float gl_left = -pill_hw + glyph_w_m + px_cursor * m_per_px;
+								float gl_top = pill_top_m - glyph_vpad_m;
 								float gl_right = gl_left + dst_gw * m_per_px;
 								float gl_bottom = gl_top - glyph_render_h_m;
 								CHROME_BLIT_POS(cb,
@@ -7406,8 +7466,8 @@ after_key_shortcuts:
 							float dst_gw = src_gw * btn_scale;
 							float bx = tox + tow - (float)CLOSE_BTN_WIDTH_PX + ((float)CLOSE_BTN_WIDTH_PX - dst_gw) / 2.0f;
 							// Local: centered in close button
-							float xg_left = win_hw - btn_w_m_val + (btn_w_m_val - glyph_w_m) / 2.0f;
-							float xg_top = win_hh + tb_h_m - glyph_vpad_m;
+							float xg_left = pill_hw - btn_w_m_val + (btn_w_m_val - glyph_w_m) / 2.0f;
+							float xg_top = pill_top_m - glyph_vpad_m;
 							D3D11_MAPPED_SUBRESOURCE mapped;
 							if (SUCCEEDED(sys->context->Map(sys->blit_constant_buffer.get(), 0,
 							              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -7434,8 +7494,8 @@ after_key_shortcuts:
 							float dst_gw = src_gw * btn_scale;
 							float mx = tox + tow - 2.0f * (float)CLOSE_BTN_WIDTH_PX + ((float)CLOSE_BTN_WIDTH_PX - dst_gw) / 2.0f;
 							// Local: centered in minimize button
-							float mg_left = win_hw - 2*btn_w_m_val + (btn_w_m_val - glyph_w_m) / 2.0f;
-							float mg_top = win_hh + tb_h_m - glyph_vpad_m;
+							float mg_left = pill_hw - 2*btn_w_m_val + (btn_w_m_val - glyph_w_m) / 2.0f;
+							float mg_top = pill_top_m - glyph_vpad_m;
 							D3D11_MAPPED_SUBRESOURCE mapped;
 							if (SUCCEEDED(sys->context->Map(sys->blit_constant_buffer.get(), 0,
 							              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -7461,10 +7521,10 @@ after_key_shortcuts:
 							float max_x_ic = tox + tow - 3.0f * (float)CLOSE_BTN_WIDTH_PX;
 							float pad_x = btn_w_m_val * 0.22f;
 							float pad_y = tb_h_m    * 0.22f;
-							float icon_l = win_hw - 3*btn_w_m_val + pad_x;
-							float icon_r = win_hw - 2*btn_w_m_val - pad_x;
-							float icon_t = win_hh + tb_h_m        - pad_y;
-							float icon_b = win_hh                 + pad_y;
+							float icon_l = pill_hw - 3*btn_w_m_val + pad_x;
+							float icon_r = pill_hw - 2*btn_w_m_val - pad_x;
+							float icon_t = pill_top_m              - pad_y;
+							float icon_b = pill_bot_m              + pad_y;
 							float icon_w = icon_r - icon_l;
 							float icon_h = icon_t - icon_b;
 							float stroke_x = icon_w * 0.18f;
