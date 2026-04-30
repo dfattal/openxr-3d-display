@@ -1,0 +1,104 @@
+# XR_EXT_spatial_workspace
+
+| Field | Value |
+|---|---|
+| **Extension Name** | `XR_EXT_spatial_workspace` |
+| **Spec Version** | 6 |
+| **Authors** | David Fattal (DisplayXR / Leia Inc.) |
+| **Status** | Provisional — published with the DisplayXR runtime; subject to revision before Khronos registry submission. |
+| **Header** | `src/external/openxr_includes/openxr/XR_EXT_spatial_workspace.h` |
+| **OpenXR Version** | 1.0 |
+| **Dependencies** | OpenXR 1.0 core. The Windows platform path also relies on `XR_EXT_win32_window_binding` for the capture-client HWND argument; the Cocoa path on `XR_EXT_cocoa_window_binding`. |
+
+---
+
+## 1. Motivation
+
+A spatial workspace is the OS-level shell for a 3D display: the privileged process that arranges multiple OpenXR clients (and 2D OS-window captures) on the panel, dispatches focus, drives layout presets, and renders chrome around the active app. It needs an OpenXR-shaped contract with the runtime — the runtime owns mechanism (atlas composition, IPC, hit-test geometry, swapchain plumbing) and the workspace controller owns policy (which apps exist, where their windows go, how they animate, what chrome looks like, what the cursor does).
+
+`XR_EXT_spatial_workspace` is that contract. A privileged OpenXR session enables the extension, calls `xrActivateSpatialWorkspaceEXT` to claim the workspace role, and from there positions client windows, drives input, and hooks lifecycle events. Anything visible to the user is policy and lives in the controller. Anything per-frame and timing-sensitive is mechanism and lives in the runtime, exposed as a primitive on this surface.
+
+---
+
+## 2. Surface (spec_version 6)
+
+### Lifecycle
+
+- `xrActivateSpatialWorkspaceEXT(session)` — claim the workspace role. At most one per system. Caller authorisation is by orchestrator-PID match (manual-mode fallback when no orchestrator is registered).
+- `xrDeactivateSpatialWorkspaceEXT(session)` — release the role. `xrDestroySession` has the same effect implicitly.
+- `xrGetSpatialWorkspaceStateEXT(session, &active)` — query whether this session holds the role.
+
+### Capture clients (adopt a 2D OS window)
+
+- `xrAddWorkspaceCaptureClientEXT(session, nativeWindow, name, &outClientId)` — adopt a Windows HWND (or future macOS/Cocoa equivalent) as a workspace client. The runtime starts a platform-appropriate capture (Windows.Graphics.Capture on Windows) and treats the captured texture as a client swapchain.
+- `xrRemoveWorkspaceCaptureClientEXT(session, clientId)` — release the capture.
+
+### Window pose + visibility
+
+- `xrSetWorkspaceClientWindowPoseEXT(session, clientId, &pose, widthMeters, heightMeters)` — position a client's window quad in display-centric space. Pose origin is the display centre; +x right, +y up, +z toward the viewer. The runtime composites the named client's swapchain into a quad of this physical size.
+- `xrGetWorkspaceClientWindowPoseEXT(session, clientId, &outPose, &outW, &outH)` — read back current pose + size. Used by controllers to seed animations (snapshot current → animate to target) and to persist layouts.
+- `xrSetWorkspaceClientVisibilityEXT(session, clientId, visible)` — show / hide without destroying.
+
+### Hit-test
+
+- `xrWorkspaceHitTestEXT(session, cursorX, cursorY, &outClientId, &outLocalUV, &outHitRegion)` — translate a screen-space cursor into a hit on a client window. The runtime intersects an eye→cursor ray with each client's window quad and reports the hit `clientId`, an interpolated UV on the content rect, and a `XrWorkspaceHitRegionEXT` classification (CONTENT, TITLE_BAR, CLOSE_BUTTON, EDGE_RESIZE_*, TASKBAR, LAUNCHER_TILE, BACKGROUND).
+
+### Focus
+
+- `xrSetWorkspaceFocusedClientEXT(session, clientId)` — set the focused client. The runtime forwards keyboard input (other than runtime-reserved keys) and click-through events to the focused client's HWND.
+- `xrGetWorkspaceFocusedClientEXT(session, &outClientId)` — read the focused client.
+
+### Input drain + pointer capture
+
+- `xrEnumerateWorkspaceInputEventsEXT(session, capacityInput, &countOutput, events)` — drain pending workspace input events. Tagged-union `XrWorkspaceInputEventEXT` records carry one of:
+  - **POINTER** (button down/up). Hit-test enriched at drain time so the controller does not need to call `xrWorkspaceHitTestEXT` per event.
+  - **KEY** (down/up + modifiers). MVP key policy: TAB and DELETE are consumed by the runtime; ESC is consumed when any window is maximised; everything else is delivered here AND forwarded to the focused HWND.
+  - **SCROLL** (mouse-wheel delta + cursor + modifiers).
+  - **POINTER_MOTION** *(spec_version 6)* — per-frame `WM_MOUSEMOVE` while pointer capture is enabled. Hit-test enriched. Carries a `buttonMask` of currently-held buttons (bit0=L, bit1=R, bit2=M).
+  - **FRAME_TICK** *(spec_version 6)* — fires once per displayed compositor frame with the host-monotonic ns at frame compose. Lets controllers pace per-frame work (animation interpolation, hover effects) to display refresh without polling.
+  - **FOCUS_CHANGED** *(spec_version 6)* — fires only on focused-client transitions (TAB, click auto-focus, controller-set, client disconnect). Does **not** fire on stable frames. Carries `prevClientId` and `currentClientId`.
+- `xrEnableWorkspacePointerCaptureEXT(session, button)` — begin pointer capture. While enabled, button-up and motion events for the named button keep flowing even when the cursor leaves any window. The runtime drives Win32 SetCapture so motion outside the workspace HWND still reaches the WndProc. Used to implement controller-driven drag, carousel, and chrome highlight without the runtime knowing about drag policy.
+- `xrDisableWorkspacePointerCaptureEXT(session)` — release.
+
+### Frame capture
+
+- `xrCaptureWorkspaceFrameEXT(session, &request, &result)` — read back the current composite atlas (and selected sub-views) to disk. Used by controllers that ship screenshot / recording features without giving them direct access to client swapchains.
+
+### Lifecycle requests *(spec_version 6)*
+
+- `xrRequestWorkspaceClientExitEXT(session, clientId)` — ask the runtime to close any client (not just the focused one). For OpenXR clients the runtime emits `XRT_SESSION_EVENT_EXIT_REQUEST`; for capture clients it tears down the capture immediately. Equivalent of the runtime's built-in DELETE shortcut, but targeted.
+- `xrRequestWorkspaceClientFullscreenEXT(session, clientId, fullscreen)` — toggle fullscreen for any client. Mirrors F11 behaviour: animates the target window to fill the display and hides others; XR_FALSE restores.
+
+### Client enumeration
+
+- `xrEnumerateWorkspaceClientsEXT(session, capacity, &countOutput, clientIds)` — two-call enumerate of OpenXR clients connected to the workspace.
+- `xrGetWorkspaceClientInfoEXT(session, clientId, &info)` — per-client metadata (name, PID, focus state, visibility, z-order).
+
+---
+
+## 3. Design notes
+
+**Hit-test enrichment.** Pointer events (POINTER and POINTER_MOTION) are enriched with the workspace hit-test (`hitClientId`, `hitRegion`, `localUV`) at drain time, so controllers don't pay the cost of a separate `xrWorkspaceHitTestEXT` call per event. The drain takes the runtime's render-mutex once for the whole batch so geometry stays stable across the events being enriched.
+
+**Capture-client id encoding.** Capture-client IDs use the convention `slot + 1000` so they're disambiguated from OpenXR-client IDs (which are issued by the IPC layer). The runtime accepts either form on `xrSetWorkspaceClientWindowPoseEXT` and the new request functions; the controller treats them as opaque uint32_t handles.
+
+**Per-frame motion cost.** With pointer capture enabled, the runtime emits one POINTER_MOTION event per WM_MOUSEMOVE message (typically ~60–120 events/s during cursor activity) plus one FRAME_TICK per displayed frame. Drain RPC overhead is ~10–20 µs. Aggregate worst case during a 4-client carousel drag is well under 1% of one core. Two escape hatches if real-world numbers surprise us: (a) the runtime can throttle motion server-side via the Enable call, (b) shared-memory ring for cursor state can replace IPC entirely.
+
+**FOCUS_CHANGED coalescing.** The drain emits at most one FOCUS_CHANGED per drain pass — intermediate transitions inside the drain window are coalesced to the latest target. This keeps the controller from having to dedupe; the spec promises "fires only on transitions, never on stable frames."
+
+**Wire-format compatibility.** Spec_version 6 strictly extends spec_version 5 by adding new enum values and new event-union members; old controllers that don't know the new variants see them as "unknown" and skip them via the existing `default:` case in their drain switch. The two new request PFNs are additive — controllers that don't resolve them are unaffected.
+
+---
+
+## 4. Implementation
+
+The extension is implemented in this repository:
+
+- **Header**: `src/external/openxr_includes/openxr/XR_EXT_spatial_workspace.h` (frozen for the runtime ABI, auto-published to `DisplayXR/displayxr-extensions` on each push to main).
+- **State tracker**: `src/xrt/state_trackers/oxr/oxr_workspace.c` (dispatch wrappers); `src/xrt/state_trackers/oxr/oxr_api_negotiate.c` (PFN entries).
+- **IPC**: `src/xrt/ipc/shared/proto.json` (RPC definitions); `src/xrt/ipc/shared/ipc_protocol.h` (event wire format); `src/xrt/ipc/client/ipc_client_compositor.c` (bridge); `src/xrt/ipc/server/ipc_server_handler.c` (server handlers).
+- **Service compositor (Windows D3D11)**: `src/xrt/compositor/d3d11_service/comp_d3d11_service.cpp` (drain, hit-test enrichment, FRAME_TICK + FOCUS_CHANGED emission, request_*_by_slot helpers); `src/xrt/compositor/d3d11/comp_d3d11_window.cpp` (WndProc, public ring, Win32 SetCapture / ReleaseCapture).
+- **Reference controller**: `src/xrt/targets/shell/main.c` (animation framework, smooth preset transitions, interactive carousel state machine, variable poll cadence).
+- **Smoke test**: `test_apps/workspace_minimal_d3d11_win/main.cpp` — resolves all 24 PFNs, walks lifecycle + pose + visibility + hit-test + focus + drain + pointer capture + 30° yaw orientation + drain counts + lifecycle requests + client enumeration + frame capture.
+
+The Phase 2 sub-phase that landed each part of this surface is tracked in [`docs/roadmap/spatial-workspace-extensions-phase2-audit.md`](../roadmap/spatial-workspace-extensions-phase2-audit.md).

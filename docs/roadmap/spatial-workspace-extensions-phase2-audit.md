@@ -133,17 +133,20 @@ Below: the original 8 sub-steps, lowest-blast-radius first.
 
 **Risk realized:** Lower than predicted. The ESC / dismiss / restore flow needed only a comment annotation; the workspace state machine simplification was deferred to Phase 2.C (chrome rendering migration) where it'll get a proper redesign.
 
-### Phase 2.K — Controller-owned interactive layouts
+### Phase 2.K — Controller-owned interactive layouts ✅ shipped
 
-**Touches:** `comp_d3d11_window.cpp` (push `WM_MOUSEMOVE` to public ring under capture), `XR_EXT_spatial_workspace.h` (revise the "no per-frame motion" comment, possibly extend the POINTER variant or add a new MOTION variant), `XR_EXT_spatial_workspace` IPC bridge (drain enrichment), `src/xrt/targets/shell/main.c` (port the carousel state machine — drag, scroll-radius, TAB-snap, auto-rotation tick — controller-side).
+**Touched:** `XR_EXT_spatial_workspace.h` (spec_version 5 → 6, three new event variants, two new request PFNs), `proto.json` + `ipc_protocol.h` (wire format for new variants and RPCs), `oxr_workspace.c` + `oxr_api_negotiate.c` + `oxr_api_funcs.h` (dispatch wrappers), `comp_d3d11_window.cpp` (drop `WM_MOUSEMOVE` skip under pointer capture; add Win32 `SetCapture` / `ReleaseCapture` so drags survive cursor exits), `comp_d3d11_service.cpp` (FRAME_TICK counter bumped per displayed frame, FOCUS_CHANGED on focused-slot transition, MOTION drain enrichment, request-by-slot helpers reused by both the keyboard shortcut and the IPC handler), `ipc_server_handler.c` (client_id → slot resolution mirroring `set_window_pose`), `src/xrt/targets/shell/shell_openxr.{h,cpp}` (resolve five new PFNs: `get_pose`, `enable/disable_pointer_capture`, `request_client_exit`, `request_client_fullscreen` — total 21 PFNs), `src/xrt/targets/shell/main.c` (per-client animation framework with 300 ms ease-out cubic, smooth preset transitions, carousel state machine with auto-rotation / drag / scroll-radius / TAB-snap / momentum, variable poll cadence 16 ms / 500 ms), `test_apps/workspace_minimal_d3d11_win/main.cpp` (24 PFN smoke + 30° yaw orientation test + drain-count window + lifecycle requests).
 
-**Why now:** Phase 2.G deleted the runtime's interactive carousel because per-Phase-2.D-design the public input drain didn't deliver per-frame motion. Restoring full functional parity requires either (a) extending the public surface to deliver per-frame motion, or (b) keeping carousel as a runtime mechanism (rejected — the controller-owns-policy direction is firm). 2.K does (a).
+**Decisions made during the migration:**
+- Picked option (a) for the motion gate: capture-gated emission via existing `xrEnableWorkspacePointerCaptureEXT`. Idle hover still bypasses the public ring; controllers that want hover for chrome highlighting opt in by enabling capture.
+- New `XR_WORKSPACE_INPUT_EVENT_POINTER_MOTION_EXT` variant rather than overloading the existing POINTER variant — cleaner discrimination on the controller side and leaves room for hit-test enrichment to differ from button events later.
+- Carousel angle interpolation lives in shell main.c as `shell_carousel_state` (separate from the per-client `slot_anim` framework). The slot_anim ticks during the *entry transition* into carousel; once those settle the carousel state machine takes over per-frame poses. Both share `shell_now_ns()` and `shell_ease_out_cubic()`.
+- N=2 special-case dropped — auto-rotation makes both windows visible naturally on the ring.
+- Keyboard DELETE / F11 shortcuts now route through the same `request_*_by_slot` helpers as the IPC path, so behaviour is identical and there's exactly one implementation.
 
-Phase 2.K must land before **Phase 2.C (chrome rendering)** because chrome highlighting also needs cursor / hover information.
+**Risk realized:** Low. Per-frame IPC drain is well below the 1% CPU budget on the dev machine. The biggest gotcha was forward-declaration ordering between the carousel state machine and the static layout-pose helpers — `shell_compute_carousel_pose` and `s_focused_client_id` had to be hoisted to file-scope so the carousel code (placed before them in the file) could see them.
 
-**Risk:** Medium. Per-frame IPC drain is a new pattern; perf has to be measured (estimate: 60 Hz × ~10–20 µs / RPC = sub-millisecond / sec, acceptable). Contract change to the input-drain surface needs to stay backwards-compatible with the v5 enum (controllers that don't opt in to motion shouldn't see new event types).
-
-See `spatial-workspace-extensions-phase2K-plan.md`.
+See `spatial-workspace-extensions-phase2K-plan.md` for the full design and `spatial-workspace-extensions-phase2K-agent-prompt.md` for the per-commit hand-off.
 
 ### Phase 2.H (final cleanup pass)
 

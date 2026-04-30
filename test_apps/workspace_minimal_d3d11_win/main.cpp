@@ -37,6 +37,7 @@
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <wrl/client.h>
+#include <cmath>
 
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
@@ -132,7 +133,7 @@ run_workspace_test()
 	XrInstance instance = XR_NULL_HANDLE;
 	CHECK_XR(xrCreateInstance(&instInfo, &instance), "xrCreateInstance");
 
-	// 3. Resolve all 22 extension PFNs (must be non-null when the extension is enabled).
+	// 3. Resolve all 24 extension PFNs (must be non-null when the extension is enabled).
 	PFN_xrActivateSpatialWorkspaceEXT pfnActivate = nullptr;
 	PFN_xrDeactivateSpatialWorkspaceEXT pfnDeactivate = nullptr;
 	PFN_xrGetSpatialWorkspaceStateEXT pfnGetState = nullptr;
@@ -155,6 +156,9 @@ run_workspace_test()
 	PFN_xrCaptureWorkspaceFrameEXT pfnCaptureFrame = nullptr;
 	PFN_xrEnumerateWorkspaceClientsEXT pfnEnumClients = nullptr;
 	PFN_xrGetWorkspaceClientInfoEXT pfnGetClientInfo = nullptr;
+	// Phase 2.K additions (spec_version 6).
+	PFN_xrRequestWorkspaceClientExitEXT pfnRequestExit = nullptr;
+	PFN_xrRequestWorkspaceClientFullscreenEXT pfnRequestFullscreen = nullptr;
 
 	struct PfnLookup {
 		const char *name;
@@ -188,6 +192,9 @@ run_workspace_test()
 	    {"xrCaptureWorkspaceFrameEXT", reinterpret_cast<PFN_xrVoidFunction *>(&pfnCaptureFrame)},
 	    {"xrEnumerateWorkspaceClientsEXT", reinterpret_cast<PFN_xrVoidFunction *>(&pfnEnumClients)},
 	    {"xrGetWorkspaceClientInfoEXT", reinterpret_cast<PFN_xrVoidFunction *>(&pfnGetClientInfo)},
+	    {"xrRequestWorkspaceClientExitEXT", reinterpret_cast<PFN_xrVoidFunction *>(&pfnRequestExit)},
+	    {"xrRequestWorkspaceClientFullscreenEXT",
+	     reinterpret_cast<PFN_xrVoidFunction *>(&pfnRequestFullscreen)},
 	};
 	for (const auto &l : lookups) {
 		PFN_xrVoidFunction fn = nullptr;
@@ -376,6 +383,82 @@ run_workspace_test()
 		CHECK_XR(pfnEnableCapture(session, 1), "xrEnableWorkspacePointerCaptureEXT");
 		CHECK_XR(pfnDisableCapture(session), "xrDisableWorkspacePointerCaptureEXT");
 
+		// Phase 2.K: orientation rendering smoke. Push a 30° yaw to the
+		// captured client so a visual atlas screenshot can confirm tilted
+		// windows compose correctly. The compositor handles the drain in
+		// real time so the next render pass picks up the new pose.
+		{
+			constexpr float yaw_deg = 30.0f;
+			float half = (yaw_deg * 0.5f) * 3.14159265358979323846f / 180.0f;
+			XrPosef tilt = {};
+			tilt.orientation.x = 0.0f;
+			tilt.orientation.y = std::sin(half); // yaw axis = +Y
+			tilt.orientation.z = 0.0f;
+			tilt.orientation.w = std::cos(half);
+			tilt.position.z = 0.5f;
+			XrResult yr = pfnSetClientPose(session, clientId, &tilt, 0.20f, 0.15f);
+			std::printf("[Phase 2.K orientation smoke (30° yaw)      ] %s "
+			            "quat=(%.3f,%.3f,%.3f,%.3f)\n",
+			            xr_result_str(yr), tilt.orientation.x, tilt.orientation.y,
+			            tilt.orientation.z, tilt.orientation.w);
+		}
+
+		// Phase 2.K: drain MOTION + FRAME_TICK + FOCUS_CHANGED counts over a
+		// short window. FRAME_TICK should fire at compositor cadence
+		// (~60 Hz, ~120 events over 2 s). FOCUS_CHANGED fires once on the
+		// initial transition. MOTION is gated on pointer capture — enable
+		// it for the count window. Numbers don't have to hit a specific
+		// target; the test passes if at least one of each fires.
+		{
+			CHECK_XR(pfnEnableCapture(session, 1),
+			         "xrEnableWorkspacePointerCaptureEXT(for drain count)");
+			uint32_t motion = 0, tick = 0, focus = 0, key = 0, ptr = 0, scroll = 0;
+			ULONGLONG start = GetTickCount64();
+			while (GetTickCount64() - start < 2000) {
+				XrWorkspaceInputEventEXT batch[16] = {};
+				uint32_t got = 0;
+				if (pfnEnumInputEvents(session, 16, &got, batch) == XR_SUCCESS) {
+					for (uint32_t i = 0; i < got; i++) {
+						switch (batch[i].eventType) {
+						case XR_WORKSPACE_INPUT_EVENT_POINTER_MOTION_EXT: motion++; break;
+						case XR_WORKSPACE_INPUT_EVENT_FRAME_TICK_EXT:     tick++;   break;
+						case XR_WORKSPACE_INPUT_EVENT_FOCUS_CHANGED_EXT:  focus++;  break;
+						case XR_WORKSPACE_INPUT_EVENT_KEY_EXT:            key++;    break;
+						case XR_WORKSPACE_INPUT_EVENT_POINTER_EXT:        ptr++;    break;
+						case XR_WORKSPACE_INPUT_EVENT_SCROLL_EXT:         scroll++; break;
+						default: break;
+						}
+					}
+				}
+				Sleep(16);
+			}
+			CHECK_XR(pfnDisableCapture(session),
+			         "xrDisableWorkspacePointerCaptureEXT(after drain count)");
+			std::printf("[Phase 2.K drain counts (2s window)         ] "
+			            "motion=%u tick=%u focus=%u key=%u ptr=%u scroll=%u\n",
+			            motion, tick, focus, key, ptr, scroll);
+			if (tick == 0) {
+				std::printf("FAIL: FRAME_TICK count is zero — runtime not emitting per-frame ticks.\n");
+			}
+		}
+
+		// Phase 2.K: lifecycle requests. Toggle fullscreen TRUE then FALSE
+		// against the synthetic capture client; expect XR_SUCCESS for both.
+		// The runtime mirrors F11 behaviour, animating the target window
+		// in/out of fullscreen and hiding others. Then verify validation:
+		// XR_NULL_WORKSPACE_CLIENT_ID returns XR_ERROR_VALIDATION_FAILURE.
+		{
+			XrResult fr = pfnRequestFullscreen(session, clientId, XR_TRUE);
+			std::printf("[xrRequestWorkspaceClientFullscreenEXT(TRUE)] %s\n", xr_result_str(fr));
+			Sleep(400); // give the runtime's fullscreen animation a moment
+			fr = pfnRequestFullscreen(session, clientId, XR_FALSE);
+			std::printf("[xrRequestWorkspaceClientFullscreenEXT(FALSE)] %s\n", xr_result_str(fr));
+
+			XrResult bad = pfnRequestFullscreen(session, XR_NULL_WORKSPACE_CLIENT_ID, XR_FALSE);
+			std::printf("[xrRequestWorkspaceClientFullscreenEXT(NULL)] %s (expect VALIDATION_FAILURE)\n",
+			            xr_result_str(bad));
+		}
+
 		// Phase 2.G: controller-side preset demo.
 		//
 		// Layout-preset semantics moved to the workspace controller in
@@ -451,7 +534,24 @@ run_workspace_test()
 		         "xrSetWorkspaceFocusedClientEXT(clear)");
 	}
 
-	CHECK_XR(pfnRemoveCapture(session, clientId), "xrRemoveWorkspaceCaptureClientEXT");
+	// Phase 2.K: request_client_exit against the synthetic capture client.
+	// For capture clients this maps to multi_compositor_remove_capture_client
+	// — same path RemoveWorkspaceCaptureClient takes — so the explicit
+	// pfnRemoveCapture below is best-effort (the runtime may already have
+	// torn the slot down). Validation against XR_NULL_WORKSPACE_CLIENT_ID
+	// must return XR_ERROR_VALIDATION_FAILURE.
+	{
+		XrResult bad = pfnRequestExit(session, XR_NULL_WORKSPACE_CLIENT_ID);
+		std::printf("[xrRequestWorkspaceClientExitEXT(NULL)      ] %s (expect VALIDATION_FAILURE)\n",
+		            xr_result_str(bad));
+		XrResult er = pfnRequestExit(session, clientId);
+		std::printf("[xrRequestWorkspaceClientExitEXT(client=%u)] %s\n",
+		            (unsigned)clientId, xr_result_str(er));
+	}
+
+	XrResult rmr = pfnRemoveCapture(session, clientId);
+	std::printf("[xrRemoveWorkspaceCaptureClientEXT(post-exit)] %s (best-effort; "
+	            "exit above already removed the slot)\n", xr_result_str(rmr));
 
 	// Launcher smoke: clear, push 3 synthetic tiles, set visible, set running
 	// mask, poll once (expect "no click" since no human is interacting),

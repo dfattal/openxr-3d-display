@@ -10,18 +10,15 @@ Outstanding items left over from the Phase 2.D + 2.I + decoupling work. Each ite
 
 **Limitation:** if the cursor leaves the workspace window entirely (no SetCapture is in flight), Windows routes the up event to whichever window the cursor is over — the WndProc never sees it. Fixing that needs `SetCapture` plumbing on enable / `ReleaseCapture` on disable, which Commit 1 deliberately did not add. File a follow-up if controller drags past the window border start losing release events.
 
-### 2. Per-frame motion events on the public input drain
+### 2. Per-frame motion events on the public input drain ✅ shipped (2.K)
 
-**State:** `XR_WORKSPACE_INPUT_EVENT_POINTER_HOVER_EXT` enum value, `XrWorkspaceInputEventEXT.pointerHover` struct variant, and the matching wire-format `ipc_workspace_input_event::u.pointer_hover` are all defined and ship in v4 — but **nothing pushes them**, and per Phase 2.D's design `xrEnumerateWorkspaceInputEventsEXT` only delivers POINTER button-down / button-up events, **not** per-frame `WM_MOUSEMOVE`. The WndProc explicitly skips MOUSEMOVE before pushing to the public ring (`comp_d3d11_window.cpp` ~line 685).
+**Resolution:** Phase 2.K landed the surface. `XR_EXT_spatial_workspace` bumps to spec_version 6 and adds three new event variants on the input drain — `POINTER_MOTION_EXT` (per-frame WM_MOUSEMOVE while pointer capture is enabled, hit-test-enriched), `FRAME_TICK_EXT` (vsync-aligned per-frame timestamp), and `FOCUS_CHANGED_EXT` (focused-client transitions only) — plus `xrRequestWorkspaceClientExitEXT` / `xrRequestWorkspaceClientFullscreenEXT` so controllers can drive lifecycle from custom chrome.
 
-**Why it matters:** A workspace controller cannot replicate the runtime's old interactive layouts (carousel drag-to-rotate, scroll-radius, drag-to-resize, hover-driven chrome highlighting) without per-frame cursor information. The controller has to own those behaviors per the Phase 2.G architectural call ("controllers own all motion logic; runtime is plumbing"), which means the public surface has to deliver motion.
+The WndProc no longer skips `WM_MOUSEMOVE` while capture is held, and the pointer-capture setter now drives Win32 `SetCapture` / `ReleaseCapture` so motion outside the workspace window keeps reaching the WndProc during a drag (the residual SetCapture limitation called out in item #1 is closed).
 
-**Where to fix:** Promoted to its own sub-phase — **Phase 2.K — controller-owned interactive layouts**. See `spatial-workspace-extensions-phase2K-plan.md`. The work:
-- Push `WM_MOUSEMOVE` cursor positions into the public input ring (gated on a button being held, or always — a controller flag picks). Probably the simplest path is to deliver them whenever any mouse button is held, since the carousel / drag use cases all need that and idle motion would flood IPC.
-- Optionally: emit a HOVER variant when the cursor crosses a region boundary (the original design intent of `pointerHover`), to give chrome highlighting cheap fidelity without per-frame drain.
-- Restore the carousel, scroll-radius, drag, momentum, TAB-snap behaviours **in the shell**, not the runtime — Phase 2.G deleted them from the runtime in favour of the public surface.
+The shell side ports the deleted runtime carousel into a controller-owned state machine — auto-rotation, drag-to-rotate, scroll-radius, TAB-snap, momentum — and adds a per-client animation framework that drives smooth Ctrl+1↔Ctrl+2↔Ctrl+3 preset transitions (300 ms ease-out cubic) plus connect-time glides. Variable poll cadence (16 ms while animating or in carousel, 500 ms idle) keeps idle CPU near zero.
 
-**Suggested phase:** Phase 2.K — must land before Phase 2.C (chrome rendering needs hover too).
+See `spatial-workspace-extensions-phase2K-plan.md` for the full design and `spatial-workspace-extensions-phase2-audit.md` for the per-commit summary.
 
 ### 3. Shell activate-failure no longer auto-reconnects
 
