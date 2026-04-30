@@ -737,6 +737,21 @@ struct d3d11_multi_compositor
 	//! Focused client index (-1 = none).
 	int32_t focused_slot;
 
+	//! Phase 2.K: focused-slot value last seen by the public-API drain. The
+	//! drain compares against `focused_slot` and emits a FOCUS_CHANGED event
+	//! to the workspace controller on each transition (TAB cycle, click
+	//! auto-focus, controller-set, client disconnect). Initialised to -1 so
+	//! the first drain after any non-empty focus emits a transition.
+	int32_t focused_slot_last_emitted;
+
+	//! Phase 2.K: vsync-aligned frame counter. Incremented once per
+	//! `multi_compositor_render` and read by the public-API drain to emit
+	//! FRAME_TICK events (capped per-batch) so controllers can pace
+	//! per-frame work without polling a timer.
+	volatile LONG frame_tick_count;
+	LONG frame_tick_last_emitted;
+	uint64_t frame_tick_last_ns;
+
 	//! Window dismissed by user (ESC).
 	bool window_dismissed;
 
@@ -4252,6 +4267,7 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 		sys->multi_comp = new d3d11_multi_compositor();
 		std::memset(sys->multi_comp, 0, sizeof(*sys->multi_comp));
 		sys->multi_comp->focused_slot = -1;
+		sys->multi_comp->focused_slot_last_emitted = -1;
 	}
 
 	struct d3d11_multi_compositor *mc = sys->multi_comp;
@@ -8425,6 +8441,12 @@ after_key_shortcuts:
 	if (mc->window != nullptr) {
 		comp_d3d11_window_signal_paint_done(mc->window);
 	}
+
+	// Phase 2.K: bump the frame-tick counter once per displayed frame so the
+	// public-API drain can emit FRAME_TICK events to the workspace controller
+	// without polling. The drain reads the counter delta and synthesises one
+	// event per missed frame (capped per batch).
+	InterlockedIncrement(&mc->frame_tick_count);
 }
 
 
@@ -11325,13 +11347,15 @@ comp_d3d11_service_workspace_drain_input_events(struct xrt_system_compositor *xs
 
 	struct workspace_public_event_raw raw[IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX];
 	uint32_t got = comp_d3d11_window_consume_workspace_public_events(mc->window, raw, want);
-	if (got == 0) {
-		return true;
-	}
 
-	std::lock_guard<std::recursive_mutex> lock(sys->render_mutex);
+	// Phase 2.K: even when the WndProc-side ring is empty, FRAME_TICK and
+	// FOCUS_CHANGED events still need to drain — controllers pace their
+	// animation tick on FRAME_TICK alone when no user input is happening.
+	// The raw-event loop only runs when there is something to translate.
+	if (got > 0) {
+		std::lock_guard<std::recursive_mutex> lock(sys->render_mutex);
 
-	for (uint32_t i = 0; i < got; i++) {
+		for (uint32_t i = 0; i < got; i++) {
 		const struct workspace_public_event_raw *r = &raw[i];
 		struct ipc_workspace_input_event *ev = &out_batch->events[out_batch->count];
 		memset(ev, 0, sizeof(*ev));
@@ -11373,10 +11397,80 @@ comp_d3d11_service_workspace_drain_input_events(struct xrt_system_compositor *xs
 			ev->u.scroll.cursor_y = (int64_t)r->cursor_y;
 			ev->u.scroll.modifiers = r->modifiers;
 			break;
+		case WORKSPACE_PUBLIC_EVENT_MOTION: {
+			// Phase 2.K: per-frame WM_MOUSEMOVE while pointer capture is
+			// enabled. Same hit-test enrichment as POINTER (within the
+			// same render_mutex region so geometry is stable across the
+			// batch).
+			ev->u.pointer_motion.button_mask = r->button_or_vk;
+			ev->u.pointer_motion.modifiers = r->modifiers;
+			ev->u.pointer_motion.cursor_x = (int64_t)r->cursor_x;
+			ev->u.pointer_motion.cursor_y = (int64_t)r->cursor_y;
+			POINT pt = {(LONG)r->cursor_x, (LONG)r->cursor_y};
+			struct workspace_hit_result hit = workspace_raycast_hit_test(sys, mc, pt);
+			ev->u.pointer_motion.hit_region = hit_result_to_region(hit);
+			if (hit.slot >= 0) {
+				ev->u.pointer_motion.hit_client_id = 1000u + (uint32_t)hit.slot;
+				if (hit.in_content) {
+					float win_w = mc->clients[hit.slot].window_width_m;
+					float win_h = mc->clients[hit.slot].window_height_m;
+					if (win_w > 0.0f)
+						ev->u.pointer_motion.local_u = hit.local_x_m / win_w;
+					if (win_h > 0.0f)
+						ev->u.pointer_motion.local_v = hit.local_y_m / win_h;
+				}
+			}
+			break;
+		}
 		default:
 			continue; // skip unknown event kinds
 		}
 		out_batch->count++;
+		}
+	}
+
+	// Phase 2.K: FOCUS_CHANGED + FRAME_TICK are emitted on every drain, even
+	// when the WndProc-side ring is empty — controllers need to see them to
+	// pace animations during idle periods. They read atomic fields and don't
+	// require the render_mutex.
+
+	// FOCUS_CHANGED: single event per drain on focused-slot transition.
+	// Emitted after raw events so the controller sees the pointer event that
+	// caused the focus change first.
+	if (mc->focused_slot != mc->focused_slot_last_emitted &&
+	    out_batch->count < IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX) {
+		struct ipc_workspace_input_event *ev = &out_batch->events[out_batch->count];
+		memset(ev, 0, sizeof(*ev));
+		ev->event_type = IPC_WORKSPACE_INPUT_EVENT_FOCUS_CHANGED;
+		ev->timestamp_ms = (uint32_t)GetTickCount();
+		ev->u.focus_changed.prev_client_id =
+		    (mc->focused_slot_last_emitted >= 0) ? (1000u + (uint32_t)mc->focused_slot_last_emitted) : 0;
+		ev->u.focus_changed.curr_client_id =
+		    (mc->focused_slot >= 0) ? (1000u + (uint32_t)mc->focused_slot) : 0;
+		mc->focused_slot_last_emitted = mc->focused_slot;
+		out_batch->count++;
+	}
+
+	// FRAME_TICK: one per displayed frame since the last drain, capped at
+	// remaining batch capacity. If the controller drains faster than one
+	// frame this is a no-op; if it falls behind we cap and the timestamp on
+	// the most recent event is what matters for pacing.
+	LONG cur = InterlockedCompareExchange(&mc->frame_tick_count, 0, 0);
+	uint64_t now_ns = os_monotonic_get_ns();
+	if (cur != mc->frame_tick_last_emitted) {
+		LONG missed = cur - mc->frame_tick_last_emitted;
+		if (missed < 0) missed = 1; // wrap; shouldn't happen with LONG counter
+		while (missed > 0 && out_batch->count < IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX) {
+			struct ipc_workspace_input_event *ev = &out_batch->events[out_batch->count];
+			memset(ev, 0, sizeof(*ev));
+			ev->event_type = IPC_WORKSPACE_INPUT_EVENT_FRAME_TICK;
+			ev->timestamp_ms = (uint32_t)GetTickCount();
+			ev->u.frame_tick.timestamp_ns = now_ns;
+			out_batch->count++;
+			missed--;
+		}
+		mc->frame_tick_last_emitted = cur;
+		mc->frame_tick_last_ns = now_ns;
 	}
 
 	return true;

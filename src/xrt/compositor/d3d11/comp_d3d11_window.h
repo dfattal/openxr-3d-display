@@ -59,16 +59,17 @@ enum workspace_public_event_kind
 	WORKSPACE_PUBLIC_EVENT_POINTER = 0,
 	WORKSPACE_PUBLIC_EVENT_KEY     = 2,
 	WORKSPACE_PUBLIC_EVENT_SCROLL  = 3,
+	WORKSPACE_PUBLIC_EVENT_MOTION  = 4, //!< Phase 2.K: per-frame WM_MOUSEMOVE while capture is enabled.
 };
 
 struct workspace_public_event_raw
 {
 	uint32_t kind;            //!< enum workspace_public_event_kind
 	uint32_t timestamp_ms;    //!< Low 32 bits of GetTickCount.
-	int32_t  cursor_x;        //!< POINTER and SCROLL: client-area px; else 0.
+	int32_t  cursor_x;        //!< POINTER/MOTION/SCROLL: client-area px; else 0.
 	int32_t  cursor_y;
-	uint32_t button_or_vk;    //!< POINTER: 1=L, 2=R, 3=M. KEY: VK code.
-	uint32_t is_down;         //!< POINTER and KEY: 1 = down, 0 = up.
+	uint32_t button_or_vk;    //!< POINTER: 1=L, 2=R, 3=M. KEY: VK code. MOTION: held-button mask.
+	uint32_t is_down;         //!< POINTER/KEY: 1 = down, 0 = up. MOTION: unused (0).
 	uint32_t modifiers;       //!< bit0=SHIFT, bit1=CTRL, bit2=ALT.
 	float    scroll_delta_y;  //!< SCROLL only: wheel ticks; positive = up.
 };

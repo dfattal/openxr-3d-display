@@ -227,6 +227,7 @@ static void set_fullscreen(HWND hWnd, bool fullscreen);
 // Custom message IDs (posted to window thread from compositor thread)
 #define WM_WORKSPACE_SET_FOREGROUND (WM_USER + 100)
 #define WM_WORKSPACE_LAUNCH_APP    (WM_USER + 101)
+#define WM_WORKSPACE_SET_CAPTURE   (WM_USER + 102) //!< Phase 2.K: wParam=enabled (0/1).
 
 #include <commdlg.h> // GetOpenFileNameA
 
@@ -685,11 +686,12 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		// Phase 2.D: emit POINTER and SCROLL events to the public-event ring
 		// before any filtering. SendInput-injected mouse events are still
 		// skipped here — they're the runtime's own forwarded clicks bouncing
-		// back, not new user input. Per-frame WM_MOUSEMOVE events are not
-		// emitted (Phase 2.D explicitly excludes per-frame motion; a
-		// controller wanting hover info polls xrWorkspaceHitTestEXT).
-		if (GetMessageExtraInfo() != (LPARAM)WORKSPACE_SENDINPUT_MARKER &&
-		    message != WM_MOUSEMOVE) {
+		// back, not new user input.
+		// Phase 2.K: WM_MOUSEMOVE now emits MOTION events while pointer
+		// capture is enabled (controllers want per-frame hover for chrome
+		// and drag-to-rotate carousels). Idle motion still bypasses the ring
+		// when capture is off.
+		if (GetMessageExtraInfo() != (LPARAM)WORKSPACE_SENDINPUT_MARKER) {
 			int32_t cx = GET_X_LPARAM(lParam);
 			int32_t cy = GET_Y_LPARAM(lParam);
 			uint32_t mods = workspace_compute_modifiers();
@@ -701,6 +703,21 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				ScreenToClient(hWnd, &clip);
 				workspace_public_ring_push(w, WORKSPACE_PUBLIC_EVENT_SCROLL,
 				                           clip.x, clip.y, 0, 0, mods, delta);
+			} else if (message == WM_MOUSEMOVE) {
+				// Gate motion on pointer capture so idle hover doesn't
+				// flood the public ring. wParam carries the held-button
+				// state (MK_LBUTTON / MK_RBUTTON / MK_MBUTTON) — pack
+				// directly into button_or_vk as a button mask.
+				LONG cap_enabled =
+				    InterlockedCompareExchange(&w->workspace_pointer_capture_enabled, 0, 0);
+				if (cap_enabled) {
+					uint32_t mask = 0;
+					if (wParam & MK_LBUTTON) mask |= 0x1u;
+					if (wParam & MK_RBUTTON) mask |= 0x2u;
+					if (wParam & MK_MBUTTON) mask |= 0x4u;
+					workspace_public_ring_push(w, WORKSPACE_PUBLIC_EVENT_MOTION,
+					                           cx, cy, mask, 0, mods, 0.0f);
+				}
 			} else {
 				uint32_t button = 0;
 				uint32_t is_down = 0;
@@ -926,6 +943,23 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			SetForegroundWindow(hWnd);
 		}
 		InterlockedExchange(&w->foreground_done, 1);
+		return 0;
+	}
+
+	case WM_WORKSPACE_SET_CAPTURE: {
+		// Phase 2.K: cross-thread SetCapture / ReleaseCapture request. SetCapture
+		// must run on the window thread, so the IPC-server thread posts here.
+		// wParam = 1 → SetCapture(hWnd) so motion outside the workspace window
+		// keeps reaching this WndProc; wParam = 0 → ReleaseCapture.
+		if (wParam) {
+			SetCapture(hWnd);
+		} else {
+			// Only release if we actually hold capture, to avoid stomping on
+			// some other window that legitimately captured the cursor.
+			if (GetCapture() == hWnd) {
+				ReleaseCapture();
+			}
+		}
 		return 0;
 	}
 
@@ -1552,6 +1586,13 @@ comp_d3d11_window_set_workspace_pointer_capture(struct comp_d3d11_window *window
 	}
 	InterlockedExchange(&window->workspace_pointer_capture_enabled, enabled ? 1 : 0);
 	InterlockedExchange(&window->workspace_pointer_capture_button, (LONG)button);
+	// Phase 2.K: also drive Win32 SetCapture / ReleaseCapture so the WndProc
+	// keeps receiving WM_MOUSEMOVE while the cursor leaves the workspace
+	// window during a drag. SetCapture must run on the thread that owns the
+	// HWND, so post to the window thread.
+	if (window->hwnd != NULL) {
+		PostMessageW(window->hwnd, WM_WORKSPACE_SET_CAPTURE, enabled ? 1 : 0, 0);
+	}
 }
 
 extern "C" void
