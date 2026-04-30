@@ -7479,17 +7479,21 @@ after_key_shortcuts:
 						              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 							BlitConstants *cb = static_cast<BlitConstants *>(mapped.pData);
 							bool close_hover = (mc->hover_btn == 1 && mc->hover_btn_slot == s);
-							cb->src_rect[0] = close_hover ? 0.90f : 0.70f;
-							cb->src_rect[1] = close_hover ? 0.25f : 0.15f;
-							cb->src_rect[2] = close_hover ? 0.25f : 0.15f;
+							// Phase 2.K Commit 8.F: vivid red close button.
+							// Hover brightens the bg.
+							cb->src_rect[0] = close_hover ? 0.95f : 0.85f;
+							cb->src_rect[1] = close_hover ? 0.30f : 0.22f;
+							cb->src_rect[2] = close_hover ? 0.30f : 0.22f;
 							cb->src_rect[3] = 1.0f;
 							cb->src_size[0] = 1; cb->src_size[1] = 1;
 							cb->dst_size[0] = (float)ca_w; cb->dst_size[1] = (float)ca_h;
 							cb->convert_srgb = 2.0f;
 							cb->chrome_alpha = chrome_fade_attenuation; // 8.C: per-slot pill fade
-							// Round close button top-right corner only (negative aspect)
-							cb->corner_radius = 0.35f;
-							cb->corner_aspect = -(UI_BTN_W_M / UI_TITLE_BAR_H_M);
+							// All four corners rounded so the close button reads as
+							// a soft pill-cap; aspect=-1 with small radius gives a
+							// subtle rounding without consuming the whole button.
+							cb->corner_radius = -0.30f;
+							cb->corner_aspect = -1.0f;
 							cb->edge_feather = 0.0f;
 							cb->glow_intensity = 0.0f;
 							float btn_x = tox + tow - (float)CLOSE_BTN_WIDTH_PX;
@@ -7507,15 +7511,17 @@ after_key_shortcuts:
 						              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 							BlitConstants *cb = static_cast<BlitConstants *>(mapped.pData);
 							bool min_hover = (mc->hover_btn == 2 && mc->hover_btn_slot == s);
-							cb->src_rect[0] = min_hover ? 0.45f : 0.30f;
-							cb->src_rect[1] = min_hover ? 0.48f : 0.33f;
-							cb->src_rect[2] = min_hover ? 0.50f : 0.36f;
+							// Phase 2.K Commit 8.F: gray minimize button.
+							cb->src_rect[0] = min_hover ? 0.55f : 0.42f;
+							cb->src_rect[1] = min_hover ? 0.57f : 0.44f;
+							cb->src_rect[2] = min_hover ? 0.60f : 0.48f;
 							cb->src_rect[3] = 1.0f;
 							cb->src_size[0] = 1; cb->src_size[1] = 1;
 							cb->dst_size[0] = (float)ca_w; cb->dst_size[1] = (float)ca_h;
 							cb->convert_srgb = 2.0f;
 							cb->chrome_alpha = chrome_fade_attenuation; // 8.C: per-slot pill fade
-							cb->corner_radius = 0; cb->corner_aspect = 0;
+							cb->corner_radius = -0.30f;
+							cb->corner_aspect = -1.0f;
 							cb->edge_feather = 0.0f; cb->glow_intensity = 0.0f;
 							float min_x = tox + tow - 2.0f * (float)CLOSE_BTN_WIDTH_PX;
 							CHROME_BLIT_POS(cb,
@@ -7532,15 +7538,19 @@ after_key_shortcuts:
 						              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 							BlitConstants *cb = static_cast<BlitConstants *>(mapped.pData);
 							bool max_hover = (mc->hover_btn == 3 && mc->hover_btn_slot == s);
-							cb->src_rect[0] = max_hover ? 0.30f : 0.20f;
-							cb->src_rect[1] = max_hover ? 0.50f : 0.35f;
-							cb->src_rect[2] = max_hover ? 0.85f : 0.70f;
+							// Phase 2.K Commit 8.F: gray maximize button (no
+							// longer the old blue accent — the colour cue is
+							// reserved for "destructive" actions like close).
+							cb->src_rect[0] = max_hover ? 0.55f : 0.42f;
+							cb->src_rect[1] = max_hover ? 0.57f : 0.44f;
+							cb->src_rect[2] = max_hover ? 0.60f : 0.48f;
 							cb->src_rect[3] = 1.0f;
 							cb->src_size[0] = 1; cb->src_size[1] = 1;
 							cb->dst_size[0] = (float)ca_w; cb->dst_size[1] = (float)ca_h;
 							cb->convert_srgb = 2.0f;
 							cb->chrome_alpha = chrome_fade_attenuation; // 8.C: per-slot pill fade
-							cb->corner_radius = 0; cb->corner_aspect = 0;
+							cb->corner_radius = -0.30f;
+							cb->corner_aspect = -1.0f;
 							cb->edge_feather = 0.0f; cb->glow_intensity = 0.0f;
 							float max_x = tox + tow - 3.0f * (float)CLOSE_BTN_WIDTH_PX;
 							CHROME_BLIT_POS(cb,
