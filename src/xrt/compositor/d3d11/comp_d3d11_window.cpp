@@ -594,11 +594,9 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			    InterlockedCompareExchange(&w->any_window_maximized, 0, 0)) {
 				return 0;
 			}
-			// Ctrl+1-4: layout presets (handled server-side) → don't forward
-			if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) &&
-			    wParam >= '1' && wParam <= '4') {
-				return 0;
-			}
+			// Phase 2.G: Ctrl+1..4 are no longer reserved by the runtime.
+			// They flow through the public input-event drain so a workspace
+			// controller can bind them to its own layout presets.
 			if (is_capture) {
 				// Capture client: buffer for SendInput dispatch
 				input_ring_push(w, message, (uint64_t)wParam, (int64_t)lParam, -1, -1);
@@ -798,10 +796,37 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					w->mouse_press_in_content = false;
 				}
 
-				// Forward if inside rect, or if dragging from an in-content press.
+				// Phase 2.G followup #1: when xrEnableWorkspacePointerCaptureEXT
+				// is active for a button, that button's events bypass the
+				// in-rect / dragging gate so a controller-driven drag (move,
+				// resize) keeps receiving the up event even when the cursor
+				// has been pulled outside the content rect. Without this gate
+				// `buttons_held` is already false at WM_*BUTTONUP and
+				// `mouse_press_in_content` was just cleared, so the up
+				// vanishes whenever the press wasn't in content.
+				LONG cap_en = InterlockedCompareExchange(
+				    &w->workspace_pointer_capture_enabled, 0, 0);
+				LONG cap_btn = InterlockedCompareExchange(
+				    &w->workspace_pointer_capture_button, 0, 0);
+				uint32_t evt_button = 0;
+				switch (message) {
+				case WM_LBUTTONDOWN:
+				case WM_LBUTTONUP:   evt_button = 1; break;
+				case WM_RBUTTONDOWN:
+				case WM_RBUTTONUP:   evt_button = 2; break;
+				case WM_MBUTTONDOWN:
+				case WM_MBUTTONUP:   evt_button = 3; break;
+				default: break;
+				}
+				bool capture_active =
+				    (cap_en != 0) && evt_button != 0 &&
+				    cap_btn == (LONG)evt_button;
+
+				// Forward if inside rect, or if dragging from an in-content press,
+				// or if pointer capture is held for this button.
 				bool buttons_held = (wParam & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON)) != 0;
 				bool dragging = buttons_held && w->mouse_press_in_content;
-				if (in_rect || dragging) {
+				if (in_rect || dragging || capture_active) {
 					// Remap to app-window client coords.
 					// Scale if target HWND is a different size than the
 					// virtual rect (e.g., captured 2D windows).
