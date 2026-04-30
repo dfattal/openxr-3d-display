@@ -245,11 +245,19 @@ shell_slot_anim_find(XrWorkspaceClientId id)
 
 // Seed an animation toward `target_pose` / `target_w` × `target_h` over
 // `duration_ns`. Snapshots the current pose via xrGetWorkspaceClientWindowPoseEXT
-// — if that fails (e.g. slot still binding mid-connect), falls back to using
-// the target as both start and end so the controller's set_pose doesn't fail
-// either. Reuses an existing entry if one is already animating this client so
-// preset switches mid-animation pick up from the current interpolated pose.
-static void
+// to use as the start of the interpolation. Reuses an existing entry if one
+// is already animating this client so preset switches mid-animation pick up
+// from the current interpolated pose.
+//
+// Returns true if the seed succeeded (the runtime knew the slot well enough
+// to read its pose). Returns false if get_pose failed (typical connect-time
+// race: the IPC client_id is enumerable but its xrt_compositor isn't bound
+// yet) — caller should retry on the next poll iteration. We deliberately do
+// NOT fall back to "target=target=animation no-op" because every set_pose
+// during such an animation also fails XR_ERROR_VALIDATION, and 300 ms can
+// elapse before binding completes — leaving the cube at the runtime's
+// entry-animation final pose.
+static bool
 shell_slot_anim_seed(XrWorkspaceClientId id,
                      const XrPosef *target_pose,
                      float target_w,
@@ -257,8 +265,24 @@ shell_slot_anim_seed(XrWorkspaceClientId id,
                      uint64_t duration_ns)
 {
 	if (g_xr == NULL || id == XR_NULL_WORKSPACE_CLIENT_ID || target_pose == NULL) {
-		return;
+		return false;
 	}
+
+	XrPosef cur_pose;
+	float cur_w = target_w, cur_h = target_h;
+	if (g_xr->get_pose == NULL) {
+		// get_pose unavailable (older runtime) — no-glide fallback: the
+		// caller can still see "true" and the carousel/preset will just
+		// snap on the first set_pose tick.
+		cur_pose = *target_pose;
+	} else {
+		XrResult gr = g_xr->get_pose(g_xr->session, id, &cur_pose, &cur_w, &cur_h);
+		if (gr != XR_SUCCESS) {
+			// Slot not yet bound. Caller retries next tick.
+			return false;
+		}
+	}
+
 	struct shell_slot_anim *a = shell_slot_anim_find(id);
 	if (a == NULL) {
 		for (int i = 0; i < SHELL_ANIM_MAX; i++) {
@@ -271,19 +295,7 @@ shell_slot_anim_seed(XrWorkspaceClientId id,
 	if (a == NULL) {
 		// Should not happen with SHELL_ANIM_MAX ≥ SHELL_MAX_CLIENTS.
 		PE("shell_slot_anim_seed: no free animation slot for client %u\n", id);
-		return;
-	}
-
-	XrPosef cur_pose = *target_pose;
-	float cur_w = target_w, cur_h = target_h;
-	if (g_xr->get_pose != NULL) {
-		XrPosef p;
-		float w, h;
-		if (g_xr->get_pose(g_xr->session, id, &p, &w, &h) == XR_SUCCESS) {
-			cur_pose = p;
-			cur_w = w;
-			cur_h = h;
-		}
+		return false;
 	}
 
 	a->active = true;
@@ -296,6 +308,7 @@ shell_slot_anim_seed(XrWorkspaceClientId id,
 	a->target_h = target_h;
 	a->start_ns = shell_now_ns();
 	a->duration_ns = duration_ns;
+	return true;
 }
 
 // Tick every active animation: interpolate, push set_pose, mark inactive on
@@ -800,9 +813,7 @@ shell_apply_preset(const char *name)
 		shell_set_pointer_capture(false);
 	}
 
-	P("Layout '%s' (%u windows) — gliding over %llu ms\n",
-	  name, n, (unsigned long long)(SHELL_ANIM_DURATION_NS / 1000000ULL));
-
+	uint32_t seeded = 0;
 	for (uint32_t i = 0; i < n; i++) {
 		XrPosef pose;
 		pose.orientation.x = 0.0f;
@@ -832,14 +843,24 @@ shell_apply_preset(const char *name)
 		// Phase 2.K: instead of snapping via set_pose, seed an animation
 		// from the current pose to the new one. The main-loop tick drives
 		// per-frame interpolation until the animation completes (~300 ms).
-		shell_slot_anim_seed(ids[i], &pose, w, h, SHELL_ANIM_DURATION_NS);
+		// Seed returns false during the connect-time race (slot not yet
+		// bound — get_pose fails); the caller retries on the next poll.
+		if (shell_slot_anim_seed(ids[i], &pose, w, h, SHELL_ANIM_DURATION_NS)) {
+			seeded++;
+		}
 	}
-	// We don't know whether set_pose will succeed until the animation
-	// actually fires; assume success at seed time. The connect-time race
-	// retry path (s_auto_tile_pending) still works because that path
-	// re-invokes shell_apply_preset on each poll iteration until at least
-	// one animation seeds and ticks cleanly.
-	return n > 0;
+
+	if (seeded > 0 && seeded < n) {
+		P("Layout '%s': partial seed %u/%u (slot binding still in flight)\n",
+		  name, seeded, n);
+	} else if (seeded > 0) {
+		P("Layout '%s' (%u windows) — gliding over %llu ms\n",
+		  name, n, (unsigned long long)(SHELL_ANIM_DURATION_NS / 1000000ULL));
+	}
+
+	// Return true only when every client seeded — that's the signal the
+	// auto-tile-on-connect retry path watches for to clear its pending flag.
+	return seeded == n && n > 0;
 }
 
 // Drain pending workspace input events; dispatch Ctrl+1..3 to layout presets.

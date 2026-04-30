@@ -495,6 +495,14 @@ struct BlitConstants
 	float glow_extent;        // glow margin as fraction of oversized quad
 	float glow_falloff;       // Gaussian tightness (e.g. 3.0)
 	float glow_color[4];      // RGB + unused alpha (float4 for HLSL alignment)
+	// Phase 2.K: per-corner SV_Position.z value, normalised to [0, 1] (closer
+	// to eye = smaller value, LESS depth-test). Window content sets all 4 to
+	// (eye_z - window_z) / WORKSPACE_DEPTH_FAR_M; rotated quads use per-corner
+	// (eye_z - corner_world_z) / WORKSPACE_DEPTH_FAR_M. Chrome biases by a
+	// small epsilon toward the eye so it occludes its own window's content
+	// while still depth-testing against other windows. Set to 0 (front) for
+	// passes that bind depth_disabled (background, launcher, glow halos).
+	float corner_depth_ndc[4]; // [TL_d, BL_d, TR_d, BR_d]
 };
 
 //! Vertex shader for projection blit - draws a quad at specified destination
@@ -518,6 +526,7 @@ cbuffer BlitCB : register(b0)
     float glow_extent;      // glow margin as fraction of oversized quad
     float glow_falloff;     // Gaussian tightness
     float4 glow_color;      // RGB + unused alpha
+    float4 corner_depth_ndc; // Phase 2.K: per-corner depth in [0,1] for SV_Position.z (TL,BL,TR,BR)
 };
 
 struct VS_OUTPUT
@@ -566,10 +575,17 @@ VS_OUTPUT VSMain(uint vertex_id : SV_VertexID)
     float2 ndc = (dst_pos / dst_size) * 2.0 - 1.0;
     ndc.y = -ndc.y;  // Flip Y for D3D
 
+    // Phase 2.K: per-corner depth for hardware depth test (LESS, [0,1]).
+    // CPU encodes (eye_z - corner_z) / WORKSPACE_DEPTH_FAR_M for window
+    // content, with a small bias toward the eye for chrome. After
+    // perspective divide the rasterizer gives SV_Position.z = corner_depth_ndc.
+    float depths[4] = { corner_depth_ndc.x, corner_depth_ndc.y, corner_depth_ndc.z, corner_depth_ndc.w };
+    float depth_ndc = depths[vid];
+
     // Set w for perspective-correct UV interpolation.
     // w=1 for axis-aligned (affine), w=depth for perspective quads.
     // D3D11 rasterizer automatically divides interpolated attributes by w.
-    output.position = float4(ndc * w, 0.0, w);
+    output.position = float4(ndc * w, depth_ndc * w, w);
 
     // Calculate source UV — always from src_rect (independent of dest size)
     float2 src_pos = src_rect.xy + uv * src_rect.zw;
@@ -603,6 +619,7 @@ cbuffer BlitCB : register(b0)
     float glow_extent;
     float glow_falloff;
     float4 glow_color;
+    float4 corner_depth_ndc; // Phase 2.K: per-corner depth (unused in PS but keeps cb layout in sync)
 };
 
 Texture2D src_tex : register(t0);

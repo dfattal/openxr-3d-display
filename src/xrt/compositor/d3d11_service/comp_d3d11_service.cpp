@@ -448,6 +448,12 @@ struct d3d11_service_system
 	//! Depth stencil state (disabled)
 	wil::com_ptr<ID3D11DepthStencilState> depth_disabled;
 
+	//! Phase 2.K: Depth stencil state (LESS test + write enabled). Bound for
+	//! the multi-window content + chrome blit pass so windows occlude each
+	//! other per-pixel — including intersecting tilted planes — without the
+	//! painter's-algorithm sort or focus-on-top override.
+	wil::com_ptr<ID3D11DepthStencilState> depth_test_enabled;
+
 	//! Atlas texture dimensions (tiled views, input to display processor)
 	uint32_t display_width;
 	uint32_t display_height;
@@ -720,6 +726,15 @@ struct d3d11_multi_compositor
 	wil::com_ptr<ID3D11Texture2D> combined_atlas;
 	wil::com_ptr<ID3D11ShaderResourceView> combined_atlas_srv;
 	wil::com_ptr<ID3D11RenderTargetView> combined_atlas_rtv;
+
+	//! Phase 2.K: depth target sibling to combined_atlas. Used by the
+	//! multi-window content + chrome blit pass for per-pixel occlusion.
+	//! Each frame is cleared to 1.0 (far) before the per-slot render loop;
+	//! per-corner SV_Position.z values from the blit VS resolve occlusion
+	//! via D3D11's LESS depth test. Resets / re-creates alongside
+	//! combined_atlas (multi_compositor_ensure_output / atlas teardown).
+	wil::com_ptr<ID3D11Texture2D> combined_atlas_depth;
+	wil::com_ptr<ID3D11DepthStencilView> combined_atlas_dsv;
 
 	//! Display processor (single, shared).
 	struct xrt_display_processor_d3d11 *display_processor;
@@ -1426,6 +1441,21 @@ create_layer_resources(struct d3d11_service_system *sys)
 	hr = sys->device->CreateDepthStencilState(&ds_desc, sys->depth_disabled.put());
 	if (FAILED(hr)) {
 		U_LOG_E("Failed to create depth stencil state: 0x%08lx", hr);
+		return false;
+	}
+
+	// Phase 2.K: depth-test state (LESS, depth-write enabled). The blit VS
+	// outputs SV_Position.z = corner_depth_ndc[i] * w (so after perspective
+	// divide we get the [0,1] depth value back), and this state turns the
+	// hardware depth test on for the multi-window blit pass.
+	D3D11_DEPTH_STENCIL_DESC ds_test = {};
+	ds_test.DepthEnable = TRUE;
+	ds_test.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+	ds_test.DepthFunc = D3D11_COMPARISON_LESS;
+	ds_test.StencilEnable = FALSE;
+	hr = sys->device->CreateDepthStencilState(&ds_test, sys->depth_test_enabled.put());
+	if (FAILED(hr)) {
+		U_LOG_E("Failed to create depth-test depth stencil state: 0x%08lx", hr);
 		return false;
 	}
 
@@ -3753,6 +3783,15 @@ project_local_rect_for_eye(const struct d3d11_service_system *sys,
 
 static inline void blit_set_quad_corners(BlitConstants *cb, const float corners[8], const float w[4]);
 
+// Phase 2.K: depth-pipeline forward declarations. Definitions live alongside
+// blit_set_quad_corners' body further down. The constants are #defines so
+// they're visible at point of use without needing forward declaration.
+#define WORKSPACE_DEPTH_FAR_M 1.0f
+#define WORKSPACE_CHROME_DEPTH_BIAS 0.001f
+static inline float workspace_depth_ndc_from_distance(float eye_to_z_distance);
+static inline void blit_set_axis_aligned_depth(BlitConstants *cb, float eye_z, float window_z, float chrome_bias);
+static inline void blit_set_perspective_depth(BlitConstants *cb, const float w[4], float chrome_bias);
+
 /*!
  * Register a per-client compositor with the multi-compositor.
  * Returns slot index, or -1 if full.
@@ -4235,6 +4274,8 @@ multi_compositor_destroy(struct d3d11_multi_compositor *mc)
 	mc->combined_atlas_rtv.reset();
 	mc->combined_atlas_srv.reset();
 	mc->combined_atlas.reset();
+	mc->combined_atlas_dsv.reset();
+	mc->combined_atlas_depth.reset();
 	mc->font_atlas_srv.reset();
 	mc->font_atlas.reset();
 	mc->logo_srv.reset();
@@ -4369,6 +4410,25 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 		sys->device->CreateShaderResourceView(mc->combined_atlas.get(), nullptr, mc->combined_atlas_srv.put());
 		sys->device->CreateRenderTargetView(mc->combined_atlas.get(), nullptr, mc->combined_atlas_rtv.put());
 
+		// Phase 2.K: depth target sibling (D32_FLOAT). Per-eye tiles share
+		// the same depth buffer — depth values stay isolated per-pixel via
+		// the tile coordinates, so no per-eye depth target is needed.
+		D3D11_TEXTURE2D_DESC depth_desc = {};
+		depth_desc.Width = ca_w;
+		depth_desc.Height = ca_h;
+		depth_desc.MipLevels = 1;
+		depth_desc.ArraySize = 1;
+		depth_desc.Format = DXGI_FORMAT_D32_FLOAT;
+		depth_desc.SampleDesc.Count = 1;
+		depth_desc.Usage = D3D11_USAGE_DEFAULT;
+		depth_desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+		hr = sys->device->CreateTexture2D(&depth_desc, nullptr, mc->combined_atlas_depth.put());
+		if (FAILED(hr)) {
+			U_LOG_E("Multi-comp: failed to create combined atlas depth (hr=0x%08X)", hr);
+			return XRT_ERROR_D3D11;
+		}
+		sys->device->CreateDepthStencilView(mc->combined_atlas_depth.get(), nullptr,
+		                                    mc->combined_atlas_dsv.put());
 	}
 
 	U_LOG_W("Multi-comp: combined atlas %ux%u",
@@ -5748,9 +5808,15 @@ after_key_shortcuts:
 			// Spatial raycast: cast ray from eye through cursor on display surface
 			struct workspace_hit_result hit = workspace_raycast_hit_test(sys, mc, pt);
 
+			// Phase 2.K: when controller has pointer capture, runtime cedes
+			// edge-resize too (the controller may want to interpret edges as
+			// something other than resize, e.g. carousel reflow).
+			bool ctrl_owns_drag = (mc->window != nullptr) &&
+			                      comp_d3d11_window_is_workspace_pointer_capture_enabled(mc->window);
 			// Edge/corner resize takes priority (unless clicking a title bar button)
 			if (hit.slot >= 0 && hit.edge_flags != RESIZE_NONE &&
-			    !hit.in_close_btn && !hit.in_minimize_btn && !hit.in_maximize_btn) {
+			    !hit.in_close_btn && !hit.in_minimize_btn && !hit.in_maximize_btn &&
+			    !ctrl_owns_drag) {
 				mc->resize.active = true;
 				mc->resize.slot = hit.slot;
 				mc->resize.edges = hit.edge_flags;
@@ -5830,19 +5896,28 @@ after_key_shortcuts:
 				if (is_double_click) {
 					toggle_fullscreen(sys, mc, hit_slot);
 				} else {
-					// Single click on title bar: start dragging
+					// Single click on title bar: focus + maybe start dragging.
+					// Phase 2.K: when a workspace controller has taken pointer
+					// capture, the runtime cedes drag policy to it (carousel
+					// rotation, custom drag affordances, etc.). Without this
+					// gate the runtime's title-bar drag fights the
+					// controller's set_pose every frame.
 					mc->focused_slot = hit_slot;
 					multi_compositor_update_input_forward(mc);
 
-					mc->title_drag.active = true;
-					mc->title_drag.slot = hit_slot;
-					// Suppress input forwarding during drag
-					if (mc->window != nullptr)
-						comp_d3d11_window_set_input_suppress(mc->window, true);
-					GetCursorPos(&mc->title_drag.start_cursor);
-					ScreenToClient(mc->hwnd, &mc->title_drag.start_cursor);
-					mc->title_drag.start_pos_x = mc->clients[hit_slot].window_pose.position.x;
-					mc->title_drag.start_pos_y = mc->clients[hit_slot].window_pose.position.y;
+					bool ctrl_owns_drag = (mc->window != nullptr) &&
+					                      comp_d3d11_window_is_workspace_pointer_capture_enabled(mc->window);
+					if (!ctrl_owns_drag) {
+						mc->title_drag.active = true;
+						mc->title_drag.slot = hit_slot;
+						// Suppress input forwarding during drag
+						if (mc->window != nullptr)
+							comp_d3d11_window_set_input_suppress(mc->window, true);
+						GetCursorPos(&mc->title_drag.start_cursor);
+						ScreenToClient(mc->hwnd, &mc->title_drag.start_cursor);
+						mc->title_drag.start_pos_x = mc->clients[hit_slot].window_pose.position.x;
+						mc->title_drag.start_pos_y = mc->clients[hit_slot].window_pose.position.y;
+					}
 				}
 			} else {
 				// Content area click or taskbar click
@@ -6079,7 +6154,12 @@ after_key_shortcuts:
 		}
 
 		if (rmb_held) {
-			if (!mc->title_rmb_drag.active && rmb_just_pressed) {
+			// Phase 2.K: when the controller has pointer capture, suppress
+			// the runtime's RMB rotation drag — the controller owns interactive
+			// motion policy.
+			bool ctrl_owns_drag = (mc->window != nullptr) &&
+			                      comp_d3d11_window_is_workspace_pointer_capture_enabled(mc->window);
+			if (!mc->title_rmb_drag.active && rmb_just_pressed && !ctrl_owns_drag) {
 				// RMB just pressed — check if on title bar to start rotation drag
 				POINT pt;
 				GetCursorPos(&pt);
@@ -6415,6 +6495,12 @@ after_key_shortcuts:
 	{
 		float bg_color[4] = {0.102f, 0.102f, 0.102f, 1.0f}; // #1a1a1a
 		sys->context->ClearRenderTargetView(mc->combined_atlas_rtv.get(), bg_color);
+		// Phase 2.K: clear depth target to far (1.0) so the per-slot LESS
+		// test resolves occlusion from scratch each frame.
+		if (mc->combined_atlas_dsv) {
+			sys->context->ClearDepthStencilView(mc->combined_atlas_dsv.get(),
+			                                    D3D11_CLEAR_DEPTH, 1.0f, 0);
+		}
 	}
 
 	// Empty state: DisplayXR logo + "Press Ctrl+L" hint when no clients are visible
@@ -6584,17 +6670,13 @@ after_key_shortcuts:
 			}
 		}
 	}
-	// Focused window always paints last (on top), regardless of Z position.
-	if (mc->focused_slot >= 0) {
-		for (int i = 0; i < render_count - 1; i++) {
-			if (render_order[i] == mc->focused_slot) {
-				int tmp = render_order[i];
-				render_order[i] = render_order[render_count - 1];
-				render_order[render_count - 1] = tmp;
-				break;
-			}
-		}
-	}
+	// Phase 2.K: focus-on-top override removed. The depth-test pipeline
+	// resolves occlusion per-pixel from window 3D depth, so forcing the
+	// focused window to paint last would break depth ordering whenever the
+	// focused window is geometrically behind another window (carousel,
+	// edge-resize z scrolls, controller-driven 3D layouts). The painter's
+	// sort above stays useful for transparent-edge alpha blending — opaque
+	// occlusion now comes from the depth buffer.
 	uint32_t dp_view_w = sys->view_width;
 	uint32_t dp_view_h = sys->view_height;
 	for (int ri = 0; ri < render_count; ri++) {
@@ -7009,9 +7091,16 @@ after_key_shortcuts:
 				cb->glow_intensity = 0.0f;
 				if (use_quad) {
 					blit_set_quad_corners(cb, quad_corners, quad_w_vals);
+					// Phase 2.K: per-corner depth from quad_w_vals (which
+					// project_local_rect_for_eye populated as eye_z - corner_z).
+					blit_set_perspective_depth(cb, quad_w_vals, 0.0f);
 				} else {
 					memset(cb->quad_corners_01, 0, sizeof(cb->quad_corners_01));
 					memset(cb->quad_corners_23, 0, sizeof(cb->quad_corners_23));
+					// Phase 2.K: uniform depth across the planar quad.
+					blit_set_axis_aligned_depth(cb,
+					    eye_pos.eyes[ei_q].z,
+					    mc->clients[s].window_pose.position.z, 0.0f);
 				}
 				sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 
@@ -7023,9 +7112,11 @@ after_key_shortcuts:
 				sys->context->PSSetShaderResources(0, 1, &slot_srv);
 				sys->context->PSSetSamplers(0, 1, sys->sampler_linear.addressof());
 
-				// Render to combined atlas
+				// Phase 2.K: bind DSV alongside the atlas RTV so the depth
+				// test resolves per-pixel occlusion between this window and
+				// other windows that have already rendered this frame.
 				ID3D11RenderTargetView *ca_rtvs[] = {mc->combined_atlas_rtv.get()};
-				sys->context->OMSetRenderTargets(1, ca_rtvs, nullptr);
+				sys->context->OMSetRenderTargets(1, ca_rtvs, mc->combined_atlas_dsv.get());
 				D3D11_VIEWPORT vp = {};
 				vp.Width = static_cast<float>(ca_w);
 				vp.Height = static_cast<float>(ca_h);
@@ -7034,7 +7125,7 @@ after_key_shortcuts:
 				sys->context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 				sys->context->IASetInputLayout(nullptr);
 				sys->context->RSSetState(sys->rasterizer_state.get());
-				sys->context->OMSetDepthStencilState(sys->depth_disabled.get(), 0);
+				sys->context->OMSetDepthStencilState(sys->depth_test_enabled.get(), 0);
 				sys->context->OMSetBlendState(sys->blend_alpha.get(), nullptr, 0xFFFFFFFF);
 
 				sys->context->Draw(4, 0);
@@ -7093,18 +7184,27 @@ after_key_shortcuts:
 					sys->context->PSSetShader(sys->blit_ps.get(), nullptr, 0);
 					sys->context->VSSetConstantBuffers(0, 1, sys->blit_constant_buffer.addressof());
 					sys->context->PSSetConstantBuffers(0, 1, sys->blit_constant_buffer.addressof());
+					// Phase 2.K: bind DSV + LESS depth-test state so chrome
+					// occludes against other windows' content / chrome by
+					// per-pixel depth. CHROME_BLIT_POS biases each draw
+					// toward the eye by WORKSPACE_CHROME_DEPTH_BIAS so a
+					// window's own chrome wins over its own content while
+					// still depth-testing across windows.
 					ID3D11RenderTargetView *tb_rtvs[] = {mc->combined_atlas_rtv.get()};
-					sys->context->OMSetRenderTargets(1, tb_rtvs, nullptr);
+					sys->context->OMSetRenderTargets(1, tb_rtvs, mc->combined_atlas_dsv.get());
 					sys->context->OMSetBlendState(sys->blend_alpha.get(), nullptr, 0xFFFFFFFF);
 					sys->context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 					sys->context->IASetInputLayout(nullptr);
 					sys->context->RSSetState(sys->rasterizer_state.get());
-					sys->context->OMSetDepthStencilState(sys->depth_disabled.get(), 0);
+					sys->context->OMSetDepthStencilState(sys->depth_test_enabled.get(), 0);
 					D3D11_VIEWPORT tb_vp = {};
 					tb_vp.Width = (float)ca_w; tb_vp.Height = (float)ca_h; tb_vp.MaxDepth = 1.0f;
 					sys->context->RSSetViewports(1, &tb_vp);
 
-					// Helper lambda: fill CB position fields for rotated or axis-aligned chrome blit
+					// Helper lambda: fill CB position fields for rotated or axis-aligned chrome blit.
+					// Phase 2.K: also fills cb->corner_depth_ndc[4] with chrome
+					// bias so chrome wins over its own content but loses to
+					// closer windows.
 					#define CHROME_BLIT_POS(cb_ptr, ll, lt, lr, lb, aa_x, aa_y, aa_w, aa_h) \
 						do { \
 							if (is_rotated) { \
@@ -7115,12 +7215,15 @@ after_key_shortcuts:
 								blit_set_quad_corners(cb_ptr, _corners, _w); \
 								(cb_ptr)->dst_offset[0] = 0; (cb_ptr)->dst_offset[1] = 0; \
 								(cb_ptr)->dst_rect_wh[0] = 0; (cb_ptr)->dst_rect_wh[1] = 0; \
+								blit_set_perspective_depth(cb_ptr, _w, WORKSPACE_CHROME_DEPTH_BIAS); \
 							} else { \
 								(cb_ptr)->quad_mode = 0; \
 								(cb_ptr)->dst_offset[0] = (aa_x); (cb_ptr)->dst_offset[1] = (aa_y); \
 								(cb_ptr)->dst_rect_wh[0] = (aa_w); (cb_ptr)->dst_rect_wh[1] = (aa_h); \
 								memset((cb_ptr)->quad_corners_01, 0, sizeof((cb_ptr)->quad_corners_01)); \
 								memset((cb_ptr)->quad_corners_23, 0, sizeof((cb_ptr)->quad_corners_23)); \
+								blit_set_axis_aligned_depth(cb_ptr, cur_eye_z, wcz, \
+								    WORKSPACE_CHROME_DEPTH_BIAS); \
 							} \
 						} while(0)
 
@@ -10017,6 +10120,7 @@ system_destroy(struct xrt_system_compositor *xsysc)
 	// when each client disconnects. System has no display processor anymore.
 
 	// Clean up layer rendering resources
+	sys->depth_test_enabled.reset();
 	sys->depth_disabled.reset();
 	sys->rasterizer_state.reset();
 	sys->blend_opaque.reset();
@@ -10911,6 +11015,53 @@ project_local_rect_for_eye(const struct d3d11_service_system *sys,
 		float frac_y = dpy / (float)ca_h;
 		out_corners[i * 2 + 0] = tile_col * half_w + frac_x * half_w;
 		out_corners[i * 2 + 1] = tile_row * half_h + frac_y * half_h;
+	}
+}
+
+// Phase 2.K: depth normalisation. Eye z is typically ~0.6 m from the display
+// plane; window z spans roughly ±0.2 m around the plane (carousel back/front,
+// edge-resize offsets). (eye_z - corner_z) is therefore in ~[0.4, 0.8] m.
+// WORKSPACE_DEPTH_FAR_M = 1.0 m keeps depth_ndc in [0, 1] with plenty of
+// resolution; WORKSPACE_CHROME_DEPTH_BIAS lets chrome bias millimetre-scale
+// toward the eye so its own-window-content occlusion wins. Both #defined at
+// the forward-declaration block near the top of the file.
+
+// Phase 2.K: convert (eye_z - z_world) to NDC depth in [0, 1].
+static inline float
+workspace_depth_ndc_from_distance(float eye_to_z_distance)
+{
+	float d = eye_to_z_distance / WORKSPACE_DEPTH_FAR_M;
+	if (d < 0.0f) d = 0.0f;
+	if (d > 1.0f) d = 1.0f;
+	return d;
+}
+
+// Phase 2.K: fill cb->corner_depth_ndc[4] for an axis-aligned (planar) blit.
+// All four corners share the same depth value derived from window.z.
+static inline void
+blit_set_axis_aligned_depth(BlitConstants *cb, float eye_z, float window_z, float chrome_bias)
+{
+	float d = workspace_depth_ndc_from_distance(eye_z - window_z) - chrome_bias;
+	if (d < 0.0f) d = 0.0f;
+	if (d > 1.0f) d = 1.0f;
+	cb->corner_depth_ndc[0] = d;
+	cb->corner_depth_ndc[1] = d;
+	cb->corner_depth_ndc[2] = d;
+	cb->corner_depth_ndc[3] = d;
+}
+
+// Phase 2.K: fill cb->corner_depth_ndc[4] from per-corner W values that
+// project_local_rect_for_eye() already computes (W = eye_z - corner_world_z).
+// Each corner gets its own depth so two intersecting tilted quads occlude
+// per-pixel via the hardware depth test.
+static inline void
+blit_set_perspective_depth(BlitConstants *cb, const float w[4], float chrome_bias)
+{
+	for (int i = 0; i < 4; i++) {
+		float d = workspace_depth_ndc_from_distance(w[i]) - chrome_bias;
+		if (d < 0.0f) d = 0.0f;
+		if (d > 1.0f) d = 1.0f;
+		cb->corner_depth_ndc[i] = d;
 	}
 }
 
@@ -11823,6 +11974,8 @@ comp_d3d11_service_ensure_workspace_window(struct xrt_system_compositor *xsysc)
 		mc->combined_atlas_rtv.reset();
 		mc->combined_atlas_srv.reset();
 		mc->combined_atlas.reset();
+		mc->combined_atlas_dsv.reset();
+		mc->combined_atlas_depth.reset();
 		mc->swap_chain.reset();
 		if (mc->window != nullptr) {
 			comp_d3d11_window_destroy(&mc->window);

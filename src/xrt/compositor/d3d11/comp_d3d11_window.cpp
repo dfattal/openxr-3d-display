@@ -1578,6 +1578,13 @@ comp_d3d11_window_consume_workspace_public_events(struct comp_d3d11_window *wind
 	return count;
 }
 
+extern "C" bool
+comp_d3d11_window_is_workspace_pointer_capture_enabled(struct comp_d3d11_window *window)
+{
+	if (window == NULL) return false;
+	return InterlockedCompareExchange(&window->workspace_pointer_capture_enabled, 0, 0) != 0;
+}
+
 extern "C" void
 comp_d3d11_window_set_workspace_pointer_capture(struct comp_d3d11_window *window, bool enabled, uint32_t button)
 {

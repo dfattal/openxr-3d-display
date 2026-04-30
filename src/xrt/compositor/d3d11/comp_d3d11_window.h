@@ -366,6 +366,15 @@ void
 comp_d3d11_window_set_workspace_pointer_capture(struct comp_d3d11_window *window, bool enabled, uint32_t button);
 
 /*!
+ * Phase 2.K: read the current pointer-capture flag. Used by the service
+ * compositor to suspend its built-in title-bar drag / resize / RMB rotation
+ * while a workspace controller has taken over interactive policy. Lock-free
+ * read of the same atomic the WndProc honours.
+ */
+bool
+comp_d3d11_window_is_workspace_pointer_capture_enabled(struct comp_d3d11_window *window);
+
+/*!
  * Request SetForegroundWindow on the window thread.
  *
  * SetForegroundWindow must be called from the thread that owns the current
