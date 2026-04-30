@@ -15,13 +15,25 @@ Phase 2.D was right at the time (no controller had asked for per-frame motion). 
 
 Extend the public surface so a workspace controller can fully implement arbitrary interactive layouts — drag, momentum, animation, hover, edge-resize, **smooth transitions between presets** — without the runtime knowing what behaviour the controller is implementing. Performance must support smooth (60 Hz) interaction with no perceptible lag.
 
-Two distinct deliverables in one phase, sharing one shell-side animation framework:
+Five deliverables in one phase, sharing one shell-side animation framework. Together they close the "controller can do ANY 3D manipulation of client windows" gap. (Custom controller-rendered overlays are Phase 2.C, separate.)
 
 **(I) Smooth transitions between layout presets** — when the user presses Ctrl+1→Ctrl+2 today, windows snap from grid to immersive. The pre-Phase-2.G runtime called `slot_animate_to` (300 ms ease) so each window glided to its target. Phase 2.K replicates this in the shell: when the controller computes new target poses, it interpolates from current pose to target over a duration of its choice and pushes `xrSetWorkspaceClientWindowPoseEXT` every tick until the animation completes. **No public-surface change needed** — set_pose already exists.
 
-**(II) Interactive carousel** — drag-to-rotate, scroll-radius, TAB-snap, momentum. Needs per-frame `WM_MOUSEMOVE` on the public input drain (this is the surface change). Same animation tick consumes motion events and re-pushes poses.
+**(II) Interactive carousel** — drag-to-rotate, scroll-radius, TAB-snap, momentum. Needs per-frame `WM_MOUSEMOVE` on the public input drain (this is the main surface change). Same animation tick consumes motion events and re-pushes poses.
 
-The first half can ship without the second; both reuse the same controller-side animation framework.
+**(III) Vsync-aligned frame-tick event** — drain a `XR_WORKSPACE_INPUT_EVENT_FRAME_TICK_EXT` event once per compositor frame so the controller paces its animation tick to display refresh. Eliminates timer jitter without forcing the controller to poll a 60 Hz counter or estimate frame timing. Cheap (one extra event per ~16 ms vs. the dozens per second motion events already imply).
+
+**(IV) Controller-driven client lifecycle requests** — two small one-shot extension functions:
+- `xrRequestWorkspaceClientExitEXT(session, clientId)` — controller asks a client to close. Today `DELETE` is intercepted in the runtime and dispatched to the focused client; the controller can't drive an "X" button on its own chrome. Mechanism is identical to the runtime's existing handler — just expose it.
+- `xrRequestWorkspaceClientFullscreenEXT(session, clientId, XrBool32 fullscreen)` — controller toggles fullscreen for a slot. Today `F11` is runtime-owned. Mechanism identical; expose.
+
+**(V) Focus-change notification event** — drain a new `XR_WORKSPACE_INPUT_EVENT_FOCUS_CHANGED_EXT` whenever the focused client changes (regardless of whether the change came from the controller's own `xrSetWorkspaceFocusedClientEXT`, a click that the runtime auto-focused, a TAB cycle, or a client disconnect). Saves the controller from polling `xrGetWorkspaceFocusedClientEXT` every tick.
+
+**(I)** can ship without **(II)–(V)**; the rest share the input-drain surface change and ship together. **(IV)** is a separate function-pointer pair, can land in any commit. **(V)** is one event-type addition.
+
+### Verification: window orientation rendering
+
+`XrPosef.orientation` is part of the existing `set_pose` surface and the runtime's parallax-aware blit path (`project_local_rect_for_eye`) reads it, but no end-to-end test has confirmed a tilted window composites correctly. **Phase 2.K commit 1 includes** an orientation smoke test: extend `test_apps/workspace_minimal_d3d11_win` (or the shell's preset code) to push a non-identity orientation (~30° yaw) and screenshot. If the rendered window doesn't tilt, the bug is in the runtime composite path and gets fixed inside this phase.
 
 ## Design
 
@@ -79,12 +91,15 @@ Pick during implementation; snapshot-at-drain is the safer first pass.
 
 | File | Change |
 |---|---|
-| `src/external/openxr_includes/openxr/XR_EXT_spatial_workspace.h` | Add the MOTION event variant or extend POINTER with `isMotion`. Bump `spec_version` from 5 → 6. Document the gate semantics. |
+| `src/external/openxr_includes/openxr/XR_EXT_spatial_workspace.h` | Add `XR_WORKSPACE_INPUT_EVENT_POINTER_MOTION_EXT` (or extend POINTER with `isMotion`), `XR_WORKSPACE_INPUT_EVENT_FRAME_TICK_EXT`, `XR_WORKSPACE_INPUT_EVENT_FOCUS_CHANGED_EXT`. Add `xrRequestWorkspaceClientExitEXT` and `xrRequestWorkspaceClientFullscreenEXT` PFN typedefs + prototypes. Bump `spec_version` from 5 → 6. Document the motion gate, frame-tick cadence guarantees, and focus-changed event semantics (fired only on actual transition, not redundantly each frame). |
 | `src/xrt/compositor/d3d11/comp_d3d11_window.cpp` | Stop the `message != WM_MOUSEMOVE` skip in the public-ring push (lines ~684–711). Push every WM_MOUSEMOVE while a button mask is non-zero (option b) or always (option a) when capture is enabled. |
 | `src/xrt/compositor/d3d11/comp_d3d11_window.cpp` | When pointer capture is enabled, call `SetCapture(workspace_hwnd)` so cursor motion outside the workspace window keeps reaching the WndProc. `ReleaseCapture` on disable. (Resolves the residual SetCapture limitation called out in `followups.md` item #1's resolution note.) |
-| `src/xrt/state_trackers/oxr/oxr_workspace.c` | If using a separate MOTION variant, add the type to the dispatch / IPC enum. |
-| `src/xrt/ipc/server/comp_d3d11_service_*` (or similar) | Drain enrichment: fill `hitClientId` / `hitRegion` / `localUV` per motion event. Snapshot slot poses under a short lock. |
-| `src/xrt/ipc/shared/proto.json` | Bump the wire format if the event struct grows. |
+| `src/xrt/compositor/d3d11_service/comp_d3d11_service.cpp` | At the end of `multi_compositor_render` (or the per-frame path that runs once per compositor frame), push a `FRAME_TICK` event into the public ring. One per displayed frame, not per VSYNC if the compositor is paced differently. |
+| `src/xrt/compositor/d3d11_service/comp_d3d11_service.cpp` | Track the previous focused-slot value at the top of the input-handling tick. When it changes (TAB cycle, click auto-focus, controller-set, client-disconnect), push a `FOCUS_CHANGED` event with prev/current client IDs into the public ring. |
+| `src/xrt/compositor/d3d11_service/comp_d3d11_service.cpp` | Implement `comp_d3d11_service_request_client_exit(slot)` that mirrors the existing `DELETE` handling (sends `XRT_SESSION_EVENT_EXIT_REQUEST` for IPC clients, `multi_compositor_remove_capture_client` for capture clients). Mirror for fullscreen by calling the existing `toggle_fullscreen` helper. |
+| `src/xrt/state_trackers/oxr/oxr_workspace.c` | Add dispatch wrappers for the two new request functions; add the new event types to the drain dispatch. |
+| `src/xrt/ipc/server/comp_d3d11_service_*` (or similar) | Drain enrichment: fill `hitClientId` / `hitRegion` / `localUV` per motion event. Snapshot slot poses under a short lock. New IPC RPCs for `request_client_exit` / `request_client_fullscreen`. |
+| `src/xrt/ipc/shared/proto.json` | Bump the wire format for the new event variants and the two request RPCs. |
 
 ### Shell (controller) side — animation framework + consumers
 
@@ -121,8 +136,24 @@ Pick during implementation; snapshot-at-drain is the safer first pass.
 - ✅ Drag latency: cursor → window pose update visible in next compositor frame (no perceptible lag at 60 Hz).
 - ✅ N=2 special case (the static-snap degenerate case from 2.G) goes away — carousel actually rotates so both windows are visible.
 
+**Frame-tick (deliverable III)**
+- ✅ Drain receives a `FRAME_TICK` event at compositor frame cadence (~16 ms on a 60 Hz display).
+- ✅ Shell drives its animation tick from FRAME_TICK only — no `MsgWaitForMultipleObjects` timer required when an animation is active. Cadence visibly matches display refresh.
+
+**Lifecycle requests (deliverable IV)**
+- ✅ Test-app calls `xrRequestWorkspaceClientExitEXT(other_client_id)` and the target client receives `XRT_SESSION_EVENT_EXIT_REQUEST` and exits cleanly (same path as a `DELETE`-key close).
+- ✅ Test-app calls `xrRequestWorkspaceClientFullscreenEXT(other_client_id, XR_TRUE)` and the target window animates to fullscreen, all other windows hide; `XR_FALSE` restores. Mirrors `F11` behaviour.
+- ✅ Calls against an invalid client ID return `XR_ERROR_HANDLE_INVALID` or equivalent without crashing.
+
+**Focus-change event (deliverable V)**
+- ✅ FOCUS_CHANGED event fires on TAB cycle, click auto-focus, `xrSetWorkspaceFocusedClientEXT` from controller, and client disconnect. **Does not** fire each frame when focus is stable.
+- ✅ Event carries `prevClientId` + `currentClientId`. `currentClientId == XR_NULL_WORKSPACE_CLIENT_ID` when no client is focused.
+
+**Orientation rendering verification**
+- ✅ Setting `XrPosef.orientation` to a 30° yaw (and / or 30° pitch) on `xrSetWorkspaceClientWindowPoseEXT` produces a visibly tilted window in the atlas screenshot (with correct parallax in both atlas tiles). No regressions in axis-aligned windows.
+
 **Performance**
-- ✅ Idle (no animation, no carousel, no drag): poll loop back to 500 ms cadence. CPU near 0.
+- ✅ Idle (no animation, no carousel, no drag): poll loop back to 500 ms cadence. CPU near 0. FRAME_TICK still fires but the shell ignores it when no animation is active.
 - ✅ During animation / carousel / drag: ~16 ms cadence × 4 clients × ~10 µs / RPC ≈ 2.4 ms / sec total. Well under 1% of one core.
 - ✅ `tests_pacing` and friends still green.
 
@@ -131,6 +162,9 @@ Pick during implementation; snapshot-at-drain is the safer first pass.
 - Adding orbital, helix, or expose layouts. The dynamic_layout_tick had stubs for these; controllers own them now if they want them.
 - General-purpose gesture / multi-touch input. Single-cursor only.
 - Rebuilding the runtime's `mc->dynamic_layout` state. The controller owns this state entirely; the runtime just delivers events and applies poses.
+- **Custom controller-rendered overlays** (focus rings, drag handles, snap previews, custom title bars). That's Phase 2.C — controller submits its own swapchain alongside client windows. 2.K only handles "controller positions / animates / interacts with existing client windows".
+- **Per-window pixel readback** (thumbnails for overview UI). Builds on capture infrastructure but per-tile rather than full-atlas; useful enough to plan but doesn't gate "any 3D manipulation". Defer to a separate sub-phase or fold into 2.C if needed alongside chrome.
+- **Client lifecycle events** (connect / disconnect on the drain). Currently the controller polls `xrEnumerateWorkspaceClientsEXT`. Works fine; the FOCUS_CHANGED event already fires on disconnect (since focus moves), which covers the disappear case for most controller UIs. Promote to a real event if controllers grow into needing it.
 
 ## Open questions
 
