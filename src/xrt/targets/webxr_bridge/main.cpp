@@ -408,15 +408,15 @@ struct WindowMetrics {
 	float sizeWm = 0.0f;
 	float sizeHm = 0.0f;
 	// 3D window-center offset from display center (meters, +right/+up/+toward-viewer).
-	// Z is populated from per-client IPC metrics in shell mode; 0 for the
+	// Z is populated from per-client IPC metrics in workspace mode; 0 for the
 	// legacy compositor-HWND path (the compositor window sits flat on the
 	// display surface, so there's no Z component to propagate).
 	float centerOffsetXm = 0.0f;
 	float centerOffsetYm = 0.0f;
 	float centerOffsetZm = 0.0f;
 	// Window orientation in display space (identity = flat on the display surface).
-	// Only the shell-mode per-client IPC path populates this; the sample
-	// applies inv(orientation) to shell-local eyes for correct Kooima when
+	// Only the workspace-mode per-client IPC path populates this; the sample
+	// applies inv(orientation) to workspace-local eyes for correct Kooima when
 	// the window is tilted relative to the display plane.
 	float orientX = 0.0f;
 	float orientY = 0.0f;
@@ -469,7 +469,7 @@ struct Bridge {
 
 	// Resolved target Chrome client_id (0 = none). Refreshed on
 	// bridge-attach (see dispatch_ws_message). 0 falls back to the global
-	// poll_window_metrics path, preserving non-shell bridge-aware behavior.
+	// poll_window_metrics path, preserving non-workspace bridge-aware behavior.
 	uint32_t chrome_client_id = 0;
 };
 
@@ -816,14 +816,14 @@ static std::string build_window_info_fields(const WindowMetrics &w) {
 		s += ",\"windowPixelSize\":[" + json_u((uint32_t)w.pixelW) + "," + json_u((uint32_t)w.pixelH) + "]";
 		s += ",\"windowSizeMeters\":[" + json_f(w.sizeWm) + "," + json_f(w.sizeHm) + "]";
 		// windowCenterOffsetMeters is [x, y, z] in meters (display-centric).
-		// x,y extend the pre-Stage-3 [x, y] contract (non-shell pages that
+		// x,y extend the pre-Stage-3 [x, y] contract (non-workspace pages that
 		// cached a length-2 array still read the first two entries); the
-		// z component enables full 3D eye-frame transform for shell mode
+		// z component enables full 3D eye-frame transform for workspace mode
 		// where the slot can sit at non-zero Z relative to the display plane.
 		s += ",\"windowCenterOffsetMeters\":[" + json_f(w.centerOffsetXm) + "," + json_f(w.centerOffsetYm) + "," + json_f(w.centerOffsetZm) + "]";
 		// windowOrientation = [x, y, z, w] quaternion in display space.
 		// Identity means the window is flat on the display surface (the
-		// common case); non-identity appears when the shell allows the
+		// common case); non-identity appears when the workspace controller allows the
 		// slot to be tilted. Apps should apply Q^-1 to (eye - offset) to
 		// get a window-local eye position before Kooima — matches the
 		// runtime's legacy-WebXR path in oxr_session.c.
@@ -1002,7 +1002,7 @@ static std::string build_eye_poses_json(const XrView *views, uint32_t count) {
 // The bridge is already an IPC client of the service through its XrInstance,
 // but that connection is private to the OpenXR loader. To resolve Chrome's
 // client_id and fetch per-client window metrics, we open a second, explicit
-// ipc_connection using the same init path the shell and monado-ctl use
+// ipc_connection using the same init path the workspace controller and monado-ctl use
 // (src/xrt/targets/ctl/main.c:307-317).
 //
 // Identity: application_name = "displayxr-webxr-bridge-ipc", distinct from
@@ -1016,7 +1016,7 @@ static bool init_ipc_connection(Bridge &b) {
 	         "displayxr-webxr-bridge-ipc");
 
 	// The service is already up (we just created an XrInstance against it),
-	// so one attempt is enough — no retry loop like the shell uses for
+	// so one attempt is enough — no retry loop like the workspace controller uses for
 	// cold-start.
 	xrt_result_t xret = ipc_client_connection_init(&b.ipc_c, U_LOGGING_WARN, &info);
 	if (xret != XRT_SUCCESS) {
@@ -1170,7 +1170,7 @@ static void handle_ws_message(Bridge &b, const std::string &msg) {
 		}
 		LOG_I("WS hello received, sending display-info");
 		// Refresh window metrics on hello so initial display-info carries them.
-		// In shell mode the Chrome client may not yet be resolvable here
+		// In workspace mode the Chrome client may not yet be resolvable here
 		// (bridge-attach is where resolution happens); display-info will be
 		// re-emitted after bridge-attach with per-client values.
 		poll_window_metrics(b);
@@ -1245,7 +1245,7 @@ static void handle_ws_message(Bridge &b, const std::string &msg) {
 			// Re-emit display-info with per-client window scoping. The
 			// initial display-info sent on `hello` carried
 			// compositor-window metrics (pre-resolve fallback). This
-			// replacement carries the shell-window-scoped values the page
+			// replacement carries the workspace-window-scoped values the page
 			// needs for correct Kooima projection. main-world.js treats
 			// every `display-info` message as authoritative, so the update
 			// propagates without extension-side changes.
@@ -1867,12 +1867,12 @@ static void run_event_loop(Bridge &b) {
 			// every frame so the sample gets window info ASAP (the sample
 			// needs windowPixelSize × viewScale to render at correct tile
 			// dims). After it's found, throttle — but keep the cadence
-			// fast enough that shell-slot drags (which don't fire the
+			// fast enough that workspace-slot drags (which don't fire the
 			// WinEvent hook on the fullscreen compositor HWND) show live
-			// in the page. In shell mode with a resolved Chrome client,
+			// in the page. In workspace mode with a resolved Chrome client,
 			// the per-client IPC query gives us authoritative pose updates;
 			// poll ~every 60 ms (sleep-10 × 6) so drag feels smooth. Outside
-			// shell, fall back to the original ~500 ms cadence.
+			// workspace mode, fall back to the original ~500 ms cadence.
 			int poll_threshold = (b.chrome_client_id != 0) ? 6 : 50;
 			if (!b.window_metrics.valid || ++window_poll_counter >= poll_threshold) {
 				window_poll_counter = 0;
@@ -1954,7 +1954,7 @@ int main() {
 
 	// Open the query-only IPC connection for Chrome client_id resolution.
 	// Failure is non-fatal — bridge falls back to the global poll_window_metrics
-	// path, matching pre-Stage-3 behavior for the non-shell case.
+	// path, matching pre-Stage-3 behavior for the non-workspace case.
 	init_ipc_connection(b);
 
 	// Create bridge HUD shared memory for cross-process HUD overlay.

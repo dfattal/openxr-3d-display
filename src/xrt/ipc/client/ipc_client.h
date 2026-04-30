@@ -132,7 +132,7 @@ struct xrt_session *
 ipc_client_session_create(struct ipc_connection *ipc_c);
 
 /*!
- * Pull per-client shell window metrics over IPC.
+ * Pull per-client workspace window metrics over IPC.
  *
  * Only safe to call when `xc` is known to be an ipc_client_compositor
  * (e.g. the OpenXR state tracker's IPC branch in

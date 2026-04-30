@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  MCP shell-scope tool handlers (Phase B).
+ * @brief  MCP workspace-scope tool handlers (Phase B).
  * @ingroup ipc_server
  */
 
@@ -46,10 +46,10 @@
 #include "d3d11_service/comp_d3d11_service.h"
 #endif
 
-#define LOG_PFX "[mcp-shell] "
+#define LOG_PFX "[mcp-workspace] "
 
 // File-static server pointer — the Phase A server registry takes a raw
-// userdata void* per tool, but for the Phase B shell tools all handlers
+// userdata void* per tool, but for the Phase B workspace tools all handlers
 // share the same ipc_server anyway. Keeping it here avoids threading the
 // pointer through each static tool descriptor.
 static struct ipc_server *g_ipc_server = NULL;
@@ -136,8 +136,8 @@ tool_list_windows(const cJSON *params, void *userdata)
 		cJSON_AddBoolToObject(o, "primary", as->primary_application);
 
 #if defined(XRT_HAVE_D3D11_SERVICE_COMPOSITOR)
-		// Shell-mode pose + size. If the client hasn't produced its
-		// compositor yet (or we're not in shell mode) the accessor
+		// Workspace-mode pose + size. If the client hasn't produced its
+		// compositor yet (or we're not in workspace mode) the accessor
 		// returns false and we emit nulls so the caller can tell.
 		struct xrt_pose pose = {0};
 		float width_m = 0.f, height_m = 0.f;
@@ -507,7 +507,7 @@ workspace_path(char *out, size_t cap, const char *name)
 //     ]
 //   }
 //
-// Windows without a pose (no shell-mode data) are skipped.
+// Windows without a pose (no workspace-mode data) are skipped.
 static cJSON *
 tool_save_workspace(const cJSON *params, void *userdata)
 {
@@ -778,8 +778,8 @@ static const struct u_mcp_tool TOOL_LIST_SESSIONS_SERVICE = {
 static const struct u_mcp_tool TOOL_LIST_WINDOWS = {
     .name = "list_windows",
     .description =
-        "List all OpenXR clients attached to the service, including shell "
-        "window pose and size in meters when shell mode is active.",
+        "List all OpenXR clients attached to the service, including workspace "
+        "window pose and size in meters when workspace mode is active.",
     .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
     .fn = tool_list_windows,
     .userdata = NULL,
@@ -787,7 +787,7 @@ static const struct u_mcp_tool TOOL_LIST_WINDOWS = {
 
 static const struct u_mcp_tool TOOL_GET_WINDOW_POSE = {
     .name = "get_window_pose",
-    .description = "Query 6-DOF pose and size (meters) of one shell window.",
+    .description = "Query 6-DOF pose and size (meters) of one workspace window.",
     .input_schema_json =
         "{\"type\":\"object\",\"required\":[\"client_id\"],"
         "\"properties\":{\"client_id\":{\"type\":\"integer\"}},"
@@ -840,7 +840,7 @@ static const struct u_mcp_tool TOOL_LOAD_WORKSPACE = {
 static const struct u_mcp_tool TOOL_APPLY_LAYOUT_PRESET = {
     .name = "apply_layout_preset",
     .description =
-        "Apply a named shell layout preset. Valid names: grid, immersive, carousel.",
+        "Apply a named workspace layout preset. Valid names: grid, immersive, carousel.",
     .input_schema_json =
         "{\"type\":\"object\",\"required\":[\"preset\"],"
         "\"properties\":{\"preset\":{\"type\":\"string\","
@@ -853,7 +853,7 @@ static const struct u_mcp_tool TOOL_APPLY_LAYOUT_PRESET = {
 static const struct u_mcp_tool TOOL_SET_WINDOW_POSE = {
     .name = "set_window_pose",
     .description =
-        "Move / resize one shell window. pose.qw defaults to 1 if the "
+        "Move / resize one workspace window. pose.qw defaults to 1 if the "
         "orientation quaternion is omitted.",
     .input_schema_json =
         "{\"type\":\"object\",\"required\":[\"client_id\",\"pose\",\"size\"],"
@@ -964,7 +964,7 @@ tool_capture_frame_service(const cJSON *params, void *userdata)
 static const struct u_mcp_tool TOOL_CAPTURE_FRAME_SERVICE = {
     .name = "capture_frame",
     .description =
-        "Capture the shell compositor's combined atlas — writes "
+        "Capture the workspace compositor's combined atlas — writes "
         "{base}_atlas.png (cropped active-region atlas) and "
         "{base}_windows.json (per-window bboxes). "
         "Returns file paths and sizes.",
@@ -989,5 +989,5 @@ ipc_mcp_tools_register(struct ipc_server *s)
 	u_mcp_server_register_tool(&TOOL_SAVE_WORKSPACE);
 	u_mcp_server_register_tool(&TOOL_LOAD_WORKSPACE);
 	u_mcp_server_register_tool(&TOOL_CAPTURE_FRAME_SERVICE);
-	U_LOG_I(LOG_PFX "registered shell tools against ipc_server %p", (void *)s);
+	U_LOG_I(LOG_PFX "registered workspace tools against ipc_server %p", (void *)s);
 }

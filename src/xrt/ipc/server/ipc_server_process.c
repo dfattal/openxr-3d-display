@@ -615,7 +615,7 @@ handle_focused_client_events(volatile struct ipc_client_state *ics, int active_i
 	bool visible = false;
 
 	// Set visible + focused if we are the primary application.
-	// In shell mode, ALL clients are visible + focused (multi-app compositor).
+	// In workspace mode, ALL clients are visible + focused (multi-app compositor).
 	if (ics->server_thread_index == active_id) {
 		visible = true;
 		focused = true;
@@ -1057,7 +1057,7 @@ ipc_server_main(int argc, char **argv, const struct ipc_server_main_info *ismi)
 	struct ipc_server *s = U_TYPED_CALLOC(struct ipc_server);
 	s->workspace_mode = ismi->workspace_mode;
 	if (s->workspace_mode) {
-		U_LOG_IFL_I(log_level, "Shell mode enabled (--shell)");
+		U_LOG_IFL_I(log_level, "Workspace mode enabled (--workspace)");
 	}
 
 #ifdef XRT_OS_WINDOWS
@@ -1088,10 +1088,10 @@ ipc_server_main(int argc, char **argv, const struct ipc_server_main_info *ismi)
 	// before any clients connect and create per-client compositors)
 	if (s->workspace_mode && s->xsysc != NULL) {
 		s->xsysc->info.workspace_mode = true;
-		U_LOG_IFL_I(log_level, "Shell mode propagated to system compositor");
+		U_LOG_IFL_I(log_level, "Workspace mode propagated to system compositor");
 	}
 
-	// Register MCP shell-scope tools against the already-running server
+	// Register MCP workspace-scope tools against the already-running server
 	// (started from service/main.c before ipc_server_main). If
 	// DISPLAYXR_MCP was unset, the tool registry is harmless scaffolding.
 	ipc_mcp_tools_register(s);

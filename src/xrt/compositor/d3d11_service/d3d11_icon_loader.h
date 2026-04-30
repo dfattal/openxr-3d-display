@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  PNG/JPEG → D3D11 texture loader for the shell launcher tiles.
+ * @brief  PNG/JPEG → D3D11 texture loader for the workspace launcher tiles.
  *
  * Decodes an image file via stb_image and creates a shader resource view bound
- * to an ID3D11Texture2D. Used by the shell's spatial launcher to load app
+ * to an ID3D11Texture2D. Used by the workspace controller's spatial launcher to load app
  * tile icons (both 2D `icon` and stereoscopic `icon_3d`).
  *
  * The loader does not interpret side-by-side / top-bottom layouts — it always

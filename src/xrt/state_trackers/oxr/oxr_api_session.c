@@ -1364,7 +1364,7 @@ oxr_xrRequestDisplayRenderingModeEXT(XrSession session, uint32_t modeIndex)
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrRequestDisplayRenderingModeEXT");
 
-	// Shell/IPC mode: the shell controls rendering mode changes, not the app.
+	// Workspace/IPC mode: the workspace controller drives rendering mode changes, not the app.
 	// The app receives mode changes via XrEventDataRenderingModeChanged events
 	// (synced from server via IPC shared memory).
 	// Exception: headless sessions (bridge relay) ARE allowed to change modes —

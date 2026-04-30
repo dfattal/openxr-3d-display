@@ -358,7 +358,7 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c, struct xrt_tracking_origin *
 		ich->base.hmd->views[i].display.h_pixels = ipc_c->ism->hmd.views[i].display.h_pixels;
 	}
 
-	// Setup rendering modes (for shell mode 2D/3D switching via V key).
+	// Setup rendering modes (for workspace mode 2D/3D switching via V key).
 	ich->base.rendering_mode_count = ism->hmd.rendering_mode_count;
 	for (uint32_t i = 0; i < ism->hmd.rendering_mode_count && i < XRT_MAX_RENDERING_MODES; i++) {
 		ich->base.rendering_modes[i] = ism->hmd.rendering_modes[i];

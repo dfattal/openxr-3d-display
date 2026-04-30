@@ -198,7 +198,7 @@ client_gl_win32_compositor_create(struct xrt_compositor_native *xcn, void *hDC, 
 		return NULL;
 	}
 
-	// Prefer WGL_NV_DX_interop2 for D3D11 shared texture import (IPC/shell mode).
+	// Prefer WGL_NV_DX_interop2 for D3D11 shared texture import (IPC/workspace mode).
 	// Fall back to GL_EXT_memory_object for VK-exported handles (in-process mode).
 	client_gl_swapchain_create_func_t swapchain_create_fn = NULL;
 	if (client_gl_d3d11_interop_available()) {

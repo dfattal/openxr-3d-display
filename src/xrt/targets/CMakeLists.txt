@@ -57,7 +57,8 @@ if(WIN32)
 		add_subdirectory(switcher)
 	endif()
 
-	# DisplayXR spatial shell (management client)
+	# DisplayXR workspace controller (management client) — directory is
+	# the legacy name `shell/`; the binary will move out of this repo soon.
 	if(XRT_FEATURE_SERVICE)
 		add_subdirectory(shell)
 	endif()

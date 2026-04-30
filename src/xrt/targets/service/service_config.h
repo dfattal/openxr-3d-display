@@ -33,10 +33,9 @@ enum service_child_mode
  * Stored in `%LOCALAPPDATA%\DisplayXR\service.json` on Windows,
  * `~/.config/displayxr/service.json` on Linux/macOS.
  *
- * Missing file or missing keys → defaults (auto/auto/true,
- * workspace_binary = "displayxr-shell.exe"). The `workspace`
- * JSON key is read with backwards-compat fallback to the legacy
- * `shell` key from earlier installs.
+ * Missing file or missing keys → defaults (auto/auto/true). Only the
+ * `workspace` JSON key is recognized; the legacy `shell` key from
+ * pre-rename installs is no longer read.
  */
 struct service_config
 {
@@ -46,9 +45,9 @@ struct service_config
 
 	//! Filename or path of the workspace controller binary that the orchestrator
 	//! spawns (resolved as a sibling of the service exe if it has no path
-	//! separator). Default "displayxr-shell.exe" — DisplayXR Shell is the
-	//! reference workspace controller. OEMs / third parties drop a different
-	//! name here to ship their own controller.
+	//! separator). OEMs / third parties drop a binary name here to ship
+	//! their own workspace controller. Default value is supplied by
+	//! config_defaults() in service_config.c.
 	char workspace_binary[SERVICE_WORKSPACE_BINARY_MAX];
 };
 

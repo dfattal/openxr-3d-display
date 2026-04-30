@@ -305,9 +305,9 @@ struct ipc_client_list
 };
 
 /*!
- * Phase 5.8: registered-app record shipped one-at-a-time from the shell
- * process to the service for the spatial launcher panel. Sized to fit a
- * single ipc message under IPC_BUF_SIZE — the shell calls
+ * Phase 5.8: registered-app record shipped one-at-a-time from the workspace
+ * controller to the service for the spatial launcher panel. Sized to fit a
+ * single ipc message under IPC_BUF_SIZE — the workspace controller calls
  * ipc_call_launcher_clear_apps then loops over its registry calling
  * ipc_call_launcher_add_app per entry whenever the registry changes.
  *
@@ -325,7 +325,7 @@ struct ipc_client_list
 #define IPC_LAUNCHER_ACTION_BROWSE (-100)
 
 // Phase 6.6: sentinel base for permanent remove. Returned as
-// -(IPC_LAUNCHER_ACTION_REMOVE_BASE + full_index). Shell decodes via
+// -(IPC_LAUNCHER_ACTION_REMOVE_BASE + full_index). Workspace controller decodes via
 // full_index = -(value) - IPC_LAUNCHER_ACTION_REMOVE_BASE.
 #define IPC_LAUNCHER_ACTION_REMOVE_BASE 200
 
@@ -416,7 +416,7 @@ struct ipc_workspace_input_event_batch
 };
 
 /*!
- * Phase 8: 3D capture MVP. Bitmask of which views (sub-images) the shell
+ * Phase 8: 3D capture MVP. Bitmask of which views (sub-images) the workspace controller
  * is requesting from the service compositor's combined atlas.
  *
  * @ingroup ipc

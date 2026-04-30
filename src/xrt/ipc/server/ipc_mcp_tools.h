@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  MCP shell-scope tools registered in-process inside displayxr-service.
+ * @brief  MCP workspace-scope tools registered in-process inside displayxr-service.
  * @ingroup ipc_server
  *
  * These tools back Phase B of the MCP v0.2 spec: list_windows,
  * get/set_window_pose, set_focus, apply_layout_preset, save/load_workspace.
  * They run on the MCP server thread started by u_mcp_server_maybe_start_named()
- * and read/write shell state via the same IPC paths the shell uses.
+ * and read/write workspace state via the same IPC paths the workspace controller uses.
  *
  * @see docs/roadmap/mcp-phase-b-plan.md
  */
@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 /*!
- * Register the Phase B shell tools against the global MCP server.
+ * Register the Phase B workspace tools against the global MCP server.
  *
  * Must be called after @c u_mcp_server_maybe_start_named("service") so the
  * server-thread picks the tools up via the shared registry. Stashes @p s

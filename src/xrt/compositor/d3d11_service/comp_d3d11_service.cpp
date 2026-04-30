@@ -5013,9 +5013,9 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 		// Extended bounds including title bar (above content).
 		// Capture clients have no workspace title bar — their native chrome is in the content.
 		// Maximized (fullscreen) windows also skip the workspace title bar.
-		bool has_shell_title_bar = (mc->clients[s].client_type != CLIENT_TYPE_CAPTURE &&
+		bool has_workspace_title_bar = (mc->clients[s].client_type != CLIENT_TYPE_CAPTURE &&
 		                            !mc->clients[s].maximized);
-		float ext_top = win_top + (has_shell_title_bar ? title_bar_h_m : 0.0f);
+		float ext_top = win_top + (has_workspace_title_bar ? title_bar_h_m : 0.0f);
 
 		// Check if hit is within extended window bounds (including resize zone)
 		if (hit_x >= win_left - resize_zone_m && hit_x < win_right + resize_zone_m &&
@@ -5032,7 +5032,7 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 			// Classify hit region
 			bool in_window = (hit_x >= win_left && hit_x < win_right &&
 			                  hit_y >= win_bottom && hit_y < ext_top);
-			if (has_shell_title_bar) {
+			if (has_workspace_title_bar) {
 				result.in_title_bar = in_window && (local_y < title_bar_h_m);
 				result.in_content = in_window && (local_y >= title_bar_h_m);
 			} else {
@@ -10244,7 +10244,7 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 	// nothing. Skip render resource init AND multi-compositor slot
 	// registration; otherwise the controller appears as a renderable tile
 	// inside its own workspace (titled with the controller's xrInstance
-	// applicationName, e.g. "displayxr-shell").
+	// applicationName, e.g. the workspace controller's process name).
 	bool is_workspace_controller = (xsi != nullptr && xsi->is_workspace_controller);
 	if (is_workspace_controller) {
 		U_LOG_W("Workspace-controller session: skipping render resources + slot registration");

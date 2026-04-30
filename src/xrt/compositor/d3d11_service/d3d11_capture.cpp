@@ -308,7 +308,7 @@ d3d11_capture_start(struct ID3D11Device *device, HWND hwnd)
 			// IsBorderRequired not available on older Windows — ignore
 		}
 
-		// Don't capture the OS cursor — the shell renders its own cursor
+		// Don't capture the OS cursor — the workspace compositor renders its own cursor
 		// and the captured cursor creates a confusing dual-cursor effect.
 		try {
 			ctx->session.IsCursorCaptureEnabled(false);

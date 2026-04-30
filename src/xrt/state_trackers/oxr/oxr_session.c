@@ -89,7 +89,7 @@
 #include "vk_native/comp_vk_native_compositor.h"
 #endif
 
-// IPC-client window metrics (for Chrome WebXR in shell mode etc.).
+// IPC-client window metrics (for Chrome WebXR in workspace mode etc.).
 // Declared here rather than via ipc_client.h because st_oxr doesn't pull
 // the ipc_client include path; the runtime DLL links ipc_client so the
 // symbol resolves at link time.
@@ -299,7 +299,7 @@ oxr_session_get_window_metrics(struct oxr_session *sess,
 		return multi_compositor_get_window_metrics(mc, out_metrics);
 	}
 
-	// IPC-client path. When the service compositor is in shell mode the
+	// IPC-client path. When the service compositor is in workspace mode the
 	// per-client window rect lives server-side; pull it over IPC so
 	// Kooima computes window-scoped FOV. Bridge-relay sessions stay on
 	// the display-dimension fallback (they forward raw eye positions to
@@ -1417,7 +1417,7 @@ oxr_session_locate_views(struct oxr_logger *log,
 			// eye positions directly. FOVs come from the device (sim_display
 			// Kooima), so we only need to override the view positions to
 			// bypass the LOCAL space offset.
-			// Skip in IPC/shell mode: the server provides tracked eyes in view poses.
+			// Skip in IPC/workspace mode: the server provides tracked eyes in view poses.
 			if ((sess->has_external_window || sess->is_bridge_relay) && !have_eye_override && have_eyes) {
 				for (uint32_t ei = 0; ei < eye_count; ei++) {
 					view_eye_world[ei] = (struct xrt_vec3){
@@ -1536,7 +1536,7 @@ oxr_session_locate_views(struct oxr_logger *log,
 		// Do the magical space relation dance here.
 		struct xrt_space_relation result = {0};
 
-		// Shell IPC sessions and bridge-relay sessions: the server already
+		// Workspace IPC sessions and bridge-relay sessions: the server already
 		// computed display-relative view poses (via display-centric Kooima
 		// with DP eye tracking). Skip the T_base_head transform which adds a
 		// spurious Y offset from the qwerty device's world-space position.
@@ -2525,7 +2525,7 @@ oxr_session_create_impl(struct oxr_logger *log,
 #endif
 
 #ifdef OXR_HAVE_EXT_spatial_workspace
-	// Phase 2.I-followup: workspace controllers (e.g. displayxr-shell) need
+	// Phase 2.I-followup: workspace controllers need
 	// an IPC-mode session to dispatch xrActivateSpatialWorkspaceEXT etc. but
 	// never render swapchains. Allow xrCreateSession with no graphics binding
 	// when the instance enabled XR_EXT_spatial_workspace — the runtime still
@@ -2538,9 +2538,9 @@ oxr_session_create_impl(struct oxr_logger *log,
 		(*out_session)->create_swapchain = NULL;
 
 		// Mark the session so the service-side compositor skips registering
-		// it as a renderable tile in its own workspace. Otherwise the shell
-		// shows up as a slot titled "displayxr-shell" inside the workspace
-		// it is supposed to be controlling.
+		// it as a renderable tile in its own workspace. Otherwise the controller
+		// shows up as a slot titled with its own application name inside the
+		// workspace it is supposed to be controlling.
 		struct xrt_session_info local_xsi = *xsi;
 		local_xsi.is_workspace_controller = true;
 
@@ -2628,13 +2628,13 @@ oxr_session_create(struct oxr_logger *log,
 	        xsi.external_window_handle, (void *)xsi.readback_callback, xsi.shared_texture_handle);
 
 #ifdef XRT_OS_WINDOWS
-	// Shell mode: resize the app's HWND to fill the display BEFORE the IPC call.
+	// Workspace mode: resize the app's HWND to fill the display BEFORE the IPC call.
 	// This must happen client-side because SetWindowPos sends synchronous WM messages
 	// to the target window — if done server-side during session_create, the client's
 	// thread is blocked waiting for the IPC response and can't process WM, deadlocking.
 	{
 		const char *workspace_session = getenv("DISPLAYXR_WORKSPACE_SESSION");
-		// Only apply borderless+hide when shell mode is currently active.
+		// Only apply borderless+hide when workspace mode is currently active.
 		// After workspace_deactivate, info.workspace_mode is false — apps that
 		// recreate their session (e.g., after LOSS_PENDING) come up in
 		// standalone mode with a normal visible HWND.
@@ -2642,12 +2642,12 @@ oxr_session_create(struct oxr_logger *log,
 		    xsi.external_window_handle != NULL && sys->xsysc != NULL &&
 		    sys->xsysc->info.workspace_mode) {
 			HWND hwnd = (HWND)xsi.external_window_handle;
-			// Shell mode: just hide the HWND, keep decorations and size
+			// Workspace mode: just hide the HWND, keep decorations and size
 			// intact. On hot-switch deactivate, ShowWindowAsync(SW_SHOW)
 			// reveals it as a normal decorated window. The compositor's
 			// auto-resize handler adapts the swap chain to client rect.
 			ShowWindow(hwnd, SW_HIDE);
-			U_LOG_W("Shell session: HWND %p hidden (decorations preserved)", hwnd);
+			U_LOG_W("Workspace session: HWND %p hidden (decorations preserved)", hwnd);
 		}
 	}
 #endif

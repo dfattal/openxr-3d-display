@@ -19,7 +19,7 @@ extern "C" {
  * @class client_gl_d3d11_swapchain
  *
  * Wraps D3D11 shared textures as GL textures via WGL_NV_DX_interop2.
- * Used when the IPC service exports D3D11 NT handles (shell/IPC mode).
+ * Used when the IPC service exports D3D11 NT handles (workspace/IPC mode).
  *
  * @ingroup comp_client
  * @implements xrt_swapchain_gl

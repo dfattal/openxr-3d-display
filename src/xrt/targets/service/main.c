@@ -29,7 +29,7 @@
 
 #include "target_lists.h"
 
-#include <string.h> // strcmp for --workspace / --shell flag
+#include <string.h> // strcmp for --workspace flag
 
 
 // Insert the on load constructor to init trace marker.
@@ -111,12 +111,12 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdS
 		ExitProcess(0);
 	}
 
-	// Parse --workspace (or legacy --shell alias) for the multi-terminal
-	// workflow. The orchestrator will also enable workspace mode when it
-	// spawns the workspace controller.
+	// Parse --workspace for the manual multi-terminal workflow. The
+	// orchestrator will also enable workspace mode when it spawns the
+	// workspace controller.
 	bool workspace_mode = false;
 	for (int i = 1; i < argc; i++) {
-		if (strcmp(argv[i], "--workspace") == 0 || strcmp(argv[i], "--shell") == 0) {
+		if (strcmp(argv[i], "--workspace") == 0) {
 			workspace_mode = true;
 			break;
 		}
@@ -145,7 +145,7 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdS
 	    .workspace_mode = workspace_mode,
 	};
 
-	// Opt-in MCP server for agent-driven shell control / debugging.
+	// Opt-in MCP server for agent-driven workspace control / debugging.
 	// Gated on DISPLAYXR_MCP env var; binds a well-known "service"
 	// socket so the adapter can discover it by role, not PID.
 	u_mcp_server_maybe_start_named("service");
@@ -173,10 +173,10 @@ main(int argc, char *argv[])
 	u_trace_marker_init();
 	u_metrics_init();
 
-	// Parse --workspace (or legacy --shell alias) for multi-compositor mode
+	// Parse --workspace for multi-compositor mode
 	bool workspace_mode = false;
 	for (int i = 1; i < argc; i++) {
-		if (strcmp(argv[i], "--workspace") == 0 || strcmp(argv[i], "--shell") == 0) {
+		if (strcmp(argv[i], "--workspace") == 0) {
 			workspace_mode = true;
 			break;
 		}
@@ -191,7 +191,7 @@ main(int argc, char *argv[])
 	    .workspace_mode = workspace_mode,
 	};
 
-	// Opt-in MCP server for agent-driven shell control / debugging.
+	// Opt-in MCP server for agent-driven workspace control / debugging.
 	// Gated on DISPLAYXR_MCP env var; binds a well-known "service"
 	// socket so the adapter can discover it by role, not PID.
 	u_mcp_server_maybe_start_named("service");

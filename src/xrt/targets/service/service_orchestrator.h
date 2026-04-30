@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Service orchestrator — manages shell and bridge child processes.
+ * @brief  Service orchestrator — manages workspace controller and bridge child processes.
  * @ingroup ipc
  */
 
@@ -28,7 +28,7 @@ service_orchestrator_init(const struct service_config *cfg);
 
 /*!
  * Called by the tray config-change callback when the user changes
- * shell/bridge mode via the context menu. Starts, stops, or
+ * workspace/bridge mode via the context menu. Starts, stops, or
  * re-registers hotkeys as needed.
  */
 void

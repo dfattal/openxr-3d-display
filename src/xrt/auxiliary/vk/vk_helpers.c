@@ -1304,7 +1304,7 @@ vk_create_image_from_native(struct vk_bundle *vk,
 
 		/*
 		 * For D3D11/D3D12 texture handles and opaque Win32 handles (used by
-		 * D3D11 service compositor for cross-API shell mode), the allocation
+		 * D3D11 service compositor for cross-API workspace mode), the allocation
 		 * size is determined by the importing driver. Skip size check.
 		 */
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_METAL)

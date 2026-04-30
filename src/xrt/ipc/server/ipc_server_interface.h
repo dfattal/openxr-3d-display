@@ -36,7 +36,7 @@ struct ipc_server_main_info
 	//! Information passed onto the debug gui.
 	struct u_debug_gui_create_info udgci;
 
-	//! When true, service runs in shell mode with a shared multi-compositor window.
+	//! When true, service runs in workspace mode with a shared multi-compositor window.
 	bool workspace_mode;
 };
 

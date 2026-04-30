@@ -178,16 +178,12 @@ service_config_load(struct service_config *cfg)
 		return;
 	}
 
-	// Prefer the new "workspace" key; fall back to legacy "shell" key from
-	// pre-rename installs so an existing service.json keeps working.
+	// Read the "workspace" key. Older installs that wrote a "shell" key
+	// will lose this setting on first read after the rename; users must
+	// re-pick the lifecycle mode in the tray menu.
 	cJSON *workspace = cJSON_GetObjectItemCaseSensitive(root, "workspace");
 	if (cJSON_IsString(workspace)) {
 		cfg->workspace = str_to_mode(workspace->valuestring);
-	} else {
-		cJSON *shell_legacy = cJSON_GetObjectItemCaseSensitive(root, "shell");
-		if (cJSON_IsString(shell_legacy)) {
-			cfg->workspace = str_to_mode(shell_legacy->valuestring);
-		}
 	}
 
 	cJSON *workspace_binary = cJSON_GetObjectItemCaseSensitive(root, "workspace_binary");

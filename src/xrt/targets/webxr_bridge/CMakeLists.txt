@@ -48,8 +48,8 @@ target_link_libraries(displayxr-webxr-bridge PRIVATE
 
 # Default (dynamic) CRT matches the in-tree libs we now link against
 # (aux_util, ipc_client, ipc_shared). Switching to /MT here would LNK2038
-# against those libraries' /MD runtime. Matches the shell's convention
-# — displayxr-shell also uses /MD and links the same libs.
+# against those libraries' /MD runtime. Matches the workspace controller's
+# convention — it also uses /MD and links the same libs.
 
 install(TARGETS displayxr-webxr-bridge RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 

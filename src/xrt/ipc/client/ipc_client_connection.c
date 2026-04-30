@@ -157,7 +157,7 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 
 			// Fallback: ShellExecuteEx works from more sandbox levels than CreateProcessA.
 			// AppContainer processes (e.g. Chrome WebXR) may not have permission to
-			// create child processes directly, but ShellExecuteEx can delegate to the shell.
+			// create child processes directly, but ShellExecuteEx can delegate to the Windows shell.
 			SHELLEXECUTEINFOA sei = {0};
 			sei.cbSize = sizeof(sei);
 			sei.lpFile = first_path;

@@ -299,7 +299,7 @@ comp_d3d11_service_get_capture_client_window_pose(struct xrt_system_compositor *
                                                     float *out_height_m);
 
 /*!
- * Eagerly create the shell compositor window (for empty shell startup).
+ * Eagerly create the workspace compositor window (for empty workspace startup).
  * Called after workspace_activate when no clients are connected yet, so the
  * window exists to receive Ctrl+O app launch requests.
  */
@@ -307,7 +307,7 @@ bool
 comp_d3d11_service_ensure_workspace_window(struct xrt_system_compositor *xsysc);
 
 /*!
- * Deactivate the shell: stop captures and restore 2D windows, suspend
+ * Deactivate the workspace: stop captures and restore 2D windows, suspend
  * multi-compositor (hide window, release DP, stop render loop).
  * Called by ipc_handle_workspace_deactivate().
  *
@@ -322,9 +322,9 @@ comp_d3d11_service_deactivate_workspace(struct xrt_system_compositor *xsysc);
  * Show or hide the spatial launcher panel. When visible, the multi-compositor
  * draws a rounded-corner launcher overlay at the zero-disparity plane
  * (z = 0 in display coordinates). Called by
- * ipc_handle_launcher_set_visible() in response to Ctrl+L from the shell.
+ * ipc_handle_launcher_set_visible() in response to Ctrl+L from the workspace controller.
  *
- * No-op if the shell is not currently active.
+ * No-op if the workspace is not currently active.
  *
  * @ingroup comp_d3d11_service
  */
@@ -332,7 +332,7 @@ void
 comp_d3d11_service_set_launcher_visible(struct xrt_system_compositor *xsysc, bool visible);
 
 /*!
- * Empty the spatial launcher's app list. Called by the shell at the start of
+ * Empty the spatial launcher's app list. Called by the workspace controller at the start of
  * each registry push (clear-then-add-N pattern keeps each IPC message under
  * the per-message buffer cap).
  *
@@ -343,7 +343,7 @@ comp_d3d11_service_clear_launcher_apps(struct xrt_system_compositor *xsysc);
 
 /*!
  * Append one app to the spatial launcher's tile grid. Silently dropped if the
- * list is already full (IPC_LAUNCHER_MAX_APPS). Called by the shell once per
+ * list is already full (IPC_LAUNCHER_MAX_APPS). Called by the workspace controller once per
  * registered app after a clear.
  *
  * @ingroup comp_d3d11_service
@@ -355,8 +355,8 @@ comp_d3d11_service_add_launcher_app(struct xrt_system_compositor *xsysc,
 /*!
  * Phase 5.9/5.10: poll-and-clear the pending launcher tile click. Returns the
  * tile index the user clicked since the last poll, or -1 if none. Called by
- * the shell from its main poll loop; on a hit the shell looks up the
- * corresponding registered app and launches it via shell_launch_registered_app.
+ * the workspace controller from its main poll loop; on a hit the controller looks up the
+ * corresponding registered app and launches it via its launch-registered-app handler.
  *
  * @ingroup comp_d3d11_service
  */
@@ -369,7 +369,7 @@ comp_d3d11_service_poll_launcher_click(struct xrt_system_compositor *xsysc);
  * connected to the service. The launcher draws a glow border around tiles
  * whose bit is set so the user can tell which apps are already open.
  *
- * Pushed by the shell whenever its computed running set changes (typically
+ * Pushed by the workspace controller whenever its computed running set changes (typically
  * after each client connect/disconnect poll).
  *
  * @ingroup comp_d3d11_service
@@ -380,7 +380,7 @@ comp_d3d11_service_set_running_tile_mask(struct xrt_system_compositor *xsysc, ui
 /*!
  * Phase 8: capture the current pre-weave combined atlas to disk. Writes a
  * PNG of the full multi-view atlas (cropped to the active region in non-
- * legacy sessions) and fills @p out_result with metadata for the shell's
+ * legacy sessions) and fills @p out_result with metadata for the workspace controller's
  * sidecar JSON file.
  *
  * The runtime appends @c "_atlas.png" to @p path_prefix. Caller owns the

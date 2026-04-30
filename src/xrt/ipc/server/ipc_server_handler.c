@@ -176,7 +176,7 @@ ipc_try_get_sr_view_poses(volatile struct ipc_client_state *ics,
 	}
 
 	// Get screen dimensions for Kooima FOV
-	// Try per-client window metrics first (shell mode dynamic windows),
+	// Try per-client window metrics first (workspace mode dynamic windows),
 	// then fall back to global window metrics, then display dimensions.
 	//
 	// Headless clients (xc == NULL) — e.g., the WebXR bridge — don't
@@ -296,27 +296,27 @@ ipc_try_get_sr_view_poses(volatile struct ipc_client_state *ics,
 
 	bool compositor_owns_window = comp_d3d11_service_owns_window(s->xsysc);
 
-	// Shell-mode distinction: the shell compositor renders the shell itself
+	// Workspace-mode distinction: the workspace compositor renders the workspace UI
 	// via DP eye tracker (Kooima) with no qwerty offset — otherwise WASD
-	// would shift the entire shell UI. But Chrome WebXR running inside the
-	// shell is like non-shell Chrome on a smaller screen: it wants qwerty
+	// would shift the entire workspace UI. But Chrome WebXR running inside the
+	// workspace is like non-workspace Chrome on a smaller screen: it wants qwerty
 	// as the player transform so WASD walks inside its scene.
 	//
-	// Discriminator between Chrome and handle apps in shell:
+	// Discriminator between Chrome and handle apps in workspace mode:
 	// XR_EXT_win32_appcontainer_compatible. Chrome WebXR enables this
-	// extension because it's sandboxed; handle apps don't. In non-shell,
+	// extension because it's sandboxed; handle apps don't. In non-workspace mode,
 	// Chrome runs with has_external_window=false (no HWND passed to the
 	// runtime — it renders into its WebGL canvas) and goes through the
-	// client-side Kooima path with stereo tunables. In shell, Chrome
+	// client-side Kooima path with stereo tunables. In workspace mode, Chrome
 	// passes its tab HWND for window-metrics so has_external_window=true,
 	// dropping it onto the server's IPC view-pose path. Without this
 	// flag, server can't tell Chrome apart from a handle app and either
 	// breaks Chrome's convergence (default tunables) or breaks handle
 	// apps (stereo tunables with qwerty head). With the flag, we route
-	// each to the formulation it had in non-shell.
+	// each to the formulation it had in non-workspace mode.
 	//
-	// `comp_d3d11_service_owns_window` is false across the board in shell
-	// mode (intentional — it suppresses qwerty for shell-self rendering).
+	// `comp_d3d11_service_owns_window` is false across the board in workspace
+	// mode (intentional — it suppresses qwerty for workspace-controller-self rendering).
 	// Here we re-enable qwerty on a per-session basis.
 	bool workspace_mode = s->xsysc != NULL && s->xsysc->info.workspace_mode;
 	unsigned long workspace_pid = get_orchestrator_workspace_pid();
@@ -383,14 +383,14 @@ ipc_try_get_sr_view_poses(volatile struct ipc_client_state *ics,
 
 	if (have_stereo_state && stereo_state.camera_mode && use_qwerty_head) {
 		// CAMERA-CENTRIC PATH (canonical camera3d_compute_views)
-		// In shell mode, app sessions take this path with qwerty pose as
+		// In workspace mode, app sessions take this path with qwerty pose as
 		// the camera position. qwerty_toggle_camera_mode preserves the
 		// convergence plane across the P-key toggle: cam->disp moves the
 		// qwerty pose forward by 1/cam_convergence and sets disp_vHeight
 		// from cam_half_tan_vfov, so the screen plane in display mode and
 		// the convergence plane in camera mode coincide. Both paths must
-		// be reachable in shell for app sessions or the toggle becomes
-		// asymmetric (works in non-shell, no-op in shell).
+		// be reachable in workspace mode for app sessions or the toggle becomes
+		// asymmetric (works in non-workspace mode, no-op in workspace mode).
 		Camera3DTunables ct = {
 		    .ipd_factor = stereo_state.cam_spread_factor,
 		    .parallax_factor = stereo_state.cam_parallax_factor,
@@ -429,7 +429,7 @@ ipc_try_get_sr_view_poses(volatile struct ipc_client_state *ics,
 
 		Display3DTunables dt = display3d_default_tunables();
 		if (have_stereo_state && use_qwerty_head) {
-			// Same gate as the camera-centric branch: shell apps must
+			// Same gate as the camera-centric branch: workspace clients must
 			// see disp_vHeight (the user-tuned virtual display size)
 			// rather than identity m2v, otherwise the P-key toggle from
 			// camera mode would land on a default-height display and
@@ -469,7 +469,7 @@ ipc_try_get_sr_view_poses(volatile struct ipc_client_state *ics,
 		float left_v = (out_fovs[0].angle_up - out_fovs[0].angle_down) * 180.0f / 3.14159265f;
 		IPC_WARN(s, "IPC SR: mode=%s display=(%.2f,%.2f,%.2f) FOV H=%.1f° V=%.1f°"
 		         " pose[0]=(%.3f,%.3f,%.3f) pose[1]=(%.3f,%.3f,%.3f)"
-		         " owns_win=%d shell=%d shell_host=%d appc=%d use_qwerty=%d app='%s'",
+		         " owns_win=%d workspace=%d workspace_host=%d appc=%d use_qwerty=%d app='%s'",
 		         (have_stereo_state && stereo_state.camera_mode && use_qwerty_head)
 		             ? "camera" : "display",
 		         display_pos.x, display_pos.y, display_pos.z,
@@ -2189,8 +2189,8 @@ ipc_handle_workspace_activate(volatile struct ipc_client_state *_ics)
 	// PID-match auth. In service-managed mode the orchestrator spawned a
 	// known workspace controller; only that PID may activate workspace
 	// mode. In manual mode (no orchestrator-spawned process, e.g. dev
-	// running displayxr-service --workspace and launching the shell by
-	// hand) the provider returns 0 → first-claim wins.
+	// running displayxr-service --workspace and launching the workspace controller
+	// by hand) the provider returns 0 → first-claim wins.
 	unsigned long expected_pid = get_orchestrator_workspace_pid();
 	unsigned long caller_pid = (unsigned long)_ics->client_state.pid;
 
@@ -2203,7 +2203,7 @@ ipc_handle_workspace_activate(volatile struct ipc_client_state *_ics)
 
 	if (s->workspace_mode) {
 		IPC_INFO(s, "Workspace: already in workspace mode — ensuring window for relaunch");
-		// Re-ensure the shell window even when already in workspace mode.
+		// Re-ensure the workspace window even when already in workspace mode.
 		// If the previous session was dismissed (ESC), ensure_workspace_window
 		// tears down the stale resources and creates a fresh window.
 		if (s->xsysc != NULL) {
@@ -2214,14 +2214,14 @@ ipc_handle_workspace_activate(volatile struct ipc_client_state *_ics)
 		return XRT_SUCCESS;
 	}
 
-	IPC_INFO(s, "Workspace: activating shell mode via IPC");
+	IPC_INFO(s, "Workspace: activating workspace mode via IPC");
 
 	s->workspace_mode = true;
 	if (s->xsysc != NULL) {
 		s->xsysc->info.workspace_mode = true;
 
 #ifdef XRT_OS_WINDOWS
-		// Eagerly create the shell window so Ctrl+O works even with no apps.
+		// Eagerly create the workspace window so Ctrl+O works even with no apps.
 		comp_d3d11_service_ensure_workspace_window(s->xsysc);
 #endif
 	}
@@ -2239,7 +2239,7 @@ ipc_handle_workspace_deactivate(volatile struct ipc_client_state *_ics)
 		return XRT_SUCCESS;
 	}
 
-	IPC_INFO(s, "Workspace: deactivating shell mode via IPC");
+	IPC_INFO(s, "Workspace: deactivating workspace mode via IPC");
 
 	s->workspace_mode = false;
 	if (s->xsysc != NULL) {

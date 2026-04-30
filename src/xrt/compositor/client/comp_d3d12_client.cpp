@@ -487,7 +487,7 @@ try {
 	uint32_t image_count = xsccp.image_count;
 
 
-	// Strip protected content flag — not needed for shell/IPC mode.
+	// Strip protected content flag — not needed for workspace/IPC mode.
 	// The D3D11 service creates shared textures without content protection.
 	struct xrt_swapchain_create_info local_info = *info;
 	local_info.create = (enum xrt_swapchain_create_flags)(local_info.create & ~XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT);
