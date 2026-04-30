@@ -118,13 +118,13 @@ shell_get_client_info(XrWorkspaceClientId id, XrWorkspaceClientInfoEXT *info)
 // the controller dispatches them. Per-client poses are pushed via
 // xrSetWorkspaceClientWindowPoseEXT — the only public layout primitive.
 //
-// Display dimensions: hardcoded to the Leia SR LP-3D fallback (700×394 mm).
-// The runtime applied the same fallback when no real display info was
-// available. A follow-up could enable XR_EXT_display_info on the shell's
-// instance and read xrGetSystemDisplayInfoEXT for accurate dims.
-
-#define SHELL_DISPLAY_W_M 0.700f
-#define SHELL_DISPLAY_H_M 0.394f
+// Display dimensions are pulled from XR_EXT_display_info during shell init
+// (see shell_openxr.cpp). Layout-preset math reads them through g_xr so we
+// scale poses to the actual physical display rather than guessing.
+//
+// Carousel radius scales with display width so the ring fits any panel:
+// 0.18 of display width gives a sensible carousel on both LP-3D
+// (~0.06 m radius on 0.344 m) and the larger 0.700 m fallback.
 #define SHELL_PI_F 3.14159265358979323846f
 
 // Adaptive grid: ceil(sqrt(N)) columns, fills row-first. 90% display, 10%
@@ -134,13 +134,15 @@ shell_compute_grid_pose(int n, int idx,
                         float *out_x, float *out_y, float *out_z,
                         float *out_w, float *out_h)
 {
+	float disp_w = (g_xr != NULL) ? g_xr->display_width_m : 0.700f;
+	float disp_h = (g_xr != NULL) ? g_xr->display_height_m : 0.394f;
 	if (n <= 0) n = 1;
 	int cols = (int)ceilf(sqrtf((float)n));
 	int rows = (int)ceilf((float)n / (float)cols);
 	int col = idx % cols;
 	int row = idx / cols;
-	float cell_w = SHELL_DISPLAY_W_M * 0.90f / (float)cols;
-	float cell_h = SHELL_DISPLAY_H_M * 0.90f / (float)rows;
+	float cell_w = disp_w * 0.90f / (float)cols;
+	float cell_h = disp_h * 0.90f / (float)rows;
 	*out_w = cell_w * 0.90f;
 	*out_h = cell_h * 0.90f;
 	*out_x = ((float)col - ((float)(cols - 1)) / 2.0f) * cell_w;
@@ -155,11 +157,13 @@ static void
 shell_compute_immersive_pose(int n, int idx, XrPosef *out_pose,
                              float *out_w, float *out_h)
 {
+	float disp_w = (g_xr != NULL) ? g_xr->display_width_m : 0.700f;
+	float disp_h = (g_xr != NULL) ? g_xr->display_height_m : 0.394f;
 	float x, y, z;
 	shell_compute_grid_pose(n, idx, &x, &y, &z, out_w, out_h);
 
-	float max_r_sq = (SHELL_DISPLAY_W_M / 2) * (SHELL_DISPLAY_W_M / 2) +
-	                 (SHELL_DISPLAY_H_M / 2) * (SHELL_DISPLAY_H_M / 2);
+	float max_r_sq = (disp_w / 2) * (disp_w / 2) +
+	                 (disp_h / 2) * (disp_h / 2);
 	float curvature = 0.015f / max_r_sq;
 	float r_sq = x * x + y * y;
 	z = curvature * r_sq;
@@ -189,11 +193,12 @@ shell_compute_carousel_pose(int n, int idx, float angle_offset,
                             XrPosef *out_pose,
                             float *out_w, float *out_h)
 {
-	float zmax = (SHELL_DISPLAY_W_M > SHELL_DISPLAY_H_M
-	              ? SHELL_DISPLAY_W_M : SHELL_DISPLAY_H_M) / 5.0f;
-	const float radius = 0.12f;
-	float base_w = SHELL_DISPLAY_W_M * 0.40f;
-	float base_h = SHELL_DISPLAY_H_M * 0.40f;
+	float disp_w = (g_xr != NULL) ? g_xr->display_width_m : 0.700f;
+	float disp_h = (g_xr != NULL) ? g_xr->display_height_m : 0.394f;
+	float zmax = (disp_w > disp_h ? disp_w : disp_h) / 5.0f;
+	float radius = disp_w * 0.18f;
+	float base_w = disp_w * 0.40f;
+	float base_h = disp_h * 0.40f;
 	if (n <= 0) n = 1;
 
 	float base_angle = (2.0f * SHELL_PI_F / (float)n) * (float)idx;
@@ -217,16 +222,46 @@ shell_compute_carousel_pose(int n, int idx, float angle_offset,
 
 // Apply a named preset to all currently-connected workspace clients.
 // Returns true if at least one pose was pushed. Unknown names are ignored.
+//
+// xrEnumerateWorkspaceClientsEXT includes the controller's own session in
+// the list (as a sentinel — the runtime tracks every connected session).
+// Layout presets need to skip it: the controller has no positionable
+// window, and including it in the count throws off grid math (e.g. 2 real
+// cubes + the controller would be laid out as 3 cells in a 2×2 grid,
+// pushing the cubes into corners).
 static bool
 shell_apply_preset(const char *name)
 {
 	if (g_xr == NULL || name == NULL) {
 		return false;
 	}
-	XrWorkspaceClientId ids[SHELL_MAX_CLIENTS];
-	uint32_t n = shell_enumerate_clients(ids, SHELL_MAX_CLIENTS);
-	if (n == 0) {
+	XrWorkspaceClientId raw_ids[SHELL_MAX_CLIENTS];
+	uint32_t raw_n = shell_enumerate_clients(raw_ids, SHELL_MAX_CLIENTS);
+	if (raw_n == 0) {
 		P("Layout '%s': no clients yet\n", name);
+		return false;
+	}
+
+	// Filter out the controller's own session by PID match.
+#ifdef _WIN32
+	uint64_t self_pid = (uint64_t)GetCurrentProcessId();
+#else
+	uint64_t self_pid = (uint64_t)getpid();
+#endif
+	XrWorkspaceClientId ids[SHELL_MAX_CLIENTS];
+	uint32_t n = 0;
+	for (uint32_t i = 0; i < raw_n; i++) {
+		XrWorkspaceClientInfoEXT cinfo;
+		if (!shell_get_client_info(raw_ids[i], &cinfo)) {
+			continue;
+		}
+		if (cinfo.pid == self_pid) {
+			continue; // skip self
+		}
+		ids[n++] = raw_ids[i];
+	}
+	if (n == 0) {
+		P("Layout '%s': no app clients yet\n", name);
 		return false;
 	}
 
@@ -239,6 +274,7 @@ shell_apply_preset(const char *name)
 
 	P("Layout '%s' (%u windows)\n", name, n);
 
+	uint32_t success = 0;
 	for (uint32_t i = 0; i < n; i++) {
 		XrPosef pose;
 		pose.orientation.x = 0.0f;
@@ -266,11 +302,14 @@ shell_apply_preset(const char *name)
 		}
 
 		XrResult r = g_xr->set_pose(g_xr->session, ids[i], &pose, w, h);
-		if (r != XR_SUCCESS) {
+		if (r == XR_SUCCESS) {
+			success++;
+		} else {
 			PE("  set_pose(client=%u) failed: %d\n", ids[i], r);
 		}
 	}
-	return true;
+	// All clients were filtered out, or none responded — let the caller retry.
+	return success == n && n > 0;
 }
 
 // Drain pending workspace input events; dispatch Ctrl+1..3 to layout presets.
@@ -2384,6 +2423,27 @@ main(int argc, char *argv[])
 		// future use (controller-driven drag, hover routing, etc.).
 		shell_drain_input_events();
 
+#ifdef _WIN32
+		// DEBUG file-trigger: drop %TEMP%\displayxr_preset_{grid|immersive|carousel}
+		// to apply that preset programmatically (bypasses keyboard focus).
+		// Used for end-to-end smoke tests that can't drive Ctrl+1..3 reliably.
+		{
+			const char *temp_dir = getenv("TEMP");
+			if (temp_dir != NULL) {
+				const char *names[3] = {"grid", "immersive", "carousel"};
+				char path[MAX_PATH];
+				for (int i = 0; i < 3; i++) {
+					snprintf(path, sizeof(path),
+					         "%s\\displayxr_preset_%s", temp_dir, names[i]);
+					if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
+						DeleteFileA(path);
+						shell_apply_preset(names[i]);
+					}
+				}
+			}
+		}
+#endif
+
 		// Apply pending poses when new clients appear
 		if (poses_pending) {
 			try_apply_poses(apps, app_count, prev_ids, prev_count);
@@ -2396,7 +2456,9 @@ main(int argc, char *argv[])
 			}
 		}
 
-		// Detect new clients and track names
+		// Detect new clients and track names. Set a flag so the auto-tile
+		// pass below knows whether it has work to do this tick.
+		bool new_client_seen = false;
 		{
 			XrWorkspaceClientId client_ids[SHELL_MAX_CLIENTS];
 			uint32_t client_count = shell_enumerate_clients(client_ids, SHELL_MAX_CLIENTS);
@@ -2435,12 +2497,50 @@ main(int argc, char *argv[])
 							snprintf(client_names[client_name_count].name, 128, "%s", numbered_name);
 							client_name_count++;
 						}
+#ifdef _WIN32
+						uint64_t self_pid_ck = (uint64_t)GetCurrentProcessId();
+#else
+						uint64_t self_pid_ck = (uint64_t)getpid();
+#endif
+						if (cinfo.pid != self_pid_ck) {
+							new_client_seen = true;
+						}
 					}
 				}
 			}
 		}
 
 		print_clients(prev_ids, &prev_count);
+
+		// Phase 2.G: when a new app client appears and the user did not
+		// pin any per-app poses, auto-tile to a grid so windows occupy
+		// their full slot instead of stacking at the runtime's
+		// connect-time placement. Replaces the "debounced re-grid" the
+		// runtime used to own.
+		//
+		// Race: xrEnumerateWorkspaceClientsEXT returns clients as soon as
+		// they connect over IPC, but the per-client compositor slot is
+		// bound a few ticks later — set_pose fails XR_ERROR_VALIDATION
+		// during that window. Retry on the next tick(s) until every
+		// client takes the pose.
+		static bool s_auto_tile_pending = false;
+		if (new_client_seen) {
+			bool any_pose_specified = false;
+			for (int i = 0; i < app_count; i++) {
+				if (apps[i].has_pose) {
+					any_pose_specified = true;
+					break;
+				}
+			}
+			if (!any_pose_specified) {
+				s_auto_tile_pending = true;
+			}
+		}
+		if (s_auto_tile_pending) {
+			if (shell_apply_preset("grid")) {
+				s_auto_tile_pending = false;
+			}
+		}
 
 #ifdef _WIN32
 		// Detect server-side deactivation (ESC closed the compositor window).

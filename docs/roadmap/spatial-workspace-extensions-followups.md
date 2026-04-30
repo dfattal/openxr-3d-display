@@ -10,15 +10,18 @@ Outstanding items left over from the Phase 2.D + 2.I + decoupling work. Each ite
 
 **Limitation:** if the cursor leaves the workspace window entirely (no SetCapture is in flight), Windows routes the up event to whichever window the cursor is over — the WndProc never sees it. Fixing that needs `SetCapture` plumbing on enable / `ReleaseCapture` on disable, which Commit 1 deliberately did not add. File a follow-up if controller drags past the window border start losing release events.
 
-### 2. HOVER events never emitted
+### 2. Per-frame motion events on the public input drain
 
-**State:** `XR_WORKSPACE_INPUT_EVENT_POINTER_HOVER_EXT` enum value, `XrWorkspaceInputEventEXT.pointerHover` struct variant, and the matching wire-format `ipc_workspace_input_event::u.pointer_hover` are all defined and ship in v4. **Nothing pushes them.** Per Phase 2.D's design (region-transition events only, no per-frame motion), the WndProc would need to track current_hit_region per WM_MOUSEMOVE tick and push a HOVER when it changes — but the cross-thread call from WndProc into `workspace_raycast_hit_test` is non-trivial (it acquires the service-side `render_mutex`).
+**State:** `XR_WORKSPACE_INPUT_EVENT_POINTER_HOVER_EXT` enum value, `XrWorkspaceInputEventEXT.pointerHover` struct variant, and the matching wire-format `ipc_workspace_input_event::u.pointer_hover` are all defined and ship in v4 — but **nothing pushes them**, and per Phase 2.D's design `xrEnumerateWorkspaceInputEventsEXT` only delivers POINTER button-down / button-up events, **not** per-frame `WM_MOUSEMOVE`. The WndProc explicitly skips MOUSEMOVE before pushing to the public ring (`comp_d3d11_window.cpp` ~line 685).
 
-**Why it matters:** Controllers wanting hover-driven UI today have to poll `xrWorkspaceHitTestEXT` per frame. That's more API surface than they should need to use for a basic feature.
+**Why it matters:** A workspace controller cannot replicate the runtime's old interactive layouts (carousel drag-to-rotate, scroll-radius, drag-to-resize, hover-driven chrome highlighting) without per-frame cursor information. The controller has to own those behaviors per the Phase 2.G architectural call ("controllers own all motion logic; runtime is plumbing"), which means the public surface has to deliver motion.
 
-**Where to fix:** Either (a) add a hit-test pass on the d3d11_window WndProc thread (needs careful threading), or (b) emit cursor-position events at lower fidelity (per WM_MOUSEMOVE tick) and let the service-side drain enrich each into a HOVER event by hit-testing at drain time.
+**Where to fix:** Promoted to its own sub-phase — **Phase 2.K — controller-owned interactive layouts**. See `spatial-workspace-extensions-phase2K-plan.md`. The work:
+- Push `WM_MOUSEMOVE` cursor positions into the public input ring (gated on a button being held, or always — a controller flag picks). Probably the simplest path is to deliver them whenever any mouse button is held, since the carousel / drag use cases all need that and idle motion would flood IPC.
+- Optionally: emit a HOVER variant when the cursor crosses a region boundary (the original design intent of `pointerHover`), to give chrome highlighting cheap fidelity without per-frame drain.
+- Restore the carousel, scroll-radius, drag, momentum, TAB-snap behaviours **in the shell**, not the runtime — Phase 2.G deleted them from the runtime in favour of the public surface.
 
-**Suggested phase:** Phase 2.C (chrome rendering) — the chrome system needs hover for button highlighting, so it'll force this design decision naturally.
+**Suggested phase:** Phase 2.K — must land before Phase 2.C (chrome rendering needs hover too).
 
 ### 3. Shell activate-failure no longer auto-reconnects
 
@@ -70,7 +73,7 @@ These three documented spots in the runtime still mention the shell app by name.
 | Phase | Folds in items |
 |---|---|
 | **2.G** | ~~#1 (pointer-capture enforcement)~~ ✅ shipped |
-| **2.C** | #2 (HOVER events) |
+| **2.K** | #2 (per-frame motion events + interactive carousel / drag in the shell) |
 | **2.J prequel** | #4 (XRT_FORCE_MODE workaround) |
 | **2.J** | #3, #5, #6 (shell extraction, residues) |
 | **(any time)** | #7 (transitional comments) |

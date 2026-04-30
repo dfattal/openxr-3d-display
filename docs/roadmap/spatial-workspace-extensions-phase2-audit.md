@@ -124,12 +124,26 @@ Below: the original 8 sub-steps, lowest-blast-radius first.
 
 **Decisions made during the migration:**
 - Layout-preset semantics moved to the controller (Option A — pure controller). The shell now ports the grid + immersive + carousel-snap math.
-- Carousel ships as a static snap on the controller side (no per-frame tick); a follow-up can add animation if the regression is felt.
+- Carousel ships as a static snap on the controller side. The original interactive carousel (drag-to-rotate, scroll-radius, TAB-snap-to-front, momentum auto-rotation) was deleted from the runtime; restoring it controller-side requires per-frame motion events that Phase 2.D deliberately excluded from the public input drain. Tracked as **Phase 2.K — controller-owned interactive layouts**, which extends `xrEnumerateWorkspaceInputEventsEXT` to deliver per-frame `WM_MOUSEMOVE` (revising the Phase 2.D decision).
+- The shell auto-tiles new clients via `apply_preset("grid")` on connect when no per-app `--pose` was specified. Replaces the runtime's old debounced re-grid.
 - ESC carve-out kept as a safety net (annotated in `comp_d3d11_window.cpp`). The empty-workspace launcher hint and reentry state machine stay — they're rendering hygiene, not policy.
-- `compute_grid_layout` stays in the runtime; auto-placement on client connect still uses it. Deferred as a separate slice of policy.
+- `compute_grid_layout` stays in the runtime; auto-placement on client connect still uses it (initial spawn slot before the shell re-tiles).
 - Three MCP tests removed (`tests/mcp/test_focus_preset.{sh,bat}` + `_focus_preset_helper.py`) — the tool they exercised is gone.
+- Shell instance now enables `XR_EXT_display_info` and reads `displaySizeMeters` for layout math; without it the shell would use the LP-3D fallback (0.700 × 0.394 m) which is wrong on the actual LP-3D unit (0.344 × 0.194 m).
 
 **Risk realized:** Lower than predicted. The ESC / dismiss / restore flow needed only a comment annotation; the workspace state machine simplification was deferred to Phase 2.C (chrome rendering migration) where it'll get a proper redesign.
+
+### Phase 2.K — Controller-owned interactive layouts
+
+**Touches:** `comp_d3d11_window.cpp` (push `WM_MOUSEMOVE` to public ring under capture), `XR_EXT_spatial_workspace.h` (revise the "no per-frame motion" comment, possibly extend the POINTER variant or add a new MOTION variant), `XR_EXT_spatial_workspace` IPC bridge (drain enrichment), `src/xrt/targets/shell/main.c` (port the carousel state machine — drag, scroll-radius, TAB-snap, auto-rotation tick — controller-side).
+
+**Why now:** Phase 2.G deleted the runtime's interactive carousel because per-Phase-2.D-design the public input drain didn't deliver per-frame motion. Restoring full functional parity requires either (a) extending the public surface to deliver per-frame motion, or (b) keeping carousel as a runtime mechanism (rejected — the controller-owns-policy direction is firm). 2.K does (a).
+
+Phase 2.K must land before **Phase 2.C (chrome rendering)** because chrome highlighting also needs cursor / hover information.
+
+**Risk:** Medium. Per-frame IPC drain is a new pattern; perf has to be measured (estimate: 60 Hz × ~10–20 µs / RPC = sub-millisecond / sec, acceptable). Contract change to the input-drain surface needs to stay backwards-compatible with the v5 enum (controllers that don't opt in to motion shouldn't see new event types).
+
+See `spatial-workspace-extensions-phase2K-plan.md`.
 
 ### Phase 2.H (final cleanup pass)
 

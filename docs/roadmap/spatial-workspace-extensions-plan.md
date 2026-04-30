@@ -49,9 +49,11 @@ After Phase 2.0 the runtime ships standalone, recognises any installed workspace
 
 Move policy (which apps exist, what tiles to show, layout-preset semantics, registered_apps.json management, capture client lifecycle) **out of the compositor** into the workspace controller process behind the workspace extensions. Mechanism (multi-client atlas composition, raycast hit-test against window planes, offscreen capture, IPC plumbing) **stays in the runtime** under neutral names.
 
-This is where the 162 internal mentions in `comp_d3d11_service.cpp` (down from 217 after Phase 1) get cleaned up — most by deletion (the code moves to the workspace process), the rest by renaming once they're clearly mechanism with no policy embedded. The line-by-line classification is in the [Phase 2 audit](spatial-workspace-extensions-phase2-audit.md), which proposes 8 sub-steps (2.A through 2.H) ordered lowest-blast-radius-first.
+This is where the 162 internal mentions in `comp_d3d11_service.cpp` (down from 217 after Phase 1) get cleaned up — most by deletion (the code moves to the workspace process), the rest by renaming once they're clearly mechanism with no policy embedded. The line-by-line classification is in the [Phase 2 audit](spatial-workspace-extensions-phase2-audit.md), which proposes 9 sub-steps (2.A through 2.H plus 2.K) ordered lowest-blast-radius-first.
 
-Output: two extension surfaces frozen and published — `XR_EXT_spatial_workspace` (the compositor-side extension: window pose, focus, capture) and `XR_EXT_app_launcher` (launcher tile registry, click events). Header sketches in [spatial-workspace-extensions-headers-draft.md](spatial-workspace-extensions-headers-draft.md).
+**Phase 2.K — controller-owned interactive layouts** is a 2.G follow-up that revises the Phase 2.D "no per-frame motion events" decision. With layout-preset semantics now in the controller (Phase 2.G), the controller needs cursor motion to replicate interactive behaviours like carousel drag-to-rotate, scroll-radius adjustment, drag-to-resize, and chrome hover. 2.K extends `xrEnumerateWorkspaceInputEventsEXT` to deliver per-frame `WM_MOUSEMOVE` (gated by capture, or whenever a button is held). Must land before Phase 2.C (chrome rendering also needs hover). Plan: [spatial-workspace-extensions-phase2K-plan.md](spatial-workspace-extensions-phase2K-plan.md).
+
+Output: two extension surfaces frozen and published — `XR_EXT_spatial_workspace` (the compositor-side extension: window pose, focus, capture, **per-frame motion** post-2.K) and `XR_EXT_app_launcher` (launcher tile registry, click events). Header sketches in [spatial-workspace-extensions-headers-draft.md](spatial-workspace-extensions-headers-draft.md).
 
 ### Phase 3 — Severance (separate branches, weeks)
 

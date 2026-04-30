@@ -21,6 +21,7 @@
 #include <openxr/openxr.h>
 #include <openxr/XR_EXT_spatial_workspace.h>
 #include <openxr/XR_EXT_app_launcher.h>
+#include <openxr/XR_EXT_display_info.h>
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -57,6 +58,13 @@ struct shell_openxr_state
 	PFN_xrEnumerateWorkspaceClientsEXT     enumerate_clients;
 	PFN_xrGetWorkspaceClientInfoEXT        get_client_info;
 	PFN_xrEnumerateWorkspaceInputEventsEXT enumerate_input_events;
+
+	// Physical display size in meters, pulled from XR_EXT_display_info during
+	// init. Falls back to LP-3D dims (0.700 × 0.394 m) if the extension is
+	// not enabled or returns zero. Layout-preset math reads these to scale
+	// poses to the actual display.
+	float display_width_m;
+	float display_height_m;
 };
 
 /*!

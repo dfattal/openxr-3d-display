@@ -10977,6 +10977,13 @@ comp_d3d11_service_set_client_window_pose(struct xrt_system_compositor *xsysc,
 	mc->clients[slot].window_width_m = width_m;
 	mc->clients[slot].window_height_m = height_m;
 
+	// Cancel any in-flight slot animation (e.g. entry animation from
+	// register_client). Without this, slot_animate_tick keeps interpolating
+	// from the animation's original start→target every frame and overwrites
+	// the pose we just snapped, so the controller's set_pose appears to do
+	// nothing for ~300ms after a fresh connect.
+	mc->clients[slot].anim.active = false;
+
 	// Recompute pixel rect from pose
 	slot_pose_to_pixel_rect(sys, &mc->clients[slot],
 	                        &mc->clients[slot].window_rect_x,

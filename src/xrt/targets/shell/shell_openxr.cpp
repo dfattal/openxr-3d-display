@@ -72,6 +72,7 @@ extern "C" struct shell_openxr_state *shell_openxr_init(void)
 	const char *exts[] = {
 	    XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME,
 	    XR_EXT_APP_LAUNCHER_EXTENSION_NAME,
+	    XR_EXT_DISPLAY_INFO_EXTENSION_NAME,
 	};
 	XrInstanceCreateInfo ci = {XR_TYPE_INSTANCE_CREATE_INFO};
 	std::snprintf(ci.applicationInfo.applicationName, sizeof(ci.applicationInfo.applicationName),
@@ -97,6 +98,27 @@ extern "C" struct shell_openxr_state *shell_openxr_init(void)
 		PE("shell_openxr: xrGetSystem failed: %s\n", xr_result_str(r));
 		shell_openxr_shutdown(s);
 		return nullptr;
+	}
+
+	// Phase 2.G: query physical display dimensions via XR_EXT_display_info.
+	// Layout-preset math needs the real dims; LP-3D for instance is
+	// 0.344 × 0.194 m, very different from the 0.700 × 0.394 fallback the
+	// runtime uses when no display is detected.
+	XrDisplayInfoEXT dinfo = {XR_TYPE_DISPLAY_INFO_EXT};
+	XrSystemProperties sysprops = {XR_TYPE_SYSTEM_PROPERTIES};
+	sysprops.next = &dinfo;
+	XrResult dr = xrGetSystemProperties(s->instance, s->system_id, &sysprops);
+	if (XR_SUCCEEDED(dr) && dinfo.displaySizeMeters.width > 0.0f &&
+	    dinfo.displaySizeMeters.height > 0.0f) {
+		s->display_width_m = dinfo.displaySizeMeters.width;
+		s->display_height_m = dinfo.displaySizeMeters.height;
+		P("shell_openxr: display dims = %.3f × %.3f m (XR_EXT_display_info)\n",
+		  s->display_width_m, s->display_height_m);
+	} else {
+		s->display_width_m = 0.700f;
+		s->display_height_m = 0.394f;
+		PE("shell_openxr: XR_EXT_display_info unavailable; using LP-3D fallback (%.3f × %.3f m)\n",
+		   s->display_width_m, s->display_height_m);
 	}
 
 	// Workspace-controller session: no graphics binding chained on next.
