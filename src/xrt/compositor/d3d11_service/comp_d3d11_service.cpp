@@ -7411,6 +7411,67 @@ after_key_shortcuts:
 							sys->context->Draw(4, 0);
 						}
 					}
+					// Phase 2.K Commit 8.D: 8-dot grip handle in pill center —
+					// 2 rows × 4 cols of small circular dots. Visual cue that
+					// the pill is the drag/rotate region. Dots are 1mm × 1mm
+					// with 1mm gaps between, so the cluster reads as a
+					// recognizable grip without crowding the bar's other
+					// elements (icon at left, buttons at right).
+					{
+						const float DOT_SIZE_M = 0.001f;
+						const float DOT_GAP_M  = 0.001f;
+						const int   GRIP_COLS  = 4;
+						const int   GRIP_ROWS  = 2;
+						float pill_w_m_total = mc->clients[s].window_width_m * PILL_W_FRAC;
+						float dot_w_px = (DOT_SIZE_M / pill_w_m_total) * tow;
+						float dot_h_px = (DOT_SIZE_M / tb_h_m) * toh;
+						float gap_w_px = (DOT_GAP_M / pill_w_m_total) * tow;
+						float gap_h_px = (DOT_GAP_M / tb_h_m) * toh;
+						float grid_w_px = (float)GRIP_COLS * dot_w_px + (float)(GRIP_COLS - 1) * gap_w_px;
+						float grid_h_px = (float)GRIP_ROWS * dot_h_px + (float)(GRIP_ROWS - 1) * gap_h_px;
+						float pill_cx_px = tox + tow * 0.5f;
+						float pill_cy_px = toy + toh * 0.5f;
+						float grid_x_px = pill_cx_px - grid_w_px * 0.5f;
+						float grid_y_px = pill_cy_px - grid_h_px * 0.5f;
+						float grip_total_w_m = (float)GRIP_COLS * DOT_SIZE_M +
+						                       (float)(GRIP_COLS - 1) * DOT_GAP_M;
+						float grip_total_h_m = (float)GRIP_ROWS * DOT_SIZE_M +
+						                       (float)(GRIP_ROWS - 1) * DOT_GAP_M;
+						float grip_left_m = -grip_total_w_m * 0.5f;
+						float grip_bot_m_local = (pill_top_m + pill_bot_m) * 0.5f - grip_total_h_m * 0.5f;
+						for (int gr = 0; gr < GRIP_ROWS; gr++) {
+							for (int gc = 0; gc < GRIP_COLS; gc++) {
+								float dx_local = grip_left_m + (float)gc * (DOT_SIZE_M + DOT_GAP_M);
+								float dy_local = grip_bot_m_local + (float)gr * (DOT_SIZE_M + DOT_GAP_M);
+								float dot_x_px = grid_x_px + (float)gc * (dot_w_px + gap_w_px);
+								float dot_y_px = grid_y_px + (float)gr * (dot_h_px + gap_h_px);
+								D3D11_MAPPED_SUBRESOURCE mapped;
+								if (SUCCEEDED(sys->context->Map(sys->blit_constant_buffer.get(), 0,
+								              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+									BlitConstants *cb = static_cast<BlitConstants *>(mapped.pData);
+									// Light gray dots, ~80% alpha so they read on
+									// the slightly-translucent pill bg.
+									cb->src_rect[0] = 0.80f; cb->src_rect[1] = 0.82f;
+									cb->src_rect[2] = 0.85f; cb->src_rect[3] = 1.0f;
+									cb->src_size[0] = 1; cb->src_size[1] = 1;
+									cb->dst_size[0] = (float)ca_w; cb->dst_size[1] = (float)ca_h;
+									cb->convert_srgb = 2.0f;
+									cb->chrome_alpha = chrome_fade_attenuation;
+									// All four corners + aspect 1.0 + radius 0.5 = circle.
+									cb->corner_radius = -0.5f;
+									cb->corner_aspect = -1.0f;
+									cb->edge_feather = 0.10f;
+									cb->glow_intensity = 0.0f;
+									CHROME_BLIT_POS(cb,
+									    dx_local, dy_local + DOT_SIZE_M,
+									    dx_local + DOT_SIZE_M, dy_local,
+									    dot_x_px, dot_y_px, dot_w_px, dot_h_px);
+									sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
+									sys->context->Draw(4, 0);
+								}
+							}
+						}
+					}
 					// Close button (red)
 					{
 						D3D11_MAPPED_SUBRESOURCE mapped;
