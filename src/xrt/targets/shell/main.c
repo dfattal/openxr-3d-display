@@ -127,6 +127,18 @@ shell_get_client_info(XrWorkspaceClientId id, XrWorkspaceClientInfoEXT *info)
 // (~0.06 m radius on 0.344 m) and the larger 0.700 m fallback.
 #define SHELL_PI_F 3.14159265358979323846f
 
+// Forward declarations: the Phase 2.K animation framework + carousel state
+// machine come before the static layout helpers but reference some of them.
+static void
+shell_compute_carousel_pose(int n, int idx, float angle_offset,
+                            XrPosef *out_pose,
+                            float *out_w, float *out_h);
+
+// Phase 2.K: focused-client id seen on the most-recent FOCUS_CHANGED event
+// from the runtime. 0 = no focused client. File-scope so the carousel state
+// machine can read it without depending on drain-internal storage.
+static int s_focused_client_id = 0;
+
 // ---------- Phase 2.K: shell-side animation framework ----------
 //
 // Replicates the deleted runtime slot_animate_to / slot_animate_tick — but
@@ -351,6 +363,281 @@ shell_slot_anim_cancel(XrWorkspaceClientId id)
 }
 
 
+// ---------- Phase 2.K: shell-side carousel state machine ----------
+//
+// Replicates the deleted runtime carousel — auto-rotation, drag-to-rotate,
+// scroll-radius, TAB-snap, momentum — controller-side. Drives per-client
+// poses every tick by calling shell_compute_carousel_pose with the current
+// `angle_offset` and `radius_scale`.
+//
+// Inputs (consumed by shell_drain_input_events):
+//  - POINTER LMB down on a title bar → start drag at cursor X
+//  - MOTION (LMB held) → angle_offset += dx * sensitivity
+//  - POINTER LMB up → end drag, latch momentum from recent dx samples
+//  - SCROLL → radius_scale ×= (1 + delta * 0.05) clamped to [0.5, 1.5]
+//  - KEY VK_TAB (no Ctrl) → snap focused client to front, animate over
+//    300 ms, pause auto-rotation 5 s.
+//
+// Per-frame work happens in shell_carousel_tick() — called from the main
+// loop only when `s_active_preset == carousel`. Auto-rotation runs at
+// ~10°/s; momentum decays exponentially with a half-life of ~0.5 s.
+
+#define SHELL_CAROUSEL_AUTO_RATE_RPS         (10.0f * SHELL_PI_F / 180.0f)  // ~10°/s
+#define SHELL_CAROUSEL_DRAG_SENSITIVITY_RPP  (2.0f * SHELL_PI_F / 1000.0f)  // 1000 px = full turn
+#define SHELL_CAROUSEL_MOMENTUM_DECAY_PER_S  2.0f                          // angular vel halves in ~0.35 s
+#define SHELL_CAROUSEL_RADIUS_MIN            0.5f
+#define SHELL_CAROUSEL_RADIUS_MAX            1.5f
+#define SHELL_CAROUSEL_SNAP_PAUSE_NS         (5ULL * 1000000000ULL)
+#define SHELL_CAROUSEL_ANGLE_ANIM_NS         SHELL_ANIM_DURATION_NS
+
+static const char *s_active_preset = NULL; // last preset applied, NULL = none
+static bool        s_pointer_capture_active = false;
+
+struct shell_carousel_state
+{
+	float    angle_offset;        // current ring rotation (rad)
+	float    angular_velocity;    // rad/sec, drives momentum
+	float    radius_scale;        // multiplier on shell_compute_carousel_pose's base radius
+	bool     dragging;
+	int32_t  drag_last_cursor_x;
+	uint64_t last_tick_ns;
+	uint64_t pause_until_ns;       // auto-rotation paused until this ns
+	uint64_t drag_last_dx_ns;      // for momentum sampling
+	float    drag_last_dx_per_s;   // last computed angular velocity sample
+
+	// TAB-snap interpolation of angle_offset itself.
+	bool     angle_anim_active;
+	float    angle_anim_start;
+	float    angle_anim_target;
+	uint64_t angle_anim_start_ns;
+	uint64_t angle_anim_duration_ns;
+};
+static struct shell_carousel_state s_car = {
+    .angle_offset = 0.0f,
+    .angular_velocity = 0.0f,
+    .radius_scale = 1.0f,
+    .dragging = false,
+    .drag_last_cursor_x = 0,
+    .last_tick_ns = 0,
+    .pause_until_ns = 0,
+    .drag_last_dx_ns = 0,
+    .drag_last_dx_per_s = 0.0f,
+    .angle_anim_active = false,
+    .angle_anim_start = 0.0f,
+    .angle_anim_target = 0.0f,
+    .angle_anim_start_ns = 0,
+    .angle_anim_duration_ns = 0,
+};
+
+// Wrap angle to (-π, π] so accumulated drift doesn't lose precision.
+static float
+shell_wrap_angle(float a)
+{
+	while (a >  SHELL_PI_F) a -= 2.0f * SHELL_PI_F;
+	while (a <= -SHELL_PI_F) a += 2.0f * SHELL_PI_F;
+	return a;
+}
+
+// Push a fresh per-client pose for every connected app client based on the
+// current carousel state. Called every tick while carousel is active. Does
+// NOT go through the slot animation framework — carousel positions are
+// computed directly (controller is the source of truth for the angle).
+static void
+shell_carousel_redrive_poses(void)
+{
+	if (g_xr == NULL || g_xr->set_pose == NULL) return;
+	XrWorkspaceClientId raw_ids[SHELL_MAX_CLIENTS];
+	uint32_t raw_n = shell_enumerate_clients(raw_ids, SHELL_MAX_CLIENTS);
+	if (raw_n == 0) return;
+
+#ifdef _WIN32
+	uint64_t self_pid = (uint64_t)GetCurrentProcessId();
+#else
+	uint64_t self_pid = (uint64_t)getpid();
+#endif
+	XrWorkspaceClientId ids[SHELL_MAX_CLIENTS];
+	uint32_t n = 0;
+	for (uint32_t i = 0; i < raw_n; i++) {
+		XrWorkspaceClientInfoEXT cinfo;
+		if (!shell_get_client_info(raw_ids[i], &cinfo)) continue;
+		if (cinfo.pid == self_pid) continue;
+		ids[n++] = raw_ids[i];
+	}
+	if (n == 0) return;
+
+	float disp_w = (g_xr != NULL) ? g_xr->display_width_m : 0.700f;
+	for (uint32_t i = 0; i < n; i++) {
+		XrPosef pose;
+		float w, h;
+		shell_compute_carousel_pose((int)n, (int)i, s_car.angle_offset, &pose, &w, &h);
+		// Apply radius scaling. shell_compute_carousel_pose plants x = sin(theta)*radius
+		// and z = (cos(theta)-1)*zmax*0.5, where radius = disp_w * 0.18. Scale x and z
+		// uniformly by radius_scale to grow / shrink the ring without touching the angle.
+		pose.position.x *= s_car.radius_scale;
+		pose.position.z *= s_car.radius_scale;
+		// Suppress unused-warning on disp_w when carousel pose math doesn't need it;
+		// kept here for symmetry with grid/immersive paths.
+		(void)disp_w;
+		g_xr->set_pose(g_xr->session, ids[i], &pose, w, h);
+	}
+}
+
+// Called every poll iteration while carousel is the active preset. Interpolates
+// any pending angle-snap, advances auto-rotation / momentum, then redrives
+// poses for the connected clients. Cheap when nothing is in motion.
+static void
+shell_carousel_tick(void)
+{
+	if (s_active_preset == NULL || strcmp(s_active_preset, "carousel") != 0) return;
+	if (g_xr == NULL || g_xr->set_pose == NULL) return;
+
+	// Defer to the slot-animation framework while any client is still
+	// gliding into its initial carousel slot (entry transition from grid /
+	// immersive). Once those settle, the carousel takes over the poses.
+	if (shell_slot_anim_active_count() > 0) {
+		return;
+	}
+
+	uint64_t now = shell_now_ns();
+	if (s_car.last_tick_ns == 0) {
+		s_car.last_tick_ns = now;
+		shell_carousel_redrive_poses();
+		return;
+	}
+	float dt = (float)((double)(now - s_car.last_tick_ns) / 1e9);
+	if (dt > 0.1f) dt = 0.1f; // clamp huge gaps after sleep
+	s_car.last_tick_ns = now;
+
+	if (s_car.angle_anim_active) {
+		// TAB-snap interpolation of angle_offset.
+		uint64_t elapsed = now - s_car.angle_anim_start_ns;
+		float t = (float)((double)elapsed / (double)s_car.angle_anim_duration_ns);
+		bool done = false;
+		if (t >= 1.0f) { t = 1.0f; done = true; }
+		float eased = shell_ease_out_cubic(t);
+		s_car.angle_offset =
+		    s_car.angle_anim_start + (s_car.angle_anim_target - s_car.angle_anim_start) * eased;
+		if (done) s_car.angle_anim_active = false;
+	} else if (s_car.dragging) {
+		// angle_offset is set incrementally by MOTION handling in the drain;
+		// nothing to advance here. Suppress auto-rotation.
+	} else if (now < s_car.pause_until_ns) {
+		// auto-rotation paused (TAB-snap recently fired); momentum still decays.
+	} else {
+		// Auto-rotation OR momentum — if momentum is significant, prefer it;
+		// otherwise apply ambient auto-rotation.
+		if (fabsf(s_car.angular_velocity) > 0.05f) {
+			s_car.angle_offset += s_car.angular_velocity * dt;
+		} else {
+			s_car.angle_offset += SHELL_CAROUSEL_AUTO_RATE_RPS * dt;
+		}
+	}
+
+	// Decay momentum exponentially regardless of rotation source.
+	if (!s_car.dragging) {
+		float decay = expf(-SHELL_CAROUSEL_MOMENTUM_DECAY_PER_S * dt);
+		s_car.angular_velocity *= decay;
+		if (fabsf(s_car.angular_velocity) < 0.01f) s_car.angular_velocity = 0.0f;
+	}
+
+	s_car.angle_offset = shell_wrap_angle(s_car.angle_offset);
+	shell_carousel_redrive_poses();
+}
+
+// Find the (PID-filtered) index of `id` in the same enumeration order
+// shell_compute_carousel_pose uses. Returns -1 on miss.
+static int
+shell_carousel_index_of(XrWorkspaceClientId id)
+{
+	if (g_xr == NULL) return -1;
+	XrWorkspaceClientId raw_ids[SHELL_MAX_CLIENTS];
+	uint32_t raw_n = shell_enumerate_clients(raw_ids, SHELL_MAX_CLIENTS);
+#ifdef _WIN32
+	uint64_t self_pid = (uint64_t)GetCurrentProcessId();
+#else
+	uint64_t self_pid = (uint64_t)getpid();
+#endif
+	int idx = 0;
+	for (uint32_t i = 0; i < raw_n; i++) {
+		XrWorkspaceClientInfoEXT cinfo;
+		if (!shell_get_client_info(raw_ids[i], &cinfo)) continue;
+		if (cinfo.pid == self_pid) continue;
+		if (raw_ids[i] == id) return idx;
+		idx++;
+	}
+	return -1;
+}
+
+// Compute the angle_offset that puts client `idx` at the front (angle 0).
+// shell_compute_carousel_pose places client idx at base_angle = 2π * idx/n
+// plus angle_offset, so target_offset = -base_angle.
+static float
+shell_carousel_target_offset_for(int idx, int n)
+{
+	if (n <= 0) return 0.0f;
+	return shell_wrap_angle(-(2.0f * SHELL_PI_F / (float)n) * (float)idx);
+}
+
+// Snap the focused client to the front. Animates angle_offset over 300 ms
+// and pauses auto-rotation for 5 s afterward (matches pre-Phase-2.G runtime
+// behaviour).
+static void
+shell_carousel_tab_snap(void)
+{
+	if (s_focused_client_id == 0) return;
+	int idx = shell_carousel_index_of((XrWorkspaceClientId)s_focused_client_id);
+	if (idx < 0) return;
+	XrWorkspaceClientId raw_ids[SHELL_MAX_CLIENTS];
+	uint32_t raw_n = shell_enumerate_clients(raw_ids, SHELL_MAX_CLIENTS);
+#ifdef _WIN32
+	uint64_t self_pid = (uint64_t)GetCurrentProcessId();
+#else
+	uint64_t self_pid = (uint64_t)getpid();
+#endif
+	int n = 0;
+	for (uint32_t i = 0; i < raw_n; i++) {
+		XrWorkspaceClientInfoEXT cinfo;
+		if (!shell_get_client_info(raw_ids[i], &cinfo)) continue;
+		if (cinfo.pid == self_pid) continue;
+		n++;
+	}
+	if (n <= 0) return;
+
+	float target = shell_carousel_target_offset_for(idx, n);
+	// Pick the short-arc direction so we don't sweep all the way around.
+	float delta = shell_wrap_angle(target - s_car.angle_offset);
+	target = s_car.angle_offset + delta;
+
+	s_car.angle_anim_active = true;
+	s_car.angle_anim_start = s_car.angle_offset;
+	s_car.angle_anim_target = target;
+	s_car.angle_anim_start_ns = shell_now_ns();
+	s_car.angle_anim_duration_ns = SHELL_CAROUSEL_ANGLE_ANIM_NS;
+	s_car.angular_velocity = 0.0f;
+	s_car.pause_until_ns = shell_now_ns() + SHELL_CAROUSEL_SNAP_PAUSE_NS;
+}
+
+// Pointer capture toggling. Carousel needs MOTION events to flow even when
+// the cursor leaves the workspace window (drag continues), so flip on entry
+// to carousel and off on exit. Idempotent.
+static void
+shell_set_pointer_capture(bool want)
+{
+	if (g_xr == NULL || want == s_pointer_capture_active) return;
+	if (want) {
+		if (g_xr->enable_pointer_capture != NULL) {
+			g_xr->enable_pointer_capture(g_xr->session, 1u); // LMB
+			s_pointer_capture_active = true;
+		}
+	} else {
+		if (g_xr->disable_pointer_capture != NULL) {
+			g_xr->disable_pointer_capture(g_xr->session);
+			s_pointer_capture_active = false;
+		}
+	}
+}
+
+
 // Adaptive grid: ceil(sqrt(N)) columns, fills row-first. 90% display, 10%
 // padding per cell. All windows at Z=0. Mirrors compute_grid_layout().
 static void
@@ -496,6 +783,23 @@ shell_apply_preset(const char *name)
 		return false;
 	}
 
+	// Phase 2.K: track the active preset so the per-tick carousel state
+	// machine knows when to take over and toggle pointer capture as we
+	// enter / leave carousel. Reset carousel state on (re-)entry so a
+	// fresh angle ramp starts from the static snap position.
+	s_active_preset = is_grid ? "grid" : (is_immersive ? "immersive" : "carousel");
+	if (is_carousel) {
+		s_car.angle_offset = 0.0f;
+		s_car.angular_velocity = 0.0f;
+		s_car.dragging = false;
+		s_car.angle_anim_active = false;
+		s_car.last_tick_ns = 0;
+		s_car.pause_until_ns = 0;
+		shell_set_pointer_capture(true);
+	} else {
+		shell_set_pointer_capture(false);
+	}
+
 	P("Layout '%s' (%u windows) — gliding over %llu ms\n",
 	  name, n, (unsigned long long)(SHELL_ANIM_DURATION_NS / 1000000ULL));
 
@@ -547,10 +851,9 @@ shell_apply_preset(const char *name)
 // is consumed; FOCUS_CHANGED is logged but not yet acted on); commit 5 wires
 // MOTION + SCROLL into the carousel state machine.
 
-// Phase 2.K: latest workspace state read from the drain. Carousel state
-// machine (commit 5) consumes these. File-scope so the per-frame tick can
-// see them.
-static int s_focused_client_id = 0; // 0 = no focus
+// Phase 2.K: latest workspace state read from the drain. The carousel state
+// machine reads s_focused_client_id (forward-declared at file top) to drive
+// TAB-snap.
 
 static void
 shell_drain_input_events(void)
@@ -563,30 +866,90 @@ shell_drain_input_events(void)
 	if (g_xr->enumerate_input_events(g_xr->session, 16, &cnt, evs) != XR_SUCCESS) {
 		return;
 	}
+	bool carousel_active = (s_active_preset != NULL && strcmp(s_active_preset, "carousel") == 0);
 	for (uint32_t i = 0; i < cnt; i++) {
 		const XrWorkspaceInputEventEXT *e = &evs[i];
 		switch (e->eventType) {
 		case XR_WORKSPACE_INPUT_EVENT_KEY_EXT: {
 			if (!e->key.isDown) break;
-			if ((e->key.modifiers & 0x2u) == 0) break; // require CTRL
-			switch (e->key.vkCode) {
-			case '1': shell_apply_preset("grid"); break;
-			case '2': shell_apply_preset("immersive"); break;
-			case '3': shell_apply_preset("carousel"); break;
-			// '4' reserved for a future preset slot.
-			default: break;
+			bool ctrl = (e->key.modifiers & 0x2u) != 0;
+			if (ctrl) {
+				switch (e->key.vkCode) {
+				case '1': shell_apply_preset("grid"); break;
+				case '2': shell_apply_preset("immersive"); break;
+				case '3': shell_apply_preset("carousel"); break;
+				// '4' reserved for a future preset slot.
+				default: break;
+				}
+			} else if (e->key.vkCode == 0x09 /*VK_TAB*/ && carousel_active) {
+				// Phase 2.K: TAB while carousel is active snaps the
+				// focused client to the front and pauses auto-rotation.
+				shell_carousel_tab_snap();
 			}
 			break;
 		}
 		case XR_WORKSPACE_INPUT_EVENT_FOCUS_CHANGED_EXT:
 			s_focused_client_id = (int)e->focusChanged.currentClientId;
 			break;
+		case XR_WORKSPACE_INPUT_EVENT_POINTER_EXT: {
+			// Carousel only: LMB on a TITLE_BAR begins drag; LMB up ends
+			// drag and latches momentum from the most recent angular
+			// velocity sample. Other buttons + non-carousel are ignored —
+			// the runtime still routes clicks through the focus path.
+			if (!carousel_active) break;
+			if (e->pointer.button != 1) break; // LMB only
+			if (e->pointer.isDown) {
+				if (e->pointer.hitRegion == XR_WORKSPACE_HIT_REGION_TITLE_BAR_EXT) {
+					s_car.dragging = true;
+					s_car.drag_last_cursor_x = e->pointer.cursorX;
+					s_car.drag_last_dx_ns = shell_now_ns();
+					s_car.drag_last_dx_per_s = 0.0f;
+					s_car.angular_velocity = 0.0f;
+					s_car.angle_anim_active = false;
+				}
+			} else {
+				if (s_car.dragging) {
+					// Latch the most recent dx-per-second as momentum.
+					s_car.angular_velocity = s_car.drag_last_dx_per_s;
+					s_car.dragging = false;
+				}
+			}
+			break;
+		}
+		case XR_WORKSPACE_INPUT_EVENT_POINTER_MOTION_EXT: {
+			if (!carousel_active || !s_car.dragging) break;
+			// Accumulate angle from cursor delta; sample angular velocity
+			// in rad/sec for the post-release momentum.
+			int32_t dx = e->pointerMotion.cursorX - s_car.drag_last_cursor_x;
+			s_car.drag_last_cursor_x = e->pointerMotion.cursorX;
+			float drot = (float)dx * SHELL_CAROUSEL_DRAG_SENSITIVITY_RPP;
+			s_car.angle_offset = shell_wrap_angle(s_car.angle_offset + drot);
+
+			uint64_t now = shell_now_ns();
+			uint64_t dt_ns = now - s_car.drag_last_dx_ns;
+			if (dt_ns > 1000000ULL) { // > 1 ms — avoid divide-by-near-zero
+				float dt = (float)((double)dt_ns / 1e9);
+				s_car.drag_last_dx_per_s = drot / dt;
+				s_car.drag_last_dx_ns = now;
+			}
+			break;
+		}
+		case XR_WORKSPACE_INPUT_EVENT_SCROLL_EXT: {
+			if (!carousel_active) break;
+			// deltaY > 0 = scroll up; expand ring. deltaY < 0 = scroll down;
+			// shrink ring. Multiplicative so symmetric in log space.
+			float factor = 1.0f + e->scroll.deltaY * 0.05f;
+			s_car.radius_scale *= factor;
+			if (s_car.radius_scale < SHELL_CAROUSEL_RADIUS_MIN)
+				s_car.radius_scale = SHELL_CAROUSEL_RADIUS_MIN;
+			if (s_car.radius_scale > SHELL_CAROUSEL_RADIUS_MAX)
+				s_car.radius_scale = SHELL_CAROUSEL_RADIUS_MAX;
+			break;
+		}
 		case XR_WORKSPACE_INPUT_EVENT_FRAME_TICK_EXT:
-		case XR_WORKSPACE_INPUT_EVENT_POINTER_MOTION_EXT:
-		case XR_WORKSPACE_INPUT_EVENT_POINTER_EXT:
-		case XR_WORKSPACE_INPUT_EVENT_SCROLL_EXT:
-			// Commit 4: silently consumed. Commit 5 wires MOTION + SCROLL
-			// into the carousel state machine; FRAME_TICK paces it.
+			// Tick is paced by the main-loop poll cadence (variable 16/500
+			// ms) — FRAME_TICK is consumed here so the count is drained
+			// but does not redundantly drive the tick.
 			break;
 		default:
 			break;
@@ -2542,13 +2905,17 @@ main(int argc, char *argv[])
 	while (g_running) {
 #ifdef _WIN32
 		// Phase 2.K: variable cadence. While any client animation is active
-		// we poll every ~16 ms (~60 Hz) so the animation tick lerps cleanly;
-		// otherwise we drop back to 500 ms for ambient idle. The runtime
-		// also delivers FRAME_TICK events on the input drain that the tick
-		// could pace against directly, but the timer fallback keeps things
-		// simple and is correct when FRAME_TICK arrives on a different
-		// drain pass.
-		DWORD poll_ms = (shell_slot_anim_active_count() > 0) ? 16u : (DWORD)POLL_INTERVAL_MS;
+		// OR the carousel preset is owning per-frame poses, we poll every
+		// ~16 ms (~60 Hz) so the tick interpolates cleanly; otherwise we
+		// drop back to 500 ms for ambient idle. The runtime also delivers
+		// FRAME_TICK events on the input drain that the tick could pace
+		// against directly, but the timer fallback keeps things simple and
+		// is correct when FRAME_TICK arrives on a different drain pass.
+		bool carousel_owning =
+		    (s_active_preset != NULL && strcmp(s_active_preset, "carousel") == 0);
+		DWORD poll_ms = (shell_slot_anim_active_count() > 0 || carousel_owning)
+		                    ? 16u
+		                    : (DWORD)POLL_INTERVAL_MS;
 		DWORD wait_result = MsgWaitForMultipleObjects(
 		    0, NULL, FALSE, poll_ms, QS_ALLINPUT);
 
@@ -2689,6 +3056,12 @@ main(int argc, char *argv[])
 		// Phase 2.K: drive any active animations forward. Idle when no
 		// animation is active; cheap when one is.
 		(void)shell_slot_anim_tick();
+
+		// Phase 2.K: drive the carousel state machine while it's the active
+		// preset. Internally early-returns when slot animations are still
+		// playing (the entry transition into carousel) or when the preset
+		// is something else. Cheap when idle.
+		shell_carousel_tick();
 
 #ifdef _WIN32
 		// DEBUG file-trigger: drop %TEMP%\displayxr_preset_{grid|immersive|carousel}
