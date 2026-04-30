@@ -4,15 +4,11 @@ Outstanding items left over from the Phase 2.D + 2.I + decoupling work. Each ite
 
 ## Functional gaps
 
-### 1. Pointer-capture flag stored but not enforced
+### 1. Pointer-capture flag stored but not enforced ✅ shipped (2.G C1)
 
-**State:** `xrEnableWorkspacePointerCaptureEXT(button)` and `xrDisableWorkspacePointerCaptureEXT()` ship in `XR_EXT_spatial_workspace v4`. The bridge sets a flag (`workspace_pointer_capture_enabled` + `workspace_pointer_capture_button`) on the d3d11 window. The WndProc click-handling path **does not yet read this flag** — out-of-content button-up events are still filtered as if capture were never requested.
+**Resolution:** Folded into Phase 2.G Commit 1. The WM_*BUTTONUP path in `src/xrt/compositor/d3d11/comp_d3d11_window.cpp` now reads `workspace_pointer_capture_enabled` + `workspace_pointer_capture_button` and bypasses the in-rect / dragging gate when capture is held for the matching button. Controller-driven drag affordances keep receiving the release event when the cursor leaves the content rect.
 
-**Why it matters:** Real drag affordances (controller-driven move/resize) need button-up events to keep flowing even when the cursor leaves any window. Today a controller calling Enable + dragging past the workspace bounds loses the release event.
-
-**Where to fix:** `src/xrt/compositor/d3d11/comp_d3d11_window.cpp` — the WM_LBUTTONUP / WM_RBUTTONUP / WM_MBUTTONUP path that already filters out-of-content events. Gate the filter on `workspace_pointer_capture_enabled && workspace_pointer_capture_button == evt.button`.
-
-**Suggested phase:** Phase 2.G Commit 1 (the WndProc input filtering path is the same area). Otherwise its own micro-PR — small change.
+**Limitation:** if the cursor leaves the workspace window entirely (no SetCapture is in flight), Windows routes the up event to whichever window the cursor is over — the WndProc never sees it. Fixing that needs `SetCapture` plumbing on enable / `ReleaseCapture` on disable, which Commit 1 deliberately did not add. File a follow-up if controller drags past the window border start losing release events.
 
 ### 2. HOVER events never emitted
 
@@ -73,7 +69,7 @@ These three documented spots in the runtime still mention the shell app by name.
 
 | Phase | Folds in items |
 |---|---|
-| **2.G** | #1 (pointer-capture enforcement) |
+| **2.G** | ~~#1 (pointer-capture enforcement)~~ ✅ shipped |
 | **2.C** | #2 (HOVER events) |
 | **2.J prequel** | #4 (XRT_FORCE_MODE workaround) |
 | **2.J** | #3, #5, #6 (shell extraction, residues) |

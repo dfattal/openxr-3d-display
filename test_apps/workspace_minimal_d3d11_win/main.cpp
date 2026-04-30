@@ -376,6 +376,29 @@ run_workspace_test()
 		CHECK_XR(pfnEnableCapture(session, 1), "xrEnableWorkspacePointerCaptureEXT");
 		CHECK_XR(pfnDisableCapture(session), "xrDisableWorkspacePointerCaptureEXT");
 
+		// Phase 2.G: controller-side preset demo.
+		//
+		// Layout-preset semantics moved to the workspace controller in
+		// Phase 2.G — the runtime no longer hosts apply_layout_preset or
+		// the Ctrl+1..3 dispatch. Controllers express layouts as a sequence
+		// of per-client xrSetWorkspaceClientWindowPoseEXT calls. The shell
+		// (src/xrt/targets/shell/main.c) is the reference implementation;
+		// here we just demonstrate the pattern for one client to keep the
+		// smoke test runnable without a multi-client orchestrator.
+		{
+			// Grid math for n=1 / idx=0 against the LP-3D fallback dims:
+			// the singleton fills 90% of an 80% × 80% cell at z=0, identity
+			// orientation. Mirrors compute_grid_layout in the shell.
+			XrPosef gridPose = {};
+			gridPose.orientation.w = 1.0f;
+			gridPose.position.z = 0.0f;
+			float gridW = 0.700f * 0.90f * 0.90f;
+			float gridH = 0.394f * 0.90f * 0.90f;
+			XrResult gpr = pfnSetClientPose(session, clientId, &gridPose, gridW, gridH);
+			std::printf("[Phase 2.G grid demo via SetClientPose      ] %s "
+			            "size=%.3fx%.3f\n", xr_result_str(gpr), gridW, gridH);
+		}
+
 		// Phase 2.I-prequel: client enumeration smoke.
 		// Count-query first, then enumerate. The smoke session is itself an
 		// OpenXR client connection so enumerate should return at least 1 id
