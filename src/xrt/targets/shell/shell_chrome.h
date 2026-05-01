@@ -28,6 +28,22 @@ struct shell_openxr_state;
 struct shell_chrome;
 
 /*!
+ * Phase 2.C C4: controller-defined chrome region IDs the shell stamps into
+ * the chrome layout's hitRegions[] array. The runtime echoes the matched id
+ * back as @c chromeRegionId on POINTER / POINTER_MOTION events so main.c can
+ * dispatch by region (close → exit RPC, grip → drag, etc.). 0 is reserved as
+ * XR_NULL_WORKSPACE_CHROME_REGION_ID and means "no chrome region matched."
+ */
+enum shell_chrome_region_id
+{
+	SHELL_CHROME_REGION_NONE  = 0,
+	SHELL_CHROME_REGION_GRIP  = 1,
+	SHELL_CHROME_REGION_CLOSE = 2,
+	SHELL_CHROME_REGION_MIN   = 3,
+	SHELL_CHROME_REGION_MAX   = 4,
+};
+
+/*!
  * Allocate the chrome module, bound to the shell's OpenXR state. The shell's
  * D3D11 device must already be live. Returns NULL on init failure (logged).
  */

@@ -949,6 +949,44 @@ shell_drain_input_events(void)
 			s_focused_client_id = (int)e->focusChanged.currentClientId;
 			break;
 		case XR_WORKSPACE_INPUT_EVENT_POINTER_EXT: {
+			// Phase 2.C C4: dispatch chrome-region clicks. The runtime
+			// fills chromeRegionId on POINTER events when the cursor
+			// hits the controller-submitted chrome quad inside one of
+			// the regions push_layout populated. Acts on LMB-down only.
+			//
+			// In-runtime chrome (still drawing until C5) ALSO fires the
+			// runtime-side close/min/max handlers via the legacy
+			// in_close_btn etc. fields — this is additive, not exclusive.
+			// Once C5 deletes the in-runtime path, the controller-driven
+			// dispatch here becomes the sole chrome interactivity owner.
+			if (e->pointer.button == 1 /* LMB */ && e->pointer.isDown &&
+			    e->pointer.chromeRegionId != 0 &&
+			    e->pointer.hitClientId != 0) {
+				switch (e->pointer.chromeRegionId) {
+				case SHELL_CHROME_REGION_CLOSE:
+					if (g_xr->request_client_exit != NULL) {
+						(void)g_xr->request_client_exit(g_xr->session,
+						                                e->pointer.hitClientId);
+					}
+					break;
+				case SHELL_CHROME_REGION_MAX:
+					if (g_xr->request_client_fullscreen != NULL) {
+						(void)g_xr->request_client_fullscreen(g_xr->session,
+						                                       e->pointer.hitClientId,
+						                                       XR_TRUE);
+					}
+					break;
+				case SHELL_CHROME_REGION_MIN:
+				case SHELL_CHROME_REGION_GRIP:
+				default:
+					// Min: no shell-side handler yet (parity with the
+					// in-runtime button which is also a no-op visually).
+					// Grip: drag-to-move lives in the carousel handler
+					// below for now; a future commit can move it here.
+					break;
+				}
+			}
+
 			// Carousel only: LMB on a TITLE_BAR begins drag; LMB up ends
 			// drag and latches momentum from the most recent angular
 			// velocity sample. Other buttons + non-carousel are ignored —

@@ -438,8 +438,14 @@ render_pill(shell_chrome *sc, chrome_slot &slot)
 }
 
 // Build the chrome layout struct: pose-in-client (above the window content),
-// size (75% width × pill height), hit regions for grip + buttons (placeholder
-// for C4 — geometry only, no interactivity yet).
+// size (75% width × pill height), and the chrome-UV-space hit regions that
+// match the pill rendering — close/min/max each take a UI_BTN_W_M-wide
+// vertical slot at the right edge, grip is the centered 4×2 dot grid.
+//
+// Chrome-UV space: (0,0) = top-left of chrome image, (1,1) = bottom-right.
+// The runtime ray-casts the chrome quad and looks up the first region whose
+// UV bounds contain the hit; the matched region's id is echoed back as
+// chromeRegionId on POINTER / POINTER_MOTION events.
 void
 push_layout(shell_chrome *sc, chrome_slot &slot)
 {
@@ -447,6 +453,43 @@ push_layout(shell_chrome *sc, chrome_slot &slot)
 	const float pill_h_m = PILL_HEIGHT_M;
 	const float gap_m    = pill_h_m * PILL_GAP_FRAC;
 	const float pill_cy  = (slot.win_h_m * 0.5f) + gap_m + (pill_h_m * 0.5f);
+
+	// Per-button slot in chrome-UV: each slot is UI_BTN_W_M wide. Mirrors
+	// the shader's pill-space layout (close on right, then min, then max).
+	const float btn_uw = UI_BTN_W_M / pill_w_m;
+
+	// Grip rect in chrome-UV: 4 dots × 1 mm + 3 gaps × 1 mm = 7 mm wide,
+	// 2 dots × 1 mm + 1 gap × 1 mm = 3 mm tall, centered in the pill.
+	const float grip_w_m = 4.0f * DOT_SIZE_M + 3.0f * DOT_GAP_M;
+	const float grip_h_m = 2.0f * DOT_SIZE_M + 1.0f * DOT_GAP_M;
+	const float grip_uw  = grip_w_m / pill_w_m;
+	const float grip_uh  = grip_h_m / pill_h_m;
+
+	XrWorkspaceChromeHitRegionEXT regions[4];
+	// Close (rightmost slot)
+	regions[0].id = SHELL_CHROME_REGION_CLOSE;
+	regions[0].bounds.offset.x = 1.0f - btn_uw;
+	regions[0].bounds.offset.y = 0.0f;
+	regions[0].bounds.extent.width = btn_uw;
+	regions[0].bounds.extent.height = 1.0f;
+	// Minimize (one slot left of close)
+	regions[1].id = SHELL_CHROME_REGION_MIN;
+	regions[1].bounds.offset.x = 1.0f - 2.0f * btn_uw;
+	regions[1].bounds.offset.y = 0.0f;
+	regions[1].bounds.extent.width = btn_uw;
+	regions[1].bounds.extent.height = 1.0f;
+	// Maximize (two slots left of close)
+	regions[2].id = SHELL_CHROME_REGION_MAX;
+	regions[2].bounds.offset.x = 1.0f - 3.0f * btn_uw;
+	regions[2].bounds.offset.y = 0.0f;
+	regions[2].bounds.extent.width = btn_uw;
+	regions[2].bounds.extent.height = 1.0f;
+	// Grip (centered)
+	regions[3].id = SHELL_CHROME_REGION_GRIP;
+	regions[3].bounds.offset.x = 0.5f - grip_uw * 0.5f;
+	regions[3].bounds.offset.y = 0.5f - grip_uh * 0.5f;
+	regions[3].bounds.extent.width = grip_uw;
+	regions[3].bounds.extent.height = grip_uh;
 
 	XrWorkspaceChromeLayoutEXT layout = {XR_TYPE_WORKSPACE_CHROME_LAYOUT_EXT};
 	layout.poseInClient.orientation.x = 0.0f;
@@ -459,8 +502,8 @@ push_layout(shell_chrome *sc, chrome_slot &slot)
 	layout.sizeMeters.width = pill_w_m;
 	layout.sizeMeters.height = pill_h_m;
 	layout.followsWindowOrient = XR_TRUE;
-	layout.hitRegionCount = 0;
-	layout.hitRegions = nullptr;
+	layout.hitRegionCount = 4;
+	layout.hitRegions = regions;
 	layout.depthBiasMeters = 0.0f; // 0 = use runtime default
 
 	XrResult r = sc->xr->set_chrome_layout(sc->xr->session, slot.id, &layout);

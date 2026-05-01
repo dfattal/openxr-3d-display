@@ -448,6 +448,7 @@ comp_ipc_client_compositor_workspace_enumerate_input_events(struct xrt_composito
 			out->pointer.button = src->u.pointer.button;
 			out->pointer.isDown = src->u.pointer.is_down ? XR_TRUE : XR_FALSE;
 			out->pointer.modifiers = src->u.pointer.modifiers;
+			out->pointer.chromeRegionId = (XrWorkspaceChromeRegionIdEXT)src->u.pointer.chrome_region_id;
 			break;
 		case IPC_WORKSPACE_INPUT_EVENT_POINTER_HOVER:
 			out->pointerHover.prevClientId =
@@ -481,6 +482,7 @@ comp_ipc_client_compositor_workspace_enumerate_input_events(struct xrt_composito
 			out->pointerMotion.cursorY = (int32_t)src->u.pointer_motion.cursor_y;
 			out->pointerMotion.buttonMask = src->u.pointer_motion.button_mask;
 			out->pointerMotion.modifiers = src->u.pointer_motion.modifiers;
+			out->pointerMotion.chromeRegionId = (XrWorkspaceChromeRegionIdEXT)src->u.pointer_motion.chrome_region_id;
 			break;
 		case IPC_WORKSPACE_INPUT_EVENT_FRAME_TICK:
 			out->frameTick.timestampNs = src->u.frame_tick.timestamp_ns;

@@ -4771,6 +4771,16 @@ struct workspace_hit_result
 	float local_x_m;    //!< Hit point in window-local meters (0 = left edge)
 	float local_y_m;    //!< Hit point in window-local meters (0 = top of title bar, positive down)
 	int edge_flags;      //!< RESIZE_LEFT|RIGHT|TOP|BOTTOM if near edge
+
+	// Phase 2.C C4: controller-submitted chrome quad. Populated additively
+	// alongside the in-runtime chrome fields above so the runtime's existing
+	// cursor + drag logic keeps working until C5 deletes the in-runtime
+	// chrome render block. The shell reads chrome_region_id off POINTER /
+	// POINTER_MOTION events to dispatch close/min/max/grip semantics.
+	bool     in_chrome_quad;     //!< Hit fell inside the controller-submitted chrome quad
+	uint32_t chrome_region_id;   //!< Matched region id from slot->chrome_regions[]; 0 if no region or no hit
+	float    chrome_local_u;     //!< Hit point in chrome-UV [0,1] (0 = left edge of chrome image)
+	float    chrome_local_v;     //!< Hit point in chrome-UV [0,1] (0 = top of chrome image)
 };
 
 static void launcher_set_visible(struct d3d11_service_system *sys,
@@ -5125,10 +5135,28 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 		// Outer hover bounds (content + gap + pill). Resize zones extend
 		// outward from the content rect on all four sides.
 		float ext_top = has_workspace_title_bar ? pill_top : win_top;
+		float ext_left = win_left;
+		float ext_right = win_right;
+		float ext_bottom = win_bottom;
+
+		// Phase 2.C C4: include the controller-submitted chrome quad in the
+		// outer bounds so hits inside chrome — even if the chrome is wider
+		// than or positioned outside the in-runtime pill — still reach the
+		// chrome detection block below.
+		if (mc->clients[s].chrome_xsc != nullptr && mc->clients[s].chrome_layout_valid) {
+			float ch_cx = mc->clients[s].chrome_pose_in_client.position.x;
+			float ch_cy = mc->clients[s].chrome_pose_in_client.position.y;
+			float ch_hw = mc->clients[s].chrome_size_w_m * 0.5f;
+			float ch_hh = mc->clients[s].chrome_size_h_m * 0.5f;
+			if (win_x + ch_cx - ch_hw < ext_left)   ext_left   = win_x + ch_cx - ch_hw;
+			if (win_x + ch_cx + ch_hw > ext_right)  ext_right  = win_x + ch_cx + ch_hw;
+			if (win_y + ch_cy - ch_hh < ext_bottom) ext_bottom = win_y + ch_cy - ch_hh;
+			if (win_y + ch_cy + ch_hh > ext_top)    ext_top    = win_y + ch_cy + ch_hh;
+		}
 
 		// Check if hit is within extended window bounds (including resize zone)
-		if (hit_x >= win_left - resize_zone_m && hit_x < win_right + resize_zone_m &&
-		    hit_y >= win_bottom - resize_zone_m && hit_y < ext_top + resize_zone_m) {
+		if (hit_x >= ext_left - resize_zone_m && hit_x < ext_right + resize_zone_m &&
+		    hit_y >= ext_bottom - resize_zone_m && hit_y < ext_top + resize_zone_m) {
 
 			// Window-local coordinates relative to top of the pill (or
 			// content for capture clients), positive down/right.
@@ -5194,6 +5222,47 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 				                         (local_x >= win_w - 2.0f * btn_w_m);
 				result.in_maximize_btn = !result.in_close_btn && !result.in_minimize_btn &&
 				                         (local_x >= win_w - 3.0f * btn_w_m);
+			}
+
+			// Phase 2.C C4: ALSO test the controller-submitted chrome quad
+			// (additive to the in-runtime chrome hit-test fields above). The
+			// chrome quad bounds come from slot->chrome_pose_in_client +
+			// chrome_size_w/h_m and live in window-local space, so we compute
+			// them in flat coords using the same hit_x/hit_y the in-runtime
+			// path already projected into.
+			//
+			// Chrome-UV [0,1]^2 has UV(0,0) at the chrome image's TOP-LEFT —
+			// i.e. high-Y corner of the chrome quad in world coords. We set
+			// chrome_region_id from the first matching hit_regions[] entry;
+			// no match leaves it 0 (still in_chrome_quad — caller can treat
+			// region 0 as "chrome bg" if useful). Region 0 is reserved as
+			// XR_NULL_WORKSPACE_CHROME_REGION_ID per the public spec.
+			if (mc->clients[s].chrome_xsc != nullptr && mc->clients[s].chrome_layout_valid) {
+				float ch_cx = mc->clients[s].chrome_pose_in_client.position.x;
+				float ch_cy = mc->clients[s].chrome_pose_in_client.position.y;
+				float ch_hw = mc->clients[s].chrome_size_w_m * 0.5f;
+				float ch_hh = mc->clients[s].chrome_size_h_m * 0.5f;
+				float ch_left  = win_x + ch_cx - ch_hw;
+				float ch_right = win_x + ch_cx + ch_hw;
+				float ch_bot   = win_y + ch_cy - ch_hh;
+				float ch_top   = win_y + ch_cy + ch_hh;
+				if (hit_x >= ch_left && hit_x < ch_right &&
+				    hit_y >= ch_bot  && hit_y < ch_top) {
+					result.in_chrome_quad = true;
+					float u = (hit_x - ch_left) / (ch_right - ch_left);
+					float v = 1.0f - (hit_y - ch_bot) / (ch_top - ch_bot); // Y-flip: UV(0,0) = top-left
+					result.chrome_local_u = u;
+					result.chrome_local_v = v;
+					for (uint32_t ri = 0; ri < mc->clients[s].chrome_region_count; ri++) {
+						const struct ipc_workspace_chrome_hit_region *reg = &mc->clients[s].chrome_regions[ri];
+						if (reg->id == 0) continue; // 0 is the null sentinel
+						if (u >= reg->bounds_x && u < reg->bounds_x + reg->bounds_w &&
+						    v >= reg->bounds_y && v < reg->bounds_y + reg->bounds_h) {
+							result.chrome_region_id = reg->id;
+							break;
+						}
+					}
+				}
 			}
 
 			// Edge detection (resize zones)
@@ -12077,6 +12146,13 @@ comp_d3d11_service_workspace_drain_input_events(struct xrt_system_compositor *xs
 					if (win_w > 0.0f) ev->u.pointer.local_u = hit.local_x_m / win_w;
 					if (win_h > 0.0f) ev->u.pointer.local_v = hit.local_y_m / win_h;
 				}
+				// Phase 2.C C4: controller-defined chrome region. 0 if no
+				// chrome hit OR if hit fell outside the controller's
+				// declared hit_regions[]. Set additively alongside the
+				// legacy in_close_btn etc. — the runtime's existing in-
+				// runtime cursor + drag logic still uses the legacy bits
+				// until C5 deletes the in-runtime chrome render block.
+				ev->u.pointer.chrome_region_id = hit.chrome_region_id;
 			}
 			break;
 		}
@@ -12113,6 +12189,8 @@ comp_d3d11_service_workspace_drain_input_events(struct xrt_system_compositor *xs
 					if (win_h > 0.0f)
 						ev->u.pointer_motion.local_v = hit.local_y_m / win_h;
 				}
+				// Phase 2.C C4: see POINTER comment above.
+				ev->u.pointer_motion.chrome_region_id = hit.chrome_region_id;
 			}
 			break;
 		}
