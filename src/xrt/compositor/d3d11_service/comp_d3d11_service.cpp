@@ -796,6 +796,15 @@ struct d3d11_multi_compositor
 	//! the first drain after any non-empty focus emits a transition.
 	int32_t focused_slot_last_emitted;
 
+	//! Phase 2.C C3.C-4: per-frame hovered slot from workspace_raycast_hit_test
+	//! (the in-runtime chrome-fade hit-test). Used to emit POINTER_HOVER
+	//! events when the hovered slot changes so controllers can drive their
+	//! own chrome fade in grid/immersive modes (where pointer capture is OFF
+	//! and per-frame MOTION events aren't published). -1 = no hover.
+	//! Updated by render_pass; consumed by drain.
+	int32_t hovered_slot;
+	int32_t hovered_slot_last_emitted;
+
 	//! Phase 2.K: vsync-aligned frame counter. Incremented once per
 	//! `multi_compositor_render` and read by the public-API drain to emit
 	//! FRAME_TICK events (capped per-batch) so controllers can pace
@@ -4366,6 +4375,8 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 		std::memset(sys->multi_comp, 0, sizeof(*sys->multi_comp));
 		sys->multi_comp->focused_slot = -1;
 		sys->multi_comp->focused_slot_last_emitted = -1;
+		sys->multi_comp->hovered_slot = -1;
+		sys->multi_comp->hovered_slot_last_emitted = -1;
 	}
 
 	struct d3d11_multi_compositor *mc = sys->multi_comp;
@@ -5968,6 +5979,11 @@ after_key_shortcuts:
 			// alphas head toward 0.
 			{
 				int hovered_slot = hover.slot; // -1 if no slot under cursor
+				// Phase 2.C C3.C-4: publish per-frame hovered slot so the
+				// drain can emit POINTER_HOVER on transitions. Lets the
+				// shell drive its own controller-side chrome fade in modes
+				// where pointer capture is OFF (grid / immersive — most use).
+				mc->hovered_slot = hovered_slot;
 				uint64_t now_ns_chrome = os_monotonic_get_ns();
 				for (int sf = 0; sf < D3D11_MULTI_MAX_CLIENTS; sf++) {
 					if (!mc->clients[sf].active ||
@@ -6423,11 +6439,18 @@ after_key_shortcuts:
 						mc->title_rmb_drag.active = true;
 						mc->title_rmb_drag.slot = rmb_hit.slot;
 						mc->title_rmb_drag.start_cursor = pt;
-						// Extract current yaw/pitch from quaternion
+						// Extract current yaw/pitch from quaternion. Note:
+						// math_quat_to_euler_angles uses Eigen's Z-Y-X
+						// decomposition and writes the result with .x = Z
+						// (roll), .y = Y (yaw), .z = X (pitch). Reading
+						// pitch from .x (the roll slot) was a long-standing
+						// bug — on every RMB-drag start it snapped pitch
+						// to 0, so any previously-accumulated pitch
+						// vanished the moment the user pressed RMB again.
 						struct xrt_vec3 euler;
 						math_quat_to_euler_angles(&mc->clients[rmb_hit.slot].window_pose.orientation, &euler);
 						mc->title_rmb_drag.start_yaw = euler.y;
-						mc->title_rmb_drag.start_pitch = euler.x;
+						mc->title_rmb_drag.start_pitch = euler.z;
 					}
 				}
 			} else if (mc->title_rmb_drag.active) {
@@ -12220,6 +12243,29 @@ comp_d3d11_service_workspace_drain_input_events(struct xrt_system_compositor *xs
 		ev->u.focus_changed.curr_client_id =
 		    (mc->focused_slot >= 0) ? (1000u + (uint32_t)mc->focused_slot) : 0;
 		mc->focused_slot_last_emitted = mc->focused_slot;
+		out_batch->count++;
+	}
+
+	// Phase 2.C C3.C-4: POINTER_HOVER on hovered-slot transition. Lets
+	// controllers drive a chrome fade in modes where pointer capture is
+	// OFF (grid/immersive), so per-frame MOTION events aren't published
+	// but the runtime's per-frame hit-test still tracks which slot the
+	// cursor is over. prev/curr_region stay 0 — the controller cares
+	// about the slot transition, not the sub-region. (Sub-region is
+	// already on POINTER / POINTER_MOTION events as chromeRegionId.)
+	if (mc->hovered_slot != mc->hovered_slot_last_emitted &&
+	    out_batch->count < IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX) {
+		struct ipc_workspace_input_event *ev = &out_batch->events[out_batch->count];
+		memset(ev, 0, sizeof(*ev));
+		ev->event_type = IPC_WORKSPACE_INPUT_EVENT_POINTER_HOVER;
+		ev->timestamp_ms = (uint32_t)GetTickCount();
+		ev->u.pointer_hover.prev_client_id =
+		    (mc->hovered_slot_last_emitted >= 0) ? (1000u + (uint32_t)mc->hovered_slot_last_emitted) : 0;
+		ev->u.pointer_hover.prev_region = 0;
+		ev->u.pointer_hover.curr_client_id =
+		    (mc->hovered_slot >= 0) ? (1000u + (uint32_t)mc->hovered_slot) : 0;
+		ev->u.pointer_hover.curr_region = 0;
+		mc->hovered_slot_last_emitted = mc->hovered_slot;
 		out_batch->count++;
 	}
 

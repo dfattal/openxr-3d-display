@@ -297,7 +297,7 @@ typedef XrResult (XRAPI_PTR *PFN_xrGetWorkspaceFocusedClientEXT)(
 
 typedef enum XrWorkspaceInputEventTypeEXT {
     XR_WORKSPACE_INPUT_EVENT_POINTER_EXT        = 0,
-    XR_WORKSPACE_INPUT_EVENT_POINTER_HOVER_EXT  = 1, // reserved; not yet emitted
+    XR_WORKSPACE_INPUT_EVENT_POINTER_HOVER_EXT  = 1, // spec_version 7: emitted on hovered-slot transitions (per-frame raycast — fires regardless of pointer-capture state)
     XR_WORKSPACE_INPUT_EVENT_KEY_EXT            = 2,
     XR_WORKSPACE_INPUT_EVENT_SCROLL_EXT         = 3,
     XR_WORKSPACE_INPUT_EVENT_POINTER_MOTION_EXT = 4, // spec_version 6

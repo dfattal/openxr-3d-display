@@ -1011,22 +1011,18 @@ shell_drain_input_events(void)
 			}
 			break;
 		}
-		case XR_WORKSPACE_INPUT_EVENT_POINTER_MOTION_EXT: {
-			// Phase 2.C C3.C-4: feed hover state to chrome so it can fade
-			// in/out. The runtime fills hitClientId on POINTER_MOTION when
-			// the cursor is over a window's chrome region (TITLE_BAR or one
-			// of the buttons). Pass 0 when no chrome region is hit so all
-			// slots fade out.
+		case XR_WORKSPACE_INPUT_EVENT_POINTER_HOVER_EXT: {
+			// Phase 2.C C3.C-4: hovered-slot transitions from the runtime.
+			// Emitted whenever the per-frame hit-test sees the cursor enter
+			// or leave a window slot — regardless of pointer-capture state,
+			// so this works in grid + immersive modes where MOTION events
+			// don't fire. currentClientId == 0 means "cursor off all slots."
 			if (g_chrome != NULL) {
-				bool over_chrome =
-				    (e->pointerMotion.hitRegion == XR_WORKSPACE_HIT_REGION_TITLE_BAR_EXT) ||
-				    (e->pointerMotion.hitRegion == XR_WORKSPACE_HIT_REGION_CHROME_EXT) ||
-				    (e->pointerMotion.chromeRegionId != 0);
-				XrWorkspaceClientId hover_id =
-				    over_chrome ? e->pointerMotion.hitClientId : XR_NULL_WORKSPACE_CLIENT_ID;
-				shell_chrome_set_hover(g_chrome, hover_id);
+				shell_chrome_set_hover(g_chrome, e->pointerHover.currentClientId);
 			}
-
+			break;
+		}
+		case XR_WORKSPACE_INPUT_EVENT_POINTER_MOTION_EXT: {
 			if (!carousel_active || !s_car.dragging) break;
 			// Accumulate angle from cursor delta; sample angular velocity
 			// in rad/sec for the post-release momentum.
