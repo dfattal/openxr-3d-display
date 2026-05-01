@@ -4725,7 +4725,8 @@ multi_compositor_ensure_output(struct d3d11_service_system *sys)
 struct workspace_hit_result
 {
 	int slot;            //!< Hit window slot (-1 = no hit)
-	bool in_title_bar;   //!< Hit is in the title bar region
+	bool in_title_bar;   //!< Hit is in the title bar region (pill bg)
+	bool in_grip_handle; //!< Hit is on the 8-dot grip in the pill center (drag/rotate region)
 	bool in_close_btn;    //!< Hit is on the close button
 	bool in_minimize_btn; //!< Hit is on the minimize button
 	bool in_maximize_btn; //!< Hit is on the maximize/fullscreen button
@@ -5126,6 +5127,29 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 				                         (pill_local_x >= pill_w_m - 2.0f * btn_w_m);
 				result.in_maximize_btn = !result.in_close_btn && !result.in_minimize_btn &&
 				                         (pill_local_x >= pill_w_m - 3.0f * btn_w_m);
+
+				// Grip handle: 8-dot grid centered in the pill (4 cols × 2
+				// rows, 1 mm dots with 1 mm gaps → 7 mm × 3 mm). Mirrors
+				// chrome-render geometry — drag/rotate is only valid here.
+				const float DOT_SIZE_M = 0.001f;
+				const float DOT_GAP_M  = 0.001f;
+				const int   GRIP_COLS  = 4;
+				const int   GRIP_ROWS  = 2;
+				float grip_w_m = (float)GRIP_COLS * DOT_SIZE_M +
+				                 (float)(GRIP_COLS - 1) * DOT_GAP_M;
+				float grip_h_m = (float)GRIP_ROWS * DOT_SIZE_M +
+				                 (float)(GRIP_ROWS - 1) * DOT_GAP_M;
+				float grip_cx = (pill_left + pill_right) * 0.5f;
+				float grip_cy = (pill_bot + pill_top) * 0.5f;
+				float grip_left = grip_cx - grip_w_m * 0.5f;
+				float grip_right = grip_cx + grip_w_m * 0.5f;
+				float grip_bot = grip_cy - grip_h_m * 0.5f;
+				float grip_top = grip_cy + grip_h_m * 0.5f;
+				if (!result.in_close_btn && !result.in_minimize_btn && !result.in_maximize_btn &&
+				    hit_x >= grip_left && hit_x < grip_right &&
+				    hit_y >= grip_bot && hit_y < grip_top) {
+					result.in_grip_handle = true;
+				}
 			} else if (result.in_title_bar) {
 				// Capture-client compatibility (buttons relative to window).
 				result.in_close_btn = (local_x >= win_w - btn_w_m);
@@ -5867,8 +5891,8 @@ after_key_shortcuts:
 					cursor_id = 1;
 				else if (ef & (RESIZE_TOP | RESIZE_BOTTOM))
 					cursor_id = 2;
-				else if (hover.in_title_bar)
-					cursor_id = 5; // move cursor on title bar hover
+				else if (hover.in_grip_handle)
+					cursor_id = 5; // move cursor only on the grip dots
 			}
 		}
 		comp_d3d11_window_set_cursor(mc->window, cursor_id);
@@ -6019,7 +6043,11 @@ after_key_shortcuts:
 
 					bool ctrl_owns_drag = (mc->window != nullptr) &&
 					                      comp_d3d11_window_is_workspace_pointer_capture_enabled(mc->window);
-					if (!ctrl_owns_drag) {
+					// Phase 2.K Commit 8 tweak: drag only starts on the
+					// grip dots, not on the entire pill. Lets buttons stay
+					// at the right edge while keeping the drag affordance
+					// visually obvious (the dotted grip).
+					if (!ctrl_owns_drag && hit.in_grip_handle) {
 						mc->title_drag.active = true;
 						mc->title_drag.slot = hit_slot;
 						// Suppress input forwarding during drag
@@ -6282,7 +6310,9 @@ after_key_shortcuts:
 						mc->focused_slot = rmb_hit.slot;
 						multi_compositor_update_input_forward(mc);
 					}
-					if (rmb_hit.in_title_bar && !rmb_hit.in_close_btn && !rmb_hit.in_minimize_btn) {
+					// Phase 2.K Commit 8 tweak: only start rotation drag
+					// when RMB lands on the grip dots (matches LMB drag).
+					if (rmb_hit.in_grip_handle) {
 						// Start rotation drag
 						mc->title_rmb_drag.active = true;
 						mc->title_rmb_drag.slot = rmb_hit.slot;
@@ -6984,17 +7014,21 @@ after_key_shortcuts:
 			    src_col, src_row, half_w, half_h, ca_w, ca_h,
 			    quad_corners, quad_w_vals);
 
-			// Draw focus glow behind focused window (before content blit)
+			// Draw focus glow behind focused window (before content blit).
+			// Phase 2.K Commit 8 tweak 2: glow wraps the CONTENT quad only.
+			// The pill floats above with a visible gap; previously the glow
+			// extended UP by UI_TITLE_BAR_H_M to where the legacy attached
+			// title bar lived, which now overlaps the gap and the pill bottom
+			// — making the chrome appear taller when focus changes on click.
 			if (s == mc->focused_slot && sys->blit_vs && sys->blit_ps) {
 				float glow_hw = mc->clients[s].window_width_m / 2.0f + UI_GLOW_MARGIN_M;
 				float glow_hh = mc->clients[s].window_height_m / 2.0f + UI_GLOW_MARGIN_M;
-				float glow_tb_h = (mc->clients[s].client_type != CLIENT_TYPE_CAPTURE)
-				    ? UI_TITLE_BAR_H_M : 0.0f;
-				float glow_total_h = mc->clients[s].window_height_m + glow_tb_h + 2.0f * UI_GLOW_MARGIN_M;
+				(void)glow_hh;
+				float glow_total_h = mc->clients[s].window_height_m + 2.0f * UI_GLOW_MARGIN_M;
 				float glow_ext = UI_GLOW_MARGIN_M / (glow_total_h / 2.0f);
 
 				float gl_l = -glow_hw;
-				float gl_t = mc->clients[s].window_height_m / 2.0f + glow_tb_h + UI_GLOW_MARGIN_M;
+				float gl_t = mc->clients[s].window_height_m / 2.0f + UI_GLOW_MARGIN_M;
 				float gl_r = glow_hw;
 				float gl_b = -(mc->clients[s].window_height_m / 2.0f + UI_GLOW_MARGIN_M);
 
@@ -7034,14 +7068,12 @@ after_key_shortcuts:
 						gcb->dst_rect_wh[0] = 0; gcb->dst_rect_wh[1] = 0;
 					} else {
 						float margin_px_x = UI_GLOW_MARGIN_M / mc->clients[s].window_width_m * dest_px_w;
-						float margin_px_y = UI_GLOW_MARGIN_M / (mc->clients[s].window_height_m + glow_tb_h) * (dest_px_h + (float)TITLE_BAR_HEIGHT_PX);
-						float tb_px_f = (mc->clients[s].client_type != CLIENT_TYPE_CAPTURE)
-						    ? (float)TITLE_BAR_HEIGHT_PX : 0.0f;
+						float margin_px_y = UI_GLOW_MARGIN_M / mc->clients[s].window_height_m * dest_px_h;
 						gcb->quad_mode = 0;
 						gcb->dst_offset[0] = dest_px_x - margin_px_x;
-						gcb->dst_offset[1] = dest_px_y - tb_px_f - margin_px_y;
+						gcb->dst_offset[1] = dest_px_y - margin_px_y;
 						gcb->dst_rect_wh[0] = dest_px_w + 2.0f * margin_px_x;
-						gcb->dst_rect_wh[1] = dest_px_h + tb_px_f + 2.0f * margin_px_y;
+						gcb->dst_rect_wh[1] = dest_px_h + 2.0f * margin_px_y;
 						memset(gcb->quad_corners_01, 0, sizeof(gcb->quad_corners_01));
 						memset(gcb->quad_corners_23, 0, sizeof(gcb->quad_corners_23));
 					}
@@ -7259,7 +7291,16 @@ after_key_shortcuts:
 		// would be redundant.
 		if (mc->clients[s].client_type != CLIENT_TYPE_CAPTURE)
 		{
-			float tb_h_frac = (float)TITLE_BAR_HEIGHT_PX / (float)ca_h;
+			// `TITLE_BAR_HEIGHT_PX` is in TILE-pixel scale (44.5 px on a
+			// 1080-tall tile for an 8 mm bar). To get the atlas-fraction
+			// that matches `wfy = eye_rect_y/ca_h` (atlas-pixel scale), we
+			// must divide by `half_h` (= tile_px_h), not `ca_h` (= full
+			// atlas height). Dividing by `ca_h` gives a 2× understated
+			// fraction → pill rendered at half the intended height in the
+			// axis-aligned path (the rotated path uses
+			// project_local_rect_for_eye with `dpy/ca_h` in atlas-px and
+			// renders correctly).
+			float tb_h_frac = (float)TITLE_BAR_HEIGHT_PX / (float)half_h;
 			// Window local-space dimensions for rotated chrome
 			bool is_rotated = !quat_is_identity(&mc->clients[s].window_pose.orientation);
 			float win_hw = mc->clients[s].window_width_m / 2.0f;
@@ -7472,90 +7513,106 @@ after_key_shortcuts:
 							}
 						}
 					}
-					// Close button (red)
+					// Phase 2.K Commit 8 tweak 3: buttons drawn as circles
+					// inset within their 8mm × 8mm slot so they read as
+					// distinct controls rather than connected rectangles
+					// (matches the concept's small round pill-caps).
+					const float BTN_INSET_FRAC = 0.18f;
+					float btn_inset_m = btn_w_m_val * BTN_INSET_FRAC;
+					float btn_inset_y = tb_h_m * BTN_INSET_FRAC;
+					float btn_inset_px_x = (float)CLOSE_BTN_WIDTH_PX * BTN_INSET_FRAC;
+					float btn_inset_px_y = toh * BTN_INSET_FRAC;
+					// Close button (red circle)
 					{
 						D3D11_MAPPED_SUBRESOURCE mapped;
 						if (SUCCEEDED(sys->context->Map(sys->blit_constant_buffer.get(), 0,
 						              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 							BlitConstants *cb = static_cast<BlitConstants *>(mapped.pData);
 							bool close_hover = (mc->hover_btn == 1 && mc->hover_btn_slot == s);
-							// Phase 2.K Commit 8.F: vivid red close button.
-							// Hover brightens the bg.
-							cb->src_rect[0] = close_hover ? 0.95f : 0.85f;
-							cb->src_rect[1] = close_hover ? 0.30f : 0.22f;
-							cb->src_rect[2] = close_hover ? 0.30f : 0.22f;
+							cb->src_rect[0] = close_hover ? 0.97f : 0.88f;
+							cb->src_rect[1] = close_hover ? 0.32f : 0.24f;
+							cb->src_rect[2] = close_hover ? 0.32f : 0.24f;
 							cb->src_rect[3] = 1.0f;
 							cb->src_size[0] = 1; cb->src_size[1] = 1;
 							cb->dst_size[0] = (float)ca_w; cb->dst_size[1] = (float)ca_h;
 							cb->convert_srgb = 2.0f;
-							cb->chrome_alpha = chrome_fade_attenuation; // 8.C: per-slot pill fade
-							// All four corners rounded so the close button reads as
-							// a soft pill-cap; aspect=-1 with small radius gives a
-							// subtle rounding without consuming the whole button.
-							cb->corner_radius = -0.30f;
+							cb->chrome_alpha = chrome_fade_attenuation;
+							// Full circle: radius = 50% of (smaller) dim,
+							// aspect = -1 = "all four corners".
+							cb->corner_radius = -0.5f;
 							cb->corner_aspect = -1.0f;
-							cb->edge_feather = 0.0f;
+							cb->edge_feather = 0.10f;
 							cb->glow_intensity = 0.0f;
-							float btn_x = tox + tow - (float)CLOSE_BTN_WIDTH_PX;
+							float btn_x = tox + tow - (float)CLOSE_BTN_WIDTH_PX + btn_inset_px_x;
+							float btn_w_px = (float)CLOSE_BTN_WIDTH_PX - 2.0f * btn_inset_px_x;
+							float btn_h_px = toh - 2.0f * btn_inset_px_y;
+							float btn_y = toy + btn_inset_px_y;
 							CHROME_BLIT_POS(cb,
-							    pill_hw - btn_w_m_val, pill_top_m, pill_hw, pill_bot_m,
-							    btn_x, toy, (float)CLOSE_BTN_WIDTH_PX, toh);
+							    pill_hw - btn_w_m_val + btn_inset_m, pill_top_m - btn_inset_y,
+							    pill_hw - btn_inset_m, pill_bot_m + btn_inset_y,
+							    btn_x, btn_y, btn_w_px, btn_h_px);
 							sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 							sys->context->Draw(4, 0);
 						}
 					}
-					// Minimize button (gray)
+					// Minimize button (gray circle)
 					{
 						D3D11_MAPPED_SUBRESOURCE mapped;
 						if (SUCCEEDED(sys->context->Map(sys->blit_constant_buffer.get(), 0,
 						              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 							BlitConstants *cb = static_cast<BlitConstants *>(mapped.pData);
 							bool min_hover = (mc->hover_btn == 2 && mc->hover_btn_slot == s);
-							// Phase 2.K Commit 8.F: gray minimize button.
-							cb->src_rect[0] = min_hover ? 0.55f : 0.42f;
-							cb->src_rect[1] = min_hover ? 0.57f : 0.44f;
-							cb->src_rect[2] = min_hover ? 0.60f : 0.48f;
+							cb->src_rect[0] = min_hover ? 0.62f : 0.48f;
+							cb->src_rect[1] = min_hover ? 0.64f : 0.50f;
+							cb->src_rect[2] = min_hover ? 0.68f : 0.54f;
 							cb->src_rect[3] = 1.0f;
 							cb->src_size[0] = 1; cb->src_size[1] = 1;
 							cb->dst_size[0] = (float)ca_w; cb->dst_size[1] = (float)ca_h;
 							cb->convert_srgb = 2.0f;
-							cb->chrome_alpha = chrome_fade_attenuation; // 8.C: per-slot pill fade
-							cb->corner_radius = -0.30f;
+							cb->chrome_alpha = chrome_fade_attenuation;
+							cb->corner_radius = -0.5f;
 							cb->corner_aspect = -1.0f;
-							cb->edge_feather = 0.0f; cb->glow_intensity = 0.0f;
-							float min_x = tox + tow - 2.0f * (float)CLOSE_BTN_WIDTH_PX;
+							cb->edge_feather = 0.10f;
+							cb->glow_intensity = 0.0f;
+							float min_x = tox + tow - 2.0f * (float)CLOSE_BTN_WIDTH_PX + btn_inset_px_x;
+							float btn_w_px = (float)CLOSE_BTN_WIDTH_PX - 2.0f * btn_inset_px_x;
+							float btn_h_px = toh - 2.0f * btn_inset_px_y;
+							float btn_y = toy + btn_inset_px_y;
 							CHROME_BLIT_POS(cb,
-							    pill_hw - 2*btn_w_m_val, pill_top_m, pill_hw - btn_w_m_val, pill_bot_m,
-							    min_x, toy, (float)CLOSE_BTN_WIDTH_PX, toh);
+							    pill_hw - 2*btn_w_m_val + btn_inset_m, pill_top_m - btn_inset_y,
+							    pill_hw - btn_w_m_val - btn_inset_m, pill_bot_m + btn_inset_y,
+							    min_x, btn_y, btn_w_px, btn_h_px);
 							sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 							sys->context->Draw(4, 0);
 						}
 					}
-					// Maximize/fullscreen button (blue)
+					// Maximize/fullscreen button (gray circle)
 					{
 						D3D11_MAPPED_SUBRESOURCE mapped;
 						if (SUCCEEDED(sys->context->Map(sys->blit_constant_buffer.get(), 0,
 						              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 							BlitConstants *cb = static_cast<BlitConstants *>(mapped.pData);
 							bool max_hover = (mc->hover_btn == 3 && mc->hover_btn_slot == s);
-							// Phase 2.K Commit 8.F: gray maximize button (no
-							// longer the old blue accent — the colour cue is
-							// reserved for "destructive" actions like close).
-							cb->src_rect[0] = max_hover ? 0.55f : 0.42f;
-							cb->src_rect[1] = max_hover ? 0.57f : 0.44f;
-							cb->src_rect[2] = max_hover ? 0.60f : 0.48f;
+							cb->src_rect[0] = max_hover ? 0.62f : 0.48f;
+							cb->src_rect[1] = max_hover ? 0.64f : 0.50f;
+							cb->src_rect[2] = max_hover ? 0.68f : 0.54f;
 							cb->src_rect[3] = 1.0f;
 							cb->src_size[0] = 1; cb->src_size[1] = 1;
 							cb->dst_size[0] = (float)ca_w; cb->dst_size[1] = (float)ca_h;
 							cb->convert_srgb = 2.0f;
-							cb->chrome_alpha = chrome_fade_attenuation; // 8.C: per-slot pill fade
-							cb->corner_radius = -0.30f;
+							cb->chrome_alpha = chrome_fade_attenuation;
+							cb->corner_radius = -0.5f;
 							cb->corner_aspect = -1.0f;
-							cb->edge_feather = 0.0f; cb->glow_intensity = 0.0f;
-							float max_x = tox + tow - 3.0f * (float)CLOSE_BTN_WIDTH_PX;
+							cb->edge_feather = 0.10f;
+							cb->glow_intensity = 0.0f;
+							float max_x = tox + tow - 3.0f * (float)CLOSE_BTN_WIDTH_PX + btn_inset_px_x;
+							float btn_w_px = (float)CLOSE_BTN_WIDTH_PX - 2.0f * btn_inset_px_x;
+							float btn_h_px = toh - 2.0f * btn_inset_px_y;
+							float btn_y = toy + btn_inset_px_y;
 							CHROME_BLIT_POS(cb,
-							    pill_hw - 3*btn_w_m_val, pill_top_m, pill_hw - 2*btn_w_m_val, pill_bot_m,
-							    max_x, toy, (float)CLOSE_BTN_WIDTH_PX, toh);
+							    pill_hw - 3*btn_w_m_val + btn_inset_m, pill_top_m - btn_inset_y,
+							    pill_hw - 2*btn_w_m_val - btn_inset_m, pill_bot_m + btn_inset_y,
+							    max_x, btn_y, btn_w_px, btn_h_px);
 							sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 							sys->context->Draw(4, 0);
 						}
@@ -7574,6 +7631,25 @@ after_key_shortcuts:
 						if (gh > toh) gh = toh; // cap to title bar height
 						float gpad = (toh - gh) / 2.0f; // vertical centering
 						if (gpad < 0) gpad = 0;
+						// Phase 2.K Commit 8 tweak 5: tunable manual y-bias for the
+						// font-rendered glyphs. D2D's vertical-centering inside the
+						// atlas cell is asymmetric (cell reserves descender room),
+						// so the visible glyph drifts inside the cell; magnitude
+						// depends on the font's exact metrics. Easier to dial in
+						// than to compute from font internals.
+						//
+						// Units: atlas pixels. NEGATIVE = lift glyph UP. Increase
+						// magnitude (more negative) if glyphs look too low; decrease
+						// toward 0 if too high. Affects close-X, minimize-`-`, and
+						// the title text. The procedural maximize square + grip
+						// dots are unaffected (they're already centered).
+						const float GLYPH_Y_BIAS_PX = -6.0f;
+						// In world-local Y (+Y = up), "lift up by N atlas-px"
+						// equals "+N * disp_h_m / tile_px_h meters". Sign-flip
+						// since GLYPH_Y_BIAS_PX is negative-when-lifting.
+						const float GLYPH_Y_LIFT_M = (-GLYPH_Y_BIAS_PX) /
+						                             (float)half_h *
+						                             sys->base.info.display_height_m;
 						// Glyph vertical centering in meters (for rotated path)
 						float glyph_render_h_m = glyph_h_m * (gh / (float)GLYPH_H);
 						float glyph_vpad_m = (tb_h_m - glyph_render_h_m) / 2.0f;
@@ -7612,12 +7688,12 @@ after_key_shortcuts:
 								// to the pill (not the window) under 8.B.
 								float m_per_px = glyph_w_m / ((float)GLYPH_W > 0 ? (float)GLYPH_W : 1.0f);
 								float gl_left = -pill_hw + glyph_w_m + px_cursor * m_per_px;
-								float gl_top = pill_top_m - glyph_vpad_m;
+								float gl_top = pill_top_m - glyph_vpad_m + GLYPH_Y_LIFT_M;
 								float gl_right = gl_left + dst_gw * m_per_px;
 								float gl_bottom = gl_top - glyph_render_h_m;
 								CHROME_BLIT_POS(cb,
 								    gl_left, gl_top, gl_right, gl_bottom,
-								    tox + (float)GLYPH_W + px_cursor, toy + gpad, dst_gw, gh);
+								    tox + (float)GLYPH_W + px_cursor, toy + gpad + GLYPH_Y_BIAS_PX, dst_gw, gh);
 								sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 								sys->context->Draw(4, 0);
 							}
@@ -7639,7 +7715,7 @@ after_key_shortcuts:
 							float bx = tox + tow - (float)CLOSE_BTN_WIDTH_PX + ((float)CLOSE_BTN_WIDTH_PX - dst_gw) / 2.0f;
 							// Local: centered in close button
 							float xg_left = pill_hw - btn_w_m_val + (btn_w_m_val - glyph_w_m) / 2.0f;
-							float xg_top = pill_top_m - glyph_vpad_m;
+							float xg_top = pill_top_m - glyph_vpad_m + GLYPH_Y_LIFT_M;
 							D3D11_MAPPED_SUBRESOURCE mapped;
 							if (SUCCEEDED(sys->context->Map(sys->blit_constant_buffer.get(), 0,
 							              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -7650,12 +7726,12 @@ after_key_shortcuts:
 								cb->src_size[1] = (float)mc->font_atlas_h;
 								cb->dst_size[0] = (float)ca_w; cb->dst_size[1] = (float)ca_h;
 								cb->convert_srgb = 0.0f;
-								cb->chrome_alpha = chrome_fade_attenuation; // 8.C: per-slot pill fade
+								cb->chrome_alpha = chrome_fade_attenuation;
 								cb->corner_radius = 0; cb->corner_aspect = 0;
 								cb->edge_feather = 0.0f; cb->glow_intensity = 0.0f;
 								CHROME_BLIT_POS(cb,
 								    xg_left, xg_top, xg_left + glyph_w_m, xg_top - glyph_h_m,
-								    bx, toy + gpad, dst_gw, gh);
+								    bx, toy + gpad + GLYPH_Y_BIAS_PX, dst_gw, gh);
 								sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 								sys->context->Draw(4, 0);
 							}
@@ -7668,7 +7744,7 @@ after_key_shortcuts:
 							float mx = tox + tow - 2.0f * (float)CLOSE_BTN_WIDTH_PX + ((float)CLOSE_BTN_WIDTH_PX - dst_gw) / 2.0f;
 							// Local: centered in minimize button
 							float mg_left = pill_hw - 2*btn_w_m_val + (btn_w_m_val - glyph_w_m) / 2.0f;
-							float mg_top = pill_top_m - glyph_vpad_m;
+							float mg_top = pill_top_m - glyph_vpad_m + GLYPH_Y_LIFT_M;
 							D3D11_MAPPED_SUBRESOURCE mapped;
 							if (SUCCEEDED(sys->context->Map(sys->blit_constant_buffer.get(), 0,
 							              D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -7679,12 +7755,12 @@ after_key_shortcuts:
 								cb->src_size[1] = (float)mc->font_atlas_h;
 								cb->dst_size[0] = (float)ca_w; cb->dst_size[1] = (float)ca_h;
 								cb->convert_srgb = 0.0f;
-								cb->chrome_alpha = chrome_fade_attenuation; // 8.C: per-slot pill fade
+								cb->chrome_alpha = chrome_fade_attenuation;
 								cb->corner_radius = 0; cb->corner_aspect = 0;
 								cb->edge_feather = 0.0f; cb->glow_intensity = 0.0f;
 								CHROME_BLIT_POS(cb,
 								    mg_left, mg_top, mg_left + glyph_w_m, mg_top - glyph_h_m,
-								    mx, toy + gpad, dst_gw, gh);
+								    mx, toy + gpad + GLYPH_Y_BIAS_PX, dst_gw, gh);
 								sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 								sys->context->Draw(4, 0);
 							}
