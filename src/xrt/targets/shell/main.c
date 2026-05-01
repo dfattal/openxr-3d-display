@@ -17,6 +17,7 @@
 
 #include "shell_app_scan.h"
 #include "shell_openxr.h"
+#include "shell_chrome.h"
 
 #include <cjson/cJSON.h>
 
@@ -78,6 +79,11 @@ static HWND g_msg_hwnd = NULL;
 // non-NULL, the corresponding ipc_call_workspace_* / launcher_* / system_*
 // sites have been migrated to the public extension surface.
 static struct shell_openxr_state *g_xr = NULL;
+
+// Phase 2.C: chrome render module. Created after g_xr in main(); owns one
+// chrome swapchain per workspace client (filtered by PID — the shell's own
+// session does not get chrome). NULL until the shell is fully initialized.
+static struct shell_chrome *g_chrome = NULL;
 
 // Cap on locally-buffered enumerate. The current wire IPC_MAX_CLIENTS is
 // 8 server-side; 16 keeps headroom for a future raise without touching
@@ -849,6 +855,14 @@ shell_apply_preset(const char *name)
 		// bound — get_pose fails); the caller retries on the next poll.
 		if (shell_slot_anim_seed(ids[i], &pose, w, h, SHELL_ANIM_DURATION_NS)) {
 			seeded++;
+		}
+
+		// Phase 2.C: re-push chrome layout for the slot's target size so
+		// the controller-rendered chrome scales with the window. One
+		// IPC RPC per preset apply (not per tick) — animation set_pose
+		// path stays uncontended.
+		if (g_chrome != NULL) {
+			shell_chrome_on_window_resized(g_chrome, ids[i], w, h);
 		}
 	}
 
@@ -2877,6 +2891,14 @@ main(int argc, char *argv[])
 	g_xr = xr;
 	P("Connected to service.\n");
 
+	// Phase 2.C: bring up the chrome render module. If init fails the shell
+	// keeps running without controller-rendered chrome — the in-runtime
+	// chrome (still alive until C5) provides a fallback.
+	g_chrome = shell_chrome_create(g_xr);
+	if (g_chrome == NULL) {
+		PE("shell_chrome_create failed — controller chrome disabled\n");
+	}
+
 	// Load registered apps config (Phase 4C.9 + Phase 5.5 scanner merge)
 	registered_apps_load();
 
@@ -3241,6 +3263,48 @@ main(int argc, char *argv[])
 			}
 		}
 
+		// Phase 2.C: lazy chrome creation. The runtime cannot mint a chrome
+		// swapchain for a slot that has not bound yet (Phase 2.K lesson 3),
+		// so each tick we walk the client list and try to create chrome for
+		// any non-self client that does not have it yet. Already-chromed
+		// clients are skipped without get_pose IPC — the slot-anim's per-
+		// frame set_pose RPCs need the IPC pipe quiet to keep transitions
+		// smooth. Layout re-push for size changes happens in shell_apply_preset.
+		if (g_chrome != NULL) {
+#ifdef _WIN32
+			uint64_t self_pid_chrome = (uint64_t)GetCurrentProcessId();
+#else
+			uint64_t self_pid_chrome = (uint64_t)getpid();
+#endif
+			XrWorkspaceClientId chr_ids[SHELL_MAX_CLIENTS];
+			uint32_t chr_n = shell_enumerate_clients(chr_ids, SHELL_MAX_CLIENTS);
+			for (uint32_t i = 0; i < chr_n; i++) {
+				if (shell_chrome_has(g_chrome, chr_ids[i])) continue;
+
+				XrWorkspaceClientInfoEXT cinfo;
+				if (!shell_get_client_info(chr_ids[i], &cinfo)) continue;
+				if (cinfo.pid == self_pid_chrome) continue; // skip own session
+
+				XrPosef pose = {0};
+				float w_m = 0.0f, h_m = 0.0f;
+				if (g_xr->get_pose(g_xr->session, chr_ids[i], &pose, &w_m, &h_m) != XR_SUCCESS) {
+					continue;
+				}
+				if (!(w_m > 0.0f) || !(h_m > 0.0f)) continue;
+				(void)shell_chrome_on_client_connected(g_chrome, chr_ids[i], w_m, h_m);
+			}
+			// Drop chrome for any disconnected clients (diff against prev_ids).
+			for (uint32_t p = 0; p < prev_count; p++) {
+				bool still = false;
+				for (uint32_t c = 0; c < chr_n; c++) {
+					if (prev_ids[p] == chr_ids[c]) { still = true; break; }
+				}
+				if (!still) {
+					shell_chrome_on_client_disconnected(g_chrome, prev_ids[p]);
+				}
+			}
+		}
+
 #ifdef _WIN32
 		// Detect server-side deactivation (ESC closed the compositor window).
 		// The compositor sets workspace_mode=false — sync our state.
@@ -3516,6 +3580,10 @@ main(int argc, char *argv[])
 	}
 #endif
 
+	if (g_chrome != NULL) {
+		shell_chrome_destroy(g_chrome);
+		g_chrome = NULL;
+	}
 	shell_openxr_shutdown(xr);
 	g_xr = NULL;
 	return 0;

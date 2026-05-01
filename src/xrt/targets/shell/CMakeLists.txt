@@ -9,6 +9,8 @@ set(DISPLAYXR_SHELL_SOURCES
     shell_app_scan.h
     shell_openxr.cpp
     shell_openxr.h
+    shell_chrome.cpp
+    shell_chrome.h
     displayxr_shell_resource.h
 )
 
