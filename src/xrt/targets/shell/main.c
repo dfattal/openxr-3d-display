@@ -1012,6 +1012,21 @@ shell_drain_input_events(void)
 			break;
 		}
 		case XR_WORKSPACE_INPUT_EVENT_POINTER_MOTION_EXT: {
+			// Phase 2.C C3.C-4: feed hover state to chrome so it can fade
+			// in/out. The runtime fills hitClientId on POINTER_MOTION when
+			// the cursor is over a window's chrome region (TITLE_BAR or one
+			// of the buttons). Pass 0 when no chrome region is hit so all
+			// slots fade out.
+			if (g_chrome != NULL) {
+				bool over_chrome =
+				    (e->pointerMotion.hitRegion == XR_WORKSPACE_HIT_REGION_TITLE_BAR_EXT) ||
+				    (e->pointerMotion.hitRegion == XR_WORKSPACE_HIT_REGION_CHROME_EXT) ||
+				    (e->pointerMotion.chromeRegionId != 0);
+				XrWorkspaceClientId hover_id =
+				    over_chrome ? e->pointerMotion.hitClientId : XR_NULL_WORKSPACE_CLIENT_ID;
+				shell_chrome_set_hover(g_chrome, hover_id);
+			}
+
 			if (!carousel_active || !s_car.dragging) break;
 			// Accumulate angle from cursor delta; sample angular velocity
 			// in rad/sec for the post-release momentum.
@@ -3184,6 +3199,13 @@ main(int argc, char *argv[])
 		// playing (the entry transition into carousel) or when the preset
 		// is something else. Cheap when idle.
 		shell_carousel_tick();
+
+		// Phase 2.C C3.C-4: chrome hover-fade tick. Lerps per-slot fade
+		// alpha and re-renders the chrome SRV when alpha changes. No-op
+		// when no slot has an active fade — idle == zero GPU work.
+		if (g_chrome != NULL) {
+			shell_chrome_tick(g_chrome);
+		}
 
 #ifdef _WIN32
 		// DEBUG file-trigger: drop %TEMP%\displayxr_preset_{grid|immersive|carousel}

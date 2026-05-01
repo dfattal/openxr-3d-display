@@ -69,6 +69,18 @@ struct chrome_slot
 	// ref to image[0]'s texture and an RTV onto it. Released on disconnect.
 	ComPtr<ID3D11Texture2D>        texture;
 	ComPtr<ID3D11RenderTargetView> rtv;
+
+	// C3.C-4: hover-fade state. `alpha` is the currently-rendered global
+	// alpha multiplier baked into the chrome image (1 = visible, 0 = hidden).
+	// On hover toggle the shell seeds a tween toward `target_alpha` over
+	// `fade_duration_ns`; shell_chrome_tick lerps + re-renders until alpha
+	// matches target, then idles. Eases via 1-(1-t)^3 (ease-out cubic) — same
+	// curve as the runtime's slot_chrome_fade_tick that this replaces.
+	float    alpha;
+	float    target_alpha;
+	float    fade_start_alpha;
+	uint64_t fade_start_ns;
+	uint64_t fade_duration_ns;
 };
 
 } // namespace
@@ -86,14 +98,16 @@ struct PillCB
 	float corner_radius_m;    // pill corner radius in METERS (full pill = pill_h_m * 0.5)
 	float btn_inset_frac;     // button visible-circle inset, 0.18 in the runtime
 
-	// Register 1: button + grip-dot geometry
+	// Register 1: button + grip-dot geometry + global fade alpha
 	float btn_width_m;        // per-button slot width (UI_BTN_W_M = 0.008)
 	float dot_size_m;         // grip-dot diameter (0.001)
 	float dot_gap_m;          // grip-dot spacing (0.001)
-	float _pad0;
+	float fade_alpha;         // C3.C-4: global alpha multiplier (0..1) — hover-fade
 
-	// Register 2-5: colors (alpha = base opacity; modulated for hover/fade
-	// in C3.C-4). Pill bg = frosted blue, close = red, btn = gray, dot = light gray.
+	// Register 2-5: colors (alpha = base opacity). Pill bg = frosted blue,
+	// close = red, btn = gray, dot = light gray. Hover-driven brightness
+	// modulation can be folded in later — for now the fade_alpha above
+	// drives the entire chrome's hover-in/out tween.
 	float pill_color[4];
 	float close_color[4];
 	float btn_color[4];
@@ -191,7 +205,7 @@ cbuffer PillCB : register(b0)
     float  btn_width_m;
     float  dot_size_m;
     float  dot_gap_m;
-    float  _pad0;
+    float  fade_alpha;
 
     float4 pill_color;
     float4 close_color;
@@ -276,7 +290,9 @@ float4 PS(VSOut input) : SV_Target
     result = over(float4(btn_color.rgb,   btn_color.a   * cov(max_dist,   aa_btn)),  result);
     result = over(float4(btn_color.rgb,   btn_color.a   * cov(min_dist,   aa_btn)),  result);
     result = over(float4(close_color.rgb, close_color.a * cov(close_dist, aa_btn)),  result);
-    return result;
+
+    // C3.C-4 hover-fade: global alpha multiplier on the final RGBA.
+    return float4(result.rgb, result.a * saturate(fade_alpha));
 }
 )";
 
@@ -378,7 +394,11 @@ render_pill(shell_chrome *sc, chrome_slot &slot)
 	cb->btn_width_m = UI_BTN_W_M;
 	cb->dot_size_m = DOT_SIZE_M;
 	cb->dot_gap_m  = DOT_GAP_M;
-	cb->_pad0 = 0.0f;
+	// C3.C-4 hover-fade: bake the slot's current fade alpha into this
+	// chrome render. The shader applies it as a global multiplier on the
+	// final pixel alpha — fade_alpha=0 hides the chrome entirely (idle
+	// steady state); fade_alpha=1 shows it fully (cursor over chrome).
+	cb->fade_alpha = slot.alpha;
 
 	// Frosted blue pill bg.
 	cb->pill_color[0] = 0.20f; cb->pill_color[1] = 0.22f;
@@ -673,6 +693,14 @@ shell_chrome_on_client_connected(struct shell_chrome *sc,
 	slot.win_w_m = win_w_m;
 	slot.win_h_m = win_h_m;
 	slot.rendered_once = false;
+	// C3.C-4: chrome is fully visible at connect. Once main.c starts
+	// feeding hover events via shell_chrome_set_hover, the standard
+	// fade-out-when-not-hovered / fade-in-on-hover behavior kicks in.
+	slot.alpha = 1.0f;
+	slot.target_alpha = 1.0f;
+	slot.fade_start_alpha = 1.0f;
+	slot.fade_start_ns = 0;
+	slot.fade_duration_ns = 0;
 
 	if (!init_slot_d3d11(sc, slot)) {
 		(void)sc->xr->destroy_chrome_swapchain(swapchain);
@@ -734,4 +762,100 @@ shell_chrome_has(struct shell_chrome *sc, XrWorkspaceClientId id)
 		return false;
 	}
 	return find_slot(sc, id) != nullptr;
+}
+
+namespace {
+
+// C3.C-4: chrome fade durations — match the runtime's Phase 2.K constants
+// so the controller-side fade feels identical to the runtime fallback.
+// Hover-IN is faster than hover-OUT (visible cue should land quickly when
+// the user moves over a window; fade-out lingers so the chrome doesn't
+// pop out from under the cursor on quick passes).
+constexpr uint64_t FADE_IN_NS  = 150ULL * 1000000ULL;
+constexpr uint64_t FADE_OUT_NS = 300ULL * 1000000ULL;
+
+uint64_t
+shell_chrome_now_ns()
+{
+#ifdef _WIN32
+	LARGE_INTEGER c, f;
+	QueryPerformanceCounter(&c);
+	QueryPerformanceFrequency(&f);
+	return (uint64_t)((double)c.QuadPart * 1e9 / (double)f.QuadPart);
+#else
+	struct timespec ts;
+	timespec_get(&ts, TIME_UTC);
+	return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+#endif
+}
+
+// Seed a fade toward `target` over `duration_ns`, picking up from the
+// slot's current alpha so consecutive hover toggles don't snap.
+void
+seed_fade(chrome_slot &slot, float target, uint64_t duration_ns)
+{
+	if (fabsf(slot.target_alpha - target) < 1e-4f && slot.fade_duration_ns != 0) {
+		return; // already heading there
+	}
+	slot.fade_start_alpha = slot.alpha;
+	slot.target_alpha = target;
+	slot.fade_start_ns = shell_chrome_now_ns();
+	slot.fade_duration_ns = duration_ns;
+}
+
+// Returns true if the slot's alpha changed this tick (caller should re-render).
+bool
+tick_fade(chrome_slot &slot)
+{
+	if (slot.fade_duration_ns == 0) {
+		return false; // no animation in flight
+	}
+	uint64_t now = shell_chrome_now_ns();
+	uint64_t elapsed = (now >= slot.fade_start_ns) ? now - slot.fade_start_ns : 0;
+	if (elapsed >= slot.fade_duration_ns) {
+		slot.alpha = slot.target_alpha;
+		slot.fade_duration_ns = 0;
+		return true;
+	}
+	float t = (float)((double)elapsed / (double)slot.fade_duration_ns);
+	float f = 1.0f - t;
+	float eased = 1.0f - f * f * f; // ease-out cubic
+	slot.alpha = slot.fade_start_alpha + (slot.target_alpha - slot.fade_start_alpha) * eased;
+	return true;
+}
+
+// Re-render just the chrome image without re-pushing the layout. Used by
+// the fade tick to update the alpha bake; geometry is unchanged.
+void
+rerender_only(shell_chrome *sc, chrome_slot &slot)
+{
+	(void)acquire_render_release(sc, slot);
+}
+
+} // namespace
+
+extern "C" void
+shell_chrome_set_hover(struct shell_chrome *sc, XrWorkspaceClientId hover_id)
+{
+	if (sc == nullptr) {
+		return;
+	}
+	for (auto &s : sc->slots) {
+		float target = (s.id == hover_id) ? 1.0f : 0.0f;
+		uint64_t dur = (s.id == hover_id) ? FADE_IN_NS : FADE_OUT_NS;
+		seed_fade(s, target, dur);
+	}
+}
+
+extern "C" void
+shell_chrome_tick(struct shell_chrome *sc)
+{
+	if (sc == nullptr) {
+		return;
+	}
+	for (auto &s : sc->slots) {
+		if (tick_fade(s)) {
+			rerender_only(sc, s);
+		}
+	}
 }

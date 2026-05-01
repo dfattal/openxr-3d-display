@@ -90,6 +90,26 @@ void shell_chrome_on_window_resized(struct shell_chrome *sc,
  */
 bool shell_chrome_has(struct shell_chrome *sc, XrWorkspaceClientId id);
 
+/*!
+ * Phase 2.C C3.C-4: notify the chrome module which client (if any) the
+ * cursor is currently hovering. Seeds per-slot fade animations: hovered
+ * slot fades alpha toward 1 over 150 ms; all other slots fade toward 0
+ * over 300 ms (matches the runtime's prior in-runtime hover-fade
+ * timings). Pass @p hover_id = XR_NULL_WORKSPACE_CLIENT_ID (0) when the
+ * cursor is not over any chrome.
+ *
+ * Cheap (no IPC, no GPU work). The actual fade tween + chrome SRV
+ * re-render happen in shell_chrome_tick.
+ */
+void shell_chrome_set_hover(struct shell_chrome *sc, XrWorkspaceClientId hover_id);
+
+/*!
+ * Phase 2.C C3.C-4: process per-slot fade animations and re-render any
+ * chrome SRVs whose alpha changed this tick. Call once per main-loop
+ * iteration. No-op when no fade is active (idle = zero GPU work).
+ */
+void shell_chrome_tick(struct shell_chrome *sc);
+
 #ifdef __cplusplus
 }
 #endif
