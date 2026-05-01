@@ -161,6 +161,10 @@ extern "C" struct shell_openxr_state *shell_openxr_init(void)
 	    {"xrDisableWorkspacePointerCaptureEXT",     reinterpret_cast<PFN_xrVoidFunction *>(&s->disable_pointer_capture)},
 	    {"xrRequestWorkspaceClientExitEXT",         reinterpret_cast<PFN_xrVoidFunction *>(&s->request_client_exit)},
 	    {"xrRequestWorkspaceClientFullscreenEXT",   reinterpret_cast<PFN_xrVoidFunction *>(&s->request_client_fullscreen)},
+	    // Phase 2.C additions
+	    {"xrCreateWorkspaceClientChromeSwapchainEXT",  reinterpret_cast<PFN_xrVoidFunction *>(&s->create_chrome_swapchain)},
+	    {"xrDestroyWorkspaceClientChromeSwapchainEXT", reinterpret_cast<PFN_xrVoidFunction *>(&s->destroy_chrome_swapchain)},
+	    {"xrSetWorkspaceClientChromeLayoutEXT",        reinterpret_cast<PFN_xrVoidFunction *>(&s->set_chrome_layout)},
 	};
 	for (const auto &e : entries) {
 		if (!resolve_pfn(s->instance, e.name, e.out)) {
@@ -169,7 +173,7 @@ extern "C" struct shell_openxr_state *shell_openxr_init(void)
 		}
 	}
 
-	P("shell_openxr: instance=%p session=%p (21 PFNs resolved, no graphics binding)\n",
+	P("shell_openxr: instance=%p session=%p (24 PFNs resolved, no graphics binding)\n",
 	  (void *)s->instance, (void *)s->session);
 	return s;
 }

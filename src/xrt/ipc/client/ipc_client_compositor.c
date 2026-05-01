@@ -681,6 +681,54 @@ comp_ipc_client_compositor_workspace_request_client_fullscreen(struct xrt_compos
 }
 
 /*
+ * Phase 2.C: chrome swapchain register/unregister + layout setter.
+ */
+xrt_result_t
+comp_ipc_client_compositor_workspace_register_chrome_swapchain(struct xrt_compositor *xc,
+                                                               uint32_t client_id,
+                                                               uint32_t swapchain_id)
+{
+	if (xc == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	return ipc_call_workspace_register_chrome_swapchain(icc->ipc_c, client_id, swapchain_id);
+}
+
+xrt_result_t
+comp_ipc_client_compositor_workspace_unregister_chrome_swapchain(struct xrt_compositor *xc,
+                                                                 uint32_t client_id,
+                                                                 uint32_t swapchain_id)
+{
+	if (xc == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	return ipc_call_workspace_unregister_chrome_swapchain(icc->ipc_c, client_id, swapchain_id);
+}
+
+xrt_result_t
+comp_ipc_client_compositor_workspace_set_chrome_layout(struct xrt_compositor *xc,
+                                                       uint32_t client_id,
+                                                       const struct ipc_workspace_chrome_layout *layout)
+{
+	if (xc == NULL || layout == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	return ipc_call_workspace_set_chrome_layout(icc->ipc_c, client_id, layout);
+}
+
+/*
  * Launcher bridges (XR_EXT_app_launcher).
  *
  * Same gating contract as the workspace_* family: only valid when `xc` is

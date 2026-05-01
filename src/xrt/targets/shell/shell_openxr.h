@@ -65,6 +65,10 @@ struct shell_openxr_state
 	PFN_xrDisableWorkspacePointerCaptureEXT    disable_pointer_capture;
 	PFN_xrRequestWorkspaceClientExitEXT        request_client_exit;
 	PFN_xrRequestWorkspaceClientFullscreenEXT  request_client_fullscreen;
+	// Phase 2.C: controller-owned chrome.
+	PFN_xrCreateWorkspaceClientChromeSwapchainEXT  create_chrome_swapchain;
+	PFN_xrDestroyWorkspaceClientChromeSwapchainEXT destroy_chrome_swapchain;
+	PFN_xrSetWorkspaceClientChromeLayoutEXT        set_chrome_layout;
 
 	// Physical display size in meters, pulled from XR_EXT_display_info during
 	// init. Falls back to LP-3D dims (0.700 × 0.394 m) if the extension is

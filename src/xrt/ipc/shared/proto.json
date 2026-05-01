@@ -221,6 +221,27 @@
 		]
 	},
 
+	"workspace_register_chrome_swapchain": {
+		"in": [
+			{"name": "client_id", "type": "uint32_t"},
+			{"name": "swapchain_id", "type": "uint32_t"}
+		]
+	},
+
+	"workspace_unregister_chrome_swapchain": {
+		"in": [
+			{"name": "client_id", "type": "uint32_t"},
+			{"name": "swapchain_id", "type": "uint32_t"}
+		]
+	},
+
+	"workspace_set_chrome_layout": {
+		"in": [
+			{"name": "client_id", "type": "uint32_t"},
+			{"name": "layout", "type": "struct ipc_workspace_chrome_layout"}
+		]
+	},
+
 	"system_devices_get_roles": {
 		"out": [
 			{"name": "system_roles", "type": "struct xrt_system_roles"}

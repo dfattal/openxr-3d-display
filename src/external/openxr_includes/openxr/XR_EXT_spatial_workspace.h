@@ -25,15 +25,17 @@ extern "C" {
 #endif
 
 #define XR_EXT_spatial_workspace 1
-#define XR_EXT_spatial_workspace_SPEC_VERSION 6
+#define XR_EXT_spatial_workspace_SPEC_VERSION 7
 #define XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME "XR_EXT_spatial_workspace"
 
 // Provisional XrStructureType values. The 1000999100..104 range is reserved for
 // this extension; final values reconcile with the Khronos registry before spec
 // freeze.
-#define XR_TYPE_WORKSPACE_CLIENT_INFO_EXT     ((XrStructureType)1000999100)
-#define XR_TYPE_WORKSPACE_CAPTURE_REQUEST_EXT ((XrStructureType)1000999101)
-#define XR_TYPE_WORKSPACE_CAPTURE_RESULT_EXT  ((XrStructureType)1000999102)
+#define XR_TYPE_WORKSPACE_CLIENT_INFO_EXT                  ((XrStructureType)1000999100)
+#define XR_TYPE_WORKSPACE_CAPTURE_REQUEST_EXT              ((XrStructureType)1000999101)
+#define XR_TYPE_WORKSPACE_CAPTURE_RESULT_EXT               ((XrStructureType)1000999102)
+#define XR_TYPE_WORKSPACE_CHROME_SWAPCHAIN_CREATE_INFO_EXT ((XrStructureType)1000999103)
+#define XR_TYPE_WORKSPACE_CHROME_LAYOUT_EXT                ((XrStructureType)1000999104)
 
 /*!
  * @brief Workspace-local identifier for a client.
@@ -44,6 +46,20 @@ extern "C" {
 typedef uint32_t XrWorkspaceClientId;
 
 #define XR_NULL_WORKSPACE_CLIENT_ID ((XrWorkspaceClientId)0)
+
+/*!
+ * @brief Controller-defined opaque identifier for a chrome hit region.
+ *
+ * The workspace controller assigns these when populating
+ * XrWorkspaceChromeLayoutEXT::hitRegions. The runtime echoes the matching
+ * region's id back on POINTER / POINTER_MOTION events when a ray-cast lands
+ * inside the chrome quad. 0 (XR_NULL_WORKSPACE_CHROME_REGION_ID) means "no
+ * chrome region hit" — either the hit was on content / background or the
+ * controller chose to leave the region anonymous.
+ */
+typedef uint32_t XrWorkspaceChromeRegionIdEXT;
+
+#define XR_NULL_WORKSPACE_CHROME_REGION_ID ((XrWorkspaceChromeRegionIdEXT)0)
 
 /*!
  * @brief Type of a workspace client.
@@ -71,9 +87,10 @@ typedef enum XrWorkspaceHitRegionEXT {
     XR_WORKSPACE_HIT_REGION_BACKGROUND_EXT       = 0,  // miss
     XR_WORKSPACE_HIT_REGION_CONTENT_EXT           = 1,
     XR_WORKSPACE_HIT_REGION_TITLE_BAR_EXT         = 2,
-    XR_WORKSPACE_HIT_REGION_CLOSE_BUTTON_EXT      = 3,
-    XR_WORKSPACE_HIT_REGION_MINIMIZE_BUTTON_EXT   = 4,
-    XR_WORKSPACE_HIT_REGION_MAXIMIZE_BUTTON_EXT   = 5,
+    XR_WORKSPACE_HIT_REGION_CLOSE_BUTTON_EXT      = 3,  // legacy; spec_version <= 6
+    XR_WORKSPACE_HIT_REGION_MINIMIZE_BUTTON_EXT   = 4,  // legacy; spec_version <= 6
+    XR_WORKSPACE_HIT_REGION_MAXIMIZE_BUTTON_EXT   = 5,  // legacy; spec_version <= 6
+    XR_WORKSPACE_HIT_REGION_CHROME_EXT            = 6,  // controller-owned chrome (spec_version 7)
     XR_WORKSPACE_HIT_REGION_EDGE_RESIZE_N_EXT     = 10,
     XR_WORKSPACE_HIT_REGION_EDGE_RESIZE_S_EXT     = 11,
     XR_WORKSPACE_HIT_REGION_EDGE_RESIZE_E_EXT     = 12,
@@ -322,14 +339,15 @@ typedef struct XrWorkspaceInputEventEXT {
     uint32_t                     timestampMs;        // host monotonic ms (low 32 bits)
     union {
         struct {
-            XrWorkspaceClientId     hitClientId;
-            XrWorkspaceHitRegionEXT hitRegion;
-            XrVector2f              localUV;
-            int32_t                 cursorX;        // display pixels, top-left origin
-            int32_t                 cursorY;
-            uint32_t                button;          // 1=L, 2=R, 3=M
-            XrBool32                isDown;
-            uint32_t                modifiers;       // bit0=SHIFT, bit1=CTRL, bit2=ALT
+            XrWorkspaceClientId          hitClientId;
+            XrWorkspaceHitRegionEXT      hitRegion;
+            XrVector2f                   localUV;
+            int32_t                      cursorX;          // display pixels, top-left origin
+            int32_t                      cursorY;
+            uint32_t                     button;            // 1=L, 2=R, 3=M
+            XrBool32                     isDown;
+            uint32_t                     modifiers;         // bit0=SHIFT, bit1=CTRL, bit2=ALT
+            XrWorkspaceChromeRegionIdEXT chromeRegionId;    // spec_version 7: controller-defined region within chrome quad, 0 if none
         } pointer;
         struct {  // reserved for future region-transition events
             XrWorkspaceClientId     prevClientId;
@@ -349,13 +367,14 @@ typedef struct XrWorkspaceInputEventEXT {
             uint32_t                modifiers;
         } scroll;
         struct {  // spec_version 6: per-frame mouse motion (capture-gated)
-            XrWorkspaceClientId     hitClientId;
-            XrWorkspaceHitRegionEXT hitRegion;
-            XrVector2f              localUV;
-            int32_t                 cursorX;        // display pixels, top-left origin
-            int32_t                 cursorY;
-            uint32_t                buttonMask;      // bit0=L, bit1=R, bit2=M (currently held)
-            uint32_t                modifiers;       // bit0=SHIFT, bit1=CTRL, bit2=ALT
+            XrWorkspaceClientId          hitClientId;
+            XrWorkspaceHitRegionEXT      hitRegion;
+            XrVector2f                   localUV;
+            int32_t                      cursorX;          // display pixels, top-left origin
+            int32_t                      cursorY;
+            uint32_t                     buttonMask;        // bit0=L, bit1=R, bit2=M (currently held)
+            uint32_t                     modifiers;         // bit0=SHIFT, bit1=CTRL, bit2=ALT
+            XrWorkspaceChromeRegionIdEXT chromeRegionId;    // spec_version 7: controller-defined region within chrome quad, 0 if none
         } pointerMotion;
         struct {  // spec_version 6: vsync-aligned compositor frame tick
             uint64_t                timestampNs;     // host monotonic ns at frame compose
@@ -567,6 +586,135 @@ typedef XrResult (XRAPI_PTR *PFN_xrGetWorkspaceClientInfoEXT)(
     XrWorkspaceClientId        clientId,
     XrWorkspaceClientInfoEXT  *info);
 
+// ---- Controller-owned chrome (spec_version 7) ----
+
+/*!
+ * @brief Maximum hit regions a controller can register per chrome layout.
+ *
+ * Fixed-size cap so the IPC wire form stays POD.
+ */
+#define XR_WORKSPACE_CHROME_MAX_HIT_REGIONS_EXT 8
+
+/*!
+ * @brief Create-info for xrCreateWorkspaceClientChromeSwapchainEXT.
+ *
+ * Describes the 2D chrome image the controller will draw to. The runtime
+ * mints a swapchain whose images are cross-process-shareable (D3D11
+ * KEYEDMUTEX + NTHANDLE) so the controller's D3D11 device can author the
+ * pixels in its own process. Format must be a 2D color format the runtime
+ * supports for blits (today: DXGI_FORMAT_R8G8B8A8_UNORM_SRGB).
+ */
+typedef struct XrWorkspaceChromeSwapchainCreateInfoEXT {
+    XrStructureType       type;        // XR_TYPE_WORKSPACE_CHROME_SWAPCHAIN_CREATE_INFO_EXT
+    const void* XR_MAY_ALIAS next;
+    int64_t               format;       // graphics-API native format (e.g. DXGI_FORMAT)
+    uint32_t              width;
+    uint32_t              height;
+    uint32_t              sampleCount;  // 1 (no MSAA) for the pill chrome
+    uint32_t              mipCount;     // 1
+} XrWorkspaceChromeSwapchainCreateInfoEXT;
+
+/*!
+ * @brief One controller-defined hit region inside a chrome quad.
+ *
+ * The runtime ray-casts the chrome quad and looks up the first region whose
+ * UV bounds contain the hit point. Region @c id is echoed back on POINTER /
+ * POINTER_MOTION events as @c chromeRegionId — opaque to the runtime, the
+ * controller decides what each id means (grip, close, minimize, …).
+ */
+typedef struct XrWorkspaceChromeHitRegionEXT {
+    XrWorkspaceChromeRegionIdEXT id;       // controller-defined; 0 = no region
+    XrRect2Df                    bounds;   // chrome-UV space [0,1]^2; offset = top-left, extent = size
+} XrWorkspaceChromeHitRegionEXT;
+
+/*!
+ * @brief Layout for a controller-submitted chrome quad.
+ *
+ * The controller calls xrSetWorkspaceClientChromeLayoutEXT once on connect
+ * and on every layout change (preset switch, resize). The runtime caches the
+ * layout per client and applies it every render. Per-frame IPC is not needed.
+ *
+ * @c poseInClient is the chrome quad's pose relative to the client window's
+ * own pose — typically {orient = identity, position = (0, +window_h/2 + gap +
+ * pill_h/2, 0)} for the floating-pill design. @c sizeMeters is the quad's
+ * physical extent.
+ *
+ * If @c followsWindowOrient is XR_TRUE the chrome rotates with the window
+ * (useful for the carousel preset). XR_FALSE keeps it axis-aligned to the
+ * display regardless of window orientation.
+ *
+ * @c depthBiasMeters biases the chrome quad toward the eye in NDC; default
+ * 0.001 m matches the runtime's prior pill-over-content depth bias. 0 means
+ * "use runtime default."
+ */
+typedef struct XrWorkspaceChromeLayoutEXT {
+    XrStructureType  type;        // XR_TYPE_WORKSPACE_CHROME_LAYOUT_EXT
+    const void* XR_MAY_ALIAS next;
+    XrPosef          poseInClient;
+    XrExtent2Df      sizeMeters;
+    XrBool32         followsWindowOrient;
+    uint32_t         hitRegionCount;     // <= XR_WORKSPACE_CHROME_MAX_HIT_REGIONS_EXT
+    const XrWorkspaceChromeHitRegionEXT* hitRegions;
+    float            depthBiasMeters;    // 0 = runtime default (0.001)
+} XrWorkspaceChromeLayoutEXT;
+
+/*!
+ * @brief Create a chrome swapchain for a workspace client.
+ *
+ * The runtime creates a cross-process-shareable image-loop swapchain
+ * dedicated to chrome rendering for the given client. The swapchain returned
+ * is a normal XrSwapchain — Acquire / Wait / Release operate as usual; the
+ * runtime tracks the magic handle internally so it composites the released
+ * image onto the workspace at the layout-specified pose.
+ *
+ * Most controllers create one chrome swapchain per client they decorate. The
+ * shell may filter out itself (its own session) since the controller does
+ * not decorate its own session.
+ *
+ * @return XR_SUCCESS on success,
+ *         XR_ERROR_HANDLE_INVALID if @p clientId is unknown,
+ *         XR_ERROR_FEATURE_UNSUPPORTED if @p session is not the active workspace,
+ *         XR_ERROR_FUNCTION_UNSUPPORTED if the extension was not enabled.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrCreateWorkspaceClientChromeSwapchainEXT)(
+    XrSession                                       session,
+    XrWorkspaceClientId                             clientId,
+    const XrWorkspaceChromeSwapchainCreateInfoEXT  *createInfo,
+    XrSwapchain                                    *swapchain);
+
+/*!
+ * @brief Destroy a chrome swapchain.
+ *
+ * Equivalent to xrDestroySwapchain for a chrome swapchain — the runtime
+ * stops compositing its image and releases the underlying texture. The
+ * client's window stays visible (just without chrome) until a new chrome
+ * swapchain is submitted.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrDestroyWorkspaceClientChromeSwapchainEXT)(
+    XrSwapchain swapchain);
+
+/*!
+ * @brief Set / update the layout of a client's chrome quad.
+ *
+ * Layout is cached per client and re-applied every render. Call once on
+ * connect after creating the chrome swapchain, and again whenever the
+ * controller changes the quad's pose, size, hit regions, or depth bias.
+ *
+ * Calling this with a clientId that has no chrome swapchain stores the
+ * layout for later — when the controller later creates a chrome swapchain
+ * for that client, the cached layout takes effect.
+ *
+ * @return XR_SUCCESS on success,
+ *         XR_ERROR_HANDLE_INVALID if @p clientId is unknown,
+ *         XR_ERROR_VALIDATION_FAILURE if hitRegionCount exceeds
+ *         XR_WORKSPACE_CHROME_MAX_HIT_REGIONS_EXT,
+ *         XR_ERROR_FEATURE_UNSUPPORTED if @p session is not the active workspace.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrSetWorkspaceClientChromeLayoutEXT)(
+    XrSession                          session,
+    XrWorkspaceClientId                clientId,
+    const XrWorkspaceChromeLayoutEXT  *layout);
+
 #ifndef XR_NO_PROTOTYPES
 XRAPI_ATTR XrResult XRAPI_CALL xrActivateSpatialWorkspaceEXT(
     XrSession session);
@@ -660,6 +808,20 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetWorkspaceClientInfoEXT(
     XrSession                  session,
     XrWorkspaceClientId        clientId,
     XrWorkspaceClientInfoEXT  *info);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrCreateWorkspaceClientChromeSwapchainEXT(
+    XrSession                                       session,
+    XrWorkspaceClientId                             clientId,
+    const XrWorkspaceChromeSwapchainCreateInfoEXT  *createInfo,
+    XrSwapchain                                    *swapchain);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrDestroyWorkspaceClientChromeSwapchainEXT(
+    XrSwapchain swapchain);
+
+XRAPI_ATTR XrResult XRAPI_CALL xrSetWorkspaceClientChromeLayoutEXT(
+    XrSession                          session,
+    XrWorkspaceClientId                clientId,
+    const XrWorkspaceChromeLayoutEXT  *layout);
 #endif
 
 #ifdef __cplusplus

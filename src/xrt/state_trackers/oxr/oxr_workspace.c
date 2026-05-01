@@ -125,6 +125,21 @@ xrt_result_t
 comp_ipc_client_compositor_workspace_request_client_fullscreen(struct xrt_compositor *xc,
                                                                uint32_t client_id,
                                                                bool fullscreen);
+// Phase 2.C: chrome swapchain bridges. Forward-declared with the IPC POD layout
+// type from ipc_protocol.h.
+struct ipc_workspace_chrome_layout;
+xrt_result_t
+comp_ipc_client_compositor_workspace_register_chrome_swapchain(struct xrt_compositor *xc,
+                                                               uint32_t client_id,
+                                                               uint32_t swapchain_id);
+xrt_result_t
+comp_ipc_client_compositor_workspace_unregister_chrome_swapchain(struct xrt_compositor *xc,
+                                                                 uint32_t client_id,
+                                                                 uint32_t swapchain_id);
+xrt_result_t
+comp_ipc_client_compositor_workspace_set_chrome_layout(struct xrt_compositor *xc,
+                                                       uint32_t client_id,
+                                                       const struct ipc_workspace_chrome_layout *layout);
 
 
 /*
@@ -847,6 +862,122 @@ oxr_xrRequestWorkspaceClientFullscreenEXT(XrSession session, XrWorkspaceClientId
 	xrt_result_t xret = comp_ipc_client_compositor_workspace_request_client_fullscreen(
 	    &sess->xcn->base, (uint32_t)clientId, fullscreen == XR_TRUE);
 	return xret_to_xr_result(&log, xret, "workspace_request_client_fullscreen");
+}
+
+
+/*
+ * Controller-owned chrome (spec_version 7)
+ *
+ * C1 stubs: validate input + return XR_SUCCESS without producing real state.
+ * C2 wires real D3D11 swapchain creation, side-table registration, and
+ * per-render compositing.
+ */
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateWorkspaceClientChromeSwapchainEXT(XrSession session,
+                                              XrWorkspaceClientId clientId,
+                                              const XrWorkspaceChromeSwapchainCreateInfoEXT *createInfo,
+                                              XrSwapchain *swapchain)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrCreateWorkspaceClientChromeSwapchainEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_spatial_workspace);
+	OXR_VERIFY_ARG_NOT_NULL(&log, createInfo);
+	OXR_VERIFY_ARG_NOT_NULL(&log, swapchain);
+
+	if (createInfo->type != XR_TYPE_WORKSPACE_CHROME_SWAPCHAIN_CREATE_INFO_EXT) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrCreateWorkspaceClientChromeSwapchainEXT: createInfo->type must be "
+		                 "XR_TYPE_WORKSPACE_CHROME_SWAPCHAIN_CREATE_INFO_EXT");
+	}
+	if (clientId == XR_NULL_WORKSPACE_CLIENT_ID) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrCreateWorkspaceClientChromeSwapchainEXT: clientId must not be "
+		                 "XR_NULL_WORKSPACE_CLIENT_ID");
+	}
+	if (createInfo->width == 0 || createInfo->height == 0) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrCreateWorkspaceClientChromeSwapchainEXT: width and height must be > 0");
+	}
+
+	if (!session_is_ipc_client(sess)) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "xrCreateWorkspaceClientChromeSwapchainEXT requires an IPC-mode session");
+	}
+
+	// C1 stub: real swapchain creation lands in C2. Returning a NULL handle here
+	// would leave the controller with an unusable XrSwapchain — flag this clearly
+	// instead so C1 callers get a recognizable "not yet implemented" signal.
+	*swapchain = XR_NULL_HANDLE;
+	return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+	                 "xrCreateWorkspaceClientChromeSwapchainEXT: not implemented yet (Phase 2.C C1 stub)");
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyWorkspaceClientChromeSwapchainEXT(XrSwapchain swapchain)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_swapchain *sc = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SWAPCHAIN_AND_INIT_LOG(&log, swapchain, sc, "xrDestroyWorkspaceClientChromeSwapchainEXT");
+	OXR_VERIFY_EXTENSION(&log, sc->sess->sys->inst, EXT_spatial_workspace);
+
+	// C1 stub: no chrome side-table to clean up yet. C2 wires the real path.
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetWorkspaceClientChromeLayoutEXT(XrSession session,
+                                        XrWorkspaceClientId clientId,
+                                        const XrWorkspaceChromeLayoutEXT *layout)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_session *sess = NULL;
+	struct oxr_logger log;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrSetWorkspaceClientChromeLayoutEXT");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, EXT_spatial_workspace);
+	OXR_VERIFY_ARG_NOT_NULL(&log, layout);
+
+	if (layout->type != XR_TYPE_WORKSPACE_CHROME_LAYOUT_EXT) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrSetWorkspaceClientChromeLayoutEXT: layout->type must be "
+		                 "XR_TYPE_WORKSPACE_CHROME_LAYOUT_EXT");
+	}
+	if (clientId == XR_NULL_WORKSPACE_CLIENT_ID) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrSetWorkspaceClientChromeLayoutEXT: clientId must not be "
+		                 "XR_NULL_WORKSPACE_CLIENT_ID");
+	}
+	if (layout->hitRegionCount > XR_WORKSPACE_CHROME_MAX_HIT_REGIONS_EXT) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrSetWorkspaceClientChromeLayoutEXT: hitRegionCount %u exceeds max %u",
+		                 layout->hitRegionCount, XR_WORKSPACE_CHROME_MAX_HIT_REGIONS_EXT);
+	}
+	if (layout->hitRegionCount > 0 && layout->hitRegions == NULL) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrSetWorkspaceClientChromeLayoutEXT: hitRegions must not be NULL when "
+		                 "hitRegionCount > 0");
+	}
+	if (!(layout->sizeMeters.width > 0.0f) || !(layout->sizeMeters.height > 0.0f)) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrSetWorkspaceClientChromeLayoutEXT: sizeMeters width/height must be > 0");
+	}
+
+	if (!session_is_ipc_client(sess)) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "xrSetWorkspaceClientChromeLayoutEXT requires an IPC-mode session");
+	}
+
+	// C1 stub: layout cache wired up in C2.
+	(void)layout;
+	return XR_SUCCESS;
 }
 
 #endif // OXR_HAVE_EXT_spatial_workspace

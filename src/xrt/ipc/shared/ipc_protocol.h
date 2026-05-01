@@ -387,7 +387,7 @@ struct ipc_workspace_input_event
 			uint32_t button;         //!< 1=L, 2=R, 3=M
 			uint32_t is_down;        //!< XrBool32 semantics
 			uint32_t modifiers;      //!< bit0=SHIFT, bit1=CTRL, bit2=ALT
-			uint32_t _pad;
+			uint32_t chrome_region_id; //!< spec_version 7: controller-defined region within chrome quad
 		} pointer;
 		struct
 		{
@@ -419,6 +419,8 @@ struct ipc_workspace_input_event
 			int64_t  cursor_y;
 			uint32_t button_mask;    //!< bit0=L, bit1=R, bit2=M (currently held)
 			uint32_t modifiers;
+			uint32_t chrome_region_id; //!< spec_version 7: controller-defined region within chrome quad
+			uint32_t _pad;
 		} pointer_motion;
 		struct                      //!< spec_version 6: vsync-aligned frame tick
 		{
@@ -484,6 +486,48 @@ struct ipc_capture_result
 	float eye_left_m[3];
 	float eye_right_m[3];
 	char _pad[16];
+};
+
+/*!
+ * Phase 2.C: maximum chrome hit regions per layout. Mirrors
+ * XR_WORKSPACE_CHROME_MAX_HIT_REGIONS_EXT — kept fixed-size so the wire form
+ * stays POD.
+ *
+ * @ingroup ipc
+ */
+#define IPC_WORKSPACE_CHROME_MAX_HIT_REGIONS 8
+
+/*!
+ * Phase 2.C: one controller-defined hit region inside a chrome quad. POD
+ * mirror of XrWorkspaceChromeHitRegionEXT.
+ *
+ * @ingroup ipc
+ */
+struct ipc_workspace_chrome_hit_region
+{
+	uint32_t id;            //!< Controller-defined; 0 = no region
+	float    bounds_x;       //!< Top-left U in [0,1]
+	float    bounds_y;       //!< Top-left V in [0,1]
+	float    bounds_w;       //!< Extent U in [0,1]
+	float    bounds_h;       //!< Extent V in [0,1]
+};
+
+/*!
+ * Phase 2.C: layout for a controller-submitted chrome quad. POD mirror of
+ * XrWorkspaceChromeLayoutEXT, with the variable-length region array inlined
+ * as a fixed-size array so the wire stays POD.
+ *
+ * @ingroup ipc
+ */
+struct ipc_workspace_chrome_layout
+{
+	struct xrt_pose pose_in_client;   //!< Chrome quad pose in client-window-local space
+	float    size_w_m;                //!< Chrome quad width in meters
+	float    size_h_m;                //!< Chrome quad height in meters
+	uint32_t follows_window_orient;   //!< XrBool32; if true chrome rotates with window
+	float    depth_bias_meters;       //!< Bias toward eye; 0 = runtime default (0.001)
+	uint32_t hit_region_count;        //!< <= IPC_WORKSPACE_CHROME_MAX_HIT_REGIONS
+	struct ipc_workspace_chrome_hit_region hit_regions[IPC_WORKSPACE_CHROME_MAX_HIT_REGIONS];
 };
 
 /*!

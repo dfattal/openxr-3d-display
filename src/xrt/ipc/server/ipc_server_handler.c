@@ -2926,6 +2926,42 @@ ipc_handle_workspace_capture_frame(volatile struct ipc_client_state *_ics,
 #endif
 }
 
+// Phase 2.C: controller-owned chrome RPCs. C1 lands these as stubs; C2 wires
+// them to the d3d11_service multi-compositor's chrome side-table.
+
+xrt_result_t
+ipc_handle_workspace_register_chrome_swapchain(volatile struct ipc_client_state *_ics,
+                                               uint32_t client_id,
+                                               uint32_t swapchain_id)
+{
+	(void)_ics;
+	(void)client_id;
+	(void)swapchain_id;
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_workspace_unregister_chrome_swapchain(volatile struct ipc_client_state *_ics,
+                                                 uint32_t client_id,
+                                                 uint32_t swapchain_id)
+{
+	(void)_ics;
+	(void)client_id;
+	(void)swapchain_id;
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_workspace_set_chrome_layout(volatile struct ipc_client_state *_ics,
+                                       uint32_t client_id,
+                                       const struct ipc_workspace_chrome_layout *layout)
+{
+	(void)_ics;
+	(void)client_id;
+	(void)layout;
+	return XRT_SUCCESS;
+}
+
 xrt_result_t
 ipc_handle_swapchain_get_properties(volatile struct ipc_client_state *ics,
                                     const struct xrt_swapchain_create_info *info,

@@ -877,6 +877,20 @@ oxr_xrRequestWorkspaceClientExitEXT(XrSession session, XrWorkspaceClientId clien
 //! OpenXR API function @ep{xrRequestWorkspaceClientFullscreenEXT}
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrRequestWorkspaceClientFullscreenEXT(XrSession session, XrWorkspaceClientId clientId, XrBool32 fullscreen);
+//! OpenXR API function @ep{xrCreateWorkspaceClientChromeSwapchainEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateWorkspaceClientChromeSwapchainEXT(XrSession session,
+                                              XrWorkspaceClientId clientId,
+                                              const XrWorkspaceChromeSwapchainCreateInfoEXT *createInfo,
+                                              XrSwapchain *swapchain);
+//! OpenXR API function @ep{xrDestroyWorkspaceClientChromeSwapchainEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyWorkspaceClientChromeSwapchainEXT(XrSwapchain swapchain);
+//! OpenXR API function @ep{xrSetWorkspaceClientChromeLayoutEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSetWorkspaceClientChromeLayoutEXT(XrSession session,
+                                        XrWorkspaceClientId clientId,
+                                        const XrWorkspaceChromeLayoutEXT *layout);
 #endif
 
 #ifdef OXR_HAVE_EXT_app_launcher
