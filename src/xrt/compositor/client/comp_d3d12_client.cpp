@@ -33,6 +33,7 @@
 #include "util/u_win32_com_guard.hpp"
 
 #include <d3d12.h>
+#include <dxgi1_4.h>
 #include <wil/resource.h>
 #include <wil/com.h>
 #include <wil/result_macros.h>
@@ -1090,6 +1091,29 @@ try {
 
 	c->device = device;
 	c->app_queue = queue;
+
+	// Log the adapter LUID + name. Must match the service compositor's adapter
+	// or shared NT-handle textures will silently produce black output on
+	// hybrid-GPU laptops (issue #184). The Windows registry pin in
+	// shell/main.c::ensure_app_gpu_pref_high is supposed to ensure this, but
+	// is sometimes overridden by NVIDIA Optimus profiles — log to confirm.
+	{
+		LUID app_luid = device->GetAdapterLuid();
+		U_LOG_W("Client D3D12 adapter LUID: %08lx-%08lx (must match service for texture sharing)",
+		        app_luid.HighPart, app_luid.LowPart);
+		wil::com_ptr<IDXGIFactory4> factory;
+		if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(factory.put())))) {
+			wil::com_ptr<IDXGIAdapter> adapter;
+			if (SUCCEEDED(factory->EnumAdapterByLuid(app_luid, IID_PPV_ARGS(adapter.put())))) {
+				DXGI_ADAPTER_DESC desc = {};
+				if (SUCCEEDED(adapter->GetDesc(&desc))) {
+					char name[128] = {0};
+					wcstombs(name, desc.Description, sizeof(name) - 1);
+					U_LOG_W("Client D3D12 adapter: %s", name);
+				}
+			}
+		}
+	}
 
 	HRESULT hr =
 	    c->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(c->command_allocator.put()));
