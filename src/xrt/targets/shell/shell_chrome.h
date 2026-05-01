@@ -59,15 +59,24 @@ void shell_chrome_destroy(struct shell_chrome *sc);
  * Call once per new workspace client. Creates a chrome swapchain for the
  * client, renders initial chrome state into image[0], and submits the
  * layout. @p win_w_m / @p win_h_m is the client's window size in meters
- * (used to compute pill width as a fraction of window width). Returns true
- * on success; false (with diagnostic) on retryable failure — callers should
- * try again on the next tick (Phase 2.K connect-time race).
+ * (used to compute pill width as a fraction of window width).
+ *
+ * @p icon_png_path is the resolved per-app icon (registered_app sidecar or
+ * extracted PE icon). NULL/"" disables the icon sample.
+ *
+ * @p title is the per-app friendly name to render between the icon and the
+ * grip dots (Phase 2.C C3.C-3b). NULL/"" disables the title sample. Both
+ * inputs are best-effort; loader failures are non-fatal.
+ *
+ * Returns true on success; false (with diagnostic) on retryable failure —
+ * callers should try again on the next tick (Phase 2.K connect-time race).
  */
 bool shell_chrome_on_client_connected(struct shell_chrome *sc,
                                       XrWorkspaceClientId id,
                                       float win_w_m,
                                       float win_h_m,
-                                      const char *icon_png_path);
+                                      const char *icon_png_path,
+                                      const char *title);
 
 /*!
  * Call when a client disconnects. Destroys its chrome swapchain.

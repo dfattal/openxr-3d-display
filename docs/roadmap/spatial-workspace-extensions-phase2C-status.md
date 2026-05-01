@@ -1,8 +1,8 @@
 # Phase 2.C Status: Controller-Owned Chrome
 
 **Branch:** `feature/workspace-extensions-2C` (off `feature/workspace-extensions-2K` tip)
-**Status:** C1, C2, C3.A, C3.B, C3.C-1, C3.C-2, C4, C3.C-4, C5, C3.C-3a (icon + glassy polish), spec_version 8 (event-driven wakeup + auto-anchor chrome layout) committed. Runtime now ships with **zero default chrome** — controller-owned chrome is the only chrome path; idle CPU effectively zero (event-driven, no poll loop); pill tracks window edge in lockstep with content during resize (no IPC roundtrip per frame). Remaining: C3.C-3b (DirectWrite title-text atlas) → C6 (test app smoke + final doc pass).
-**Date:** 2026-05-01 (last updated end-of-session after spec_version 8 + C3.C-3a)
+**Status:** C1, C2, C3.A, C3.B, C3.C-1, C3.C-2, C4, C3.C-4, C5, C3.C-3a, C3.C-3b, spec_version 8 committed. Runtime now ships with **zero default chrome** — controller-owned chrome is the only chrome path; idle CPU effectively zero (event-driven, no poll loop); pill tracks window edge in lockstep with content during resize (no IPC roundtrip per frame); per-client app name renders between icon and dots via DirectWrite, adaptive-skip when too narrow. Remaining: C6 (test app smoke + final doc pass).
+**Date:** 2026-05-01 (last updated end-of-session after C3.C-3b)
 
 ## Scope
 
@@ -31,7 +31,7 @@ Lift the floating-pill chrome (pill bg, grip dots, close/min/max buttons, app ic
 | [x] | spec_v8: auto-anchor | `XrWorkspaceChromeLayoutEXT.anchorToWindowTopEdge` + `widthAsFractionOfWindow` flags. Runtime auto-recomputes chrome center/width every frame from CURRENT window dims; shell pushes layout once at create and never on resize. Pill tracks window edge in lockstep with content. |
 | [x] | spec_v8: pose-changed | New `XR_WORKSPACE_INPUT_EVENT_WINDOW_POSE_CHANGED_EXT` event lets controllers react to runtime-driven pose / size changes (edge resize, fullscreen toggle). |
 | [x] | spec_v8: glassy polish | Lighter / more transparent pill bg (22 % alpha, edge highlight ring); semi-transparent buttons with procedural × / − / □ glyphs in PS. |
-| [ ] | C3.C-3b | DirectWrite title-text atlas — render the per-client app name between icon and grip dots. Adaptive width: skip text when the pill is too narrow. (next session) |
+| [x] | C3.C-3b | DirectWrite title-text atlas — per-client app name baked once via DirectWrite + D2D over a DXGI surface (R8G8B8A8_UNORM linear, 64 px tall, vertically centered Segoe UI Variable @ 28 DIP). Sampled at register t1 in the pill PS via new `over_pma()` Porter-Duff variant. Adaptive: render_pill flips `has_title=0` when the available rect (icon-right → dots-left, minus padding) can't fit the measured text, AND while a resize burst is in flight (prevents flicker on hover-fade ticks during drag). |
 | [~] | C6 | Spec + separation-of-concerns + audit + plan docs (mostly done, will need a small refresh after C3.C-3b); test app smoke deferred |
 
 ## Commits
@@ -73,11 +73,9 @@ Lift the floating-pill chrome (pill bg, grip dots, close/min/max buttons, app ic
 
 - **Pill image stretches during horizontal resize until 100 ms after release.** The chrome IMAGE has button slots and dot circles baked in pill-space-meters of the LAST render. Width changes scale `pill_w_m` but the runtime composites the cached image stretched onto the new quad — buttons/dots momentarily look elongated until the debounced post-resize re-render fires. Vertical resize is unaffected (pill width unchanged). Documented; could be mitigated by image-pixel-space SDF (always slight elongation, never wobble) but trade-off was not deemed worth it.
 - **Keyed-mutex AcquireSync timeout is 4 ms.** If the shell's GPU is slow to flush its writes, the runtime's acquire could time out and the chrome blit silently uses stale texture content. Worth instrumenting with a one-shot warn-log if the acquire ever fails. Not yet observed in practice.
-- **Test apps have no app-name string.** `XrWorkspaceClientInfoEXT.name` is the OpenXR `applicationName` (e.g. `SRCubeOpenXRExt`). Registered_app `name` is the friendly sidecar name (e.g. `Cube D3D11 (Handle)`). They don't match for test apps. C3.C-3b will need a PID-based lookup for the title text, mirroring the icon resolution.
+- **Test apps have no app-name string.** `XrWorkspaceClientInfoEXT.name` is the OpenXR `applicationName` (e.g. `SRCubeOpenXRExt`). Registered_app `name` is the friendly sidecar name (e.g. `Cube D3D11 (Handle)`). They don't match for test apps. C3.C-3b's `shell_resolve_title_for_pid` (`main.c`) prefers the registered_app `name` when the PID's exe matches a sidecar, and falls back to `cinfo.name` otherwise.
 
 ## Next-step plan
-
-**C3.C-3b — Title text via DirectWrite glyph atlas.** Render the per-client app name between the icon and grip dots in the pill. Fresh-session work, ~300–500 lines. See [`spatial-workspace-extensions-phase2C-c3c3b-agent-prompt.md`](spatial-workspace-extensions-phase2C-c3c3b-agent-prompt.md) for the focused agent prompt.
 
 **C6 — Test app smoke + final doc pass.** Chrome-swapchain smoke in `workspace_minimal_d3d11_win` (~200 lines: create chrome swapchain, fill with checkerboard, set 2 hit regions, drain events, verify chromeRegionId). Spec doc refresh to mention spec_version 8 fields + the new `WINDOW_POSE_CHANGED` event + the wakeup-event PFN. Audit entry update. Mark Phase 2.C ✅ shipped.
 
@@ -111,7 +109,6 @@ Shell:
 ## Hand-off
 
 - Branch sequence (`2G → 2K → 2C`) stays in flight. Don't merge to main.
-- Phase 2.C is **architecturally complete and visually production-ready** save for the title text. The runtime owns zero pixels of UI policy. The controller-side chrome is fully interactive (hit-test, click dispatch, hover-fade, drag/resize tracking, app icons), event-driven (zero idle CPU), and visually polished (glassy frosted-blue pill matching the concept art).
-- C3.C-3b (title text) is the only remaining visual polish. Plan + scope + heuristics live in [`spatial-workspace-extensions-phase2C-c3c3b-agent-prompt.md`](spatial-workspace-extensions-phase2C-c3c3b-agent-prompt.md).
+- Phase 2.C is **architecturally complete and visually production-ready**. The runtime owns zero pixels of UI policy. The controller-side chrome is fully interactive (hit-test, click dispatch, hover-fade, drag/resize tracking, app icons, app-name title text), event-driven (zero idle CPU), and visually polished (glassy frosted-blue pill matching the concept art at [`docs/architecture/assets/chrome-pill-concept.png`](../architecture/assets/chrome-pill-concept.png)).
 - C6 (test app smoke + final doc refresh) closes Phase 2.C.
 - Per `feedback_test_before_ci.md`: any continuing session must build + smoke locally before pushing.

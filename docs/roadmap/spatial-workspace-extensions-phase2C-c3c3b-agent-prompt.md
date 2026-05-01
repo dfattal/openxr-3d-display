@@ -37,8 +37,9 @@ authoritative current state. Read it first.
 
 Add per-client app-name text rendered between the icon (left) and the
 grip dots (center) of the pill. Match the reference concept image at
-`Pictures/DisplayXR/Shell UI Concept.png` — clean white sans-serif,
-well-proportioned, no overlap with the icon or dots. **Adaptive
+[`docs/architecture/assets/chrome-pill-concept.png`](../architecture/assets/chrome-pill-concept.png)
+— clean white sans-serif, well-proportioned, no overlap with the icon
+or dots. **Adaptive
 width**: if the available pill space (icon-right-edge → dots-left-edge,
 minus padding) cannot fit the text without overlap, skip the text
 entirely and render only icon + dots + buttons.
@@ -235,7 +236,7 @@ parameter.
 
 1. **Visual parity with the concept image**: title text is white,
    sans-serif, well-proportioned (height ≈ 70 % of pill height,
-   centered vertically). Reference: `Pictures/DisplayXR/Shell UI Concept.png`.
+   centered vertically). Reference: [`docs/architecture/assets/chrome-pill-concept.png`](../architecture/assets/chrome-pill-concept.png).
 2. **Adaptive**: at default 13 cm pill width, both cube apps show their
    names. Resize the window narrow enough that the title would overlap
    icon or dots — title disappears, no garbled overlap. Make wide

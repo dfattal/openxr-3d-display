@@ -21,6 +21,13 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 
+// Phase 2.C C3.C-3b: DirectWrite + Direct2D used to bake per-app title text
+// into a per-slot D3D11 texture sampled by the pill shader at register t1.
+// Pattern mirrors comp_d3d11_service.cpp:4540-4660 — D2D draws into a DXGI
+// surface backed by a D3D11 RTV+SRV texture, no WIC, no CoInitialize needed.
+#include <d2d1.h>
+#include <dwrite.h>
+
 // stb_image for PNG decode of per-app icons. The shell already includes
 // stb headers via the launcher path — re-use here, header-only impl is
 // disabled (defined elsewhere). If stb_image isn't already linked, fall
@@ -120,6 +127,19 @@ struct chrome_slot
 	// has_icon = 0 in the cbuffer.
 	ComPtr<ID3D11Texture2D>        icon_texture;
 	ComPtr<ID3D11ShaderResourceView> icon_srv;
+
+	// Phase 2.C C3.C-3b: per-app title text. Baked once at connect via
+	// DirectWrite + D2D into a D3D11 RTV+SRV texture (R8G8B8A8_UNORM,
+	// 64 px tall — chrome image height — vertically centered glyph row).
+	// NULL if the app has no resolvable title; pill shader samples
+	// title_srv at register t1 and skips the sample when has_title = 0.
+	// title_image_w_px is the measured DirectWrite text width in pixels;
+	// render_pill uses it to compute pill-space meters via the chrome
+	// image's vertical pixel-to-meter scale (pill_h_m / 64), which keeps
+	// text at fixed physical size regardless of pill width.
+	ComPtr<ID3D11Texture2D>          title_texture;
+	ComPtr<ID3D11ShaderResourceView> title_srv;
+	uint32_t                         title_image_w_px;
 };
 
 } // namespace
@@ -159,9 +179,23 @@ struct PillCB
 	float has_icon;
 	float icon_size_m;
 	float _pad1[2];
+
+	// Register 7: title text control (Phase 2.C C3.C-3b). has_title = 1
+	// enables the per-slot title sample between the icon and the grip
+	// dots. title_left_uv / title_right_uv define the chrome-image x
+	// range (UV space, [0,1]) that the title texture is stretched
+	// across; UV.y maps directly because the title texture is baked
+	// 64 px tall to match the chrome image height. render_pill flips
+	// has_title to 0 when the available space is too narrow to fit the
+	// measured text without overlap, OR while a resize burst is in
+	// flight (gates flicker if a hover-fade tick lands mid-drag).
+	float has_title;
+	float title_left_uv;
+	float title_right_uv;
+	float _pad2;
 };
 static_assert(sizeof(PillCB) % 16 == 0, "PillCB must be 16-byte aligned");
-static_assert(sizeof(PillCB) == 112, "PillCB layout drift");
+static_assert(sizeof(PillCB) == 128, "PillCB layout drift");
 
 struct shell_chrome
 {
@@ -189,6 +223,15 @@ struct shell_chrome
 	ComPtr<ID3D11BlendState>     bs_passthrough;  // overwrite RTV — controller owns the chrome image
 	ComPtr<ID3D11DepthStencilState> dss_disabled;
 	ComPtr<ID3D11SamplerState>   icon_sampler; // linear-clamp; sampled by the pill shader for per-app icons
+
+	// Phase 2.C C3.C-3b: DirectWrite + D2D for per-slot title-text bake.
+	// Factories are process-global state cached once at create and reused
+	// for every per-slot bake. text_format is the shared TextFormat used
+	// by all slots — Segoe UI Variable, normal weight, sized so the
+	// rendered glyph height ≈ 70 % of the chrome image's 64 px vertical.
+	ComPtr<ID2D1Factory>     d2d_factory;
+	ComPtr<IDWriteFactory>   dw_factory;
+	ComPtr<IDWriteTextFormat> text_format;
 };
 
 namespace {
@@ -270,9 +313,15 @@ cbuffer PillCB : register(b0)
     float  has_icon;
     float  icon_size_m;
     float2 _pad1;
+
+    float  has_title;
+    float  title_left_uv;
+    float  title_right_uv;
+    float  _pad2;
 };
 
 Texture2D    icon_tex  : register(t0);
+Texture2D    title_tex : register(t1);
 SamplerState icon_samp : register(s0);
 
 // Signed distance to a rounded rectangle centered at origin with half-extents
@@ -295,6 +344,18 @@ float4 over(float4 src, float4 dst)
     float a = src.a + dst.a * (1.0 - src.a);
     if (a <= 1e-6) return float4(0, 0, 0, 0);
     float3 c = (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / a;
+    return float4(c, a);
+}
+
+// Variant where `src` arrives with PREMULTIPLIED alpha (D2D's native output
+// when CreateDxgiSurfaceRenderTarget is given D2D1_ALPHA_MODE_PREMULTIPLIED).
+// `dst` is straight as before; output is straight. Same composite identity
+// just without the redundant src.rgb * src.a step (it's already baked in).
+float4 over_pma(float4 src_pma, float4 dst)
+{
+    float a = src_pma.a + dst.a * (1.0 - src_pma.a);
+    if (a <= 1e-6) return float4(0, 0, 0, 0);
+    float3 c = (src_pma.rgb + dst.rgb * dst.a * (1.0 - src_pma.a)) / a;
     return float4(c, a);
 }
 
@@ -372,6 +433,28 @@ float4 PS(VSOut input) : SV_Target
             float icon_cov = saturate(0.5 - icon_dist / max(fwidth(icon_dist), 1e-6));
             result = over(float4(icon_sample.rgb, icon_sample.a * icon_cov), result);
         }
+    }
+
+    // App-name title text (Phase 2.C C3.C-3b). Sampled from a per-slot
+    // texture baked once via DirectWrite + D2D. Renders between the icon
+    // and the centered grip-dot cluster when the controller decides
+    // there's room — render_pill flips has_title=0 to skip the sample
+    // when the pill is too narrow, so we don't have to clip in the
+    // shader. UV.x is remapped from [title_left_uv, title_right_uv] to
+    // the title texture's full [0,1] horizontal range; UV.y maps
+    // directly because the title texture is 64 px tall to match the
+    // chrome image. D2D outputs PREMULTIPLIED alpha, so we composite
+    // via over_pma. White-tinted to match the existing button glyphs.
+    if (has_title > 0.5 &&
+        input.uv.x >= title_left_uv && input.uv.x < title_right_uv) {
+        float tu = (input.uv.x - title_left_uv) / max(title_right_uv - title_left_uv, 1e-6);
+        float4 t_pma = title_tex.Sample(icon_samp, float2(tu, input.uv.y));
+        // Tint to (0.97, 0.98, 1.0) at 0.95 opacity — matches glyph_col.
+        // PMA RGB scales with alpha already, so multiplying both .rgb
+        // and .a by the same 0.95 factor keeps the premultiplication
+        // invariant.
+        float4 src = float4(t_pma.rgb * float3(0.97, 0.98, 1.0), t_pma.a) * 0.95;
+        result = over_pma(src, result);
     }
 
     // Pill edge highlight — thin bright rim along the perimeter, falls off
@@ -494,6 +577,7 @@ init_shader_pipeline(shell_chrome *sc)
 	// Linear-clamp sampler for app icons. Linear filter keeps the icon
 	// crisp at varying display scales; clamp address mode prevents tiling
 	// artifacts when the shader's UV math drifts off the [0,1] range.
+	// Reused by the title-text sample at register t1 (Phase 2.C C3.C-3b).
 	D3D11_SAMPLER_DESC ssd = {};
 	ssd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
 	ssd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -502,6 +586,60 @@ init_shader_pipeline(shell_chrome *sc)
 	ssd.MaxLOD = D3D11_FLOAT32_MAX;
 	hr = sc->device->CreateSamplerState(&ssd, sc->icon_sampler.GetAddressOf());
 	if (FAILED(hr)) { PE("shell_chrome: CreateSamplerState(icon) failed: 0x%08lx\n", hr); return false; }
+
+	// Phase 2.C C3.C-3b: D2D + DirectWrite factories for title-text bake.
+	// D2D1CreateFactory and DWriteCreateFactory are direct DLL exports —
+	// neither requires CoInitialize on the calling thread (mirrors the
+	// runtime's compositor at comp_d3d11_service.cpp:4540-4575). A failure
+	// here disables title rendering across all slots; the rest of the
+	// chrome (pill bg, icon, dots, buttons) continues to render.
+	hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
+	                       __uuidof(ID2D1Factory),
+	                       reinterpret_cast<void **>(sc->d2d_factory.GetAddressOf()));
+	if (FAILED(hr) || !sc->d2d_factory) {
+		PE("shell_chrome: D2D1CreateFactory failed: 0x%08lx (title text disabled)\n", hr);
+		// Non-fatal: leave d2d_factory null; bake_title_texture will skip.
+	}
+
+	hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+	                         __uuidof(IDWriteFactory),
+	                         reinterpret_cast<IUnknown **>(sc->dw_factory.GetAddressOf()));
+	if (FAILED(hr) || !sc->dw_factory) {
+		PE("shell_chrome: DWriteCreateFactory failed: 0x%08lx (title text disabled)\n", hr);
+		sc->d2d_factory.Reset();
+	}
+
+	if (sc->dw_factory) {
+		// Segoe UI Variable @ 28 DIP ≈ 37 px glyph height at 96 DPI →
+		// ~58 % of the 64 px chrome image height, with vertical centering
+		// adding the leading + descent margin so the visible glyph row
+		// reads at the ~70 % proportion in the concept image.
+		hr = sc->dw_factory->CreateTextFormat(
+		    L"Segoe UI Variable", nullptr,
+		    DWRITE_FONT_WEIGHT_NORMAL,
+		    DWRITE_FONT_STYLE_NORMAL,
+		    DWRITE_FONT_STRETCH_NORMAL,
+		    28.0f, L"en-us",
+		    sc->text_format.GetAddressOf());
+		if (FAILED(hr) || !sc->text_format) {
+			// Fall back to Segoe UI (universally installed) if Variable is
+			// missing on older Windows builds.
+			hr = sc->dw_factory->CreateTextFormat(
+			    L"Segoe UI", nullptr,
+			    DWRITE_FONT_WEIGHT_NORMAL,
+			    DWRITE_FONT_STYLE_NORMAL,
+			    DWRITE_FONT_STRETCH_NORMAL,
+			    28.0f, L"en-us",
+			    sc->text_format.GetAddressOf());
+		}
+		if (sc->text_format) {
+			sc->text_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+			sc->text_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+			sc->text_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+		} else {
+			PE("shell_chrome: CreateTextFormat failed: 0x%08lx (title text disabled)\n", hr);
+		}
+	}
 
 	return true;
 }
@@ -546,6 +684,142 @@ load_icon_png(shell_chrome *sc, chrome_slot &slot, const char *png_path)
 		slot.icon_texture.Reset();
 		return false;
 	}
+	return true;
+}
+
+// Phase 2.C C3.C-3b: bake the per-app title text into a per-slot D3D11
+// texture using DirectWrite + D2D over a DXGI surface. Mirrors the
+// runtime compositor's text-overlay bake at comp_d3d11_service.cpp:4607.
+//
+// Texture format = DXGI_FORMAT_R8G8B8A8_UNORM (LINEAR, not _SRGB) — D2D
+// outputs gamma-corrected anti-aliased glyphs already; sampling from
+// _SRGB would degamma twice and read as washed-out / thin glyphs. The
+// texture is 64 px tall to match the chrome image height, with the
+// glyph row vertically centered via DWRITE_PARAGRAPH_ALIGNMENT_CENTER —
+// this keeps UV.y mapping straight (no extra cbuffer fields needed).
+//
+// On failure (D2D unavailable, allocation fails, etc.) returns false
+// and leaves slot.title_srv null; the shader gates via has_title=0.
+bool
+bake_title_texture(shell_chrome *sc, chrome_slot &slot, const char *text)
+{
+	if (sc == nullptr || text == nullptr || text[0] == '\0') {
+		return false;
+	}
+	if (!sc->d2d_factory || !sc->dw_factory || !sc->text_format) {
+		return false; // factory init failed at create — title rendering disabled
+	}
+
+	// UTF-8 → UTF-16 for DirectWrite.
+	wchar_t wtext[128];
+	int wlen = MultiByteToWideChar(CP_UTF8, 0, text, -1,
+	                               wtext, (int)(sizeof(wtext) / sizeof(wtext[0])));
+	if (wlen <= 1) {
+		return false;
+	}
+	const UINT32 wtext_chars = (UINT32)(wlen - 1); // exclude NUL
+
+	// Cap layout box at 480 DIPs (chrome image is 512 px; leave room for
+	// icon + buttons before the adaptive logic clips). DirectWrite will
+	// truncate or wrap if needed; SetWordWrapping(NO_WRAP) keeps a single
+	// horizontal line, so overlong names just exceed the box and we'll
+	// clip via the adaptive width gate at render time anyway.
+	constexpr float kMaxWidthDips  = 480.0f;
+	constexpr float kLayoutHeight  = (float)CHROME_TEX_H; // 64
+
+	ComPtr<IDWriteTextLayout> layout;
+	HRESULT hr = sc->dw_factory->CreateTextLayout(
+	    wtext, wtext_chars,
+	    sc->text_format.Get(),
+	    kMaxWidthDips, kLayoutHeight,
+	    layout.GetAddressOf());
+	if (FAILED(hr) || !layout) {
+		PE("shell_chrome: CreateTextLayout failed for '%s': 0x%08lx\n", text, hr);
+		return false;
+	}
+
+	DWRITE_TEXT_METRICS metrics = {};
+	hr = layout->GetMetrics(&metrics);
+	if (FAILED(hr)) {
+		PE("shell_chrome: TextLayout GetMetrics failed for '%s': 0x%08lx\n", text, hr);
+		return false;
+	}
+	uint32_t measured_w_px = (uint32_t)std::ceil(metrics.width);
+	if (measured_w_px == 0) measured_w_px = 1;
+	if (measured_w_px > 480) measured_w_px = 480; // hard clamp
+
+	// Create the D3D11 backing texture: SHADER_RESOURCE | RENDER_TARGET so
+	// D2D can draw into it and the pill shader can sample it. R8G8B8A8_UNORM
+	// (linear) — see comment above re: D2D gamma.
+	D3D11_TEXTURE2D_DESC td = {};
+	td.Width = measured_w_px;
+	td.Height = CHROME_TEX_H;
+	td.MipLevels = 1;
+	td.ArraySize = 1;
+	td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	td.SampleDesc.Count = 1;
+	td.Usage = D3D11_USAGE_DEFAULT;
+	td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+
+	ComPtr<ID3D11Texture2D> tex;
+	hr = sc->device->CreateTexture2D(&td, nullptr, tex.GetAddressOf());
+	if (FAILED(hr) || !tex) {
+		PE("shell_chrome: CreateTexture2D(title) failed for '%s': 0x%08lx\n", text, hr);
+		return false;
+	}
+
+	ComPtr<IDXGISurface> dxgi_surface;
+	hr = tex.As(&dxgi_surface);
+	if (FAILED(hr) || !dxgi_surface) {
+		PE("shell_chrome: title texture QueryInterface(IDXGISurface) failed: 0x%08lx\n", hr);
+		return false;
+	}
+
+	D2D1_RENDER_TARGET_PROPERTIES rt_props = D2D1::RenderTargetProperties(
+	    D2D1_RENDER_TARGET_TYPE_DEFAULT,
+	    D2D1::PixelFormat(DXGI_FORMAT_R8G8B8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+	    96.0f, 96.0f);
+
+	ComPtr<ID2D1RenderTarget> rt;
+	hr = sc->d2d_factory->CreateDxgiSurfaceRenderTarget(
+	    dxgi_surface.Get(), &rt_props, rt.GetAddressOf());
+	if (FAILED(hr) || !rt) {
+		PE("shell_chrome: CreateDxgiSurfaceRenderTarget(title) failed: 0x%08lx\n", hr);
+		return false;
+	}
+
+	ComPtr<ID2D1SolidColorBrush> brush;
+	hr = rt->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White, 1.0f),
+	                                brush.GetAddressOf());
+	if (FAILED(hr) || !brush) {
+		PE("shell_chrome: CreateSolidColorBrush(title) failed: 0x%08lx\n", hr);
+		return false;
+	}
+
+	rt->BeginDraw();
+	rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+	// Re-create the layout with the actual texture width as the box, so
+	// paragraph alignment center keeps the (already-known) glyph row in the
+	// vertical middle of the 64 px texture and horizontal alignment leading
+	// places it flush at x=0.
+	rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+	rt->DrawTextLayout(D2D1::Point2F(0.0f, 0.0f), layout.Get(), brush.Get());
+	hr = rt->EndDraw();
+	if (FAILED(hr)) {
+		PE("shell_chrome: D2D EndDraw(title) failed for '%s': 0x%08lx\n", text, hr);
+		return false;
+	}
+
+	ComPtr<ID3D11ShaderResourceView> srv;
+	hr = sc->device->CreateShaderResourceView(tex.Get(), nullptr, srv.GetAddressOf());
+	if (FAILED(hr) || !srv) {
+		PE("shell_chrome: CreateShaderResourceView(title) failed for '%s': 0x%08lx\n", text, hr);
+		return false;
+	}
+
+	slot.title_texture = tex;
+	slot.title_srv = srv;
+	slot.title_image_w_px = measured_w_px;
 	return true;
 }
 
@@ -614,6 +888,42 @@ render_pill(shell_chrome *sc, chrome_slot &slot)
 	cb->_pad1[0] = 0.0f;
 	cb->_pad1[1] = 0.0f;
 
+	// Phase 2.C C3.C-3b: title text adaptive-width logic. Use the chrome
+	// image's vertical pixel-to-meter scale (pill_h_m / 64) for both axes
+	// so the rendered text stays at fixed physical size regardless of pill
+	// width — and the "skip when too narrow" heuristic falls out naturally
+	// from comparing measured text width (in pill-space meters) against
+	// the available rect between the icon's right edge and the dot grid.
+	//
+	// Suppress the title while a resize burst is in flight: render_pill
+	// re-runs on hover-fade ticks, and a fade tick that lands mid-drag
+	// would otherwise pop the title on/off as win_w_m sweeps past the
+	// adaptive threshold. Pinning has_title=0 during resize_pending keeps
+	// the pill geometrically clean during the drag, and the burst-end
+	// re-render makes the final adaptive decision once.
+	const bool resize_in_flight = (slot.resize_pending_until_ns != 0);
+	const float meters_per_image_px = pill_h_m / (float)CHROME_TEX_H;
+	const float text_needed_m = (float)slot.title_image_w_px * meters_per_image_px;
+
+	const float icon_right_m = UI_BTN_W_M * 0.5f + cb->icon_size_m;
+	const float grip_total_w = 4.0f * DOT_SIZE_M + 3.0f * DOT_GAP_M;
+	const float grip_left_m  = pill_w_m * 0.5f - grip_total_w * 0.5f;
+	const float padding_m    = pill_h_m * 0.25f; // 2 mm
+	const float text_avail_m = grip_left_m - icon_right_m - 2.0f * padding_m;
+
+	if (slot.title_srv && !resize_in_flight &&
+	    text_needed_m > 0.0f && text_needed_m <= text_avail_m) {
+		cb->has_title       = 1.0f;
+		const float left_m  = icon_right_m + padding_m;
+		cb->title_left_uv   = left_m / pill_w_m;
+		cb->title_right_uv  = (left_m + text_needed_m) / pill_w_m;
+	} else {
+		cb->has_title       = 0.0f;
+		cb->title_left_uv   = 0.0f;
+		cb->title_right_uv  = 0.0f;
+	}
+	cb->_pad2 = 0.0f;
+
 	sc->context->Unmap(sc->cb_pill.Get(), 0);
 
 	// Clear to fully transparent so the SDF coverage outside the pill
@@ -645,12 +955,15 @@ render_pill(shell_chrome *sc, chrome_slot &slot)
 	sc->context->VSSetConstantBuffers(0, 1, sc->cb_pill.GetAddressOf());
 	sc->context->PSSetConstantBuffers(0, 1, sc->cb_pill.GetAddressOf());
 
-	// Bind the icon SRV at register t0 (pill shader samples it iff
-	// has_icon = 1) and a linear-clamp sampler at s0. When has_icon = 0
-	// we still bind a NULL SRV so the previous slot's icon doesn't leak
-	// across draws.
-	ID3D11ShaderResourceView *icon_srv = slot.icon_srv ? slot.icon_srv.Get() : nullptr;
-	sc->context->PSSetShaderResources(0, 1, &icon_srv);
+	// Bind the icon SRV at register t0 and the title SRV at register t1
+	// (pill shader samples each iff has_icon / has_title = 1) and a
+	// shared linear-clamp sampler at s0. NULL SRVs are bound when not
+	// available so the previous slot's resources don't leak across draws.
+	ID3D11ShaderResourceView *srvs[2] = {
+	    slot.icon_srv  ? slot.icon_srv.Get()  : nullptr,
+	    slot.title_srv ? slot.title_srv.Get() : nullptr,
+	};
+	sc->context->PSSetShaderResources(0, 2, srvs);
 	sc->context->PSSetSamplers(0, 1, sc->icon_sampler.GetAddressOf());
 
 	sc->context->Draw(4, 0);
@@ -867,7 +1180,8 @@ shell_chrome_on_client_connected(struct shell_chrome *sc,
                                  XrWorkspaceClientId id,
                                  float win_w_m,
                                  float win_h_m,
-                                 const char *icon_png_path)
+                                 const char *icon_png_path,
+                                 const char *title)
 {
 	if (sc == nullptr || id == XR_NULL_WORKSPACE_CLIENT_ID) {
 		return false;
@@ -932,6 +1246,15 @@ shell_chrome_on_client_connected(struct shell_chrome *sc,
 		(void)load_icon_png(sc, slot, icon_png_path);
 	}
 
+	// Phase 2.C C3.C-3b: bake app-name title into a per-slot DirectWrite
+	// texture. Best-effort — the chrome renders without text if D2D init
+	// failed at create or the bake itself fails. Bake-once: the connect
+	// path short-circuits at the find_slot check above on subsequent
+	// ticks, so this runs exactly once per slot.
+	if (title != nullptr && title[0] != '\0') {
+		(void)bake_title_texture(sc, slot, title);
+	}
+
 	if (!acquire_render_release(sc, slot)) {
 		release_slot_resources(slot, sc);
 		return false;
@@ -941,9 +1264,10 @@ shell_chrome_on_client_connected(struct shell_chrome *sc,
 	sc->slots.push_back(std::move(slot));
 	push_layout(sc, sc->slots.back());
 
-	P("shell_chrome: chrome ready for client %u (window %.3f×%.3f m, pill %.3f×%.3f m, icon=%s)\n",
+	P("shell_chrome: chrome ready for client %u (window %.3f×%.3f m, pill %.3f×%.3f m, icon=%s, title=\"%s\")\n",
 	  id, win_w_m, win_h_m, win_w_m * PILL_W_FRAC, PILL_HEIGHT_M,
-	  (icon_png_path && icon_png_path[0]) ? icon_png_path : "(none)");
+	  (icon_png_path && icon_png_path[0]) ? icon_png_path : "(none)",
+	  (title && title[0]) ? title : "");
 	return true;
 }
 

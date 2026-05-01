@@ -1387,6 +1387,59 @@ static const char *
 shell_resolve_icon_for_pid(unsigned long pid) { (void)pid; return ""; }
 #endif
 
+// Phase 2.C C3.C-3b: resolve the per-app title text the shell_chrome pill
+// renders between the icon and the grip dots. Mirrors shell_resolve_icon_
+// for_pid: prefer the registered_app sidecar's friendly `name` (e.g.
+// "Cube D3D11 (Handle)") when the PID's exe matches a registered app;
+// otherwise fall back to the OpenXR application name (cinfo.name, e.g.
+// "SRCubeOpenXRExt"). Returns "" when neither is resolvable.
+//
+// Note: cinfo.name does NOT carry the shell-side " (N)" duplicate-instance
+// suffix — that suffix is appended only in the launcher's print path
+// (main.c near line 3411), not in the runtime payload — so no suffix
+// stripping is needed here.
+#ifdef _WIN32
+static const char *
+shell_resolve_title_for_pid(unsigned long pid, const char *fallback_name)
+{
+	static char cached_title[128];
+	cached_title[0] = '\0';
+
+	if (pid != 0) {
+		HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+		if (h != NULL) {
+			char exe[MAX_PATH] = {0};
+			DWORD n = (DWORD)sizeof(exe);
+			BOOL ok = QueryFullProcessImageNameA(h, 0, exe, &n);
+			CloseHandle(h);
+			if (ok && n > 0) {
+				for (int i = 0; i < g_registered_app_count; i++) {
+					if (exe_path_equal(g_registered_apps[i].exe_path, exe) &&
+					    g_registered_apps[i].name[0] != '\0') {
+						snprintf(cached_title, sizeof(cached_title), "%s",
+						         g_registered_apps[i].name);
+						return cached_title;
+					}
+				}
+			}
+		}
+	}
+
+	if (fallback_name != NULL && fallback_name[0] != '\0') {
+		snprintf(cached_title, sizeof(cached_title), "%s", fallback_name);
+		return cached_title;
+	}
+	return "";
+}
+#else
+static const char *
+shell_resolve_title_for_pid(unsigned long pid, const char *fallback_name)
+{
+	(void)pid;
+	return (fallback_name != NULL) ? fallback_name : "";
+}
+#endif
+
 // Read a string field from a cJSON object into a fixed buffer. If the field
 // is missing or not a string, dst is left untouched.
 static void
@@ -3505,8 +3558,10 @@ main(int argc, char *argv[])
 				}
 				const char *icon_path = shell_resolve_icon_for_pid(
 				    (unsigned long)cinfo.pid);
+				const char *title_text = shell_resolve_title_for_pid(
+				    (unsigned long)cinfo.pid, cinfo.name);
 				(void)shell_chrome_on_client_connected(
-				    g_chrome, chr_ids[i], w_m, h_m, icon_path);
+				    g_chrome, chr_ids[i], w_m, h_m, icon_path, title_text);
 			}
 			// Drop chrome for any disconnected clients (diff against prev_ids).
 			for (uint32_t p = 0; p < prev_count; p++) {

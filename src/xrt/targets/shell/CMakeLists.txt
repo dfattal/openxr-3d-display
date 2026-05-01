@@ -62,7 +62,10 @@ if(WIN32)
     # D3D11/DXGI: Phase 2.C — shell creates an ID3D11Device on the runtime's
     #     adapter to author chrome swapchain images.
     # D3DCompiler: Phase 2.C C3.C — runtime HLSL compile for chrome shaders.
-    target_link_libraries(displayxr-shell PRIVATE dbghelp comdlg32 d3d11 dxgi d3dcompiler)
+    # Dwrite/D2d1: Phase 2.C C3.C-3b — DirectWrite + Direct2D over a DXGI
+    #     surface to bake per-app title text into a per-slot SRV sampled
+    #     by the chrome pill shader at register t1.
+    target_link_libraries(displayxr-shell PRIVATE dbghelp comdlg32 d3d11 dxgi d3dcompiler dwrite d2d1)
 endif()
 
 install(TARGETS displayxr-shell RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
