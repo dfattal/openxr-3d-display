@@ -2658,6 +2658,17 @@ oxr_session_create(struct oxr_logger *log,
 	}
 #endif
 
+#ifdef OXR_HAVE_EXT_spatial_workspace
+	// Phase 2.C: any session enabling XR_EXT_spatial_workspace is a workspace
+	// controller — even when it provides a graphics binding (e.g. shell with
+	// D3D11 for chrome rendering, or workspace_minimal_d3d11_win as an API
+	// smoke). The d3d11_service compositor uses this flag to skip
+	// slot-registering the controller as a renderable tile.
+	if (sys->inst->extensions.EXT_spatial_workspace) {
+		xsi.is_workspace_controller = true;
+	}
+#endif
+
 	/* Try allocating and populating. */
 	XrResult ret = oxr_session_create_impl(log, sys, createInfo, &xsi, &sess);
 	if (ret != XR_SUCCESS) {

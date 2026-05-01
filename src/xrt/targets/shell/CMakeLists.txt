@@ -57,9 +57,9 @@ endif()
 if(WIN32)
     # Dbghelp: ImageDirectoryEntryToData (PE import scan)
     # Comdlg32: GetOpenFileNameA (Phase 5.14 Browse-for-app tile)
-    # No D3D11/DXGI: the workspace-controller session takes no graphics
-    #     binding, so the shell never opens a D3D11 device.
-    target_link_libraries(displayxr-shell PRIVATE dbghelp comdlg32)
+    # D3D11/DXGI: Phase 2.C — shell creates an ID3D11Device on the runtime's
+    #     adapter to author chrome swapchain images.
+    target_link_libraries(displayxr-shell PRIVATE dbghelp comdlg32 d3d11 dxgi)
 endif()
 
 install(TARGETS displayxr-shell RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

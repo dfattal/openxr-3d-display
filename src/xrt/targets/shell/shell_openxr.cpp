@@ -2,21 +2,31 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Shell-side OpenXR scaffolding (Phase 2.I) implementation.
+ * @brief  Shell-side OpenXR scaffolding (Phase 2.I + Phase 2.C) implementation.
  *
- * The shell does not render swapchains; it dispatches workspace + launcher
- * extension functions only. xrCreateSession is called with no graphics
- * binding — the runtime's workspace-controller path (in oxr_session.c)
- * allocates an IPC client compositor for transport but skips the
- * graphics-API wrapper, so no redundant client window is created.
+ * Phase 2.I shipped the IPC-only session for workspace + launcher dispatch.
+ * Phase 2.C adds a D3D11 graphics binding so the shell can mint chrome
+ * swapchains via xrCreateWorkspaceClientChromeSwapchainEXT — the runtime
+ * detects XR_EXT_spatial_workspace and flags the session as a controller, so
+ * the per-client compositor is created without slot registration (no phantom
+ * tile in the workspace).
  */
 
 #include "shell_openxr.h"
 
 #define WIN32_LEAN_AND_MEAN
+#include <Unknwn.h>
 #include <windows.h>
 
+#include <d3d11.h>
+#include <dxgi1_4.h>
+#include <wrl/client.h>
+
+#define XR_USE_GRAPHICS_API_D3D11
+#define XR_USE_PLATFORM_WIN32
+
 #include <openxr/openxr.h>
+#include <openxr/openxr_platform.h>
 
 #include <cstdio>
 #include <cstring>
@@ -73,6 +83,7 @@ extern "C" struct shell_openxr_state *shell_openxr_init(void)
 	    XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME,
 	    XR_EXT_APP_LAUNCHER_EXTENSION_NAME,
 	    XR_EXT_DISPLAY_INFO_EXTENSION_NAME,
+	    XR_KHR_D3D11_ENABLE_EXTENSION_NAME, // Phase 2.C: chrome rendering
 	};
 	XrInstanceCreateInfo ci = {XR_TYPE_INSTANCE_CREATE_INFO};
 	std::snprintf(ci.applicationInfo.applicationName, sizeof(ci.applicationInfo.applicationName),
@@ -121,11 +132,74 @@ extern "C" struct shell_openxr_state *shell_openxr_init(void)
 		   s->display_width_m, s->display_height_m);
 	}
 
-	// Workspace-controller session: no graphics binding chained on next.
-	// The runtime detects this case (XR_EXT_spatial_workspace enabled +
-	// no binding) and creates an IPC-only session.
+	// Phase 2.C: query the adapter the runtime expects for D3D11 work, then
+	// create an ID3D11Device on it. Chrome SHARED_NTHANDLE textures the
+	// runtime mints come back here; OpenSharedResource1 only succeeds against
+	// a device on the same adapter (LUID match).
+	PFN_xrGetD3D11GraphicsRequirementsKHR get_d3d11_reqs = nullptr;
+	r = xrGetInstanceProcAddr(s->instance, "xrGetD3D11GraphicsRequirementsKHR",
+	                          reinterpret_cast<PFN_xrVoidFunction *>(&get_d3d11_reqs));
+	if (XR_FAILED(r) || get_d3d11_reqs == nullptr) {
+		PE("shell_openxr: xrGetInstanceProcAddr(xrGetD3D11GraphicsRequirementsKHR) failed: %s\n",
+		   xr_result_str(r));
+		shell_openxr_shutdown(s);
+		return nullptr;
+	}
+	XrGraphicsRequirementsD3D11KHR d3d11_reqs = {XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR};
+	r = get_d3d11_reqs(s->instance, s->system_id, &d3d11_reqs);
+	if (XR_FAILED(r)) {
+		PE("shell_openxr: xrGetD3D11GraphicsRequirementsKHR failed: %s\n", xr_result_str(r));
+		shell_openxr_shutdown(s);
+		return nullptr;
+	}
+
+	using Microsoft::WRL::ComPtr;
+	ComPtr<IDXGIFactory4> dxgi_factory;
+	HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(dxgi_factory.GetAddressOf()));
+	if (FAILED(hr)) {
+		PE("shell_openxr: CreateDXGIFactory1 failed: 0x%08lx\n", hr);
+		shell_openxr_shutdown(s);
+		return nullptr;
+	}
+	ComPtr<IDXGIAdapter> adapter;
+	hr = dxgi_factory->EnumAdapterByLuid(d3d11_reqs.adapterLuid, IID_PPV_ARGS(adapter.GetAddressOf()));
+	if (FAILED(hr)) {
+		PE("shell_openxr: EnumAdapterByLuid(%08lx-%08lx) failed: 0x%08lx\n",
+		   d3d11_reqs.adapterLuid.HighPart, d3d11_reqs.adapterLuid.LowPart, hr);
+		shell_openxr_shutdown(s);
+		return nullptr;
+	}
+	D3D_FEATURE_LEVEL feature_levels[] = {
+	    D3D_FEATURE_LEVEL_11_1,
+	    D3D_FEATURE_LEVEL_11_0,
+	};
+	D3D_FEATURE_LEVEL chosen_level = D3D_FEATURE_LEVEL_11_0;
+	ComPtr<ID3D11Device> d3d11_device;
+	ComPtr<ID3D11DeviceContext> d3d11_context;
+	hr = D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr,
+	                       D3D11_CREATE_DEVICE_BGRA_SUPPORT, feature_levels,
+	                       (UINT)(sizeof(feature_levels) / sizeof(feature_levels[0])),
+	                       D3D11_SDK_VERSION, d3d11_device.GetAddressOf(), &chosen_level,
+	                       d3d11_context.GetAddressOf());
+	if (FAILED(hr)) {
+		PE("shell_openxr: D3D11CreateDevice failed: 0x%08lx\n", hr);
+		shell_openxr_shutdown(s);
+		return nullptr;
+	}
+	// Hand ownership to the state struct (raw pointers — header-visible to C).
+	s->d3d11_device = d3d11_device.Detach();
+	s->d3d11_context = d3d11_context.Detach();
+
+	// Workspace-controller session with D3D11 binding. The runtime sees
+	// XR_EXT_spatial_workspace enabled and sets is_workspace_controller on the
+	// xrt_session_info, so the d3d11_service compositor allocates the per-
+	// client compositor (needed for swapchain create RPCs) but skips slot
+	// registration — no phantom tile inside the workspace this shell controls.
+	XrGraphicsBindingD3D11KHR d3d11_binding = {XR_TYPE_GRAPHICS_BINDING_D3D11_KHR};
+	d3d11_binding.device = static_cast<ID3D11Device *>(s->d3d11_device);
+
 	XrSessionCreateInfo sci = {XR_TYPE_SESSION_CREATE_INFO};
-	sci.next = nullptr;
+	sci.next = &d3d11_binding;
 	sci.systemId = s->system_id;
 	r = xrCreateSession(s->instance, &sci, &s->session);
 	if (XR_FAILED(r)) {
@@ -190,6 +264,14 @@ extern "C" void shell_openxr_shutdown(struct shell_openxr_state *s)
 	if (s->instance != XR_NULL_HANDLE) {
 		xrDestroyInstance(s->instance);
 		s->instance = XR_NULL_HANDLE;
+	}
+	if (s->d3d11_context != nullptr) {
+		static_cast<ID3D11DeviceContext *>(s->d3d11_context)->Release();
+		s->d3d11_context = nullptr;
+	}
+	if (s->d3d11_device != nullptr) {
+		static_cast<ID3D11Device *>(s->d3d11_device)->Release();
+		s->d3d11_device = nullptr;
 	}
 	delete s;
 }

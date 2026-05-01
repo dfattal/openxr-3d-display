@@ -76,6 +76,15 @@ struct shell_openxr_state
 	// poses to the actual display.
 	float display_width_m;
 	float display_height_m;
+
+	// Phase 2.C: D3D11 device for chrome rendering. The shell creates this
+	// on the same adapter the runtime selected (matched via DXGI LUID from
+	// xrGetD3D11GraphicsRequirementsKHR) so SHARED_NTHANDLE chrome textures
+	// open cleanly with OpenSharedResource1. NULL on platforms without
+	// XR_KHR_D3D11_enable. Declared as void* in this C-visible header so
+	// main.c (compiled as C) does not pull d3d11.h.
+	void *d3d11_device;        // ID3D11Device *
+	void *d3d11_context;       // ID3D11DeviceContext *
 };
 
 /*!
