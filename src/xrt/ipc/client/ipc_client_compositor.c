@@ -459,6 +459,10 @@ comp_ipc_client_compositor_workspace_enumerate_input_events(struct xrt_composito
 			    (XrWorkspaceClientId)src->u.pointer_hover.curr_client_id;
 			out->pointerHover.currentRegion =
 			    (XrWorkspaceHitRegionEXT)src->u.pointer_hover.curr_region;
+			out->pointerHover.prevChromeRegionId =
+			    (XrWorkspaceChromeRegionIdEXT)src->u.pointer_hover.prev_chrome_region_id;
+			out->pointerHover.currentChromeRegionId =
+			    (XrWorkspaceChromeRegionIdEXT)src->u.pointer_hover.curr_chrome_region_id;
 			break;
 		case IPC_WORKSPACE_INPUT_EVENT_KEY:
 			out->key.vkCode = src->u.key.vk_code;

@@ -351,11 +351,21 @@ typedef struct XrWorkspaceInputEventEXT {
             uint32_t                     modifiers;         // bit0=SHIFT, bit1=CTRL, bit2=ALT
             XrWorkspaceChromeRegionIdEXT chromeRegionId;    // spec_version 7: controller-defined region within chrome quad, 0 if none
         } pointer;
-        struct {  // reserved for future region-transition events
-            XrWorkspaceClientId     prevClientId;
-            XrWorkspaceHitRegionEXT prevRegion;
-            XrWorkspaceClientId     currentClientId;
-            XrWorkspaceHitRegionEXT currentRegion;
+        struct {  // hovered-slot transitions; spec_version 9 adds chromeRegionId
+            XrWorkspaceClientId          prevClientId;
+            XrWorkspaceHitRegionEXT      prevRegion;
+            XrWorkspaceClientId          currentClientId;
+            XrWorkspaceHitRegionEXT      currentRegion;
+            // spec_version 9: controller-defined chrome region the cursor is
+            // over (matches the chromeRegionId field on POINTER / POINTER_MOTION
+            // events; 0 = none). Lets the shell drive per-region UI feedback —
+            // button hover-lighten, tooltip popovers, etc. — without enabling
+            // pointer capture continuously. The runtime fires a POINTER_HOVER
+            // whenever EITHER the hovered slot OR the resolved chromeRegionId
+            // changes, so a cursor moving from grip → close inside the same
+            // window's chrome bar still produces a transition event.
+            XrWorkspaceChromeRegionIdEXT prevChromeRegionId;
+            XrWorkspaceChromeRegionIdEXT currentChromeRegionId;
         } pointerHover;
         struct {
             uint32_t                vkCode;          // Win32 VK_* (cross-platform mapping TBD)

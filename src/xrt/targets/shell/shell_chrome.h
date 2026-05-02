@@ -108,10 +108,19 @@ bool shell_chrome_has(struct shell_chrome *sc, XrWorkspaceClientId id);
  * timings). Pass @p hover_id = XR_NULL_WORKSPACE_CLIENT_ID (0) when the
  * cursor is not over any chrome.
  *
+ * Phase 2.C spec_version 9: @p hover_region_id is the controller-defined
+ * chrome region the cursor is over within @p hover_id (one of the
+ * shell_chrome_region_id enum values, or 0 = none). Lets the pill
+ * shader brighten the close/min/max button under the cursor. Pass
+ * SHELL_CHROME_REGION_NONE for @p hover_region_id when the cursor is
+ * over a window's content (not over its chrome).
+ *
  * Cheap (no IPC, no GPU work). The actual fade tween + chrome SRV
  * re-render happen in shell_chrome_tick.
  */
-void shell_chrome_set_hover(struct shell_chrome *sc, XrWorkspaceClientId hover_id);
+void shell_chrome_set_hover(struct shell_chrome *sc,
+                            XrWorkspaceClientId hover_id,
+                            uint32_t hover_region_id);
 
 /*!
  * Phase 2.C C3.C-4: process per-slot fade animations and re-render any

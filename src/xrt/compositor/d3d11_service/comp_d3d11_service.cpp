@@ -835,6 +835,15 @@ struct d3d11_multi_compositor
 	int32_t hovered_slot;
 	int32_t hovered_slot_last_emitted;
 
+	//! spec_version 9: per-frame hovered chromeRegionId — the controller-defined
+	//! sub-region within the hovered slot's chrome quad (0 = none). Updated by
+	//! render_pass alongside hovered_slot from the same workspace_hit_result.
+	//! POINTER_HOVER fires when EITHER slot OR chromeRegionId transitions, so
+	//! the controller can drive per-region UI (button hover-lighten) without
+	//! enabling continuous pointer capture.
+	uint32_t hovered_chrome_region_id;
+	uint32_t hovered_chrome_region_id_last_emitted;
+
 	//! spec_version 8: last value of focused_slot we signaled the wakeup event
 	//! for. The drain emits FOCUS_CHANGED based on focused_slot_last_emitted;
 	//! this separate snapshot lives in render_pass so we can wake the
@@ -6024,6 +6033,17 @@ after_key_shortcuts:
 			// drain.
 			if (mc->hovered_slot != hover.slot) {
 				mc->hovered_slot = hover.slot;
+				service_signal_workspace_wakeup(sys);
+			}
+			// spec_version 9: same idea for the chrome sub-region. The
+			// per-frame raycast already resolves chrome_region_id from
+			// the hovered slot's chrome_regions[]; we just publish the
+			// transition so the drain can emit POINTER_HOVER and the
+			// controller's wait wakes promptly when the cursor moves
+			// between buttons inside a chrome bar (grip → close, etc.).
+			uint32_t new_chrome_region = (hover.slot >= 0) ? hover.chrome_region_id : 0;
+			if (mc->hovered_chrome_region_id != new_chrome_region) {
+				mc->hovered_chrome_region_id = new_chrome_region;
 				service_signal_workspace_wakeup(sys);
 			}
 			// Same idea for focused_slot — wakes the controller's wait
@@ -11706,16 +11726,23 @@ comp_d3d11_service_workspace_drain_input_events(struct xrt_system_compositor *xs
 	// controllers drive a chrome fade in modes where pointer capture is
 	// OFF (grid/immersive), so per-frame MOTION events aren't published
 	// but the runtime's per-frame hit-test still tracks which slot the
-	// cursor is over. prev/curr_region stay 0 — the controller cares
-	// about the slot transition, not the sub-region. (Sub-region is
-	// already on POINTER / POINTER_MOTION events as chromeRegionId.)
+	// cursor is over.
 	//
 	// Uses the slot's stored workspace_client_id (the OpenXR client id
 	// the controller used at xrCreateWorkspaceClientChromeSwapchainEXT
 	// time) so controllers can match the hover signal to their own
 	// per-client chrome bookkeeping. Falls back to 0 for slots without
 	// chrome registered.
-	if (mc->hovered_slot != mc->hovered_slot_last_emitted &&
+	//
+	// spec_version 9: also fires on chromeRegionId transitions WITHIN
+	// the hovered slot (e.g., cursor moves grip → close inside the same
+	// chrome bar). Stamps prev/curr_chrome_region_id from the per-frame
+	// hit-test so the controller can drive per-region UI feedback (button
+	// hover-lighten, region-tooltip popovers) without enabling continuous
+	// pointer capture.
+	bool slot_changed = (mc->hovered_slot != mc->hovered_slot_last_emitted);
+	bool region_changed = (mc->hovered_chrome_region_id != mc->hovered_chrome_region_id_last_emitted);
+	if ((slot_changed || region_changed) &&
 	    out_batch->count < IPC_WORKSPACE_INPUT_EVENT_BATCH_MAX) {
 		struct ipc_workspace_input_event *ev = &out_batch->events[out_batch->count];
 		memset(ev, 0, sizeof(*ev));
@@ -11731,7 +11758,10 @@ comp_d3d11_service_workspace_drain_input_events(struct xrt_system_compositor *xs
 		        ? mc->clients[mc->hovered_slot].workspace_client_id
 		        : 0;
 		ev->u.pointer_hover.curr_region = 0;
+		ev->u.pointer_hover.prev_chrome_region_id = mc->hovered_chrome_region_id_last_emitted;
+		ev->u.pointer_hover.curr_chrome_region_id = mc->hovered_chrome_region_id;
 		mc->hovered_slot_last_emitted = mc->hovered_slot;
+		mc->hovered_chrome_region_id_last_emitted = mc->hovered_chrome_region_id;
 		out_batch->count++;
 	}
 

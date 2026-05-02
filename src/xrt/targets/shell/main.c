@@ -1017,8 +1017,14 @@ shell_drain_input_events(void)
 			// or leave a window slot — regardless of pointer-capture state,
 			// so this works in grid + immersive modes where MOTION events
 			// don't fire. currentClientId == 0 means "cursor off all slots."
+			//
+			// Phase 2.C spec_version 9: also fires on chromeRegionId
+			// transitions WITHIN the same slot, so the chrome can drive
+			// per-button hover lighten without continuous pointer capture.
 			if (g_chrome != NULL) {
-				shell_chrome_set_hover(g_chrome, e->pointerHover.currentClientId);
+				shell_chrome_set_hover(g_chrome,
+				                       e->pointerHover.currentClientId,
+				                       (uint32_t)e->pointerHover.currentChromeRegionId);
 			}
 			break;
 		}

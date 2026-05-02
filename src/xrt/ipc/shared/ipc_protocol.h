@@ -396,6 +396,12 @@ struct ipc_workspace_input_event
 			uint32_t prev_region;
 			uint32_t curr_client_id;
 			uint32_t curr_region;
+			// spec_version 9: chromeRegionId the cursor is over (controller-
+			// defined sub-region within a chrome quad). 0 = no chrome region
+			// matched. Runtime fires POINTER_HOVER on EITHER slot OR
+			// chromeRegionId transitions.
+			uint32_t prev_chrome_region_id;
+			uint32_t curr_chrome_region_id;
 		} pointer_hover;
 		struct
 		{

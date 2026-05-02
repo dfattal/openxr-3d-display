@@ -193,9 +193,19 @@ struct PillCB
 	float title_left_uv;
 	float title_right_uv;
 	float _pad2;
+
+	// Register 8: per-button hover (Phase 2.C spec_version 9). Carries the
+	// SHELL_CHROME_REGION_* id under the cursor (or 0 = none). The pill PS
+	// brightens the matching close/min/max button so the user gets visual
+	// feedback that they're about to click. Region ids match the layout
+	// hit_regions submitted to the runtime — the runtime echoes the same
+	// id back as currChromeRegionId on POINTER_HOVER, which main.c forwards
+	// to shell_chrome_set_hover.
+	float hover_region;
+	float _pad3[3];
 };
 static_assert(sizeof(PillCB) % 16 == 0, "PillCB must be 16-byte aligned");
-static_assert(sizeof(PillCB) == 128, "PillCB layout drift");
+static_assert(sizeof(PillCB) == 144, "PillCB layout drift");
 
 struct shell_chrome
 {
@@ -211,6 +221,12 @@ struct shell_chrome
 	// for the next POINTER_HOVER event — which won't fire if the cursor
 	// is already over the slot at resize-end.
 	XrWorkspaceClientId current_hover_id;
+
+	// Phase 2.C spec_version 9: which chromeRegionId the cursor is over
+	// inside current_hover_id (one of SHELL_CHROME_REGION_*, or 0 = none).
+	// Drives per-button hover lighten in the pill PS. Updated whenever
+	// main.c receives a POINTER_HOVER with chromeRegionId transition.
+	uint32_t current_hover_region;
 
 	// Resolved at create.
 	PFN_xrEnumerateSwapchainImages enum_images;
@@ -318,11 +334,22 @@ cbuffer PillCB : register(b0)
     float  title_left_uv;
     float  title_right_uv;
     float  _pad2;
+
+    float  hover_region;
+    float3 _pad3;
 };
 
 Texture2D    icon_tex  : register(t0);
 Texture2D    title_tex : register(t1);
 SamplerState icon_samp : register(s0);
+
+// Phase 2.C spec_version 9: SHELL_CHROME_REGION_* enum values, kept in sync
+// with shell_chrome.h. Used to test which button to brighten under the cursor.
+static const float SHELL_CHROME_REGION_NONE  = 0.0;
+static const float SHELL_CHROME_REGION_GRIP  = 1.0;
+static const float SHELL_CHROME_REGION_CLOSE = 2.0;
+static const float SHELL_CHROME_REGION_MIN   = 3.0;
+static const float SHELL_CHROME_REGION_MAX   = 4.0;
 
 // Signed distance to a rounded rectangle centered at origin with half-extents
 // `b` (full width/height = 2b) and corner radius `r`.
@@ -465,10 +492,20 @@ float4 PS(VSOut input) : SV_Target
     float pill_edge_glow = saturate(1.0 - pill_edge / (pill_edge_aa * 2.0));
     result.rgb = lerp(result.rgb, float3(1.0, 1.0, 1.0), pill_edge_glow * 0.35 * cov(pill_dist - aa_pill, aa_pill));
 
-    result = over(float4(dot_color.rgb,   dot_color.a   * cov(dot_dist,   aa_dot)),  result);
-    result = over(float4(btn_color.rgb,   btn_color.a   * cov(max_dist,   aa_btn)),  result);
-    result = over(float4(btn_color.rgb,   btn_color.a   * cov(min_dist,   aa_btn)),  result);
-    result = over(float4(close_color.rgb, close_color.a * cov(close_dist, aa_btn)),  result);
+    // Per-button hover lighten (Phase 2.C spec_version 9). When the cursor's
+    // chromeRegionId from POINTER_HOVER matches a button's region, brighten
+    // its base color toward white and bump alpha so the visual change reads
+    // clearly through the glassy pill bg. The grip's hover effect rides on
+    // the existing pill-wide hover-fade alpha tween (this affects buttons
+    // only). Region ids match the SHELL_CHROME_REGION_* constants above.
+    float4 btn_color_max   = (hover_region == SHELL_CHROME_REGION_MAX)   ? float4(min(btn_color.rgb   + 0.20, 1.0), min(btn_color.a   + 0.30, 1.0)) : btn_color;
+    float4 btn_color_min   = (hover_region == SHELL_CHROME_REGION_MIN)   ? float4(min(btn_color.rgb   + 0.20, 1.0), min(btn_color.a   + 0.30, 1.0)) : btn_color;
+    float4 btn_color_close = (hover_region == SHELL_CHROME_REGION_CLOSE) ? float4(min(close_color.rgb + 0.15, 1.0), min(close_color.a + 0.25, 1.0)) : close_color;
+
+    result = over(float4(dot_color.rgb,        dot_color.a        * cov(dot_dist,   aa_dot)),  result);
+    result = over(float4(btn_color_max.rgb,    btn_color_max.a    * cov(max_dist,   aa_btn)),  result);
+    result = over(float4(btn_color_min.rgb,    btn_color_min.a    * cov(min_dist,   aa_btn)),  result);
+    result = over(float4(btn_color_close.rgb,  btn_color_close.a  * cov(close_dist, aa_btn)),  result);
 
     // Procedural button glyphs (placeholder until DirectWrite atlas lands):
     //   close   = × (two diagonals)
@@ -923,6 +960,17 @@ render_pill(shell_chrome *sc, chrome_slot &slot)
 		cb->title_right_uv  = 0.0f;
 	}
 	cb->_pad2 = 0.0f;
+
+	// Phase 2.C spec_version 9: per-button hover. Only the slot under the
+	// cursor publishes a non-zero region; other slots see hover_region = 0
+	// so their buttons render in the default state. The cursor can only
+	// be over one chrome at a time, so this naturally exclusive.
+	cb->hover_region = (slot.id == sc->current_hover_id)
+	                       ? (float)sc->current_hover_region
+	                       : 0.0f;
+	cb->_pad3[0] = 0.0f;
+	cb->_pad3[1] = 0.0f;
+	cb->_pad3[2] = 0.0f;
 
 	sc->context->Unmap(sc->cb_pill.Get(), 0);
 
@@ -1410,16 +1458,41 @@ rerender_only(shell_chrome *sc, chrome_slot &slot)
 } // namespace
 
 extern "C" void
-shell_chrome_set_hover(struct shell_chrome *sc, XrWorkspaceClientId hover_id)
+shell_chrome_set_hover(struct shell_chrome *sc,
+                       XrWorkspaceClientId hover_id,
+                       uint32_t hover_region_id)
 {
 	if (sc == nullptr) {
 		return;
 	}
+	const XrWorkspaceClientId prev_hover_id = sc->current_hover_id;
+	const uint32_t prev_region = sc->current_hover_region;
 	sc->current_hover_id = hover_id;
-	for (auto &s : sc->slots) {
-		float target = (s.id == hover_id) ? 1.0f : 0.0f;
-		uint64_t dur = (s.id == hover_id) ? FADE_IN_NS : FADE_OUT_NS;
-		seed_fade(s, target, dur);
+	sc->current_hover_region = hover_region_id;
+
+	const bool slot_changed = (prev_hover_id != hover_id);
+	const bool region_changed = (prev_region != hover_region_id);
+
+	if (slot_changed) {
+		// Slot transition: seed the standard hover-fade tween (handles
+		// re-render via shell_chrome_tick during the fade). Buttons in
+		// the new hover slot pick up the hover_region in their first
+		// fade-tick re-render.
+		for (auto &s : sc->slots) {
+			float target = (s.id == hover_id) ? 1.0f : 0.0f;
+			uint64_t dur = (s.id == hover_id) ? FADE_IN_NS : FADE_OUT_NS;
+			seed_fade(s, target, dur);
+		}
+	} else if (region_changed) {
+		// Same slot, different region (e.g. cursor moved grip → close
+		// inside the same chrome bar). No fade — just one-shot re-bake
+		// the affected slot so the brightened button shows up.
+		for (auto &s : sc->slots) {
+			if (s.id == hover_id) {
+				rerender_only(sc, s);
+				break;
+			}
+		}
 	}
 }
 
