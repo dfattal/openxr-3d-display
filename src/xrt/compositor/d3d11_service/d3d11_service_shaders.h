@@ -758,9 +758,21 @@ float4 PSMain(VS_OUTPUT input) : SV_Target
     // top doubly-reduces alpha in corners (visible discontinuity where
     // the corner curve meets the straight edge, especially when a focus
     // tint amplifies the falloff into a colored band).
+    //
+    // Aspect-correct the X-axis distance so the feather has equal PHYSICAL
+    // extent on all four sides regardless of window aspect ratio.
+    // edge_feather is normalized to HEIGHT (controller passes
+    // meters/win_h_m); without this correction, a wide window's left/right
+    // feather would be stretched by win_w/win_h relative to the top/bottom
+    // feather, leaving an obvious asymmetry where the corner's elliptical
+    // falloff meets the straight-edge falloff.
     float feather_alpha = 1.0;
     if (!in_corner && edge_feather > 0.0) {
-        float d = min(min(uv01.x, 1.0 - uv01.x), min(uv01.y, 1.0 - uv01.y));
+        float aspect_for_feather = abs(corner_aspect);
+        if (aspect_for_feather < 0.001) aspect_for_feather = 1.0;
+        float dx = min(uv01.x, 1.0 - uv01.x) * aspect_for_feather;
+        float dy = min(uv01.y, 1.0 - uv01.y);
+        float d = min(dx, dy);
         feather_alpha = saturate(d / edge_feather);
     }
     // One of corner_alpha / feather_alpha is always 1 by construction —

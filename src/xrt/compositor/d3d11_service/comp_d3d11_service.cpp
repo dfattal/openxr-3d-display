@@ -5155,6 +5155,14 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 {
 	struct workspace_hit_result result = {};
 	result.slot = -1;
+	// Pill click priority: in a multi-window grid the pill (chrome quad)
+	// of one slot can extend over a NEIGHBOR slot's content area. Without
+	// this fallback, the per-slot iteration's first content hit wins —
+	// even if that pixel actually shows a different slot's pill on top.
+	// Save content-only hits here while we keep iterating for a pill hit
+	// on any other slot; commit at the end if no pill was found.
+	struct workspace_hit_result pending = {};
+	pending.slot = -1;
 
 	float disp_w_m = sys->base.info.display_width_m;
 	float disp_h_m = sys->base.info.display_height_m;
@@ -5450,10 +5458,29 @@ workspace_raycast_hit_test(struct d3d11_service_system *sys,
 				result.edge_flags = RESIZE_NONE;
 			}
 
-			break; // First hit wins (z-priority order)
+			// Pill priority: a hit on this slot's pill (in_title_bar) or
+			// its controller-submitted chrome quad always wins over any
+			// neighbor's content hit, even if a neighbor was tested
+			// first. Content-only hits get saved as a fallback so we can
+			// keep iterating for a pill hit; if none arrives, commit the
+			// fallback after the loop.
+			const bool is_pill_hit =
+			    result.in_title_bar || result.in_chrome_quad;
+			if (is_pill_hit) {
+				break;
+			}
+			if (pending.slot < 0) {
+				pending = result;
+			}
+			result = {};
+			result.slot = -1;
+			// fall through — continue iterating to look for a pill hit
 		}
 	}
 
+	if (result.slot < 0 && pending.slot >= 0) {
+		result = pending;
+	}
 	return result;
 }
 
@@ -7520,12 +7547,32 @@ after_key_shortcuts:
 				// Convert meters → fraction-of-window-height (same physical
 				// dimension): meters / window_height_m. Always-on (focused or
 				// not) so all windows soften at the perimeter.
-				const float style_feather_frac =
+				//
+				// Cap at the corner radius: the shader uses
+				// `feather_band = edge_feather / ry` for the rounded-corner
+				// alpha falloff, and when feather_band > 1 the corner_alpha
+				// never reaches 1.0 (saturate clamps it down) — leaving the
+				// corner interior tinted while the straight-edge interior
+				// reaches full opacity. The visible discontinuity at the
+				// corner→edge boundary appears as "broken / segmented" focus
+				// glow on small windows where the requested 3 mm physical
+				// feather exceeds the proportional corner radius. Capping
+				// edge_feather to the corner radius keeps both regions
+				// reaching opacity 1 at their interior. Larger windows (where
+				// the requested feather is below the corner radius) are
+				// unaffected.
+				float style_feather_frac =
 				    style_active
 				        ? (cs.style_edge_feather_meters > 0.0f
 				               ? cs.style_edge_feather_meters / win_h_m
 				               : 0.0f)
 				        : (UI_EDGE_FEATHER_PX / dest_px_h);
+				if (style_corner_r != 0.0f) {
+					float corner_r_frac = -style_corner_r;
+					if (style_feather_frac > corner_r_frac) {
+						style_feather_frac = corner_r_frac;
+					}
+				}
 
 				// Phase 2.C spec_version 9: focus tint. When this slot is
 				// the focused workspace client AND the controller's pushed

@@ -1100,7 +1100,12 @@ push_layout(shell_chrome *sc, chrome_slot &slot)
 	layout.followsWindowOrient = XR_TRUE;
 	layout.hitRegionCount = 4;
 	layout.hitRegions = regions;
-	layout.depthBiasMeters = 0.0f; // 0 = use runtime default
+	// Push the pill slightly forward of its window so a multi-window grid's
+	// pills don't visibly overlap with neighbor windows' content (the pill
+	// of a bottom-row slot can extend up over a top-row slot's content
+	// area in tight grids; the extra forward bias gives a small but
+	// visible parallax cue that the pill is "above" both windows).
+	layout.depthBiasMeters = 0.004f;
 	layout.anchorToWindowTopEdge = XR_TRUE;
 	layout.widthAsFractionOfWindow = PILL_W_FRAC;
 
