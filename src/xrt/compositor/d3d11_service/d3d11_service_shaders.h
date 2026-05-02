@@ -788,6 +788,17 @@ float4 PSMain(VS_OUTPUT input) : SV_Target
 
     float4 color = src_tex.Sample(src_samp, input.uv);
 
+    // Phase 2.J / 3D cursor: shape-mask tint mode. When chrome_alpha.y > 0.5
+    // the output uses glow_color.rgb as a SOLID color while preserving the
+    // texture's alpha mask (sample.a * glow_color.a). Used by the runtime
+    // cursor's halo pass: an oversized blue silhouette of the cursor sprite
+    // sits behind the cursor itself, giving a colored glow halo around the
+    // pointer when it hovers a workspace window. chrome_alpha.x still
+    // controls the global fade-in/out multiplier as before.
+    if (chrome_alpha.y > 0.5) {
+        return float4(glow_color.rgb, color.a * glow_color.a * alpha * a_mul);
+    }
+
     // Phase 2.C spec_version 9: focus tint. When this content blit is for the
     // focused workspace client AND a glow color/intensity is supplied (set by
     // the workspace controller via XrWorkspaceClientStyleEXT, gated on focus
@@ -802,6 +813,13 @@ float4 PSMain(VS_OUTPUT input) : SV_Target
     if (edge_feather > 0.0 && glow_intensity > 0.0) {
         float tint_amount = (1.0 - coverage) * glow_intensity * glow_color.a;
         color.rgb = lerp(color.rgb, glow_color.rgb, saturate(tint_amount));
+    } else if (glow_intensity > 0.0) {
+        // Phase 2.J / 3D cursor: flat multiplicative tint when there's no
+        // edge feathering. Used by the runtime cursor body to reduce its
+        // contrast (light-gray tint) and pick up a slight blue tone over
+        // workspace clients — preserves internal cursor detail (black
+        // outline vs white fill) by multiplying instead of replacing.
+        color = color * glow_color;
     }
 
     return float4(color.rgb, color.a * alpha * a_mul);

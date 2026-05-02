@@ -2268,17 +2268,37 @@ init_client_render_resources(struct d3d11_service_system *sys,
 		u_hud_create(&res->hud, actual_width);
 	}
 
-	// Create swap chain at actual window size (not defaults)
+	// Create swap chain at actual window size (not defaults).
+	//
+	// Default: flip-model + ALPHA_MODE_IGNORE (#163) — opaque present, no DWM bleed-through.
+	// Transparent opt-in: BitBlt swap effect so DWM consults WS_EX_LAYERED + LWA_COLORKEY
+	// on the bound HWND. Only meaningful when the app owns the HWND and we're not in
+	// workspace/shell mode (the workspace path uses a service-owned compositor window).
+	const bool use_transparent =
+	    transparent_hwnd && external_hwnd != nullptr && !sys->workspace_mode;
+
 	DXGI_SWAP_CHAIN_DESC1 sc_desc = {};
 	sc_desc.Width = actual_width;
 	sc_desc.Height = actual_height;
 	sc_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	sc_desc.SampleDesc.Count = 1;
 	sc_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	sc_desc.BufferCount = 2;
-	sc_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	// IGNORE so DWM doesn't composite the desktop through the bound HWND (#163).
-	sc_desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+	if (use_transparent) {
+		sc_desc.BufferCount = 1;
+		sc_desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+		sc_desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+		U_LOG_W("Transparent HWND opt-in: BitBlt swapchain (DISCARD + UNSPECIFIED, bc=1)");
+	} else {
+		sc_desc.BufferCount = 2;
+		sc_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+		// IGNORE so DWM doesn't composite the desktop through the bound HWND (#163).
+		sc_desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+	}
+	if (transparent_hwnd && !use_transparent) {
+		U_LOG_W("Transparent HWND requested but ignored "
+		        "(external_hwnd=%p, workspace_mode=%d)",
+		        external_hwnd, (int)sys->workspace_mode);
+	}
 
 	hr = sys->dxgi_factory->CreateSwapChainForHwnd(
 	    sys->device.get(),
@@ -6313,11 +6333,23 @@ after_key_shortcuts:
 
 					bool ctrl_owns_drag = (mc->window != nullptr) &&
 					                      comp_d3d11_window_is_workspace_pointer_capture_enabled(mc->window);
-					// Phase 2.K Commit 8 tweak: drag only starts on the
-					// grip dots, not on the entire pill. Lets buttons stay
-					// at the right edge while keeping the drag affordance
-					// visually obvious (the dotted grip).
-					if (!ctrl_owns_drag && hit.in_grip_handle) {
+					// Drag starts on any title-bar / chrome-quad click that
+					// ISN'T a close/min/max button. Includes the legacy in-
+					// runtime grip-dot hit AND controller-owned chrome quad
+					// hits. Lets the user click + drag from anywhere on the
+					// chrome pill in a single motion (typical OS title-bar
+					// behaviour) rather than requiring a second click on
+					// the grip dots after the first focuses the window.
+					// Region-id convention matches SHELL_CHROME_REGION_*:
+					// 2 = close, 3 = minimize, 4 = maximize.
+					bool on_chrome_button =
+					    (hit.chrome_region_id == 2 ||
+					     hit.chrome_region_id == 3 ||
+					     hit.chrome_region_id == 4);
+					bool drag_initiator =
+					    hit.in_grip_handle ||
+					    (hit.in_chrome_quad && !on_chrome_button);
+					if (!ctrl_owns_drag && drag_initiator) {
 						mc->title_drag.active = true;
 						mc->title_drag.slot = hit_slot;
 						// Suppress input forwarding during drag
@@ -6364,19 +6396,34 @@ after_key_shortcuts:
 						}
 					}
 				} else {
-					// Content area: focus + forward to app
-					if (hit_slot != mc->focused_slot) {
+					// Content area: focus + forward to app.
+					//
+					// Click ordering issue: WM_LBUTTONDOWN arrives at the
+					// workspace WndProc and gets forwarded to the CURRENT
+					// input_forward target BEFORE this handler runs. When
+					// the user clicks an UNFOCUSED window, that means the
+					// DOWN goes to the OLD fwd target (or nowhere), and
+					// the NEW target only sees subsequent MOVE + UP — so
+					// it can't start a drag from the first click and the
+					// user has to release + click again. Synthesize a
+					// DOWN to the NEW target after the focus change so
+					// the app sees a full DOWN/MOVE/UP and the click+drag
+					// works in a single motion.
+					const bool focus_changed = (hit_slot != mc->focused_slot);
+					if (focus_changed) {
 						mc->focused_slot = hit_slot;
 						U_LOG_W("Multi-comp: click → focused slot %d%s", mc->focused_slot,
 						        mc->focused_slot < 0 ? " (unfocused)" : "");
 						multi_compositor_update_input_forward(mc);
-			
 					}
 
 					// For capture clients, synthesize a click to route to the correct
-					// child control (sets internal focus for typing).
-					// For IPC apps, the WndProc already forwards the real mouse events
-					// — don't synthesize here or it cancels the drag (down+up).
+					// child control. When focus DIDN'T change (single click on the
+					// already-focused capture's content) we send the full DOWN+UP so
+					// it reads as a discrete click for setting internal focus on a
+					// sub-control. When focus DID change we send DOWN only — the
+					// natural WndProc-forwarded UP arrives when the user releases
+					// LMB, which completes the drag.
 					if (mc->clients[hit_slot].client_type == CLIENT_TYPE_CAPTURE &&
 					    mc->clients[hit_slot].app_hwnd != nullptr) {
 						float title_h_m = UI_TITLE_BAR_H_M;
@@ -6410,7 +6457,56 @@ after_key_shortcuts:
 						LPARAM lp = MAKELPARAM(app_x, app_y);
 						PostMessage(click_target, WM_MOUSEMOVE, 0, lp);
 						PostMessage(click_target, WM_LBUTTONDOWN, MK_LBUTTON, lp);
-						PostMessage(click_target, WM_LBUTTONUP, 0, lp);
+						if (!focus_changed) {
+							PostMessage(click_target, WM_LBUTTONUP, 0, lp);
+						}
+					} else if (focus_changed &&
+					           mc->clients[hit_slot].app_hwnd != nullptr) {
+						// IPC app: focus changed mid-click. WndProc had
+						// already forwarded the initial DOWN to the OLD
+						// fwd target (or nowhere if none); the NEW target
+						// is missing it. Inject one — but use the SAME
+						// coord transform the WndProc applies to MOVE/UP
+						// (app-relative inside the inset content rect,
+						// scaled if app HWND ≠ rect dims) so the app
+						// doesn't see a sudden jump between DOWN and the
+						// first natural MOVE.
+						HWND target = mc->clients[hit_slot].app_hwnd;
+						const int32_t inset = 20;
+						int32_t rx = (int32_t)mc->clients[hit_slot].window_rect_x + inset;
+						int32_t ry = (int32_t)mc->clients[hit_slot].window_rect_y + inset;
+						int32_t rw = (int32_t)mc->clients[hit_slot].window_rect_w - 2 * inset;
+						int32_t rh = (int32_t)mc->clients[hit_slot].window_rect_h - 2 * inset;
+						if (rw > 0 && rh > 0 &&
+						    pt.x >= rx && pt.x < rx + rw &&
+						    pt.y >= ry && pt.y < ry + rh) {
+							RECT target_cr;
+							GetClientRect(target, &target_cr);
+							int target_w = target_cr.right - target_cr.left;
+							int target_h = target_cr.bottom - target_cr.top;
+							int rel_x = pt.x - rx;
+							int rel_y = pt.y - ry;
+							int app_x, app_y;
+							if (target_w > 0 && target_h > 0 &&
+							    (target_w != rw || target_h != rh)) {
+								app_x = (int)((float)rel_x * (float)target_w / (float)rw);
+								app_y = (int)((float)rel_y * (float)target_h / (float)rh);
+							} else {
+								app_x = rel_x;
+								app_y = rel_y;
+							}
+							LPARAM lp = MAKELPARAM(app_x, app_y);
+							// Seed a MOUSEMOVE first so the app's stored
+							// last-known mouseX/Y matches the click pos.
+							// Without this, apps that compute drag deltas
+							// from "current mouseX - last_move_mouseX"
+							// (cube test apps' input_handler.cpp does
+							// exactly that) end up using a stale mouseX
+							// from an earlier move event and produce a
+							// huge first-frame delta = visible jump.
+							PostMessage(target, WM_MOUSEMOVE, 0, lp);
+							PostMessage(target, WM_LBUTTONDOWN, MK_LBUTTON, lp);
+						}
 					}
 				}
 			}
@@ -8654,15 +8750,36 @@ after_key_shortcuts:
 			float base_tile_x = (float)mc->cursor_panel_x * scale_x;
 			float base_tile_y = (float)mc->cursor_panel_y * scale_y;
 
-			// Cursor sprite size + hot spot in NATIVE atlas pixels — no
-			// scaling, since 1 atlas pixel = 1 perceived panel pixel
-			// after the DP weave. A 32×32 cursor texture renders as a
-			// 32×32 perceived sprite, matching the OS cursor's visual
-			// size and aspect ratio.
-			float cursor_w_atlas = (float)ci.w;
-			float cursor_h_atlas = (float)ci.h;
-			float hot_x_atlas    = (float)ci.hot_x;
-			float hot_y_atlas    = (float)ci.hot_y;
+			// Cursor sprite size + hot spot. Scaled by the active-region
+			// fraction of the panel so the visible cursor lands at OS-
+			// cursor-equivalent visual size after the DP upscale. We
+			// use the smaller of the two axis ratios as a uniform
+			// scale so the cursor always renders square-aspect, even
+			// in asymmetric active regions (e.g. half-width × full-
+			// height) where applying per-axis ratios would visibly
+			// stretch the cursor.
+			const float size_ratio_x =
+			    (float)(tile_w * n_cols) / (float)panel_w;
+			const float size_ratio_y =
+			    (float)(tile_h * n_rows) / (float)panel_h;
+			const float size_ratio =
+			    (size_ratio_x < size_ratio_y) ? size_ratio_x : size_ratio_y;
+			float cursor_w_atlas = (float)ci.w * size_ratio;
+			float cursor_h_atlas = (float)ci.h * size_ratio;
+			float hot_x_atlas    = (float)ci.hot_x * size_ratio;
+			float hot_y_atlas    = (float)ci.hot_y * size_ratio;
+
+			// Over-window cosmetic: render the cursor at 30 % alpha so
+			// it doesn't fight content behind it (reduces lenticular
+			// crosstalk on the cursor's bright pixels). Trigger is
+			// keyed off mc->hovered_slot — the same per-frame raycast
+			// signal that drives the chrome pill's hover fade — so
+			// the cursor's translucency syncs with chrome appearance.
+			// hit_z alone wouldn't work for windows at z = 0 (panel
+			// plane), where hit_z is 0 even though the cursor IS over
+			// a workspace client.
+			const bool over_window = (mc->hovered_slot >= 0);
+			const float body_tint[4]  = {1.00f, 1.00f, 1.00f, 0.30f};
 
 			// Common pipeline state
 			ID3D11RenderTargetView *crtvs[] = {mc->combined_atlas_rtv.get()};
@@ -8724,6 +8841,24 @@ after_key_shortcuts:
 					cb->convert_srgb = 0.0f;
 					cb->chrome_alpha = 0.0f;
 					cb->quad_mode = 0.0f;
+					if (over_window) {
+						// Multiplicative tint via the shader's
+						// flat-tint path (edge_feather <= 0,
+						// glow_intensity > 0). RGB stays at 1.0
+						// so the cursor keeps its natural color;
+						// alpha drops to 0.55 so the cursor reads
+						// as semi-transparent over content,
+						// reducing lenticular crosstalk on its
+						// bright pixels.
+						cb->edge_feather = 0.0f;
+						cb->glow_intensity = 1.0f;
+						cb->glow_color[0] = body_tint[0];
+						cb->glow_color[1] = body_tint[1];
+						cb->glow_color[2] = body_tint[2];
+						cb->glow_color[3] = body_tint[3];
+					} else {
+						cb->glow_intensity = 0.0f;
+					}
 					sys->context->Unmap(sys->blit_constant_buffer.get(), 0);
 
 					// Tile-local scissor — keeps a left-tile cursor with
@@ -10267,8 +10402,10 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 	// Initialize per-client render resources (window, swap chain, display processor)
 	// Get external window handle if app provided one via XR_EXT_win32_window_binding
 	void *external_hwnd = nullptr;
+	bool transparent_hwnd = false;
 	if (xsi != nullptr) {
 		external_hwnd = xsi->external_window_handle;
+		transparent_hwnd = xsi->transparent_background_enabled;
 	}
 
 	if (!is_headless_relay && !is_workspace_controller) {
@@ -10279,7 +10416,8 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 			U_LOG_W("Workspace mode activated for D3D11 service system");
 		}
 
-		xrt_result_t res_ret = init_client_render_resources(sys, external_hwnd, sys->xsysd, &c->render);
+		xrt_result_t res_ret = init_client_render_resources(
+		    sys, external_hwnd, transparent_hwnd, sys->xsysd, &c->render);
 		if (res_ret != XRT_SUCCESS) {
 			U_LOG_E("Failed to initialize client render resources");
 			delete c;
