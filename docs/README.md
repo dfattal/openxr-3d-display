@@ -83,6 +83,7 @@ Design docs, status trackers, and plans — some shipped, some in progress.
 - [MCP Spec v0.2](roadmap/mcp-spec-v0.2.md) — AI-native runtime control & introspection over Model Context Protocol
 - [MCP Phase A Status](roadmap/mcp-phase-a-status.md) — handle-app introspection (complete)
 - [MCP Phase B Plan](roadmap/mcp-phase-b-plan.md) — service-mode shell tools (complete)
+- [Desktop Overlay Apps — Forward Work](roadmap/avatar-overlay-native.md) — follow-on work after the transparent HWND path shipped (#191)
 
 ### Planned
 
@@ -110,6 +111,7 @@ Design docs, status trackers, and plans — some shipped, some in progress.
 - [Window Drag Rendering](reference/window-drag-rendering.md) — rendering during window drag
 - [Debug Logging](reference/debug-logging.md) — log level conventions
 - [Leia SR Weaver](reference/LeiaWeaver.md) — DX11, DX12, OpenGL & Vulkan weaver internals
+- [Transparent HWND Overlay](reference/chroma-key-transparent-overlay.md) — opt-in transparent presentation for desktop-overlay apps (DComp + post-weave chroma-key)
 
 ## Archive
 
