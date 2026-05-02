@@ -30,15 +30,9 @@ See `spatial-workspace-extensions-phase2K-plan.md` for the full design and `spat
 
 **Suggested phase:** Phase 2.J (shell repo extraction) — the cleanup naturally happens when the shell is its own repo and can iterate freely. Until then, it's a known UX regression.
 
-### 4. `XRT_FORCE_MODE=ipc` shell workaround
+### 4. `XRT_FORCE_MODE=ipc` shell workaround ✅ shipped (2.J prequel)
 
-**State:** `shell_openxr.cpp::shell_openxr_init` calls `SetEnvironmentVariableA("XRT_FORCE_MODE", "ipc")` before `xrCreateInstance`. This forces the DisplayXR hybrid runtime to pick the IPC client compositor over the in-process native one. **It's runtime-specific** — a workspace controller running against any other OpenXR runtime wouldn't need it (and wouldn't have an `XRT_FORCE_MODE` env var to set).
-
-**Why it matters:** Once the shell forks to its own repo, this hack is awkward — the shell is supposed to be runtime-agnostic. The cleaner solution is for the runtime to detect a workspace-controller session and pick IPC mode automatically (e.g., when `XR_EXT_spatial_workspace` is in the enabled extension list).
-
-**Where to fix:** `src/xrt/auxiliary/util/u_sandbox.c::u_sandbox_should_use_ipc` — add a check: if the calling instance has `XR_EXT_spatial_workspace` enabled, return `true`. Or hand the decision to `xrt_instance_create` based on the createInfo's enabled-extension list (cleaner but requires more plumbing).
-
-**Suggested phase:** Phase 2.J prequel (before extracting the shell) — once fixed, the shell drops the SetEnvironmentVariableA call and is genuinely runtime-agnostic.
+**Resolution:** `xrt_application_info` gained an `ext_spatial_workspace_enabled` flag, populated in `oxr_instance.c` from the parsed enabled-extensions list. `target.c::xrt_instance_create` now checks the flag at the top of its dispatch — sessions with `XR_EXT_spatial_workspace` enabled go straight to `ipc_instance_create` regardless of sandbox / env-var state. The shell dropped its `SetEnvironmentVariableA("XRT_FORCE_MODE", "ipc")` call and is now genuinely runtime-agnostic; any OpenXR runtime that surfaces `XR_EXT_spatial_workspace` will see the same enable signal at instance create.
 
 ## Repo-extraction residue
 
@@ -70,8 +64,8 @@ These three documented spots in the runtime still mention the shell app by name.
 | Phase | Folds in items |
 |---|---|
 | **2.G** | ~~#1 (pointer-capture enforcement)~~ ✅ shipped |
-| **2.K** | #2 (per-frame motion events + interactive carousel / drag in the shell) |
-| **2.J prequel** | #4 (XRT_FORCE_MODE workaround) |
+| **2.K** | ~~#2 (per-frame motion events + interactive carousel / drag in the shell)~~ ✅ shipped |
+| **2.J prequel** | ~~#4 (XRT_FORCE_MODE workaround)~~ ✅ shipped |
 | **2.J** | #3, #5, #6 (shell extraction, residues) |
 | **(any time)** | #7 (transitional comments) |
 

@@ -40,6 +40,17 @@ xrt_instance_create(struct xrt_instance_info *ii, struct xrt_instance **out_xins
 
 	XRT_TRACE_MARKER();
 
+	// Workspace controllers (sessions with XR_EXT_spatial_workspace enabled)
+	// always go IPC — the controller talks to the service over IPC by
+	// design, and the in-process native compositor doesn't host the
+	// workspace state. This auto-detection lets the shell drop the
+	// runtime-specific SetEnvironmentVariableA("XRT_FORCE_MODE", "ipc")
+	// hack and stay genuinely runtime-agnostic.
+	if (ii != NULL && ii->app_info.ext_spatial_workspace_enabled) {
+		U_LOG_I("Hybrid mode: workspace controller session — forcing IPC");
+		return ipc_instance_create(ii, out_xinst);
+	}
+
 	// Check if we should use IPC mode
 	if (u_sandbox_should_use_ipc()) {
 		U_LOG_I("Hybrid mode: using IPC/service compositor (sandboxed environment)");

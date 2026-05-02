@@ -182,9 +182,9 @@ See `spatial-workspace-extensions-phase2K-plan.md` for the full design and `spat
 
 ### Phase 2.J — Shell repo extraction (NOT YET SHIPPED)
 
-**Outstanding** — see `spatial-workspace-extensions-followups.md` items #3, #4, #5, #6 for the full punch list. High-level:
+**Outstanding** — see `spatial-workspace-extensions-followups.md` items #3, #5, #6 for the full punch list. High-level:
 
-- **Prerequisite (followup #4):** runtime auto-detects workspace-controller sessions (sessions with `XR_EXT_spatial_workspace` enabled) and forces IPC mode in `u_sandbox.c::u_sandbox_should_use_ipc`. Once shipped, the shell drops the `SetEnvironmentVariableA("XRT_FORCE_MODE", "ipc")` hack from `shell_openxr.cpp::shell_openxr_init` and becomes genuinely runtime-agnostic.
+- **Prerequisite (followup #4) ✅ shipped:** `xrt_application_info` gained an `ext_spatial_workspace_enabled` flag (populated in `oxr_instance.c` from the parsed enabled-extensions list); `target.c::xrt_instance_create` checks it and forces IPC at the top of its dispatch. The shell dropped its `SetEnvironmentVariableA("XRT_FORCE_MODE", "ipc")` hack and is now runtime-agnostic — any OpenXR runtime exposing `XR_EXT_spatial_workspace` will see the same enable signal.
 - **The extraction itself:** create new repo `DisplayXR/displayxr-shell-pvt` (mirroring the runtime's pvt/public split, since shell currently has private and public pieces); move `src/xrt/targets/shell/` to its own repo; mirror the build via `scripts/build_windows.bat`-style scripts; add a publish-public workflow (the shell can stay private until proven; public consumers depend on the API surface, not the implementation).
 - **Runtime-side cleanup:** drop `add_subdirectory(shell)` from `src/xrt/targets/CMakeLists.txt`; update `service_config.c`'s default binary literal from `"displayxr-shell.exe"` to either a config-only value or NULL (orchestrator no longer auto-spawns); delete the residual transitional `"shell"` JSON-key comments (`service_config.{c,h}`).
 - **UX regression to fix in the same window (followup #3):** post-2.I the shell can no longer auto-reconnect on service crash because the runtime DLL holds the IPC connection. Once the shell is in its own repo, wrap the `xrCreateInstance` activate-failure path with `xrDestroyInstance` + `xrCreateInstance` retry so service-crash recovery returns.

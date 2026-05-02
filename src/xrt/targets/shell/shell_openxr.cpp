@@ -71,14 +71,12 @@ extern "C" struct shell_openxr_state *shell_openxr_init(void)
 		return nullptr;
 	}
 
-	// The hybrid runtime auto-selects between in-process native compositor
-	// and IPC mode based on env vars (see u_sandbox.c). The workspace
-	// extension requires IPC mode — the controller talks to the service
-	// over IPC. XRT_FORCE_MODE is read via both getenv() and
-	// GetEnvironmentVariableA(), so SetEnvironmentVariableA reliably
-	// reaches the runtime DLL even with separate static CRTs.
-	SetEnvironmentVariableA("XRT_FORCE_MODE", "ipc");
-
+	// IPC mode is selected automatically by the runtime when it sees
+	// XR_EXT_spatial_workspace in the enabled-extensions list at
+	// xrCreateInstance — the workspace controller is by definition an
+	// out-of-process consumer of the service compositor, and there's no
+	// in-process equivalent that hosts workspace state. Lets this shell
+	// stay runtime-agnostic (no DisplayXR-specific env-var hack here).
 	const char *exts[] = {
 	    XR_EXT_SPATIAL_WORKSPACE_EXTENSION_NAME,
 	    XR_EXT_APP_LAUNCHER_EXTENSION_NAME,
