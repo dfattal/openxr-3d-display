@@ -147,6 +147,33 @@ bool
 comp_ipc_client_compositor_get_window_metrics(struct xrt_compositor *xc, struct xrt_window_metrics *out_metrics);
 
 /*!
+ * Phase 2 workspace_sync_fence bridges. Same gating contract as
+ * comp_ipc_client_compositor_get_window_metrics — only valid when @p xc is
+ * an ipc_client_compositor. Used by the D3D11 client compositor to import
+ * the per-IPC-client shared `ID3D11Fence` once and to ship the per-frame
+ * monotonic value through the existing layer-sync RPC each xrEndFrame.
+ *
+ * `comp_ipc_client_compositor_get_workspace_sync_fence` fetches the handle
+ * from the service. `out_have_fence` is set to false when the underlying
+ * native compositor is not the D3D11 service compositor (legacy path runs
+ * unchanged) or when the service-side fence creation failed.
+ *
+ * `comp_ipc_client_compositor_set_workspace_sync_fence_value` caches the
+ * latest value the client just signaled; the next layer-sync RPC ships it
+ * to the service. Calling with `value=0` is the "no fence" sentinel and is
+ * what legacy / non-D3D11 client paths leave it as.
+ */
+#include "xrt/xrt_handles.h"
+
+xrt_result_t
+comp_ipc_client_compositor_get_workspace_sync_fence(struct xrt_compositor *xc,
+                                                    bool *out_have_fence,
+                                                    xrt_graphics_sync_handle_t *out_handle);
+
+void
+comp_ipc_client_compositor_set_workspace_sync_fence_value(struct xrt_compositor *xc, uint64_t value);
+
+/*!
  * Workspace controller bridges (XR_EXT_spatial_workspace).
  *
  * Thin accessors used by the OpenXR state tracker to dispatch workspace

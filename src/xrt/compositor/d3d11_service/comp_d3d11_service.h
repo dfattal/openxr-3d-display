@@ -19,6 +19,7 @@
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_display_metrics.h"
+#include "xrt/xrt_handles.h"
 #include "xrt/xrt_system.h"
 
 #ifdef __cplusplus
@@ -604,6 +605,45 @@ bool
 comp_d3d11_service_set_capture_client_style(struct xrt_system_compositor *xsysc,
                                             int slot_index,
                                             const struct ipc_workspace_client_style *style);
+
+/*! @} */
+
+/*!
+ * @name Phase 2 workspace_sync_fence
+ * @{
+ */
+
+/*!
+ * Phase 2: export the per-IPC-client `workspace_sync_fence` shared NT handle
+ * for the IPC layer to `DuplicateHandle` into the client process. The handle
+ * is created at session start (`system_create_native_compositor`) on the
+ * service device; the IPC client opens it via `ID3D11Device5::OpenSharedFence`
+ * and signals a monotonic value once per `xrEndFrame`. The service queues a
+ * GPU-side `ID3D11DeviceContext4::Wait` on the per-view loop instead of the
+ * legacy CPU-side `IDXGIKeyedMutex::AcquireSync`.
+ *
+ * Returns `false` when @p xc is not a D3D11 service compositor (other native
+ * compositor types do not expose this fence) or when the fence path is
+ * disabled for this client (e.g. bridge-relay / workspace-controller sessions
+ * with no render resources). In that case the legacy KeyedMutex path stays
+ * in effect and the IPC handler emits zero handles to the client.
+ */
+bool
+comp_d3d11_service_compositor_export_workspace_sync_fence(struct xrt_compositor *xc,
+                                                          xrt_graphics_sync_handle_t *out_handle);
+
+/*!
+ * Phase 2: stash the latest per-frame fence value the IPC client just
+ * signaled. Called by the `compositor_layer_sync` IPC handler before it
+ * dispatches the layer commit; the per-view loop in `compositor_layer_commit`
+ * reads this atomic to decide whether the tile is fresh (queue GPU `Wait`)
+ * or stale (skip-blit, reuse the persistent atlas slot's prior content).
+ *
+ * No-op when @p xc is not a D3D11 service compositor — keeps the IPC handler
+ * indifferent to the underlying compositor backend.
+ */
+void
+comp_d3d11_service_compositor_set_workspace_sync_fence_value(struct xrt_compositor *xc, uint64_t value);
 
 /*! @} */
 

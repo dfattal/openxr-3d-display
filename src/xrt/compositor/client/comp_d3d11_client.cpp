@@ -49,6 +49,16 @@ using namespace std::chrono;
 
 using xrt::compositor::client::unique_swapchain_ref;
 
+// Phase 2 — forward decls of the IPC client compositor bridges defined in
+// src/xrt/ipc/client/ipc_client_compositor.c. Resolved at link time so this
+// TU does not pull the IPC client headers (and their u_logging chain).
+extern "C" xrt_result_t
+comp_ipc_client_compositor_get_workspace_sync_fence(struct xrt_compositor *xc,
+                                                    bool *out_have_fence,
+                                                    xrt_graphics_sync_handle_t *out_handle);
+extern "C" void
+comp_ipc_client_compositor_set_workspace_sync_fence_value(struct xrt_compositor *xc, uint64_t value);
+
 DEBUG_GET_ONCE_LOG_OPTION(log, "D3D_COMPOSITOR_LOG", U_LOGGING_INFO)
 
 /*!
@@ -164,6 +174,27 @@ struct client_d3d11_compositor
 	 * The value most recently signaled on the timeline semaphore
 	 */
 	uint64_t timeline_semaphore_value = 0;
+
+	/*!
+	 * Phase 2 — per-IPC-client `ID3D11Fence` shared with the d3d11 service
+	 * compositor. This is **separate** from @ref fence above, which is the
+	 * per-session timeline semaphore used for D3D11↔Vulkan interop. The
+	 * workspace_sync_fence replaces the per-view CPU `IDXGIKeyedMutex::AcquireSync`
+	 * the service render thread used to do.
+	 *
+	 * `import_fence`'d once at compositor create from the handle returned by
+	 * the IPC `compositor_get_workspace_sync_fence` RPC. Signal a monotonically
+	 * increasing value on @ref fence_context once per `layer_commit` AFTER
+	 * the app's render commands are submitted; ship the value to the service
+	 * via `comp_ipc_client_compositor_set_workspace_sync_fence_value` so the
+	 * service per-view loop can queue an `ID3D11DeviceContext4::Wait` instead
+	 * of CPU-blocking on the keyed mutex.
+	 *
+	 * `nullptr` ⇒ legacy KeyedMutex path runs unchanged (older runtimes,
+	 * mismatched feature levels, or non-D3D11 service backends).
+	 */
+	wil::com_ptr<ID3D11Fence> workspace_sync_fence;
+	uint64_t workspace_sync_fence_value = 0;
 };
 
 static_assert(std::is_standard_layout<client_d3d11_compositor>::value);
@@ -891,6 +922,34 @@ client_d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_syn
 		OutputDebugStringA("[DisplayXR] xrEndFrame: Fence signaled OK\n");
 	}
 
+	// Phase 2 — signal the workspace_sync_fence with a fresh monotonic
+	// value AFTER the per-session timeline-semaphore signal above. Both
+	// signals are queued on the same `fence_context` (the app's immediate
+	// context), so they ride the same GPU command stream as the just-
+	// submitted render commands — when the value reaches the GPU, the
+	// frame's commands have already executed.
+	//
+	// Cache the value on the IPC client compositor so the very next
+	// layer_sync RPC ships it to the service. The service per-view loop
+	// will queue an `ID3D11DeviceContext4::Wait` on this value and skip
+	// the legacy KeyedMutex acquire entirely for fence-capable clients.
+	if (c->workspace_sync_fence) {
+		c->workspace_sync_fence_value++;
+		HRESULT hr_wsf =
+		    c->fence_context->Signal(c->workspace_sync_fence.get(), c->workspace_sync_fence_value);
+		if (!SUCCEEDED(hr_wsf)) {
+			char buf[kErrorBufSize];
+			formatMessage(hr_wsf, buf);
+			D3D_WARN(c, "Phase 2: Signal(workspace_sync_fence) failed: %s", buf);
+			// Don't bail — fall through to the legacy path with value=0
+			// (the IPC handler treats 0 as "no fence" sentinel).
+			c->workspace_sync_fence_value--;
+		} else {
+			comp_ipc_client_compositor_set_workspace_sync_fence_value(
+			    &c->xcn->base, c->workspace_sync_fence_value);
+		}
+	}
+
 	if (c->timeline_semaphore) {
 		// We got this from the native compositor, so we can pass it back
 		OutputDebugStringA("[DisplayXR] xrEndFrame: Using timeline semaphore commit\n");
@@ -1106,6 +1165,51 @@ try {
 	}
 	if (!c->fence) {
 		D3D_WARN(c, "No sync mechanism for D3D11 was successful!");
+	}
+
+	// Phase 2 — fetch the per-IPC-client workspace_sync_fence from the
+	// service. This is a separate fence from the per-session timeline
+	// semaphore handled above; it replaces the per-view CPU `AcquireSync`
+	// the service used to do during compose. Failure is non-fatal —
+	// `workspace_sync_fence` stays null and the legacy KeyedMutex path
+	// runs unchanged on the service side for this client.
+	{
+		bool have = false;
+		xrt_graphics_sync_handle_t handle = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
+		xrt_result_t fxret = comp_ipc_client_compositor_get_workspace_sync_fence(&xcn->base, &have, &handle);
+		if (fxret == XRT_SUCCESS && have && xrt_graphics_sync_handle_is_valid(handle)) {
+			try {
+				wil::com_ptr<ID3D11Fence> wsf = import_fence(*(c->fence_device), (HANDLE)handle);
+				if (wsf) {
+					c->workspace_sync_fence = std::move(wsf);
+					c->workspace_sync_fence_value = 0;
+					U_LOG_W("[FENCE] client=%p workspace_sync_fence imported "
+					        "(GPU-side wait path active)",
+					        (void *)c.get());
+				} else {
+					U_LOG_W("Phase 2: import_fence returned null; falling back "
+					        "to legacy KeyedMutex path.");
+				}
+			} catch (wil::ResultException const &e) {
+				U_LOG_W("Phase 2: OpenSharedFence threw (%s); falling back to "
+				        "legacy KeyedMutex path.",
+				        e.what());
+			}
+			// We OPENED the imported handle above; the IPC layer
+			// duped it into our process. Close our copy so we don't
+			// leak — wil::com_ptr<ID3D11Fence> holds the only ref
+			// we need.
+			CloseHandle((HANDLE)handle);
+		} else if (fxret != XRT_SUCCESS) {
+			D3D_WARN(c,
+			         "Phase 2: ipc_call_compositor_get_workspace_sync_fence failed "
+			         "(xret=%d); legacy KeyedMutex path stays in effect.",
+			         (int)fxret);
+		} else {
+			U_LOG_W("Phase 2: server reported no workspace_sync_fence "
+			        "(non-D3D11 backend or fence creation failed); legacy "
+			        "KeyedMutex path stays in effect.");
+		}
 	}
 	c->base.base.get_swapchain_create_properties = client_d3d11_compositor_get_swapchain_create_properties;
 	c->base.base.create_swapchain = client_d3d11_create_swapchain;

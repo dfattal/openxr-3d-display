@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Phase 1 shell-mode benchmark — captures Present-to-Present jitter and
+    Phase 1 shell-mode benchmark - captures Present-to-Present jitter and
     KeyedMutex health for the D3D11 service compositor while two
     cube_handle apps run inside the shell.
 
@@ -8,10 +8,14 @@
     Phase 1 (shell-optimization branch) added greppable breadcrumbs to
     the service log under %LOCALAPPDATA%\DisplayXR:
 
-        [PRESENT_NS] client=<ptr|workspace> dt_ns=<int>   — env-gated by DISPLAYXR_LOG_PRESENT_NS=1
-        [CLIENT_FRAME_NS] client=<ptr> dt_ns=<int>        — env-gated by DISPLAYXR_LOG_PRESENT_NS=1
+        [PRESENT_NS] client=<ptr|workspace> dt_ns=<int>   - env-gated by DISPLAYXR_LOG_PRESENT_NS=1
+        [CLIENT_FRAME_NS] client=<ptr> dt_ns=<int>        - env-gated by DISPLAYXR_LOG_PRESENT_NS=1
         [MUTEX] client=<ptr> timeouts=<u> acquires=<u> avg_acquire_us=<u> window_s=<int>
         [ZC] client=<ptr> views=<u> zero_copy=<Y|N> reason=<str>
+
+    Phase 2 added one more (rate-limited 1-/10s, mirrors [MUTEX]):
+
+        [FENCE] client=<ptr> waits_queued=<u> stale_views=<u> last_value=<u64> window_s=<int>
 
     `client=workspace` tags the multi_compositor_render combined-atlas
     Present (only present in workspace mode). `client=<ptr>` is the
@@ -25,8 +29,8 @@
       3. Kills the shell process tree.
       4. Tails the most recent service log, extracts the breadcrumbs, and
          emits two CSVs:
-            <out>_raw.csv      — every [PRESENT_NS] sample.
-            <out>_summary.csv  — p50/p95/p99 + jitter for present intervals;
+            <out>_raw.csv      - every [PRESENT_NS] sample.
+            <out>_summary.csv  - p50/p95/p99 + jitter for present intervals;
                                  timeout / acquire totals from [MUTEX].
       5. Prints a one-line summary.
 
@@ -114,7 +118,7 @@ try {
     Start-Sleep -Seconds $Seconds
 } finally {
     Write-Host "[bench] killing shell process tree (pid=$($proc.Id))..."
-    # Kill children too — displayxr-shell spawns service + apps.
+    # Kill children too - displayxr-shell spawns service + apps.
     & taskkill /T /F /PID $proc.Id 2>&1 | Out-Null
     # Best-effort cleanup of orphaned service / cube processes.
     Get-Process -ErrorAction SilentlyContinue -Name "displayxr-service","cube_handle_d3d11_win","displayxr-shell" |
@@ -132,7 +136,7 @@ if ($runLogs.Count -eq 0) {
                  Sort-Object LastWriteTime -Descending | Select-Object -First 1)
 }
 if ($runLogs.Count -eq 0) {
-    throw "No service log produced under $logDir — did the service even start?"
+    throw "No service log produced under $logDir - did the service even start?"
 }
 
 Write-Host "[bench] parsing $($runLogs.Count) service log file(s)..."
@@ -147,12 +151,19 @@ $rePresent = [regex]'\[PRESENT_NS\]\s+client=(?<c>\S+)\s+dt_ns=(?<dt>\d+)'
 $reFrame   = [regex]'\[CLIENT_FRAME_NS\]\s+client=(?<c>\S+)\s+dt_ns=(?<dt>\d+)'
 $reMutex   = [regex]'\[MUTEX\]\s+client=(?<c>\S+)\s+timeouts=(?<to>\d+)\s+acquires=(?<aq>\d+)\s+avg_acquire_us=(?<avg>\d+)\s+window_s=(?<ws>\d+)'
 $reZc      = [regex]'\[ZC\]\s+client=(?<c>\S+)\s+views=(?<v>\d+)\s+zero_copy=(?<z>[YN])\s+reason=(?<r>\S+)'
+# Phase 2 - [FENCE] is the GPU-wait counterpart to [MUTEX]. Same window
+# cadence (1 / 10 s); a healthy fence-capable client shows
+# waits_queued > 0 and stale_views - 0; a starved client shows
+# stale_views > 0. Legacy KeyedMutex clients emit no [FENCE] (the field
+# stays absent and the mutex line is the authoritative signal).
+$reFence   = [regex]'\[FENCE\]\s+client=(?<c>\S+)\s+waits_queued=(?<wq>\d+)\s+stale_views=(?<sv>\d+)\s+last_value=(?<lv>\d+)\s+window_s=(?<ws>\d+)'
 
 # Per-client per-source samples.
 $presentByClient = @{}
 $frameByClient   = @{}
 $mutexEvents     = New-Object 'System.Collections.Generic.List[psobject]'
 $zcEvents        = New-Object 'System.Collections.Generic.List[psobject]'
+$fenceEvents     = New-Object 'System.Collections.Generic.List[psobject]'
 
 function Add-Sample {
     param([hashtable] $bag, [string] $client, [int64] $dt)
@@ -180,6 +191,15 @@ foreach ($f in $runLogs) {
                 views       = [int]$m.Groups['v'].Value
                 zero_copy   = $m.Groups['z'].Value
                 reason      = $m.Groups['r'].Value
+            }); return
+        }
+        $m = $reFence.Match($line);   if ($m.Success) {
+            [void]$fenceEvents.Add([pscustomobject]@{
+                client      = $m.Groups['c'].Value
+                waits_queued = [int]$m.Groups['wq'].Value
+                stale_views = [int]$m.Groups['sv'].Value
+                last_value  = [uint64]$m.Groups['lv'].Value
+                window_s    = [int]$m.Groups['ws'].Value
             })
         }
     }
@@ -190,9 +210,9 @@ foreach ($key in $presentByClient.Keys) { $presentSamples.AddRange($presentByCli
 $frameSamples = New-Object 'System.Collections.Generic.List[int64]'
 foreach ($key in $frameByClient.Keys) { $frameSamples.AddRange($frameByClient[$key]) }
 
-Write-Host "[bench] samples: present(total)=$($presentSamples.Count) clients_present=$($presentByClient.Count) clients_frame=$($frameByClient.Count) mutex_windows=$($mutexEvents.Count) zc_events=$($zcEvents.Count)"
+Write-Host "[bench] samples: present(total)=$($presentSamples.Count) clients_present=$($presentByClient.Count) clients_frame=$($frameByClient.Count) mutex_windows=$($mutexEvents.Count) zc_events=$($zcEvents.Count) fence_windows=$($fenceEvents.Count)"
 
-# Raw CSV — every sample tagged by source (present|frame) + client.
+# Raw CSV - every sample tagged by source (present|frame) + client.
 $rawRows = New-Object 'System.Collections.Generic.List[psobject]'
 foreach ($key in $presentByClient.Keys) {
     $list = $presentByClient[$key]
@@ -268,6 +288,15 @@ $avgAcquireUs  = if ($mutexEvents.Count -gt 0) {
     [math]::Round((($mutexEvents | Measure-Object -Property avg_acquire_us -Average).Average), 2)
 } else { 0 }
 
+# Phase 2 - fence aggregate counters. waits_queued sums all GPU-side
+# Wait calls queued in the fence-path during the run; stale_views sums
+# views skipped (atlas slot reused). On a fully Phase-2-capable run
+# under steady load: waits_queued >> stale_views and total_acquires - 0
+# (the legacy KeyedMutex path is bypassed for fence-capable clients).
+$totalFenceWaits = ($fenceEvents | Measure-Object -Property waits_queued -Sum).Sum
+$totalFenceStale = ($fenceEvents | Measure-Object -Property stale_views -Sum).Sum
+$fenceClients    = ($fenceEvents | Group-Object client | Measure-Object).Count
+
 # Last [ZC] decision per client (most recent transition).
 $lastZc = $zcEvents | Group-Object client | ForEach-Object {
     $last = $_.Group | Select-Object -Last 1
@@ -292,6 +321,9 @@ $header = [pscustomobject]@{
     mutex_total_acquires = $totalAcquires
     mutex_avg_acquire_us = $avgAcquireUs
     zc_per_client        = ($lastZc -join ";")
+    fence_total_waits    = $totalFenceWaits
+    fence_total_stale    = $totalFenceStale
+    fence_clients        = $fenceClients
 }
 # Re-wrap stat rows so they share columns with the header.
 $enrichedSummary = New-Object 'System.Collections.Generic.List[psobject]'
@@ -314,6 +346,9 @@ foreach ($r in $summaryRows) {
         mutex_total_acquires = ""
         mutex_avg_acquire_us = ""
         zc_per_client        = ""
+        fence_total_waits    = ""
+        fence_total_stale    = ""
+        fence_clients        = ""
     })
 }
 $enrichedSummary | Export-Csv -LiteralPath $summaryCsv -NoTypeInformation
@@ -321,6 +356,7 @@ $enrichedSummary | Export-Csv -LiteralPath $summaryCsv -NoTypeInformation
 Write-Host ""
 Write-Host "[bench] === summary ($Tag, ${Seconds}s) ==="
 Write-Host ("[bench]   mutex timeouts      = {0} / {1} acquires (avg {2} us)" -f $totalTimeouts, $totalAcquires, $avgAcquireUs)
+Write-Host ("[bench]   fence waits queued  = {0} (stale_views = {1}, fence-capable clients = {2})" -f $totalFenceWaits, $totalFenceStale, $fenceClients)
 Write-Host ("[bench]   zc per client       = {0}" -f ($lastZc -join "; "))
 Write-Host ""
 Write-Host "[bench] per-source stats:"

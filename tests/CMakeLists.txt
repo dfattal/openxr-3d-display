@@ -82,7 +82,11 @@ endif()
 
 if(XRT_HAVE_D3D11)
 	target_link_libraries(tests_aux_d3d_d3d11 PRIVATE aux_d3d)
-	target_link_libraries(tests_comp_client_d3d11 PRIVATE comp_client comp_mock)
+	# Phase 2 — comp_d3d11_client.cpp now references the
+	# comp_ipc_client_compositor_{get,set}_workspace_sync_fence{,_value}
+	# bridge symbols defined in ipc_client_compositor.c. Add ipc_client to
+	# the link line so the unit test binary resolves them.
+	target_link_libraries(tests_comp_client_d3d11 PRIVATE comp_client comp_mock ipc_client)
 endif()
 
 if(XRT_HAVE_D3D12)

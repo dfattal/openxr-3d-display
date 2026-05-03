@@ -459,7 +459,8 @@
 
 	"compositor_layer_sync": {
 		"in": [
-			{"name": "slot_id", "type": "uint32_t"}
+			{"name": "slot_id", "type": "uint32_t"},
+			{"name": "workspace_sync_fence_value", "type": "uint64_t"}
 		],
 		"in_handles": {"type": "xrt_graphics_sync_handle_t"},
 		"out": [
@@ -471,7 +472,8 @@
 		"in": [
 			{"name": "slot_id", "type": "uint32_t"},
 			{"name": "semaphore_id", "type": "uint32_t"},
-			{"name": "semaphore_value", "type": "uint64_t"}
+			{"name": "semaphore_value", "type": "uint64_t"},
+			{"name": "workspace_sync_fence_value", "type": "uint64_t"}
 		],
 		"out": [
 			{"name": "free_slot_id", "type": "uint32_t"}
@@ -593,6 +595,13 @@
 	"compositor_semaphore_create": {
 		"out": [
 			{"name": "id", "type": "uint32_t"}
+		],
+		"out_handles": {"type": "xrt_graphics_sync_handle_t"}
+	},
+
+	"compositor_get_workspace_sync_fence": {
+		"out": [
+			{"name": "have_fence", "type": "bool"}
 		],
 		"out_handles": {"type": "xrt_graphics_sync_handle_t"}
 	},

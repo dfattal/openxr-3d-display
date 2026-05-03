@@ -91,6 +91,16 @@ struct ipc_client_compositor
 	//! To get better wake up in wait frame.
 	struct os_precise_sleeper sleeper;
 
+	//! Phase 2 — latest per-frame value the upper-layer client compositor
+	//! signaled on its imported workspace_sync_fence (or 0 if no fence is
+	//! in use). Read by ipc_compositor_layer_commit{,_with_semaphore} when
+	//! it fires the per-frame layer-sync RPC. The d3d11 client compositor
+	//! sets this via comp_ipc_client_compositor_set_workspace_sync_fence_value
+	//! right before invoking xrt_comp_layer_commit; legacy / non-D3D11
+	//! clients leave it at 0, which the service treats as a "no fence"
+	//! sentinel and the legacy KeyedMutex path stays in effect.
+	uint64_t workspace_sync_fence_value;
+
 #ifdef IPC_USE_LOOPBACK_IMAGE_ALLOCATOR
 	//! To test image allocator.
 	struct xrt_image_native_allocator loopback_xina;
@@ -204,6 +214,59 @@ comp_ipc_client_compositor_get_window_metrics(struct xrt_compositor *xc, struct 
 
 	return out_metrics->valid;
 }
+
+/*
+ * Phase 2 — workspace_sync_fence bridges (D3D11 client compositor only).
+ * Same gating contract: only safe to call when `xc` is an ipc_client_compositor.
+ *
+ * The d3d11 client compositor calls comp_ipc_client_compositor_get_workspace_sync_fence
+ * once after creation to fetch the per-IPC-client shared fence handle, then
+ * comp_ipc_client_compositor_set_workspace_sync_fence_value once per
+ * xrEndFrame (right before xrt_comp_layer_commit) to ship the latest
+ * monotonic value over the per-frame layer-sync RPC. Other client backends
+ * (Vulkan, GL, etc.) do not call these and the IPC handler treats a
+ * 0-handle / 0-value as the legacy KeyedMutex sentinel.
+ */
+xrt_result_t
+comp_ipc_client_compositor_get_workspace_sync_fence(struct xrt_compositor *xc,
+                                                    bool *out_have_fence,
+                                                    xrt_graphics_sync_handle_t *out_handle)
+{
+	if (xc == NULL || out_have_fence == NULL || out_handle == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	*out_have_fence = false;
+	*out_handle = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
+
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	bool have = false;
+	xrt_graphics_sync_handle_t h = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
+	xrt_result_t xret = ipc_call_compositor_get_workspace_sync_fence(icc->ipc_c, &have, &h, 1);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	*out_have_fence = have;
+	*out_handle = h;
+	return XRT_SUCCESS;
+}
+
+void
+comp_ipc_client_compositor_set_workspace_sync_fence_value(struct xrt_compositor *xc, uint64_t value)
+{
+	if (xc == NULL) {
+		return;
+	}
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL) {
+		return;
+	}
+	icc->workspace_sync_fence_value = value;
+}
+
 
 /*
  * Workspace controller bridges — thin accessors used by the OpenXR state
@@ -1489,6 +1552,7 @@ ipc_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 	xret = ipc_call_compositor_layer_sync( //
 	    icc->ipc_c,                        //
 	    icc->layers.slot_id,               //
+	    icc->workspace_sync_fence_value,   //
 	    &sync_handle,                      //
 	    valid_sync ? 1 : 0,                //
 	    &icc->layers.slot_id);             //
@@ -1530,6 +1594,7 @@ ipc_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 	    icc->layers.slot_id,                              //
 	    iccs->id,                                         //
 	    value,                                            //
+	    icc->workspace_sync_fence_value,                  //
 	    &icc->layers.slot_id);                            //
 
 	/*

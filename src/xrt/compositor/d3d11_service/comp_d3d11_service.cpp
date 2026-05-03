@@ -65,6 +65,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -338,6 +339,30 @@ struct d3d11_service_compositor
 	//! diff the same client's number across the two for an apples-to-
 	//! apples per-app frame-rate comparison.
 	int64_t last_commit_ns;
+
+	//! Phase 2 — per-IPC-client shared `ID3D11Fence` that replaces the
+	//! per-view `IDXGIKeyedMutex::AcquireSync` CPU wait with a GPU-side
+	//! `ID3D11DeviceContext4::Wait`. Created at session-create on the
+	//! service device and exported as an NT handle to the client; the
+	//! client increments `last_signaled_fence_value` once per `xrEndFrame`
+	//! after submitting render commands and ships the new value over the
+	//! `compositor_layer_sync` IPC. The service per-view loop reads the
+	//! atomic, queues a GPU wait if it advanced, and skip-blits the view
+	//! (reusing the persistent atlas slot) if the value is stale.
+	//! `nullptr` ⇒ legacy KeyedMutex path runs unchanged (WebXR bridge,
+	//! `_ipc` apps without fence support).
+	wil::com_ptr<ID3D11Fence> workspace_sync_fence;
+	HANDLE workspace_sync_fence_handle;            // shared NT handle for IPC export; nullptr when disabled
+	std::atomic<uint64_t> last_signaled_fence_value;
+	uint64_t last_composed_fence_value[XRT_MAX_VIEWS];
+
+	//! Phase 2 diagnostic — `[FENCE]` rate-limited (1× / 10 s) per-client
+	//! summary of GPU-wait queueing and stale-view occurrence. Mirrors the
+	//! `[MUTEX]` window pattern above so the bench harness can A/B compare
+	//! `acquires` vs `waits_queued` directly.
+	int64_t fence_window_start_ns;
+	uint32_t fence_waits_queued_in_window;
+	uint32_t fence_stale_views_in_window;
 };
 
 /*!
@@ -9992,36 +10017,119 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			}
 
 			if (view_scs[eye]->service_created && view_scs[eye]->images[view_img_indices[eye]].keyed_mutex) {
-				int64_t acq_start_ns = os_monotonic_get_ns();
-				HRESULT hr = view_scs[eye]->images[view_img_indices[eye]].keyed_mutex->AcquireSync(0, mutex_timeout_ms);
-				int64_t acq_dt_ns = os_monotonic_get_ns() - acq_start_ns;
-				c->mutex_acquires_in_window++;
-				c->mutex_acquire_total_ns_in_window += acq_dt_ns;
-				if (SUCCEEDED(hr)) {
-					view_mutex_acquired[eye] = true;
-					// Holding a cross-process keyed mutex
-					// disqualifies this view from the
-					// downstream zero-copy path: that path
-					// would have to keep the mutex held all
-					// the way through DP submit + Present,
-					// blocking the client's next AcquireSync.
-					view_zc_eligible[eye] = false;
-				} else if (hr == static_cast<HRESULT>(WAIT_TIMEOUT)) {
-					// Skip this view's blit; previous frame's
-					// tile in the per-client atlas is reused.
-					view_skip_blit[eye] = true;
-					view_zc_eligible[eye] = false;
-					c->mutex_timeouts_in_window++;
-					// Demoted from U_LOG_W: timeouts are
-					// expected on slow clients and would spam
-					// the service log otherwise. The
-					// rate-limited [MUTEX] line below is the
-					// authoritative signal.
-					U_LOG_D("layer_commit: View %u mutex timeout (client still holding?) skipping blit", eye);
+				if (c->workspace_sync_fence) {
+					// Phase 2 — GPU-side fence path. No CPU
+					// wait, no IDXGIKeyedMutex acquire. The
+					// client signals `last_signaled_fence_value`
+					// at xrEndFrame after submitting render
+					// commands; we cheaply read the atomic and
+					// either queue a non-blocking
+					// `ID3D11DeviceContext4::Wait` (frame is
+					// fresh) or skip the blit entirely (no new
+					// frame since last compose, atlas slot is
+					// reused — same trick Phase 1's mutex
+					// timeout handler uses, but driven by the
+					// fence rather than a 4 ms wall-clock
+					// timeout).
+					uint64_t signaled = c->last_signaled_fence_value.load(
+					    std::memory_order_acquire);
+					if (signaled == 0 ||
+					    signaled == c->last_composed_fence_value[eye]) {
+						// Client hasn't produced a new frame
+						// since we last composed this view —
+						// reuse persistent atlas slot content.
+						view_skip_blit[eye] = true;
+						view_zc_eligible[eye] = false;
+						c->fence_stale_views_in_window++;
+					} else {
+						// Fresh frame. The shared swapchain
+						// texture still has
+						// `D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX`
+						// set (we left swapchain creation
+						// alone so legacy / WebXR-bridge
+						// clients keep working). Per the
+						// D3D11 spec, every cross-process
+						// access to such a texture must be
+						// bracketed by AcquireSync /
+						// ReleaseSync — that is what issues
+						// the cross-process GPU memory
+						// barrier. Skipping it on the reader
+						// side means stale / undefined data
+						// (manifested empirically as empty
+						// cubes on the dev box).
+						//
+						// The fence guarantees the client's
+						// render commands are done by the
+						// time it signaled + shipped the
+						// value, so we acquire with a
+						// 0-timeout: succeeds immediately in
+						// steady state, or returns
+						// WAIT_TIMEOUT if the writer is
+						// still mid-release (treat as a
+						// stale view, reuse the persistent
+						// atlas slot — same Phase 1 trick).
+						// This is the cheapest possible
+						// CPU touchpoint that preserves the
+						// SHARED_KEYEDMUTEX contract; the
+						// real GPU sync still rides on the
+						// fence Wait below.
+						HRESULT hr_a =
+						    view_scs[eye]->images[view_img_indices[eye]].keyed_mutex->AcquireSync(
+						        0, 0);
+						if (SUCCEEDED(hr_a)) {
+							view_mutex_acquired[eye] = true;
+							sys->context->Wait(
+							    c->workspace_sync_fence.get(),
+							    signaled);
+							c->last_composed_fence_value[eye] = signaled;
+							c->fence_waits_queued_in_window++;
+						} else {
+							view_skip_blit[eye] = true;
+							view_zc_eligible[eye] = false;
+							c->fence_stale_views_in_window++;
+						}
+						// Phase 2 leaves zero-copy semantics
+						// unchanged - `view_zc_eligible[eye]`
+						// stays at its init value (true) and
+						// the existing downstream gates
+						// (single_view, ui_layers,
+						// workspace_mode, etc.) continue to
+						// govern the zc decision. Phase 3 may
+						// revisit this once per-client pacing
+						// removes the workspace_mode gate.
+					}
 				} else {
-					view_skip_blit[eye] = true;
-					view_zc_eligible[eye] = false;
-					U_LOG_W("layer_commit: Failed to acquire view %u mutex: 0x%08lx", eye, hr);
+					int64_t acq_start_ns = os_monotonic_get_ns();
+					HRESULT hr = view_scs[eye]->images[view_img_indices[eye]].keyed_mutex->AcquireSync(0, mutex_timeout_ms);
+					int64_t acq_dt_ns = os_monotonic_get_ns() - acq_start_ns;
+					c->mutex_acquires_in_window++;
+					c->mutex_acquire_total_ns_in_window += acq_dt_ns;
+					if (SUCCEEDED(hr)) {
+						view_mutex_acquired[eye] = true;
+						// Holding a cross-process keyed mutex
+						// disqualifies this view from the
+						// downstream zero-copy path: that path
+						// would have to keep the mutex held all
+						// the way through DP submit + Present,
+						// blocking the client's next AcquireSync.
+						view_zc_eligible[eye] = false;
+					} else if (hr == static_cast<HRESULT>(WAIT_TIMEOUT)) {
+						// Skip this view's blit; previous frame's
+						// tile in the per-client atlas is reused.
+						view_skip_blit[eye] = true;
+						view_zc_eligible[eye] = false;
+						c->mutex_timeouts_in_window++;
+						// Demoted from U_LOG_W: timeouts are
+						// expected on slow clients and would spam
+						// the service log otherwise. The
+						// rate-limited [MUTEX] line below is the
+						// authoritative signal.
+						U_LOG_D("layer_commit: View %u mutex timeout (client still holding?) skipping blit", eye);
+					} else {
+						view_skip_blit[eye] = true;
+						view_zc_eligible[eye] = false;
+						U_LOG_W("layer_commit: Failed to acquire view %u mutex: 0x%08lx", eye, hr);
+					}
 				}
 			}
 		}
@@ -10051,6 +10159,31 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 				c->mutex_timeouts_in_window = 0;
 				c->mutex_acquires_in_window = 0;
 				c->mutex_acquire_total_ns_in_window = 0;
+			}
+		}
+
+		// Phase 2 — emit one [FENCE] line per client per ~10 s window
+		// summarising the new GPU-wait path. Mirrors the [MUTEX] window
+		// pattern so the bench harness can A/B compare directly.
+		// Greppable; emitted at U_LOG_W (the project filter drops U_LOG_I).
+		{
+			int64_t now_ns = os_monotonic_get_ns();
+			if (c->fence_window_start_ns == 0) {
+				c->fence_window_start_ns = now_ns;
+			}
+			int64_t window_ns = now_ns - c->fence_window_start_ns;
+			if (window_ns >= 10LL * 1000LL * 1000LL * 1000LL) {
+				uint64_t last_value =
+				    c->last_signaled_fence_value.load(std::memory_order_relaxed);
+				U_LOG_W("[FENCE] client=%p waits_queued=%u stale_views=%u last_value=%llu window_s=%lld",
+				        (void *)c,
+				        c->fence_waits_queued_in_window,
+				        c->fence_stale_views_in_window,
+				        (unsigned long long)last_value,
+				        (long long)(window_ns / 1000000000LL));
+				c->fence_window_start_ns = now_ns;
+				c->fence_waits_queued_in_window = 0;
+				c->fence_stale_views_in_window = 0;
 			}
 		}
 
@@ -10851,7 +10984,56 @@ compositor_destroy(struct xrt_compositor *xc)
 	// Clean up per-client render resources (window, swap chain, display processor)
 	fini_client_render_resources(&c->render);
 
+	// Phase 2: workspace_sync_fence cleanup. The com_ptr release drops the
+	// fence object; the shared NT handle was DuplicateHandle'd into the
+	// client process by the IPC layer (each ipc_send_handles_* call mints a
+	// fresh dup), so closing the source handle here doesn't disturb the
+	// client's open fence.
+	if (c->workspace_sync_fence_handle != nullptr) {
+		CloseHandle(c->workspace_sync_fence_handle);
+		c->workspace_sync_fence_handle = nullptr;
+	}
+	c->workspace_sync_fence.reset();
+
 	delete c;
+}
+
+
+/*
+ *
+ * Phase 2 — workspace_sync_fence public surface (declared in
+ * comp_d3d11_service.h). Defined here so the static `compositor_destroy`
+ * function-pointer is in scope for the type-tag check.
+ *
+ */
+
+extern "C" bool
+comp_d3d11_service_compositor_export_workspace_sync_fence(struct xrt_compositor *xc,
+                                                          xrt_graphics_sync_handle_t *out_handle)
+{
+	if (out_handle == nullptr) {
+		return false;
+	}
+	*out_handle = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
+	if (xc == nullptr || xc->destroy != compositor_destroy) {
+		return false;
+	}
+	struct d3d11_service_compositor *c = d3d11_service_compositor_from_xrt(xc);
+	if (c->workspace_sync_fence_handle == nullptr) {
+		return false;
+	}
+	*out_handle = (xrt_graphics_sync_handle_t)c->workspace_sync_fence_handle;
+	return true;
+}
+
+extern "C" void
+comp_d3d11_service_compositor_set_workspace_sync_fence_value(struct xrt_compositor *xc, uint64_t value)
+{
+	if (xc == nullptr || xc->destroy != compositor_destroy) {
+		return;
+	}
+	struct d3d11_service_compositor *c = d3d11_service_compositor_from_xrt(xc);
+	c->last_signaled_fence_value.store(value, std::memory_order_release);
 }
 
 
@@ -10972,6 +11154,58 @@ system_create_native_compositor(struct xrt_system_compositor *xsysc,
 			U_LOG_E("Failed to initialize client render resources");
 			delete c;
 			return res_ret;
+		}
+
+		// Phase 2: per-IPC-client workspace_sync_fence — replaces the
+		// per-view CPU-side IDXGIKeyedMutex::AcquireSync wait with a GPU-side
+		// ID3D11DeviceContext4::Wait. Created on the service device,
+		// exported as a shared NT handle that the IPC layer DuplicateHandle's
+		// into the client process. Failure leaves workspace_sync_fence null
+		// and the legacy KeyedMutex path runs unchanged for this client
+		// (preserves WebXR bridge / older _ipc app compatibility).
+		c->workspace_sync_fence_handle = nullptr;
+		c->last_signaled_fence_value.store(0, std::memory_order_relaxed);
+		c->fence_window_start_ns = 0;
+		c->fence_waits_queued_in_window = 0;
+		c->fence_stale_views_in_window = 0;
+		for (uint32_t v = 0; v < XRT_MAX_VIEWS; v++) {
+			c->last_composed_fence_value[v] = 0;
+		}
+		{
+			HRESULT hr_fence = sys->device->CreateFence(
+			    0,
+			    static_cast<D3D11_FENCE_FLAG>(D3D11_FENCE_FLAG_SHARED |
+			                                  D3D11_FENCE_FLAG_SHARED_CROSS_ADAPTER),
+			    IID_PPV_ARGS(c->workspace_sync_fence.put()));
+			if (FAILED(hr_fence)) {
+				U_LOG_W("Phase 2: CreateFence(_SHARED|_SHARED_CROSS_ADAPTER) failed "
+				        "(hr=0x%08lX); retrying SHARED-only.",
+				        (long)hr_fence);
+				hr_fence = sys->device->CreateFence(0, D3D11_FENCE_FLAG_SHARED,
+				                                    IID_PPV_ARGS(c->workspace_sync_fence.put()));
+			}
+			if (SUCCEEDED(hr_fence) && c->workspace_sync_fence) {
+				HANDLE fh = nullptr;
+				HRESULT hr_h = c->workspace_sync_fence->CreateSharedHandle(
+				    nullptr, GENERIC_ALL, nullptr, &fh);
+				if (SUCCEEDED(hr_h) && fh != nullptr) {
+					c->workspace_sync_fence_handle = fh;
+					U_LOG_W("[FENCE] client=%p workspace_sync_fence created "
+					        "(handle=%p)",
+					        (void *)c, fh);
+				} else {
+					U_LOG_W("Phase 2: CreateSharedHandle on workspace_sync_fence "
+					        "failed (hr=0x%08lX); legacy KeyedMutex path stays "
+					        "in effect for this client.",
+					        (long)hr_h);
+					c->workspace_sync_fence.reset();
+				}
+			} else {
+				U_LOG_W("Phase 2: CreateFence failed (hr=0x%08lX); legacy "
+				        "KeyedMutex path stays in effect for this client.",
+				        (long)hr_fence);
+				c->workspace_sync_fence.reset();
+			}
 		}
 	}
 

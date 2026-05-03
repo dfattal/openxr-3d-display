@@ -1856,6 +1856,7 @@ _update_layers(volatile struct ipc_client_state *ics, struct xrt_compositor *xc,
 xrt_result_t
 ipc_handle_compositor_layer_sync(volatile struct ipc_client_state *ics,
                                  uint32_t slot_id,
+                                 uint64_t workspace_sync_fence_value,
                                  uint32_t *out_free_slot_id,
                                  const xrt_graphics_sync_handle_t *handles,
                                  const uint32_t handle_count)
@@ -1865,6 +1866,18 @@ ipc_handle_compositor_layer_sync(volatile struct ipc_client_state *ics,
 	if (ics->xc == NULL) {
 		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
 	}
+
+#if defined(XRT_HAVE_LEIA_SR_D3D11) && defined(XRT_HAVE_D3D11_SERVICE_COMPOSITOR)
+	// Phase 2 — relay the per-frame fence value to the d3d11 service
+	// compositor BEFORE dispatching the layer commit, so the per-view loop
+	// in compositor_layer_commit reads a fresh value. Legacy clients send 0
+	// (sentinel), and clients without a fence imported simply pass 0 every
+	// frame; either way the per-view loop falls through to the legacy
+	// KeyedMutex AcquireSync path. No-op for non-D3D11 native compositors.
+	comp_d3d11_service_compositor_set_workspace_sync_fence_value(ics->xc, workspace_sync_fence_value);
+#else
+	(void)workspace_sync_fence_value;
+#endif
 
 	struct ipc_shared_memory *ism = get_ism(ics);
 	struct ipc_layer_slot *slot = &ism->slots[slot_id];
@@ -1915,6 +1928,7 @@ ipc_handle_compositor_layer_sync_with_semaphore(volatile struct ipc_client_state
                                                 uint32_t slot_id,
                                                 uint32_t semaphore_id,
                                                 uint64_t semaphore_value,
+                                                uint64_t workspace_sync_fence_value,
                                                 uint32_t *out_free_slot_id)
 {
 	IPC_TRACE_MARKER();
@@ -1922,6 +1936,14 @@ ipc_handle_compositor_layer_sync_with_semaphore(volatile struct ipc_client_state
 	if (ics->xc == NULL) {
 		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
 	}
+
+#if defined(XRT_HAVE_LEIA_SR_D3D11) && defined(XRT_HAVE_D3D11_SERVICE_COMPOSITOR)
+	// Phase 2 — see the matching comment in ipc_handle_compositor_layer_sync.
+	comp_d3d11_service_compositor_set_workspace_sync_fence_value(ics->xc, workspace_sync_fence_value);
+#else
+	(void)workspace_sync_fence_value;
+#endif
+
 	if (semaphore_id >= IPC_MAX_CLIENT_SEMAPHORES) {
 		IPC_ERROR(ics->server, "Invalid semaphore_id");
 		return XRT_ERROR_IPC_FAILURE;
@@ -3462,6 +3484,42 @@ ipc_handle_compositor_semaphore_create(volatile struct ipc_client_state *ics,
 	*out_id = id;
 	out_handles[0] = handle;
 	*out_handle_count = 1;
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_compositor_get_workspace_sync_fence(volatile struct ipc_client_state *ics,
+                                               bool *out_have_fence,
+                                               uint32_t max_handle_count,
+                                               xrt_graphics_sync_handle_t *out_handles,
+                                               uint32_t *out_handle_count)
+{
+	IPC_TRACE_MARKER();
+
+	*out_have_fence = false;
+	*out_handle_count = 0;
+
+	if (ics->xc == NULL || max_handle_count < 1) {
+		return XRT_SUCCESS;
+	}
+
+#if defined(XRT_HAVE_LEIA_SR_D3D11) && defined(XRT_HAVE_D3D11_SERVICE_COMPOSITOR)
+	// Phase 2 — only the d3d11_service compositor exposes a per-client
+	// shared ID3D11Fence. The exporter does the type-tag check and returns
+	// false for any other backend (or when the fence creation failed at
+	// session start). The IPC machinery (ipc_send_handles_*) DuplicateHandle's
+	// the source NT handle into the client process; the source handle stays
+	// owned by the d3d11_service_compositor and is closed on session destroy.
+	xrt_graphics_sync_handle_t h = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
+	if (comp_d3d11_service_compositor_export_workspace_sync_fence(ics->xc, &h)) {
+		out_handles[0] = h;
+		*out_handle_count = 1;
+		*out_have_fence = true;
+	}
+#else
+	(void)out_handles;
+#endif
 
 	return XRT_SUCCESS;
 }
