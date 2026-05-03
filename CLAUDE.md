@@ -160,27 +160,23 @@ Per-component tag scheme — each public repo versions independently. Tag pvt wi
 
 | Tag | Fires | When |
 |---|---|---|
-| `vX.Y.Z` | every `publish-*` workflow | synchronised full-stack release (default, back-compat) |
-| `runtime/vX.Y.Z` | `publish-public.yml` only | runtime or shell changed; demos unaffected |
-| `demo-<name>/vX.Y.Z` | `publish-demo-<name>.yml` only | one demo changed; runtime + other demos unaffected |
+| `vX.Y.Z` | `publish-public.yml` (and historically every `publish-*`) | full-stack release |
+| `runtime/vX.Y.Z` | `publish-public.yml` only | runtime-only release |
 
-Prefix is stripped when setting the public-repo tag: `runtime/v1.2.0` → `v1.2.0` on `displayxr-runtime` + `displayxr-shell-releases`. Each demo's `README.md` states its minimum compatible runtime version ("Requires DisplayXR runtime ≥ vX.Y.Z"). Details: `docs/roadmap/demo-distribution.md`.
+Prefix is stripped when setting the public-repo tag: `runtime/v1.2.0` → `v1.2.0` on `displayxr-runtime`.
 
 ```bash
 # /release skill handles version bump, tagging, monitoring, verification.
-# First arg is the component (defaults to `all` if omitted).
-/release v1.0.0                               # full-stack, every publish workflow
-/release patch                                # full-stack, auto-bump from latest v*
-/release runtime minor                        # runtime + shell only
-/release demo-gaussiansplat patch             # one demo only
-/release demo-gaussiansplat v1.1.0            # one demo, explicit version
+/release v1.0.0      # full-stack runtime release
+/release patch       # auto-bump from latest v*
+/release minor       # auto-bump minor
 ```
 
-Cross-repo pushes (runtime, shell-releases, extensions, every demo repo) are authenticated via the `displayxr-publish-bot` GitHub App. The App's installation token is minted per-job via `actions/create-github-app-token@v1`, scoped to only the one repo that job writes to. Org secrets `DISPLAYXR_APP_ID` + `DISPLAYXR_APP_PRIVATE_KEY` hold the credentials. Local `.pem` backup at `.secrets/displayxr-publish-bot.pem` (gitignored) — see `.secrets/NOTE.md` for rotation procedure.
+Cross-repo pushes (extensions; shell-pvt → shell-releases) are authenticated via the `displayxr-publish-bot` GitHub App. The App's installation token is minted per-job via `actions/create-github-app-token@v1`, scoped to only the one repo that job writes to. Org secrets `DISPLAYXR_APP_ID` + `DISPLAYXR_APP_PRIVATE_KEY` hold the credentials. Local `.pem` backup at `.secrets/displayxr-publish-bot.pem` (gitignored) — see `.secrets/NOTE.md` for rotation procedure.
 
 Extension headers auto-publish to `DisplayXR/displayxr-extensions` via `publish-extensions.yml` on every push to main.
 
-Demos publish **one repo per demo** — `DisplayXR/displayxr-demo-<name>`. Each has its own `publish-demo-<name>.yml` workflow that syncs source + attaches a binary Release zip. Currently: `DisplayXR/displayxr-demo-gaussiansplat`. `demos/spatial_os_handle_d3d11_win/` stays in this repo as a reference implementation (superseded by the Shell feature) and does not publish.
+Standalone demos live in their own repos (e.g. `DisplayXR/displayxr-demo-gaussiansplat`) and evolve independently — no source-mirror from this repo. `demos/spatial_os_handle_d3d11_win/` stays in this repo as a reference implementation (superseded by the Shell feature) and does not publish.
 
 ### Repository Structure
 
@@ -191,7 +187,7 @@ Demos publish **one repo per demo** — `DisplayXR/displayxr-demo-<name>`. Each 
 | `DisplayXR/displayxr-shell-pvt` | **Private** (dev) | DisplayXR Shell source, dev issues, CI |
 | `DisplayXR/displayxr-shell-releases` | Public | DisplayXR Shell installer releases (auto-published from `displayxr-shell-pvt` on tags), user-facing bug reports |
 | `DisplayXR/displayxr-extensions` | Public | OpenXR extension headers, auto-synced from this repo's `src/external/openxr_includes/` (consumed by shell-pvt + 3rd-party workspace apps) |
-| `DisplayXR/displayxr-demo-<name>` | Public | One repo per standalone demo (source + binary releases). Currently `displayxr-demo-gaussiansplat`. |
+| `DisplayXR/displayxr-demo-<name>` | Public | Standalone demo repos with independent evolution. Currently `displayxr-demo-gaussiansplat`. No source-mirror from this repo. |
 
 Shell source moved to `displayxr-shell-pvt` in 2026-05 (Phase 2.J Step 1). The runtime no longer carries any shell code; the discovery contract is documented at `docs/specs/workspace-controller-registration.md`.
 
@@ -319,7 +315,6 @@ Copy binaries to `_package/DisplayXR-macOS/bin/`. Run scripts exec from `$DIR/bi
 | cube_texture_metal_macos | `test_apps/cube_texture_metal_macos/build/cube_texture_metal_macos` | `_package/.../bin/cube_texture_metal_macos` | `run_cube_texture_metal.sh` |
 | cube_hosted_metal_macos | `test_apps/cube_hosted_metal_macos/build/cube_hosted_metal_macos` | `_package/.../bin/cube_hosted_metal_macos` | `run_cube_hosted_metal.sh` |
 | cube_hosted_legacy_metal_macos | `test_apps/cube_hosted_legacy_metal_macos/build/cube_hosted_legacy_metal_macos` | `_package/.../bin/cube_hosted_legacy_metal_macos` | `run_cube_hosted_legacy_metal.sh` |
-| gaussian_splatting_handle_vk_macos | `demos/gaussian_splatting_handle_vk_macos/build/gaussian_splatting_handle_vk_macos` | `_package/.../bin/gaussian_splatting_handle_vk_macos` | `run_gaussian_splatting_handle_vk.sh` |
 
 ## Windows Test App Local Builds
 

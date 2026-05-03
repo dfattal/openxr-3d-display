@@ -1,5 +1,24 @@
 # Demo distribution — per-demo public repos
 
+**Status: superseded (2026-05).** Demo repos are now **standalone
+source of truth**, not auto-synced from this repo. The
+`publish-demo-*.yml` workflows + `scripts/publish-demo.sh` were
+removed in master plan Step 2 (privacy collapse). Each demo repo
+evolves independently from this point forward — runtime updates
+flow into demos via the public OpenXR loader + extension headers,
+not via source mirroring.
+
+A future enhancement: each standalone demo's installer drops a
+sidecar app manifest under `%LOCALAPPDATA%\DisplayXR\apps\` so the
+DisplayXR Shell's launcher picks it up. While the demo lived in
+this repo, the in-tree build path emitted that manifest as part of
+the install step; standalone demo repos need their own install-time
+mechanism for the same effect.
+
+The historical rationale below is preserved for context.
+
+---
+
 ## Motivation
 
 Previously every DisplayXR demo lived in a single public umbrella repo, `DisplayXR/displayxr-demos`, auto-synced on each release tag. That worked when there was one demo; with several planned, a single repo makes it awkward to:

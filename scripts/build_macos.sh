@@ -130,13 +130,8 @@ cmake -B "$ROOT/test_apps/cube_hosted_legacy_vk_macos/build" \
   -DCMAKE_PREFIX_PATH="$OPENXR_DIR"
 cmake --build "$ROOT/test_apps/cube_hosted_legacy_vk_macos/build"
 
-# Step 3d: Build 3DGS demo app
-echo "=== Building gaussian_splatting_handle_vk_macos ==="
-cmake -B "$ROOT/demos/gaussian_splatting_handle_vk_macos/build" \
-  -S "$ROOT/demos/gaussian_splatting_handle_vk_macos" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_PREFIX_PATH="$OPENXR_DIR"
-cmake --build "$ROOT/demos/gaussian_splatting_handle_vk_macos/build"
+# 3DGS demo source moved to DisplayXR/displayxr-demo-gaussiansplat
+# (master plan Step 2, 2026-05). Build it from that repo separately.
 
 # Step 4: Package artifacts (mirrors CI workflow)
 echo "=== Packaging artifacts ==="
@@ -164,12 +159,6 @@ cp "$ROOT/test_apps/cube_hosted_metal_macos/build/cube_hosted_metal_macos" "$PKG
 cp "$ROOT/test_apps/cube_hosted_legacy_metal_macos/build/cube_hosted_legacy_metal_macos" "$PKG_DIR/bin/" 2>/dev/null || true
 cp "$ROOT/test_apps/cube_hosted_legacy_gl_macos/build/cube_hosted_legacy_gl_macos" "$PKG_DIR/bin/" 2>/dev/null || true
 cp "$ROOT/test_apps/cube_hosted_legacy_vk_macos/build/cube_hosted_legacy_vk_macos" "$PKG_DIR/bin/" 2>/dev/null || true
-cp "$ROOT/demos/gaussian_splatting_handle_vk_macos/build/gaussian_splatting_handle_vk_macos" "$PKG_DIR/bin/" 2>/dev/null || true
-cp "$ROOT/demos/gaussian_splatting_handle_vk_macos/assets/butterfly.spz" "$PKG_DIR/bin/" 2>/dev/null || true
-# DisplayXR shell manifest sidecar (.displayxr.json + icons)
-cp "$ROOT/demos/gaussian_splatting_handle_vk_macos/displayxr/"*.json "$PKG_DIR/bin/" 2>/dev/null || true
-cp "$ROOT/demos/gaussian_splatting_handle_vk_macos/displayxr/"*.png "$PKG_DIR/bin/" 2>/dev/null || true
-
 # Copy texture files for handle apps
 mkdir -p "$PKG_DIR/bin/textures"
 cp "$ROOT/test_apps/common/textures/"*.jpg "$PKG_DIR/bin/textures/" 2>/dev/null || true
@@ -202,7 +191,6 @@ install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_hosted_m
 install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_hosted_legacy_metal_macos" 2>/dev/null || true
 install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_hosted_legacy_gl_macos" 2>/dev/null || true
 install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/cube_hosted_legacy_vk_macos" 2>/dev/null || true
-install_name_tool -add_rpath @executable_path/../lib "$PKG_DIR/bin/gaussian_splatting_handle_vk_macos" 2>/dev/null || true
 install_name_tool -add_rpath @loader_path "$PKG_DIR"/lib/libopenxr_loader*.dylib 2>/dev/null || true
 
 # Create MoltenVK ICD manifest
@@ -328,19 +316,6 @@ exec "$DIR/bin/cube_hosted_legacy_vk_macos" "$@"
 SCRIPT
 chmod +x "$PKG_DIR/run_cube_hosted_legacy_vk.sh"
 
-# Create run script for 3DGS demo app
-cat > "$PKG_DIR/run_gaussian_splatting_handle_vk.sh" <<'SCRIPT'
-#!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
-export XR_RUNTIME_JSON="$DIR/openxr_displayxr.json"
-export DYLD_LIBRARY_PATH="$DIR/lib:${DYLD_LIBRARY_PATH:-}"
-export VK_ICD_FILENAMES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
-export VK_DRIVER_FILES="$DIR/share/vulkan/icd.d/MoltenVK_icd.json"
-export SIM_DISPLAY_OUTPUT="${SIM_DISPLAY_OUTPUT:-anaglyph}"
-echo "Starting gaussian_splatting_handle_vk_macos (3D Gaussian Splatting) with $SIM_DISPLAY_OUTPUT output..."
-exec "$DIR/bin/gaussian_splatting_handle_vk_macos" "$@"
-SCRIPT
-chmod +x "$PKG_DIR/run_gaussian_splatting_handle_vk.sh"
 
 # Step 5: Build .pkg installer (optional)
 if [ "$BUILD_INSTALLER" = "ON" ]; then

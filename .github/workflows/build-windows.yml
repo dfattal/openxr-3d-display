@@ -57,7 +57,6 @@ jobs:
     runs-on: windows-2022
 
     env:
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       SR_TAG: 1.35.0.2011
       GH_TOKEN: ${{ github.token }}
 
@@ -171,29 +170,6 @@ jobs:
           Write-Host "Uploading $($installer.Name) to OneDrive: $destPath"
           rclone copy $installer.FullName "onedrive:$destPath" --progress
           Write-Host "Upload complete!"
-
-      - name: Post build to Slack
-        if: success() && !contains(github.event.head_commit.message, '[skip slack]')
-        uses: act10ns/slack@v2
-        with:
-          status: starting
-          message: ':thumbsup: ${{ github.event.head_commit.message }}
-
-            READY
-
-            ${{ steps.installer-upload-step.outputs.artifact-url }}'
-
-      - name: Post failure to Slack
-        if: failure() && !contains(github.event.head_commit.message, '[skip slack]')
-        uses: act10ns/slack@v2
-        with:
-          status: starting
-
-          message: ':thumbsdown: ${{ github.event.head_commit.message }}
-
-            FAILED
-
-            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
 
   # D3D11 test app with XR_EXT_win32_window_binding (app provides window handle)
   TestAppCubeHandleD3D11:

@@ -1,8 +1,16 @@
 # Adding a new demo (with its own public repo)
 
-This guide walks you through turning a demo in `displayxr-runtime-pvt/demos/` into a standalone `DisplayXR/displayxr-demo-<name>` public repo with CI-driven source sync + binary releases.
+**Status: superseded (2026-05).** This guide describes the *old*
+auto-sync model where demos lived under `demos/` in the runtime repo
+and were mirrored on each tag to a public `DisplayXR/displayxr-demo-<name>`
+repo. As of the privacy-collapse step, demo repos are **standalone
+source of truth** — create the new demo repo directly with its own
+CMake + CI scaffolding (the `displayxr-shell-pvt` extraction from the
+runtime repo is a similar pattern, see that repo for the layout).
 
-See `docs/roadmap/demo-distribution.md` for the rationale behind the per-repo split.
+See `docs/roadmap/demo-distribution.md` for the historical rationale
+behind the per-repo split. The auto-sync sections below are kept for
+reference; the new flow does not need them.
 
 ## 1. Build the demo in-tree first
 
