@@ -8,18 +8,19 @@ on:
   # Cost-saver combo (see CLAUDE.md):
   # - Drafts skip CI (job-level `!github.event.pull_request.draft` guard).
   #   Iterate as a draft; CI fires when you mark Ready for review.
-  # - Doc-only PRs skip CI via paths-ignore.
+  # - Doc-only PRs are detected by DetectChanges (`docs_only` output);
+  #   the heavy steps inside Runtime + test-app jobs skip when true,
+  #   but the workflow still fires + Runtime still reports a status so
+  #   branch protection's required-status-check on `Runtime` is
+  #   satisfied. (The naive trigger-level `paths-ignore` would block
+  #   doc-only PRs forever once the check is required — see
+  #   reference_org_protection_state.md.)
   # - Rapid pushes to a PR cancel the in-progress run; only the latest
   #   commit's CI completes (concurrency group below).
   push:
     tags:
       - 'v*'
-  pull_request:
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
-      - 'LICENSE'
+  pull_request: {}
 
 # Cancel any in-progress run for the same PR (or branch) when a new
 # push comes in. Only the latest commit's CI completes.
@@ -36,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       test_apps_changed: ${{ steps.filter.outputs.test_apps }}
+      docs_only: ${{ steps.filter.outputs.docs_only }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,7 +50,8 @@ jobs:
           # path below would miss this case.
           if [ "${{ github.ref_type }}" = "tag" ]; then
             echo "test_apps=true" >> "$GITHUB_OUTPUT"
-            echo "Detected tag push — forcing test_apps_changed=true"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "Detected tag push — forcing test_apps_changed=true, docs_only=false"
             exit 0
           fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -56,23 +59,39 @@ jobs:
           else
             BASE=${{ github.event.before }}
           fi
-          # Check if test_apps/ or demos/ changed
-          if git diff --name-only "$BASE" HEAD | grep -qE '^(test_apps/|demos/)'; then
+          CHANGED=$(git diff --name-only "$BASE" HEAD)
+          # test_apps_changed: any test_apps/ or demos/ files modified.
+          if echo "$CHANGED" | grep -qE '^(test_apps/|demos/)'; then
             echo "test_apps=true" >> "$GITHUB_OUTPUT"
           else
             echo "test_apps=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "Detected test_apps_changed=$(grep test_apps "$GITHUB_OUTPUT" | cut -d= -f2)"
+          # docs_only: every changed file matches doc / boilerplate patterns.
+          # When true, Runtime (and downstream test-app jobs) still RUN — to
+          # report a status for branch protection — but skip their heavy
+          # steps via per-step `if:`.
+          NON_DOC=$(echo "$CHANGED" | grep -vE '^(docs/|.*\.md$|LICENSE$|\.github/ISSUE_TEMPLATE/)' || true)
+          if [ -n "$CHANGED" ] && [ -z "$NON_DOC" ]; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Detected test_apps_changed=$(grep ^test_apps= "$GITHUB_OUTPUT" | cut -d= -f2) docs_only=$(grep ^docs_only= "$GITHUB_OUTPUT" | cut -d= -f2)"
 
   Runtime:
     # Drafts skip CI; non-draft fork PRs run the build (SR SDK is fetched from
     # upstream's release page — see the Download SR SDK step).
+    # Always runs on non-draft PRs so it can report a status check
+    # (branch protection requires this); heavy steps below skip when
+    # DetectChanges flagged the PR as docs_only.
+    needs: DetectChanges
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: windows-2022
 
     env:
       SR_TAG: 1.35.0.2011
       GH_TOKEN: ${{ github.token }}
+      DOCS_ONLY: ${{ needs.DetectChanges.outputs.docs_only }}
 
     steps:
 
@@ -82,7 +101,12 @@ jobs:
           submodules: recursive
           lfs: true
 
+      - name: Doc-only PR — skipping heavy build steps
+        if: needs.DetectChanges.outputs.docs_only == 'true'
+        run: echo "DetectChanges flagged docs_only=true; the steps below skip and the Runtime job reports a success status without running the full Windows build."
+
       - name: Download Simulated Reality SDK
+        if: needs.DetectChanges.outputs.docs_only != 'true'
         run: |
           gh release download -R DisplayXR/displayxr-runtime sr-sdk-v$env:SR_TAG -p LeiaSR-SDK-$env:SR_TAG-win64.zip -D .
           tar -xf LeiaSR-SDK-$env:SR_TAG-win64.zip -C .
@@ -94,6 +118,7 @@ jobs:
           # gh release download -R DisplayXR/displayxr-runtime sr-sdk-v$env:SR_TAG -p glweaver.h -D LeiaSR-SDK-$env:SR_TAG-win64/include/sr/weaver
 
       - name: Restore from cache and setup vcpkg executable and data files.
+        if: needs.DetectChanges.outputs.docs_only != 'true'
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
@@ -101,14 +126,17 @@ jobs:
           vcpkgJsonGlob: 'vcpkg.json'
 
       - name: Install Vulkan SDK
+        if: needs.DetectChanges.outputs.docs_only != 'true'
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
           version: 1.3.283.0
           cache: true
 
-      - uses: ilammy/msvc-dev-cmd@v1
+      - if: needs.DetectChanges.outputs.docs_only != 'true'
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Generate
+        if: needs.DetectChanges.outputs.docs_only != 'true'
         env:
           LEIASR_SDKROOT: ${{ github.workspace }}/LeiaSR-SDK-${{ env.SR_TAG }}-win64
         run: |
@@ -124,14 +152,16 @@ jobs:
             -DBUILD_NUM="${{ github.run_number }}"
 
       - name: Build
+        if: needs.DetectChanges.outputs.docs_only != 'true'
         run: cmake --build build --config Release --target install
 
       - name: Build Installer
+        if: needs.DetectChanges.outputs.docs_only != 'true'
         run: cmake --build build --config Release --target installer
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
-        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        if: needs.DetectChanges.outputs.docs_only != 'true' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
         id: artifact-upload-step
         with:
           retention-days: 3
@@ -141,7 +171,7 @@ jobs:
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
-        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        if: needs.DetectChanges.outputs.docs_only != 'true' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
         id: installer-upload-step
         with:
           retention-days: 3
@@ -153,7 +183,7 @@ jobs:
       # the whole rclone group on forks; the artifact-upload steps above
       # already give reviewers the installer.
       - name: Setup rclone config
-        if: github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.DetectChanges.outputs.docs_only != 'true' && github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         shell: powershell
         run: |
           $rcloneDir = "$env:USERPROFILE\.config\rclone"
@@ -167,7 +197,7 @@ jobs:
           Write-Host "rclone config written to $rcloneDir\rclone.conf"
 
       - name: Install rclone (if not present)
-        if: github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.DetectChanges.outputs.docs_only != 'true' && github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         shell: powershell
         run: |
           if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
@@ -182,7 +212,7 @@ jobs:
           }
 
       - name: Upload installer to OneDrive
-        if: github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.DetectChanges.outputs.docs_only != 'true' && github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         shell: powershell
         run: |
           $installer = Get-ChildItem -Path "_package/DisplayXRSetup-*.exe" | Select-Object -First 1
@@ -1089,7 +1119,7 @@ jobs:
       # OneDrive upload uses RCLONE_CONFIG; skip on forks (the bundled
       # artifact upload above already exposes the test apps to reviewers).
       - name: Install rclone
-        if: github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.DetectChanges.outputs.docs_only != 'true' && github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: |
           curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip
           unzip rclone-current-linux-amd64.zip
@@ -1097,7 +1127,7 @@ jobs:
           rclone --version
 
       - name: Setup rclone config
-        if: github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.DetectChanges.outputs.docs_only != 'true' && github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         env:
           RCLONE_CONFIG_CONTENTS: ${{ secrets.RCLONE_CONFIG }}
         run: |
@@ -1105,7 +1135,7 @@ jobs:
           echo "$RCLONE_CONFIG_CONTENTS" > ~/.config/rclone/rclone.conf
 
       - name: Zip test apps
-        if: github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.DetectChanges.outputs.docs_only != 'true' && github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: |
           cd TestApps
           zip -r ../TestApps-${{ github.run_number }}.zip .
@@ -1113,7 +1143,7 @@ jobs:
           ls -lh TestApps-${{ github.run_number }}.zip
 
       - name: Upload test apps zip to OneDrive
-        if: github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: needs.DetectChanges.outputs.docs_only != 'true' && github.repository == 'DisplayXR/displayxr-runtime' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: |
           destPath="SANDBOX/RUNTIMES + SDK + PLUGINS/OpenXR"
           echo "Uploading TestApps-${{ github.run_number }}.zip to OneDrive: $destPath"
