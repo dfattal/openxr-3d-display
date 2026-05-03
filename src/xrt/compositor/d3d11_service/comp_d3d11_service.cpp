@@ -314,6 +314,30 @@ struct d3d11_service_compositor
 
 	//! Thread safety
 	std::mutex mutex;
+
+	//! Phase 1 diagnostic — last logged zero-copy decision per client.
+	//! Drives the one-shot `[ZC]` breadcrumb in compositor_layer_commit:
+	//! we only emit a log line when the decision FLIPS, not every frame.
+	bool zc_last_logged_set;
+	bool zc_last_logged_value;
+	const char *zc_last_logged_reason;
+
+	//! Phase 1 diagnostic — `[MUTEX]` rate-limited (1× / 10 s) per-client
+	//! summary of KeyedMutex acquire health on the service render thread.
+	//! Acquire latencies and timeout counts accumulate during the window;
+	//! the window flush emits one `U_LOG_I` line and resets the counters.
+	int64_t mutex_window_start_ns;
+	uint32_t mutex_timeouts_in_window;
+	uint32_t mutex_acquires_in_window;
+	int64_t mutex_acquire_total_ns_in_window;
+
+	//! Phase 1 diagnostic — `[CLIENT_FRAME_NS]` env-gated per-client
+	//! commit-to-commit interval. Measures the rate at which THIS client
+	//! is actually submitting frames (its `xrEndFrame` cadence as seen on
+	//! the service side). Works in both shell and standalone modes —
+	//! diff the same client's number across the two for an apples-to-
+	//! apples per-app frame-rate comparison.
+	int64_t last_commit_ns;
 };
 
 /*!
@@ -9328,6 +9352,27 @@ after_key_shortcuts:
 	// so the atlas is fully populated.
 	comp_d3d11_service_poll_mcp_capture((struct xrt_system_compositor *)sys);
 
+	// Phase 1 Task 1.4 — env-gated Present-to-Present interval log for the
+	// shell-mode service swapchain. Production builds pay nothing (one
+	// getenv on first frame, then a static-cached 0/1 branch). Bench
+	// harness flips DISPLAYXR_LOG_PRESENT_NS=1 to enable. Greppable.
+	{
+		static int log_present_ns = -1;
+		if (log_present_ns < 0) {
+			const char *e = getenv("DISPLAYXR_LOG_PRESENT_NS");
+			log_present_ns = (e != nullptr && e[0] == '1') ? 1 : 0;
+		}
+		if (log_present_ns) {
+			static int64_t last_present_ns = 0;
+			int64_t now_ns = os_monotonic_get_ns();
+			if (last_present_ns != 0) {
+				U_LOG_W("[PRESENT_NS] client=shell dt_ns=%lld",
+				        (long long)(now_ns - last_present_ns));
+			}
+			last_present_ns = now_ns;
+		}
+	}
+
 	// Present
 	if (mc->swap_chain) {
 		mc->swap_chain->Present(1, 0);
@@ -9353,6 +9398,28 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	struct d3d11_service_system *sys = c->sys;
 
 	std::lock_guard<std::mutex> lock(c->mutex);
+
+	// Phase 1 diagnostic — env-gated per-client commit interval. One
+	// line per client per xrEndFrame; tagged by HWND so multi-client
+	// runs can be split out. Cheap (one getenv on first frame, then a
+	// static-cached branch), and works in BOTH shell and standalone
+	// modes for direct comparison.
+	{
+		static int log_client_frame_ns = -1;
+		if (log_client_frame_ns < 0) {
+			const char *e = getenv("DISPLAYXR_LOG_PRESENT_NS");
+			log_client_frame_ns = (e != nullptr && e[0] == '1') ? 1 : 0;
+		}
+		if (log_client_frame_ns) {
+			int64_t now_ns = os_monotonic_get_ns();
+			if (c->last_commit_ns != 0) {
+				U_LOG_W("[CLIENT_FRAME_NS] client=%p dt_ns=%lld",
+				        (void *)c,
+				        (long long)(now_ns - c->last_commit_ns));
+			}
+			c->last_commit_ns = now_ns;
+		}
+	}
 
 	// Check window validity - detect window close to end session
 	if (!c->window_closed) {
@@ -9851,6 +9918,23 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		bool view_mutex_acquired[XRT_MAX_VIEWS] = {};
 		D3D11_TEXTURE2D_DESC view_descs[XRT_MAX_VIEWS] = {};
 		bool view_is_srgb[XRT_MAX_VIEWS] = {};
+		// Phase 1 Task 1.1 — per-view zero-copy eligibility. Default true;
+		// flipped false below by anything that disqualifies the view (the
+		// view required a service-side mutex acquire, or that acquire
+		// timed out / failed). Replaces the old per-commit
+		// `any_mutex_acquired` flag so one ineligible view does not nuke
+		// the fast path for its siblings.
+		bool view_zc_eligible[XRT_MAX_VIEWS] = {};
+		// Phase 1 Task 1.2 — per-view "skip the blit" flag. Set when the
+		// service could NOT safely read this view's source texture (mutex
+		// timeout). The per-client atlas slot is persistent, so skipping
+		// the blit reuses last frame's tile content for that one view —
+		// converting a 100 ms render-thread stall into a 1-frame quality
+		// blip. Other views in the same client commit are unaffected.
+		bool view_skip_blit[XRT_MAX_VIEWS] = {};
+		for (uint32_t e = 0; e < proj_view_count; e++) {
+			view_zc_eligible[e] = true;
+		}
 
 		bool views_valid = true;
 		for (uint32_t eye = 0; eye < proj_view_count; eye++) {
@@ -9879,30 +9963,93 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		}
 		if (!views_valid) continue;
 
-		// For service-created swapchains (WebXR), acquire KeyedMutex before reading
-		const DWORD mutex_timeout_ms = 100;
-		bool any_mutex_acquired = false;
+		// Phase 1 Task 1.2 — drop service-thread KeyedMutex timeout from
+		// 100 ms to a frame-budget value (4 ms, matching the chrome-overlay
+		// path at the top of this file). On timeout we skip this view's
+		// blit entirely so the per-client atlas slot retains its prior
+		// content — a 1-frame quality blip on that one tile rather than a
+		// ~100 ms render-thread stall that drops 6 frames at 60 Hz.
+		const DWORD mutex_timeout_ms = 4;
 		for (uint32_t eye = 0; eye < proj_view_count; eye++) {
 			// Skip mutex for views sharing the same swapchain+image as a prior view
 			bool already_locked = false;
+			uint32_t prev_idx = 0;
 			for (uint32_t prev = 0; prev < eye; prev++) {
 				if (view_scs[eye] == view_scs[prev] && view_img_indices[eye] == view_img_indices[prev]) {
 					already_locked = true;
+					prev_idx = prev;
 					break;
 				}
 			}
-			if (already_locked) continue;
+			if (already_locked) {
+				// Inherit eligibility / skip from the view that did
+				// the actual acquire so the per-view arrays stay
+				// consistent across the blit / release loops.
+				view_zc_eligible[eye] = view_zc_eligible[prev_idx];
+				view_skip_blit[eye] = view_skip_blit[prev_idx];
+				continue;
+			}
 
 			if (view_scs[eye]->service_created && view_scs[eye]->images[view_img_indices[eye]].keyed_mutex) {
+				int64_t acq_start_ns = os_monotonic_get_ns();
 				HRESULT hr = view_scs[eye]->images[view_img_indices[eye]].keyed_mutex->AcquireSync(0, mutex_timeout_ms);
+				int64_t acq_dt_ns = os_monotonic_get_ns() - acq_start_ns;
+				c->mutex_acquires_in_window++;
+				c->mutex_acquire_total_ns_in_window += acq_dt_ns;
 				if (SUCCEEDED(hr)) {
 					view_mutex_acquired[eye] = true;
-					any_mutex_acquired = true;
+					// Holding a cross-process keyed mutex
+					// disqualifies this view from the
+					// downstream zero-copy path: that path
+					// would have to keep the mutex held all
+					// the way through DP submit + Present,
+					// blocking the client's next AcquireSync.
+					view_zc_eligible[eye] = false;
 				} else if (hr == static_cast<HRESULT>(WAIT_TIMEOUT)) {
-					U_LOG_W("layer_commit: View %u mutex timeout (client still holding?)", eye);
+					// Skip this view's blit; previous frame's
+					// tile in the per-client atlas is reused.
+					view_skip_blit[eye] = true;
+					view_zc_eligible[eye] = false;
+					c->mutex_timeouts_in_window++;
+					// Demoted from U_LOG_W: timeouts are
+					// expected on slow clients and would spam
+					// the service log otherwise. The
+					// rate-limited [MUTEX] line below is the
+					// authoritative signal.
+					U_LOG_D("layer_commit: View %u mutex timeout (client still holding?) skipping blit", eye);
 				} else {
+					view_skip_blit[eye] = true;
+					view_zc_eligible[eye] = false;
 					U_LOG_W("layer_commit: Failed to acquire view %u mutex: 0x%08lx", eye, hr);
 				}
+			}
+		}
+
+		// Phase 1 Task 1.3 — emit one [MUTEX] line per client per ~10 s
+		// window summarising acquire health on the service render thread.
+		// Greppable from the service log under %LOCALAPPDATA%\DisplayXR\.
+		{
+			int64_t now_ns = os_monotonic_get_ns();
+			if (c->mutex_window_start_ns == 0) {
+				c->mutex_window_start_ns = now_ns;
+			}
+			int64_t window_ns = now_ns - c->mutex_window_start_ns;
+			if (window_ns >= 10LL * 1000LL * 1000LL * 1000LL) {
+				uint32_t avg_us = 0;
+				if (c->mutex_acquires_in_window > 0) {
+					avg_us = (uint32_t)((c->mutex_acquire_total_ns_in_window /
+					                     (int64_t)c->mutex_acquires_in_window) / 1000);
+				}
+				U_LOG_W("[MUTEX] client=%p timeouts=%u acquires=%u avg_acquire_us=%u window_s=%lld",
+				        (void *)c,
+				        c->mutex_timeouts_in_window,
+				        c->mutex_acquires_in_window,
+				        avg_us,
+				        (long long)(window_ns / 1000000000LL));
+				c->mutex_window_start_ns = now_ns;
+				c->mutex_timeouts_in_window = 0;
+				c->mutex_acquires_in_window = 0;
+				c->mutex_acquire_total_ns_in_window = 0;
 			}
 		}
 
@@ -9926,8 +10073,23 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		// sub-rects match tiling layout, and texture matches content dimensions.
 		// Skip the blit and pass the app's texture directly to the display processor.
 		bool zero_copy = false;
+		const char *zc_reason = "ok";
 
-		if (proj_view_count > 1 && !has_ui_layers && !any_mutex_acquired && !sys->workspace_mode) {
+		// Phase 1 Task 1.1 — per-view eligibility AND. Old code used a single
+		// per-commit `any_mutex_acquired` flag; the new array preserves
+		// the same semantics (zero-copy needs every view safe to read
+		// without holding a cross-process mutex) at a finer granularity
+		// that Phase 2's shared-fence path will further leverage.
+		bool all_views_zc_eligible = true;
+		for (uint32_t e = 0; e < proj_view_count; e++) {
+			if (!view_zc_eligible[e]) { all_views_zc_eligible = false; break; }
+		}
+		if (proj_view_count <= 1) zc_reason = "single_view";
+		else if (has_ui_layers) zc_reason = "ui_layers";
+		else if (!all_views_zc_eligible) zc_reason = "view_ineligible";
+		else if (sys->workspace_mode) zc_reason = "workspace_mode";
+
+		if (proj_view_count > 1 && !has_ui_layers && all_views_zc_eligible && !sys->workspace_mode) {
 			// Check all views reference the same swapchain image
 			bool all_same = true;
 			for (uint32_t eye = 1; eye < proj_view_count; eye++) {
@@ -9958,9 +10120,12 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 					}
 				}
 
-				if (active_mode != nullptr &&
-				    u_tiling_can_zero_copy(proj_view_count, rect_xs, rect_ys, rect_ws, rect_hs,
-				                           view_descs[0].Width, view_descs[0].Height, active_mode)) {
+				if (active_mode == nullptr) {
+					zc_reason = "no_active_mode";
+				} else if (!u_tiling_can_zero_copy(proj_view_count, rect_xs, rect_ys, rect_ws, rect_hs,
+				                                  view_descs[0].Width, view_descs[0].Height, active_mode)) {
+					zc_reason = "tiling_mismatch";
+				} else {
 					// Texture matches atlas dims exactly — zero-copy is safe
 					D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
 					srv_desc.Format = view_is_srgb[0] ? get_srgb_format(view_descs[0].Format) : view_descs[0].Format;
@@ -9984,9 +10149,30 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 							        rect_ws[0], rect_hs[0], proj_view_count, srv_desc.Format);
 							logged_zc = true;
 						}
+					} else {
+						zc_reason = "srv_create_failed";
 					}
 				}
+			} else {
+				zc_reason = "view_unique_textures";
 			}
+		}
+
+		// Phase 1 Task 1.3 — emit [ZC] one-shot per client whenever the
+		// decision (or its reason) FLIPS. Greppable from the service log.
+		if (!c->zc_last_logged_set ||
+		    c->zc_last_logged_value != zero_copy ||
+		    (c->zc_last_logged_reason != nullptr &&
+		     zc_reason != nullptr &&
+		     strcmp(c->zc_last_logged_reason, zc_reason) != 0)) {
+			U_LOG_W("[ZC] client=%p views=%u zero_copy=%c reason=%s",
+			        (void *)c,
+			        proj_view_count,
+			        zero_copy ? 'Y' : 'N',
+			        zc_reason ? zc_reason : "?");
+			c->zc_last_logged_set = true;
+			c->zc_last_logged_value = zero_copy;
+			c->zc_last_logged_reason = zc_reason;
 		}
 
 		if (!zero_copy) {
@@ -10023,6 +10209,13 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 		}
 
 		for (uint32_t eye = 0; eye < proj_view_count; eye++) {
+			// Phase 1 Task 1.2 — mutex acquire timed out earlier;
+			// the source texture is unsafe to read. Leave the per-
+			// client atlas slot for this view untouched so it keeps
+			// last frame's content. One-frame blip on this tile only.
+			if (view_skip_blit[eye]) {
+				continue;
+			}
 			float src_x = static_cast<float>(layer->data.proj.v[eye].sub.rect.offset.w);
 			float src_y = static_cast<float>(layer->data.proj.v[eye].sub.rect.offset.h);
 			float src_w = static_cast<float>(layer->data.proj.v[eye].sub.rect.extent.w);
@@ -10552,6 +10745,29 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 	// Post-weave chroma-key alpha conversion (no-op when chroma_key_color == 0).
 	svc_chroma_key_pass_execute(sys, &c->render);
+
+	// Phase 1 diagnostic — same env-gated [PRESENT_NS] used for the
+	// shell swapchain. In standalone mode this fires per client per
+	// frame against THIS client's own swap chain. Tagged with HWND so
+	// shell mode (multi_compositor_render's Present) and standalone
+	// (here) can be told apart by grep.
+	{
+		static int log_present_ns = -1;
+		if (log_present_ns < 0) {
+			const char *e = getenv("DISPLAYXR_LOG_PRESENT_NS");
+			log_present_ns = (e != nullptr && e[0] == '1') ? 1 : 0;
+		}
+		if (log_present_ns) {
+			static int64_t last_present_ns_standalone = 0;
+			int64_t now_ns = os_monotonic_get_ns();
+			if (last_present_ns_standalone != 0) {
+				U_LOG_W("[PRESENT_NS] client=%p dt_ns=%lld",
+				        (void *)c,
+				        (long long)(now_ns - last_present_ns_standalone));
+			}
+			last_present_ns_standalone = now_ns;
+		}
+	}
 
 	// Present to display
 	if (c->render.swap_chain) {

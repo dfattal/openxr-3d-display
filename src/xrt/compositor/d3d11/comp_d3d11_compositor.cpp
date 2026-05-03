@@ -959,6 +959,30 @@ d3d11_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 
 	std::lock_guard<std::mutex> lock(c->mutex);
 
+	// Phase 1 diagnostic — env-gated per-client commit interval. Mirrors
+	// the same `[CLIENT_FRAME_NS]` line emitted by the SERVICE compositor's
+	// `compositor_layer_commit` so per-app frame rates are directly
+	// comparable across shell mode (service compositor) and standalone
+	// (this in-process compositor). One client per process here so a
+	// static cache is fine; HWND tags the line for log demuxing.
+	{
+		static int log_client_frame_ns = -1;
+		if (log_client_frame_ns < 0) {
+			const char *e = getenv("DISPLAYXR_LOG_PRESENT_NS");
+			log_client_frame_ns = (e != nullptr && e[0] == '1') ? 1 : 0;
+		}
+		if (log_client_frame_ns) {
+			static int64_t last_commit_ns = 0;
+			int64_t now_ns = os_monotonic_get_ns();
+			if (last_commit_ns != 0) {
+				U_LOG_W("[CLIENT_FRAME_NS] client=%p dt_ns=%lld",
+				        (void *)c->hwnd,
+				        (long long)(now_ns - last_commit_ns));
+			}
+			last_commit_ns = now_ns;
+		}
+	}
+
 	// Get predicted eye positions
 	struct xrt_eye_positions eye_pos = {};
 	if (c->display_processor != nullptr) {
