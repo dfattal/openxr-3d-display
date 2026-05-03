@@ -39,7 +39,7 @@ permissions:
 
 jobs:
   sync-source:
-    if: github.repository == 'DisplayXR/displayxr-runtime-pvt'
+    if: (github.repository == 'DisplayXR/displayxr-runtime' || github.repository == 'DisplayXR/displayxr-runtime-pvt')
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.resolve-tag.outputs.tag }}
@@ -113,7 +113,7 @@ jobs:
     # Only on tag pushes: build-windows.yml fires on tag / PR / *-ci branches,
     # not on workflow_dispatch, so a dispatch-based dry-run has nothing to
     # wait on. Dry-runs exercise sync-source only.
-    if: github.repository == 'DisplayXR/displayxr-runtime-pvt' && github.event_name == 'push'
+    if: (github.repository == 'DisplayXR/displayxr-runtime' || github.repository == 'DisplayXR/displayxr-runtime-pvt') && github.event_name == 'push'
     needs: sync-source
     runs-on: ubuntu-latest
 

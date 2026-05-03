@@ -12,7 +12,7 @@ on:
 
 jobs:
   publish-headers:
-    if: github.repository == 'DisplayXR/displayxr-runtime-pvt'
+    if: (github.repository == 'DisplayXR/displayxr-runtime' || github.repository == 'DisplayXR/displayxr-runtime-pvt')
     runs-on: ubuntu-latest
 
     steps:

@@ -5,7 +5,7 @@
  * @brief  Server mainloop details on macOS, using kqueue.
  * @author Pete Black <pblack@collabora.com>
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author David Fattal <david.fattal@leiainc.com>
+ * @author David Fattal
  * @ingroup ipc_server
  */
 

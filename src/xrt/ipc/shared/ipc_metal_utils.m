@@ -3,7 +3,7 @@
 /*!
  * @file
  * @brief  Metal/IOSurface helpers for cross-process texture sharing on macOS.
- * @author David Fattal <david.fattal@leiainc.com>
+ * @author David Fattal
  * @ingroup ipc_shared
  */
 
