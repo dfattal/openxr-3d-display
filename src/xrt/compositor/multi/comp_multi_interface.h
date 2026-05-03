@@ -5,6 +5,15 @@
  * @brief  Interface for the multi-client layer code.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @ingroup comp_main
+ *
+ * @note DisplayXR-specific: this is the Monado-legacy multi-client orchestrator.
+ * DisplayXR's workspace mode uses a separate per-client compositor
+ * (`d3d11_service_compositor`) and its own multi-client orchestration
+ * (`d3d11_multi_compositor`) inside `compositor/d3d11_service/comp_d3d11_service.cpp`.
+ * The code behind this interface is reachable only via
+ * `compositor/null/null_compositor.c` (headless testing) and
+ * `targets/sdl_test/sdl_compositor.c` (dev harness). Modifying it does NOT
+ * affect workspace-mode performance or behavior.
  */
 
 #pragma once
