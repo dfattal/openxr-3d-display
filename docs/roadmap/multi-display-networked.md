@@ -6,7 +6,7 @@ issues: [70]
 code-paths: [src/xrt/ipc/]
 ---
 
-> **Status: Proposal** — not yet implemented. Tracking issue: [#70](https://github.com/DisplayXR/displayxr-runtime-pvt/issues/70)
+> **Status: Proposal** — not yet implemented. Tracking issue: [#70](https://github.com/DisplayXR/displayxr-runtime/issues/70)
 
 # Multi-Display Compositing Across Networked Machines
 

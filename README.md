@@ -41,16 +41,18 @@ Every graphics API gets its own native compositor — no Vulkan intermediary, no
 ## Quick Start
 
 ```bash
+# Windows — recommended (auto-fetches vcpkg, OpenXR loader, LeiaSR SDK)
+scripts\build_windows.bat all
+# Outputs: _package/DisplayXRSetup-*.exe (installer) + _package/bin/
+
 # macOS
 brew install cmake ninja eigen vulkan-sdk && ./scripts/build_macos.sh
 
-# Windows (with optional vendor SDK)
-set LEIASR_SDKROOT=C:\path\to\SimulatedReality
-mkdir build && cd build && cmake .. -G Ninja && cmake --build .
-
 # Run without installing
-XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json ./your_openxr_app
+XR_RUNTIME_JSON=./build/Release/openxr_displayxr-dev.json ./your_openxr_app
 ```
+
+Pre-built installers from [GitHub Releases](https://github.com/DisplayXR/displayxr-runtime/releases). For the spatial-workspace experience, also install the [DisplayXR Shell](https://github.com/DisplayXR/displayxr-shell-releases/releases) (separate installer, registers with the runtime via the [workspace controller contract](docs/specs/workspace-controller-registration.md)).
 
 See [Building DisplayXR](docs/getting-started/building.md) for full instructions and CMake options.
 

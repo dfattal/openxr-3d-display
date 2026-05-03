@@ -264,7 +264,7 @@ plus: open a bridge-aware page **and** Chrome legacy WebXR simultaneously
 in shell — both should respond to qwerty input independently.
 
 **Not in Stage 2 scope.** Doesn't block 2b/2c. File as its own dev issue on
-`DisplayXR/displayxr-runtime-pvt` after 2c lands.
+`DisplayXR/displayxr-runtime` after 2c lands.
 
 ### Bridge-aware page color shift in shell mode (pre-existing)
 

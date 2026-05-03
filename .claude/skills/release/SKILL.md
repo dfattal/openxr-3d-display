@@ -87,7 +87,7 @@ Replace `[COMPONENT]`, `[VERSION]` (the `vX.Y.Z` without prefix), and `[FULL_TAG
 Execute the DisplayXR release workflow for [COMPONENT] = [VERSION] (tag: [FULL_TAG]).
 
 ## Configuration
-- Private repo: DisplayXR/displayxr-runtime-pvt
+- Source repo: DisplayXR/displayxr-runtime (public)
 - Public repos (only the ones this release affects):
     all     → displayxr-runtime, displayxr-shell-releases, displayxr-extensions,
               every displayxr-demo-<name>

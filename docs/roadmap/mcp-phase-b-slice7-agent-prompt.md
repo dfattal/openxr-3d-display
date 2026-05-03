@@ -31,7 +31,7 @@ Slice 7 is Windows-only because it touches the **D3D11 service compositor** (`co
 ### 1.1 Sync
 
 ```bat
-cd %USERPROFILE%\Documents\GitHub\displayxr-runtime-pvt
+cd %USERPROFILE%\Documents\GitHub\displayxr-runtime
 git fetch origin
 git checkout feature/mcp-phase-b
 git pull
@@ -63,7 +63,7 @@ Leave this running. Per `CLAUDE.md`, launch via `Bash run_in_background: true` w
 Fresh cmd.exe window:
 
 ```bat
-cd %USERPROFILE%\Documents\GitHub\displayxr-runtime-pvt
+cd %USERPROFILE%\Documents\GitHub\displayxr-runtime
 tests\mcp\test_service_handshake.bat
 tests\mcp\test_list_windows.bat
 tests\mcp\test_set_window_pose.bat

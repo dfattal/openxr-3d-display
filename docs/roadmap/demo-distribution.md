@@ -34,14 +34,14 @@ So we split: **one repo per demo**, named `DisplayXR/displayxr-demo-<name>`. The
 
 Each per-demo public repo:
 
-1. **Is auto-synced.** Source comes from `displayxr-runtime-pvt` via a dedicated workflow `.github/workflows/publish-demo-<name>.yml`, triggered by `v*` tags. Users should open issues on `displayxr-runtime-pvt` (or on the demo repo — they get forwarded), not PR the synced source directly.
+1. **Is auto-synced.** Source comes from `displayxr-runtime` via a dedicated workflow `.github/workflows/publish-demo-<name>.yml`, triggered by `v*` tags. Users should open issues on `displayxr-runtime` (or on the demo repo — they get forwarded), not PR the synced source directly.
 2. **Builds offline, cross-platform where applicable.** Each repo is self-contained: vendored OpenXR headers (no submodule), pinned FetchContent dependencies, no path references back into the runtime repo.
 3. **Ships binaries as GitHub Releases.** On each tag, a zipped Windows binary (and, once macOS CI is re-enabled, a macOS binary) is attached to the Release matching the tag.
-4. **Has a standalone `CMakeLists.txt`.** Same sources as in `displayxr-runtime-pvt/demos/<demo>/`, but the top-level and per-subdir CMakeLists use sibling paths instead of `../../` references.
+4. **Has a standalone `CMakeLists.txt`.** Same sources as in `displayxr-runtime/demos/<demo>/`, but the top-level and per-subdir CMakeLists use sibling paths instead of `../../` references.
 
 ## How the dual layout works
 
-Each demo source tree in `displayxr-runtime-pvt/demos/<demo>/` ships two CMakeLists:
+Each demo source tree in `displayxr-runtime/demos/<demo>/` ships two CMakeLists:
 
 - `CMakeLists.txt` — the in-tree one, used by local dev and `build-windows.yml`. Reaches up into `test_apps/common/` and `src/external/openxr_includes/`.
 - `CMakeLists.standalone.txt` — renamed to `CMakeLists.txt` by the publish workflow when copied into the demo repo. Uses sibling paths (`../common`, `../openxr_includes`, `../3dgs_common`).
@@ -92,7 +92,7 @@ Each public repo versions independently. Tag pvt with one of:
 
 ### Why not one `vX.Y.Z` for everything?
 
-Before the per-component tag scheme existed, every CI-only fix-forward (e.g. a workflow YAML typo) dragged all public repos through a meaningless release bump — users saw a v1.1.0 → v1.1.1 → v1.1.2 chain where v1.1.1/v1.1.2 had source-identical runtime+shell to v1.1.0. [#170](https://github.com/DisplayXR/displayxr-runtime-pvt/issues/170) tracked the cleanup. With per-component tags, a runtime-only fix becomes `runtime/v1.1.1` → v1.1.1 on the runtime repo only; the demo repo stays at whatever version it was.
+Before the per-component tag scheme existed, every CI-only fix-forward (e.g. a workflow YAML typo) dragged all public repos through a meaningless release bump — users saw a v1.1.0 → v1.1.1 → v1.1.2 chain where v1.1.1/v1.1.2 had source-identical runtime+shell to v1.1.0. [#170](https://github.com/DisplayXR/displayxr-runtime/issues/170) tracked the cleanup. With per-component tags, a runtime-only fix becomes `runtime/v1.1.1` → v1.1.1 on the runtime repo only; the demo repo stays at whatever version it was.
 
 ### Runtime-compatibility covenant
 
@@ -108,7 +108,7 @@ See `docs/guides/add-new-demo-repo.md` for the step-by-step.
 
 ## What is *not* published
 
-- `demos/spatial_os_handle_d3d11_win/` — superseded by the Shell feature. Stays in `displayxr-runtime-pvt/demos/` as a reference implementation, but no public repo and no publish workflow.
+- `demos/spatial_os_handle_d3d11_win/` — superseded by the Shell feature. Stays in `displayxr-runtime/demos/` as a reference implementation, but no public repo and no publish workflow.
 - Anything under `test_apps/` — these are CI-only builds, not user-facing demos.
 
 ## What happened to `DisplayXR/displayxr-demos`

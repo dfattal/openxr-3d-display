@@ -27,7 +27,7 @@ For every `CMakeLists.txt` in the demo and any shared lib it vendors (`3dgs_comm
 - `${CMAKE_SOURCE_DIR}/../../src/external/openxr_includes` → `${CMAKE_SOURCE_DIR}/openxr_includes`
 - `${CMAKE_SOURCE_DIR}/../../test_apps/common` → `${CMAKE_SOURCE_DIR}/common`
 - `${CMAKE_SOURCE_DIR}/../3dgs_common` → `${CMAKE_SOURCE_DIR}/3dgs_common`
-- Drop `displayxr-runtime-pvt`-specific fallbacks (e.g., the `PARENT_BUILD_DIR` OpenXR fallback).
+- Drop `displayxr-runtime`-specific fallbacks (e.g., the `PARENT_BUILD_DIR` OpenXR fallback).
 
 Also create:
 

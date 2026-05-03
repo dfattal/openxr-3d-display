@@ -5,12 +5,19 @@ See the full [contributing guide](docs/guides/contributing.md) for workflow, cod
 ## Quick Reference
 
 1. Fork the repository (external) or create a feature branch off `main` (collaborators)
-2. Make your changes and commit
-3. Format with `git clang-format` before committing
-4. Submit a pull request targeting `main`
-5. Both CI jobs (Windows + macOS) must pass
-6. A maintainer will review your PR
+2. Make your changes and commit; format with `git clang-format` before committing
+3. Submit a pull request targeting `main`
+4. The Windows CI build must pass (macOS CI is currently disabled — macOS work is verified locally)
+5. A maintainer will review your PR
+
+### Issues
+
+Open issues at [github.com/DisplayXR/displayxr-runtime/issues](https://github.com/DisplayXR/displayxr-runtime/issues). For the **DisplayXR Shell** (the spatial workspace controller), file at [displayxr-shell-releases](https://github.com/DisplayXR/displayxr-shell-releases/issues) — those are forwarded to the private shell repo.
 
 ### For Display Vendors
 
-See the [vendor integration guide](docs/guides/vendor-integration.md). All vendor-specific code lives under `src/xrt/drivers/<vendor>/` — zero compositor changes required.
+See the [vendor integration guide](docs/guides/vendor-integration.md). All vendor-specific code lives under `src/xrt/drivers/<vendor>/` — zero compositor changes required. The runtime is purposefully decoupled from any specific vendor SDK; the LeiaSR integration is one example, and adding a new vendor follows the same pattern.
+
+### License
+
+Boost Software License 1.0. By contributing, you agree your code is licensed under BSL-1.0.

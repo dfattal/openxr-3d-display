@@ -12,7 +12,7 @@ I'm working on the DisplayXR runtime. Issue #158 is a D3D11 service-compositor b
 ## Context (read in order)
 
 1. `CLAUDE.md` — project overview, build commands, architecture
-2. Issue text on GitHub: https://github.com/DisplayXR/displayxr-runtime-pvt/issues/158
+2. Issue text on GitHub: https://github.com/DisplayXR/displayxr-runtime/issues/158
 3. Phase 8 status doc `docs/roadmap/shell-phase8-status.md` — Phase 8 surfaced the bug; the capture code intentionally dumps the full atlas uncropped for now, and re-adding the crop depends on this fix.
 4. `src/xrt/include/xrt/xrt_device.h` lines 234–251 — the `xrt_rendering_mode` struct. Note the vendor-set `view_scale_x/y` and the runtime-computed `view_width_pixels / view_height_pixels / atlas_width_pixels / atlas_height_pixels`.
 

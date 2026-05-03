@@ -128,10 +128,10 @@ What it DOES catch reliably: `windows.h` symbol resolution, missing platform-con
 Toolchain: `cmake/toolchain-mingw-w64.cmake`. Output goes to `build-mingw/` (gitignored). Runs in ~30 s after first configure.
 
 ### CI Build (Remote)
-```bash
-/ci-monitor "your commit message"
-```
-Commits, pushes, monitors GitHub Actions (Windows + macOS), auto-fixes common build errors. Use for feature branch (`**-ci`) validation when remote CI is needed before merge. **Not needed for every push** — prefer local builds for daily development.
+
+**CI policy: PR-only.** `build-windows.yml` triggers on **pull requests** and **`v*` tag pushes** — nothing else. Pushes to feature branches do NOT trigger CI; iterate locally and open a draft PR if you want CI feedback before review. macOS CI is currently disabled.
+
+For tagged releases, use the `/release` skill (see below) — it's the official release path. Don't tag manually.
 
 ### Standard CMake Build
 ```bash
@@ -292,12 +292,7 @@ Creates a tagged release, monitors CI build and publish pipeline, verifies all p
 /release patch     # auto-bump: v1.0.0 → v1.0.1
 /release minor     # auto-bump: v1.0.0 → v1.1.0
 ```
-Updates `CMakeLists.txt` version, creates tag, monitors `build-windows.yml` + `publish-public.yml`, verifies releases on `displayxr-runtime` and `displayxr-shell-releases`. Rolls back tag on build failure.
-
-### /ci-monitor - Feature Branch CI Validation
-Automates commit, push, GitHub Actions monitoring, auto-fix. See `.claude/skills/ci-monitor/SKILL.md`.
-Use for feature branch (`**-ci`) validation. **Not for releases** — use `/release` instead.
-**Important:** Always include the related GitHub issue number in commit messages — e.g., `Fix linker error (#93)`. Check conversation context and recent commits to determine the issue number.
+Updates `CMakeLists.txt` version, creates tag, monitors `build-windows.yml`, attaches the installer to the GitHub Release. The official path for cutting a runtime release.
 
 ### /ask-gemini - Code Analysis with Gemini
 Ask Gemini to analyze code and produce a read-only report. See `~/.claude/skills/ask-gemini/SKILL.md`.

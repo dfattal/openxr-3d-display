@@ -68,7 +68,7 @@ Once Phase 2 is stable and the extensions are frozen, the shell repo can consume
 | `DisplayXR/displayxr-runtime` | **Public** | Full source. The only runtime repo. |
 | `DisplayXR/displayxr-shell-pvt` (new) | Private | Proprietary shell source, consumes published runtime |
 | `DisplayXR/displayxr-shell-releases` | Public | Binary shell releases (unchanged) |
-| `DisplayXR/displayxr-runtime-pvt` (current) | **Archived** | Historical |
+| `DisplayXR/displayxr-runtime` (current) | **Archived** | Historical |
 
 External contributors PR directly against `displayxr-runtime`. The current `apply-public-pr.sh` flow disappears.
 
@@ -311,7 +311,7 @@ Severance becomes possible when **all** of these are true:
 - [ ] `targets/shell/CMakeLists.txt` switches from in-tree paths to consuming a published runtime artifact (release zip / git submodule against a tagged runtime version)
 - [ ] Shell repo gets its own CI that builds against the latest published runtime, not source-coupled
 
-After all six: the shell repo can move to `DisplayXR/displayxr-shell-pvt`, the runtime repo's `targets/shell/` directory disappears, `displayxr-runtime-pvt` archives, and `apply-public-pr.sh` retires.
+After all six: the shell repo can move to `DisplayXR/displayxr-shell-pvt`, the runtime repo's `targets/shell/` directory disappears, `displayxr-runtime` archives, and `apply-public-pr.sh` retires.
 
 **Costs to weigh before committing to severance:**
 
