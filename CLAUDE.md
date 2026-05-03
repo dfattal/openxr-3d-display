@@ -8,7 +8,7 @@ DisplayXR is a lightweight standalone OpenXR runtime purpose-built for 3D displa
 
 ### Milestone Progress
 
-See the [milestone tracker](https://github.com/DisplayXR/displayxr-runtime-pvt/milestones) for full status.
+See the [milestone tracker](https://github.com/DisplayXR/displayxr-runtime/milestones) for full status.
 
 - **M1: Foundation** — Done. Stripped 34 VR drivers, removed Vulkan server compositor, cleaned CMake, extracted stereo math.
 - **M2: Native Compositors** — Done. D3D11, D3D12, Metal, OpenGL, Vulkan all shipping.
@@ -182,8 +182,8 @@ Standalone demos live in their own repos (e.g. `DisplayXR/displayxr-demo-gaussia
 
 | Repo | Visibility | Contents |
 |------|-----------|----------|
-| `DisplayXR/displayxr-runtime-pvt` | **Private** (dev) | Runtime source, all runtime dev issues, CI builds. **This repo.** |
-| `DisplayXR/displayxr-runtime` | Public | Public runtime releases — auto-published from `-pvt` on tags |
+| `DisplayXR/displayxr-runtime` | **Public** | Runtime source, all runtime dev issues, CI builds. **This repo.** |
+| `DisplayXR/displayxr-runtime-legacy-mirror` | Public (archived) | Pre-deprivatize snapshot history; read-only. Old links auto-redirect from this repo. |
 | `DisplayXR/displayxr-shell-pvt` | **Private** (dev) | DisplayXR Shell source, dev issues, CI |
 | `DisplayXR/displayxr-shell-releases` | Public | DisplayXR Shell installer releases (auto-published from `displayxr-shell-pvt` on tags), user-facing bug reports |
 | `DisplayXR/displayxr-extensions` | Public | OpenXR extension headers, auto-synced from this repo's `src/external/openxr_includes/` (consumed by shell-pvt + 3rd-party workspace apps) |
@@ -193,21 +193,20 @@ Shell source moved to `displayxr-shell-pvt` in 2026-05 (Phase 2.J Step 1). The r
 
 ### Issue Management
 
-**Runtime dev issues** → `DisplayXR/displayxr-runtime-pvt` (this repo). **Shell dev issues** → `DisplayXR/displayxr-shell-pvt`. User-facing shell bug reports stay on the public `displayxr-shell-releases`.
+**Runtime dev issues** → `DisplayXR/displayxr-runtime` (this repo, public). **Shell dev issues** → `DisplayXR/displayxr-shell-pvt` (private). User-facing shell bug reports stay on the public `displayxr-shell-releases`.
 
 | Where | What | Who |
 |-------|------|-----|
-| `DisplayXR/displayxr-runtime-pvt` | Runtime dev issues (bugs, tasks, implementation) | Developers |
+| `DisplayXR/displayxr-runtime` | Runtime dev issues (bugs, tasks, implementation) | Developers + community |
 | `DisplayXR/displayxr-shell-pvt` | Shell dev issues | Developers |
 | `DisplayXR/displayxr-runtime` | Curated public runtime milestones only (~5-10 issues) | Public / OEMs |
 | `DisplayXR/displayxr-shell-releases` | User-facing shell bug reports | Shell users |
 
 **Rules:**
 - Never dual-create issues across repos. One source of truth per issue.
-- Create dev issues on `DisplayXR/displayxr-runtime-pvt` only.
-- Update public milestone issues on `DisplayXR/displayxr-runtime` at major milestones, don't create new ones for subtasks.
-- If a user files a bug on `displayxr-shell-releases`, triage it and create a dev issue on the private repo if actionable.
-- Community contributions: external contributors submit PRs to `DisplayXR/displayxr-runtime` (public). Accepted PRs are applied to `-pvt` via `scripts/apply-public-pr.sh`.
+- Create runtime dev issues on `DisplayXR/displayxr-runtime` (this repo).
+- If a user files a bug on `displayxr-shell-releases`, triage it and create a dev issue on `displayxr-shell-pvt` if actionable.
+- Community contributions: external contributors submit PRs directly against `DisplayXR/displayxr-runtime`. No two-hop apply step.
 
 ## Architecture
 

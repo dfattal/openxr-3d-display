@@ -22,23 +22,46 @@ brew install cmake ninja eigen vulkan-sdk
 
 Builds the runtime, OpenXR loader, and test apps. The Vulkan compositor will fail at runtime with `VK_ERROR_EXTENSION_NOT_PRESENT` (MoltenVK limitation, not a build issue).
 
-### Windows
-```bash
-# Set vendor SDK path (optional)
-set LEIASR_SDKROOT=C:\path\to\SimulatedReality
+### Windows (recommended)
+```bat
+scripts\build_windows.bat all
+```
 
-# Build
+The script auto-fetches everything needed: vcpkg (for cJSON +
+runtime deps), the OpenXR loader release zip, and the LeiaSR SDK
+release artifact (from this repo's `sr-sdk-v*` release). It then
+runs CMake (Ninja Multi-Config) and builds the runtime + installer
+in one go. Outputs land in `_package/`.
+
+Available targets: `all` (default), `build` (runtime only,
+fastest iteration), `installer`, `test-apps`, `generate`. See
+the script's header for the full list.
+
+Requires: VS 2022 with C++ workload, Ninja
+(`winget install Ninja-build.Ninja`), Vulkan SDK
+(`winget install KhronosGroup.VulkanSDK`), GitHub CLI
+(`winget install GitHub.cli` + `gh auth login`).
+
+### Windows (manual cmake fallback)
+For advanced users who want fine-grained control:
+```bat
+:: Set vendor SDK path (optional but recommended for real hardware)
+set LEIASR_SDKROOT=C:\path\to\LeiaSR-SDK
+
+:: Build
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -G Ninja -DCMAKE_PREFIX_PATH=%LEIASR_SDKROOT%
 cmake --build .
 ```
 
-### Standard CMake Build
+### Standard CMake Build (no vendor SDK)
 ```bash
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -G Ninja
 cmake --build .
 ```
+Builds the runtime with sim_display only — useful for local dev
+without hardware.
 
 ## Vendor SDK
 

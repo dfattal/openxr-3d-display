@@ -1,6 +1,6 @@
 # DisplayXR Roadmap
 
-This page summarizes where the project stands and where it's headed. For the full issue tracker, see the [GitHub milestones](https://github.com/DisplayXR/displayxr-runtime-pvt/milestones).
+This page summarizes where the project stands and where it's headed. For the full issue tracker, see the [GitHub milestones](https://github.com/DisplayXR/displayxr-runtime/milestones).
 
 ## Project Phases
 

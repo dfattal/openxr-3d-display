@@ -83,12 +83,12 @@ XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json ./build/test_apps/cube_handle_
 
 | Repo | Description |
 |------|-------------|
+| [displayxr-shell-releases](https://github.com/DisplayXR/displayxr-shell-releases) | DisplayXR Shell — spatial workspace controller (installer + bug reports) |
+| [displayxr-extensions](https://github.com/DisplayXR/displayxr-extensions) | OpenXR extension specs and headers |
+| [displayxr-demo-gaussiansplat](https://github.com/DisplayXR/displayxr-demo-gaussiansplat) | 3D Gaussian Splatting reference demo |
 | [displayxr-unity](https://github.com/DisplayXR/displayxr-unity) | Unity engine plugin (UPM package) |
 | [displayxr-unreal](https://github.com/DisplayXR/displayxr-unreal) | Unreal Engine plugin |
-| [displayxr-extensions](https://github.com/DisplayXR/displayxr-extensions) | OpenXR extension specs and headers |
 | [kooima-projection](https://github.com/DisplayXR/kooima-projection) | Off-axis frustum projection math library |
-| [displayxr-demos](https://github.com/DisplayXR/displayxr-demos) | Demo applications |
-| [displayxr-shell](https://github.com/DisplayXR/displayxr-shell) | Spatial shell / 3D window manager |
 
 ## Contributing
 
