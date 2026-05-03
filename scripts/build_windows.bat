@@ -4,12 +4,13 @@ setlocal enabledelayedexpansion
 :: ============================================================
 :: DisplayXR Local Build Script
 :: Downloads all dependencies on first run, then builds.
-:: Usage: scripts\build_windows.bat [generate|build|installer|test-apps|all]
-::   generate   - CMake generate only
-::   build      - Build runtime + install
-::   installer  - Build installer
-::   test-apps  - Build all test apps
-::   all        - Everything (default)
+:: Usage: scripts\build_windows.bat [generate|build|installer|shell_installer|test-apps|all]
+::   generate         - CMake generate only
+::   build            - Build runtime + install
+::   installer        - Build runtime installer
+::   shell_installer  - Build dedicated shell installer
+::   test-apps        - Build all test apps
+::   all              - Everything (default)
 :: ============================================================
 
 set REPO=%~dp0..\
@@ -132,6 +133,7 @@ echo.
 :: ============================================================
 if "%TARGET%"=="build" if exist "%REPO%build\build.ninja" goto :do_build
 if "%TARGET%"=="installer" if exist "%REPO%build\build.ninja" goto :do_installer
+if "%TARGET%"=="shell_installer" if exist "%REPO%build\build.ninja" goto :do_shell_installer
 if "%TARGET%"=="test-apps" goto :do_test_apps
 
 echo === CMake Generate ===
@@ -169,18 +171,32 @@ if %ERRORLEVEL% NEQ 0 (
 if "%TARGET%"=="build" goto :done
 
 :: ============================================================
-:: 5. Build installer
+:: 5. Build installer (runtime)
 :: ============================================================
 :do_installer
 echo.
-echo === Building installer ===
+echo === Building runtime installer ===
 cmake --build "%REPO%build" --config Release --target installer
 
 if %ERRORLEVEL% NEQ 0 (
-    echo Installer build FAILED - continuing with test apps...
+    echo Runtime installer build FAILED - continuing with shell installer...
 )
 
 if "%TARGET%"=="installer" goto :done
+
+:: ============================================================
+:: 5b. Build shell installer
+:: ============================================================
+:do_shell_installer
+echo.
+echo === Building shell installer ===
+cmake --build "%REPO%build" --config Release --target shell_installer
+
+if %ERRORLEVEL% NEQ 0 (
+    echo Shell installer build FAILED - continuing with test apps...
+)
+
+if "%TARGET%"=="shell_installer" goto :done
 
 :: ============================================================
 :: 6. Build test apps

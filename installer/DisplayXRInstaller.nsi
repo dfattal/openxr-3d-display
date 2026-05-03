@@ -40,6 +40,9 @@ ShowUninstDetails show
 !include "x64.nsh"
 !include "TextFunc.nsh"
 !include "WinMessages.nsh"
+!include "LogicLib.nsh"
+!include "WordFunc.nsh"
+!insertmacro un.WordFind
 
 ; Windows constants for PATH modification
 !ifndef HWND_BROADCAST
@@ -562,11 +565,19 @@ FunctionEnd
 Section "DisplayXR Runtime" SecRuntime
 	SectionIn RO  ; Required section
 
+	; Force 64-bit registry view so HKLM\Software\DisplayXR\* lands in the
+	; non-redirected view (NSIS is 32-bit and would otherwise redirect into
+	; HKLM\Software\WOW6432Node\DisplayXR\*, breaking the contract with the
+	; 64-bit service which reads via KEY_WOW64_64KEY).
+	SetRegView 64
+
 	SetOutPath "$INSTDIR"
 
-	; Kill any running DisplayXR processes before overwriting (avoids write/sharing error)
-	nsExec::ExecToLog 'taskkill /f /im displayxr-shell.exe'
-	Pop $0  ; Ignore exit code (may not be running)
+	; Kill any running DisplayXR processes before overwriting (avoids write/sharing error).
+	; Workspace controllers (e.g. the DisplayXR shell) are installed as separate
+	; products and have their own installers; we don't reach into their processes
+	; here. The uninstall path runs cascade-uninstall first which handles their
+	; lifecycle.
 	nsExec::ExecToLog 'taskkill /f /im displayxr-service.exe'
 	Pop $0
 	; Wait for processes to fully exit and release pipe/file handles
@@ -581,8 +592,10 @@ Section "DisplayXR Runtime" SecRuntime
 	; Install manifest
 	File "${OUTPUT_DIR}\DisplayXR_win64.json"
 
-	; Install shell (spatial window manager)
-	File /nonfatal "${BIN_DIR}\displayxr-shell.exe"
+	; Workspace controllers (the DisplayXR shell, third-party verticals, …)
+	; ship as their own products with dedicated installers — see
+	; docs/specs/workspace-controller-registration.md. The runtime owns no
+	; specific workspace app and has nothing to install here.
 
 	; Install WebXR Bridge v2 host (metadata sideband for Chrome's native WebXR, issue #139)
 	File /nonfatal "${BIN_DIR}\displayxr-webxr-bridge.exe"
@@ -602,10 +615,9 @@ Section "DisplayXR Runtime" SecRuntime
 	WriteRegStr HKLM "Software\DisplayXR\Runtime" "InstallPath" "$INSTDIR"
 	WriteRegStr HKLM "Software\DisplayXR\Runtime" "Version" "${VERSION}"
 
-	; Set as active OpenXR runtime
-	SetRegView 64
+	; Set as active OpenXR runtime (still in 64-bit view from section-start
+	; SetRegView; explicit no-op kept for clarity).
 	WriteRegStr HKLM "Software\Khronos\OpenXR\1" "ActiveRuntime" "$INSTDIR\DisplayXR_win64.json"
-	SetRegView 32
 
 	; Add install directory to system PATH
 	; This is needed so OpenXR apps can find DisplayXRClient.dll's dependencies
@@ -684,9 +696,8 @@ SectionEnd
 Section "Start Menu Shortcuts" SecShortcuts
 	CreateDirectory "$SMPROGRAMS\DisplayXR"
 
-	; Add shell shortcut if installed
-	IfFileExists "$INSTDIR\displayxr-shell.exe" 0 +2
-		CreateShortCut "$SMPROGRAMS\DisplayXR\DisplayXR Shell.lnk" "$INSTDIR\displayxr-shell.exe"
+	; Workspace controllers add their own Start Menu shortcuts from their
+	; respective installers.
 
 	; Add switcher shortcut if installed
 	IfFileExists "$INSTDIR\DisplayXRSwitcher.exe" 0 +2
@@ -699,6 +710,61 @@ SectionEnd
 ; Uninstaller Section
 
 Section "Uninstall"
+	; Same 64-bit view as the install section — see Section "DisplayXR Runtime".
+	SetRegView 64
+
+	; -----------------------------------------------------------------
+	; Cascade-uninstall registered workspace controllers FIRST.
+	;
+	; Each workspace app (the DisplayXR shell, third-party verticals, …)
+	; has registered its UninstallString at
+	; HKLM\Software\DisplayXR\WorkspaceControllers\<id>. Run each one
+	; silently before we touch the runtime files; their installers own
+	; their own files and registry entries.
+	;
+	; We collect all UninstallStrings up-front into a pipe-delimited
+	; buffer ($R0) because each chained uninstaller deletes its own
+	; subkey, so EnumRegKey indices would shift mid-iteration.
+	; -----------------------------------------------------------------
+	DetailPrint "Discovering registered workspace controllers..."
+	StrCpy $R0 ""
+	StrCpy $9 0
+	cascade_collect_loop:
+		EnumRegKey $1 HKLM "Software\DisplayXR\WorkspaceControllers" $9
+		StrCmp $1 "" cascade_collect_done
+		ReadRegStr $2 HKLM "Software\DisplayXR\WorkspaceControllers\$1" "UninstallString"
+		${If} $2 != ""
+			${If} $R0 == ""
+				StrCpy $R0 "$2"
+			${Else}
+				StrCpy $R0 "$R0|$2"
+			${EndIf}
+		${EndIf}
+		IntOp $9 $9 + 1
+		Goto cascade_collect_loop
+	cascade_collect_done:
+
+	${If} $R0 != ""
+		${un.WordFind} "$R0" "|" "#" $R9
+		StrCpy $R8 1
+		cascade_run_loop:
+			IntCmp $R8 $R9 0 0 cascade_run_done
+			${un.WordFind} "$R0" "|" "+$R8" $R7
+			${If} $R7 != ""
+				DetailPrint "Uninstalling workspace controller: $R7"
+				nsExec::ExecToLog '"$R7" /S'
+				Pop $5
+			${EndIf}
+			IntOp $R8 $R8 + 1
+			Goto cascade_run_loop
+		cascade_run_done:
+	${EndIf}
+
+	; Drop the parent key (cleans any orphan entries whose uninstallers
+	; failed to remove themselves).
+	DeleteRegKey HKLM "Software\DisplayXR\WorkspaceControllers"
+	; -----------------------------------------------------------------
+
 	; Stop the displayxr-service and remove auto-start registration (issue #68)
 	; Kill any running instance first so we can delete the exe
 	DetailPrint "Stopping DisplayXR Service..."
@@ -709,13 +775,9 @@ Section "Uninstall"
 	; Also remove legacy scheduled task if it exists (from older installs)
 	nsExec::ExecToLog 'schtasks /delete /tn "DisplayXR Service" /f'
 
-	; Stop shell if running
-	nsExec::ExecToLog 'taskkill /f /im displayxr-shell.exe'
-
 	; Remove files
 	Delete "$INSTDIR\DisplayXRClient.dll"
 	Delete "$INSTDIR\displayxr-service.exe"
-	Delete "$INSTDIR\displayxr-shell.exe"
 	Delete "$INSTDIR\displayxr-webxr-bridge.exe"
 	Delete "$INSTDIR\DisplayXRSwitcher.exe"
 	Delete "$INSTDIR\DisplayXR_win64.json"
@@ -739,8 +801,8 @@ Section "Uninstall"
 	; Remove AppData directory
 	RMDir "$APPDATA\DisplayXR"
 
-	; Remove Start Menu shortcuts
-	Delete "$SMPROGRAMS\DisplayXR\DisplayXR Shell.lnk"
+	; Remove Start Menu shortcuts (workspace-controller shortcuts are
+	; removed by their own cascade-uninstaller; nothing left to clean here)
 	Delete "$SMPROGRAMS\DisplayXR\DisplayXR Runtime Switcher.lnk"
 	Delete "$SMPROGRAMS\DisplayXR\Uninstall DisplayXR.lnk"
 	RMDir "$SMPROGRAMS\DisplayXR"
@@ -752,12 +814,10 @@ Section "Uninstall"
 	; Remove from Add/Remove Programs
 	DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DisplayXR"
 
-	; Only remove ActiveRuntime if it points to our manifest
-	SetRegView 64
+	; Only remove ActiveRuntime if it points to our manifest (still in 64-bit view).
 	ReadRegStr $0 HKLM "Software\Khronos\OpenXR\1" "ActiveRuntime"
 	StrCmp $0 "$INSTDIR\DisplayXR_win64.json" 0 +2
 		DeleteRegValue HKLM "Software\Khronos\OpenXR\1" "ActiveRuntime"
-	SetRegView 32
 
 	; Remove install directory from system PATH
 	Push $INSTDIR

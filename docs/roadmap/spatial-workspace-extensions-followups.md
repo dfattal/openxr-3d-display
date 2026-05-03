@@ -44,20 +44,13 @@ These three documented spots in the runtime still mention the shell app by name.
 
 **Where to fix:** Phase 2.J commit that removes `src/xrt/targets/shell/` entirely.
 
-### 6. `service_config.c` default binary literal `"displayxr-shell.exe"`
+### 6. `service_config.c` default binary literal `"displayxr-shell.exe"` ✅ shipped (workspace-controller registry)
 
-**State:** The orchestrator uses this string as the default binary to spawn when no config exists. Once the shell ships from a separate repo, this default either:
-- Becomes config-only (no compiled-in default).
-- Updates to whatever name the new repo's binary uses.
-- Drops to NULL and the orchestrator simply doesn't auto-spawn.
+**Resolution:** Default `workspace_binary` is now empty. The orchestrator enumerates `HKLM\Software\DisplayXR\WorkspaceControllers\*` (populated by each workspace app's installer) and picks the first registered controller. The runtime owns no specific workspace app — see `docs/specs/workspace-controller-registration.md` for the registration contract.
 
-**Where to fix:** Phase 2.J. The decision is partly product (do we want auto-spawn out of the box?).
+### 7. Two transitional comments documenting the removed legacy `shell` JSON key ✅ shipped (workspace-controller registry)
 
-### 7. Two transitional comments documenting the removed legacy `shell` JSON key
-
-**State:** `src/xrt/targets/service/service_config.c:181` and `src/xrt/targets/service/service_config.h:37` have one-line comments noting that the legacy `"shell"` JSON key was removed in Phase 2.I-followup decoupling. Kept for users discovering the breaking change.
-
-**Where to fix:** Delete after the migration window settles (~3 months post-2.I publication). Tiny commit, can ride with any other cleanup.
+**Resolution:** Both comments deleted. The migration window for the pre-rename `"shell"` JSON key has lapsed; users on those builds will pick up the new workspace-controller registry on next install.
 
 ## Suggested integration
 
@@ -66,7 +59,7 @@ These three documented spots in the runtime still mention the shell app by name.
 | **2.G** | ~~#1 (pointer-capture enforcement)~~ ✅ shipped |
 | **2.K** | ~~#2 (per-frame motion events + interactive carousel / drag in the shell)~~ ✅ shipped |
 | **2.J prequel** | ~~#4 (XRT_FORCE_MODE workaround)~~ ✅ shipped |
-| **2.J** | #3, #5, #6 (shell extraction, residues) |
-| **(any time)** | #7 (transitional comments) |
+| **2.J — installer split** | ~~#6 (default-binary literal), #7 (transitional comments)~~ ✅ shipped via workspace-controller registry |
+| **2.J — source-tree move** | #3 (shell auto-reconnect on activate-failure), #5 (CMake `add_subdirectory(shell)`) — pending shell repo extraction |
 
 If you're picking up a phase listed above, check this doc and decide whether to fold the relevant item in or defer further. Update this doc when an item lands so the list stays current.

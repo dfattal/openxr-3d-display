@@ -8,7 +8,7 @@
 
 #include "service_orchestrator.h"
 #include "service_tray_win.h"
-#include "service_workspace_manifest.h"
+#include "service_workspace_registry.h"
 
 #include "util/u_debug.h"
 #include "util/u_logging.h"
@@ -69,11 +69,16 @@ static HANDLE s_workspace_watch_thread = NULL;
 static bool s_hotkey_registered = false; // true when WH_KEYBOARD_LL hook is active
 static HHOOK s_kbd_hook = NULL;
 
-// Set once at init: true iff the workspace controller binary exists next to
-// the service exe. When false, all workspace mode handling is short-circuited
-// — the runtime operates as a standalone platform.
+// Set once at init: true iff a workspace controller is registered AND its
+// binary exists on disk. When false, all workspace mode handling is
+// short-circuited — the runtime operates as a standalone platform.
+//
+// Workspace controllers register themselves at
+// HKLM\Software\DisplayXR\WorkspaceControllers\<id>; the runtime never writes
+// these keys and has no compiled-in knowledge of any specific controller. See
+// docs/specs/workspace-controller-registration.md.
 static bool s_workspace_available = false;
-static struct workspace_manifest s_workspace_manifest = {0};
+static struct workspace_controller_entry s_workspace_active = {0};
 
 static PROCESS_INFORMATION s_bridge_pi;
 static bool s_bridge_running = false;
@@ -128,34 +133,87 @@ sibling_file_exists(const char *path)
 	return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-//! Detect whether a workspace controller is installed. Sets
-//! s_workspace_available + s_workspace_manifest. Logs the outcome.
+//! Returns true if @p s contains a path separator (\ or /) — used to
+//! distinguish a dev-mode absolute-path override from a registered-id
+//! reference in cfg->workspace_binary.
+static bool
+looks_like_path(const char *s)
+{
+	return s != NULL && (strchr(s, '\\') != NULL || strchr(s, '/') != NULL);
+}
+
+//! Detect which workspace controller (if any) the orchestrator will spawn.
+//! Sets s_workspace_available + s_workspace_active. Logs the outcome.
 //! Called once from service_orchestrator_init before any apply_workspace_mode.
+//!
+//! Selection order:
+//!  1. cfg->workspace_binary contains a path separator → dev-mode absolute
+//!     path override; use it directly without registry lookup.
+//!  2. Else, enumerate HKLM\Software\DisplayXR\WorkspaceControllers\*.
+//!     If empty → no controller available.
+//!  3. Else, if cfg->workspace_binary is a non-empty id, prefer the entry
+//!     with that id; fall through to first if not registered.
+//!  4. Else, pick the first registered entry.
 static void
 detect_workspace_controller(const struct service_config *cfg)
 {
-	char workspace_path[MAX_PATH];
-	if (!sibling_exe_path(cfg->workspace_binary, workspace_path, sizeof(workspace_path))) {
-		s_workspace_available = false;
+	memset(&s_workspace_active, 0, sizeof(s_workspace_active));
+	s_workspace_available = false;
+
+	// 1. Dev-mode absolute-path override.
+	if (looks_like_path(cfg->workspace_binary)) {
+		if (!sibling_file_exists(cfg->workspace_binary)) {
+			OW("Workspace controller dev-override binary not found: %s",
+			   cfg->workspace_binary);
+			return;
+		}
+		snprintf(s_workspace_active.id, sizeof(s_workspace_active.id), "dev");
+		snprintf(s_workspace_active.binary, sizeof(s_workspace_active.binary),
+		         "%s", cfg->workspace_binary);
+		snprintf(s_workspace_active.display_name,
+		         sizeof(s_workspace_active.display_name),
+		         "Workspace Controller (dev)");
+		s_workspace_available = true;
+		OW("Workspace controller (dev override): %s", s_workspace_active.binary);
 		return;
 	}
 
-	if (!sibling_file_exists(workspace_path)) {
-		s_workspace_available = false;
-		OW("Workspace controller not installed (looked for %s)", workspace_path);
+	// 2. Registry enumeration.
+	struct workspace_controller_entry entries[WORKSPACE_REGISTRY_MAX_ENTRIES];
+	int n = service_workspace_registry_enumerate(entries,
+	                                             WORKSPACE_REGISTRY_MAX_ENTRIES);
+	if (n <= 0) {
+		OW("No workspace controllers registered "
+		   "(HKLM\\Software\\DisplayXR\\WorkspaceControllers empty); "
+		   "running in standalone-platform mode");
 		return;
 	}
 
+	// 3. Preferred-id match.
+	int picked = 0;
+	if (cfg->workspace_binary[0] != '\0') {
+		bool found = false;
+		for (int i = 0; i < n; i++) {
+			if (_stricmp(entries[i].id, cfg->workspace_binary) == 0) {
+				picked = i;
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			OW("Preferred workspace controller id '%s' not registered; "
+			   "falling back to '%s'",
+			   cfg->workspace_binary, entries[0].id);
+		}
+	}
+
+	// 4. Commit selection.
+	s_workspace_active = entries[picked];
 	s_workspace_available = true;
-	if (!service_workspace_manifest_load(workspace_path, &s_workspace_manifest)) {
-		// Controller present but no/invalid manifest — fall back to a
-		// generic name so the tray submenu still has a label.
-		snprintf(s_workspace_manifest.display_name,
-		         sizeof(s_workspace_manifest.display_name),
-		         "Workspace Controller");
-	}
-	OW("Workspace controller detected: %s (binary=%s)",
-	   s_workspace_manifest.display_name, workspace_path);
+	OW("Workspace controller detected: %s (id=%s binary=%s)",
+	   s_workspace_active.display_name,
+	   s_workspace_active.id,
+	   s_workspace_active.binary);
 }
 
 //! Launch a child process and return its PROCESS_INFORMATION.
@@ -291,15 +349,12 @@ workspace_watch_thread_func(LPVOID param)
 	// in the hook proc.
 
 	// In Enable mode, restart the workspace controller
-	if (s_cfg.workspace == SERVICE_CHILD_ENABLE) {
-		char workspace_path[MAX_PATH];
-		if (sibling_exe_path(s_cfg.workspace_binary, workspace_path, sizeof(workspace_path))) {
-			if (launch_child(workspace_path, "--service-managed", &s_workspace_pi)) {
-				s_workspace_running = true;
-				OW("Restarted workspace controller (Enable mode)");
-				// Recurse — start watching the new process
-				s_workspace_watch_thread = CreateThread(NULL, 0, workspace_watch_thread_func, NULL, 0, NULL);
-			}
+	if (s_cfg.workspace == SERVICE_CHILD_ENABLE && s_workspace_available) {
+		if (launch_child(s_workspace_active.binary, "--service-managed", &s_workspace_pi)) {
+			s_workspace_running = true;
+			OW("Restarted workspace controller (Enable mode)");
+			// Recurse — start watching the new process
+			s_workspace_watch_thread = CreateThread(NULL, 0, workspace_watch_thread_func, NULL, 0, NULL);
 		}
 	}
 
@@ -317,13 +372,7 @@ spawn_workspace(void)
 		return;
 	}
 
-	char workspace_path[MAX_PATH];
-	if (!sibling_exe_path(s_cfg.workspace_binary, workspace_path, sizeof(workspace_path))) {
-		OW("Cannot find workspace controller binary '%s' next to service", s_cfg.workspace_binary);
-		return;
-	}
-
-	if (!launch_child(workspace_path, "--service-managed", &s_workspace_pi)) {
+	if (!launch_child(s_workspace_active.binary, "--service-managed", &s_workspace_pi)) {
 		return;
 	}
 
@@ -832,7 +881,7 @@ service_orchestrator_is_workspace_available(void)
 const char *
 service_orchestrator_get_workspace_display_name(void)
 {
-	return s_workspace_manifest.display_name;
+	return s_workspace_active.display_name;
 }
 
 unsigned long

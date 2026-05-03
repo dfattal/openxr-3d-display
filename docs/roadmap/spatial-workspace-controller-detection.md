@@ -172,17 +172,34 @@ This avoids the buggy state where the hook is installed but the spawn target doe
 
 **Binary exists but is the wrong architecture (32-bit on a 64-bit service).** Detection passes (file exists). Spawn fails when the user activates. Treat as a runtime failure, not a detection failure — too rare to warrant a header-parse / PE-architecture check at detect time.
 
-## Future evolution: multi-controller registry
+## Future evolution: multi-controller registry — ✅ implemented
 
-Phase 2/3 single-controller-at-a-time is fine. If multiple controllers ever need to coexist (DisplayXR Shell + a Lenovo workspace + a vertical cockpit, all installed simultaneously), the natural extension:
+Implemented as part of the dedicated-shell-installer work (Phase 2.J). The
+final shape diverged from the original sketch in two ways:
 
-- A registry directory at `%LOCALAPPDATA%\DisplayXR\workspaces\` (analogous to the `apps\` directory the launcher uses for app manifests, per commit `acd954548`).
-- Each controller's installer drops a `.controller.json` there pointing at the binary path.
-- The orchestrator scans the directory at init, builds a list of available controllers.
-- The tray shows the active controller as the submenu parent, with a chooser for switching ("Switch workspace controller →").
-- `service.json::workspace_binary` becomes the *active* controller path; the registry is the *available* set.
+1. **Registry, not file directory.** Workspace apps register at
+   `HKLM\Software\DisplayXR\WorkspaceControllers\<id>` rather than dropping
+   `.controller.json` files. NSIS installers write the registry natively;
+   no JSON serialization in the installer; orchestrator uses
+   `RegEnumKeyEx` for discovery.
+2. **`service.json::workspace_binary` was repurposed**, not retired. It
+   now holds the **preferred controller id** (e.g. `"shell"`) for tie-
+   breaking when multiple controllers are registered, OR an absolute
+   path for dev-mode override (testing freshly-built binaries from
+   `_package/` without registering). Empty = pick first registered.
 
-Not building this yet — it's overkill for Phase 2 and YAGNI risk. But the manifest format and detection mechanism settled here compose toward it cleanly: just generalize from "look at one path" to "scan a directory and pick one."
+The runtime sidecar manifest (`<binary>.controller.json`) is gone —
+`service_workspace_manifest.{c,h}` was deleted. All metadata now lives
+in the registry subkey: `Binary`, `DisplayName`, `Vendor`, `Version`,
+`UninstallString`.
+
+See `docs/specs/workspace-controller-registration.md` for the full
+contract; `src/xrt/targets/service/service_workspace_registry.{c,h}`
+for the enumerator API.
+
+Tray multi-controller chooser (when more than one is registered) is
+still future work — single registered controller is the path through
+the orchestrator today.
 
 ## Migration path
 

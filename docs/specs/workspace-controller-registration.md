@@ -1,0 +1,158 @@
+# Workspace Controller Registration (Windows)
+
+**Status:** Stable. Implemented in
+`src/xrt/targets/service/service_workspace_registry.{c,h}`.
+
+This document is the contract between the DisplayXR runtime and any
+**workspace app** that wants to drive the multi-window spatial shell
+experience — the DisplayXR Shell, third-party verticals (cockpits,
+kiosks, branded shells), or experimental controllers built against
+`XR_EXT_spatial_workspace`.
+
+The runtime owns no specific workspace app. There is no
+`displayxr-shell.exe` literal in any runtime binary. Workspace apps
+**self-register** via the registry contract below; the runtime's
+service orchestrator enumerates them at startup and spawns one.
+
+## The contract
+
+A workspace app's installer:
+
+1. **Reads `HKLM\Software\DisplayXR\Runtime\InstallPath` (REG_SZ).**
+   If the value is missing or empty, the runtime is not installed —
+   the workspace app installer must abort with a clear error message.
+   The runtime is a **hard prerequisite** because the workspace app's
+   binary lives inside the runtime install tree.
+2. **Installs its files into the runtime install directory.** The
+   workspace exe (e.g. `displayxr-shell.exe`) sits next to
+   `displayxr-service.exe`, `openxr_loader.dll`, and the runtime DLLs
+   it binds against. No PATH gymnastics are required.
+3. **Writes its registration at `HKLM\Software\DisplayXR\WorkspaceControllers\<id>`.**
+   `<id>` is a short unique identifier; vendor-prefix it (e.g.
+   `leia-shell`, `lenovo-cockpit`) unless you are DisplayXR's own
+   shell. Subkey schema:
+
+   | Value | Type | Required | Purpose |
+   |---|---|---|---|
+   | `Binary` | REG_SZ | yes | Absolute path to the controller exe. |
+   | `DisplayName` | REG_SZ | yes | Tray submenu label, log strings. |
+   | `Vendor` | REG_SZ | no | Publisher (reserved for future ecosystem use). |
+   | `Version` | REG_SZ | no | Free-form version string (logged at spawn). |
+   | `IconPath` | REG_SZ | no | Tray submenu icon (reserved). |
+   | `UninstallString` | REG_SZ | yes | Used by the runtime uninstaller for cascade uninstall. **Must honor `/S` (silent).** |
+
+4. **Writes its own Add/Remove Programs entry under
+   `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\<ProductId>`.**
+   Standard Windows-installer hygiene; lets the user uninstall the
+   workspace app from Control Panel without touching the runtime.
+
+The runtime never writes any of these keys.
+
+## Cascade uninstall
+
+When the user uninstalls the runtime via Add/Remove Programs:
+
+1. The runtime's uninstaller enumerates
+   `HKLM\Software\DisplayXR\WorkspaceControllers\*`, collecting each
+   subkey's `UninstallString` value.
+2. For each collected string, it executes `<UninstallString> /S`
+   (silent uninstall) **before** removing any runtime files.
+3. Each chained workspace app uninstaller removes only the files and
+   registry keys it owns — never the runtime's.
+4. The runtime then proceeds with its own cleanup.
+
+This pattern mirrors how OS package managers handle dependent
+products. It is the workspace app's responsibility to:
+
+- Honor `/S` so the cascade does not block on UI.
+- Remove the workspace app's own
+  `WorkspaceControllers\<id>` registration key in its uninstall
+  section.
+- Remove its own Add/Remove Programs entry.
+- Remove only the files it installed (its exe, its assets, its own
+  uninstaller).
+- Never touch shared runtime files (e.g.
+  `DisplayXRClient.dll`, `displayxr-service.exe`).
+
+If a workspace app's uninstaller fails or never runs, the runtime
+uninstaller's final
+`DeleteRegKey HKLM "Software\DisplayXR\WorkspaceControllers"` removes
+any orphan registration keys.
+
+## Service-side discovery
+
+At service startup, the orchestrator (`service_orchestrator.c`):
+
+1. If `service.json::workspace_binary` contains a path separator
+   (`\` or `/`) → dev-mode absolute-path override; spawn that exact
+   binary, skip registry.
+2. Else, call `service_workspace_registry_enumerate()` to read all
+   `WorkspaceControllers\*` subkeys. Stale entries (whose `Binary`
+   does not exist on disk) are skipped silently.
+3. If `service.json::workspace_binary` is non-empty, treat it as the
+   preferred `<id>`; pick that entry. Fall through to first available
+   if not registered.
+4. Else, pick the first enumerated entry.
+5. If no entries exist, the runtime runs in standalone-platform mode
+   — no workspace submenu in the tray, no Ctrl+Space hotkey.
+
+Tray UI (when one or more controllers are registered) shows the
+active controller's `DisplayName` as the submenu parent. A future
+multi-controller chooser (when more than one is registered) will live
+in the tray and toggle `service.json::workspace_binary` between
+registered ids.
+
+## Reference implementation
+
+See `installer/DisplayXRShellInstaller.nsi` for the canonical
+DisplayXR Shell registration. Third-party workspace apps should mirror
+its structure:
+
+- `.onInit` reads the runtime's `InstallPath`, aborts if missing,
+  sets `$INSTDIR` to the runtime's install directory.
+- Single install section drops the binary, writes a self-uninstaller
+  with a distinct name (avoid colliding with `Uninstall.exe`),
+  populates the registration key, populates the Add/Remove entry.
+- Uninstall section removes only its own files + registry; does not
+  touch the runtime's `$INSTDIR` directory itself.
+
+## Versioning
+
+`Version` is informational. The compatibility contract between
+runtime and workspace app is enforced by the OpenXR extension layer:
+each workspace app declares the minimum runtime `XR_EXT_spatial_workspace`
+spec_version it requires (typically in its README; see
+`docs/roadmap/demo-distribution.md` for the demo precedent). When
+that version is unavailable, the workspace app fails at
+`xrCreateInstance` and the user sees a clean OpenXR error rather than
+a runtime-crash mystery.
+
+## What this contract is NOT
+
+- **Not a plugin system.** The workspace app runs in its own process
+  and talks IPC to the runtime via the public OpenXR extension. The
+  runtime does not load any workspace app code.
+- **Not a Windows-Service registration.** The runtime's service
+  orchestrator (`displayxr-service.exe`) is the parent process; the
+  workspace app is just a managed child. No SCM involvement.
+- **Not coupled to `service.json`.** That file persists user
+  preferences (lifecycle mode, preferred controller id). It is not the
+  source of truth for which controllers are installed — the registry
+  is.
+- **Not a code-signing or trust mechanism.** Any installer with admin
+  rights can register a workspace app. If trust gating is needed in
+  the future, a separate signature verification step would gate
+  enumeration; for now, registration is open.
+
+## Future evolution
+
+If multiple workspace apps need to coexist (one user has the
+DisplayXR Shell + a third-party cockpit installed simultaneously):
+
+- Tray submenu grows a controller chooser ("Switch workspace
+  controller →") that flips `service.json::workspace_binary` between
+  registered ids.
+- Runtime restart picks up the new selection on next boot.
+
+Live-switching while the service is running is out of scope; the user
+restarts the service via the tray.

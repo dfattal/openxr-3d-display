@@ -33,9 +33,7 @@ enum service_child_mode
  * Stored in `%LOCALAPPDATA%\DisplayXR\service.json` on Windows,
  * `~/.config/displayxr/service.json` on Linux/macOS.
  *
- * Missing file or missing keys → defaults (auto/auto/true). Only the
- * `workspace` JSON key is recognized; the legacy `shell` key from
- * pre-rename installs is no longer read.
+ * Missing file or missing keys → defaults (auto/auto/true).
  */
 struct service_config
 {
@@ -43,11 +41,20 @@ struct service_config
 	enum service_child_mode bridge;    //!< WebXR bridge lifecycle mode (default AUTO).
 	bool start_on_login;               //!< If false, service exits immediately on auto-start.
 
-	//! Filename or path of the workspace controller binary that the orchestrator
-	//! spawns (resolved as a sibling of the service exe if it has no path
-	//! separator). OEMs / third parties drop a binary name here to ship
-	//! their own workspace controller. Default value is supplied by
-	//! config_defaults() in service_config.c.
+	//! Workspace controller selection.
+	//!
+	//! Empty (default) → orchestrator picks the first entry from
+	//!   `HKLM\Software\DisplayXR\WorkspaceControllers\*`.
+	//! Bare id (no path separator) → preferred registered controller, e.g.
+	//!   `"shell"` matches `WorkspaceControllers\shell`. Falls back to first
+	//!   entry if not registered.
+	//! Absolute path (contains `\` or `/`) → dev-mode override; the
+	//!   orchestrator launches that exact binary without consulting the
+	//!   registry. Use for testing freshly-built binaries from `_package/`.
+	//!
+	//! The runtime owns no specific workspace app — workspace controllers
+	//! register themselves from their own installer. See
+	//! `docs/specs/workspace-controller-registration.md`.
 	char workspace_binary[SERVICE_WORKSPACE_BINARY_MAX];
 };
 

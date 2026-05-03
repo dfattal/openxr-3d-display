@@ -37,8 +37,11 @@ config_defaults(struct service_config *cfg)
 	cfg->workspace = SERVICE_CHILD_AUTO;
 	cfg->bridge = SERVICE_CHILD_AUTO;
 	cfg->start_on_login = true;
-	snprintf(cfg->workspace_binary, sizeof(cfg->workspace_binary),
-	         "displayxr-shell.exe");
+	// Empty = orchestrator picks the first registered workspace controller
+	// from HKLM\Software\DisplayXR\WorkspaceControllers. The runtime owns no
+	// specific workspace app; controllers self-register from their own
+	// installer. See docs/specs/workspace-controller-registration.md.
+	cfg->workspace_binary[0] = '\0';
 }
 
 //! Build the full path to service.json into @p buf.
@@ -178,9 +181,6 @@ service_config_load(struct service_config *cfg)
 		return;
 	}
 
-	// Read the "workspace" key. Older installs that wrote a "shell" key
-	// will lose this setting on first read after the rename; users must
-	// re-pick the lifecycle mode in the tray menu.
 	cJSON *workspace = cJSON_GetObjectItemCaseSensitive(root, "workspace");
 	if (cJSON_IsString(workspace)) {
 		cfg->workspace = str_to_mode(workspace->valuestring);

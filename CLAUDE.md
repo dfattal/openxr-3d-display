@@ -83,12 +83,25 @@ Builds the runtime, OpenXR loader, and test apps. The Vulkan compositor will fai
 
 ### Local Windows Build
 ```bat
-scripts\build_windows.bat all        REM Full build (generate + runtime + installer + test apps)
-scripts\build_windows.bat build      REM Runtime only (fastest iteration)
-scripts\build_windows.bat test-apps  REM Test apps only (uses existing runtime build)
-scripts\build_windows.bat generate   REM CMake generate only
+scripts\build_windows.bat all              REM Full build (generate + runtime + both installers + test apps)
+scripts\build_windows.bat build            REM Runtime only (fastest iteration)
+scripts\build_windows.bat installer        REM Runtime installer only
+scripts\build_windows.bat shell_installer  REM Dedicated shell installer only
+scripts\build_windows.bat test-apps        REM Test apps only (uses existing runtime build)
+scripts\build_windows.bat generate         REM CMake generate only
 ```
 Downloads all dependencies on first run (SR SDK, vcpkg, OpenXR loader). Requires VS 2022 with C++ workload, Ninja, Vulkan SDK, and GitHub CLI. Outputs to `_package/` (runtime) and `test_apps/*/build/` (test apps).
+
+**Two installers, separate products.** The runtime installer
+(`DisplayXRSetup-*.exe`) and the dedicated shell installer
+(`DisplayXRShellSetup-*.exe`) build independently and ship
+independently. The shell installer requires the runtime as a hard
+prereq (reads `HKLM\Software\DisplayXR\Runtime\InstallPath`), installs
+into the runtime's tree, and registers itself at
+`HKLM\Software\DisplayXR\WorkspaceControllers\shell` for the service
+orchestrator to discover. The runtime owns no specific workspace app
+— third-party verticals follow the same registration contract. See
+`docs/specs/workspace-controller-registration.md`.
 
 **When on a Windows machine with a Leia SR display, prefer local builds over CI** — iterate faster with `scripts\build_windows.bat build` and test directly. Run scripts are generated in `_package/` (see Windows Test App section below).
 
@@ -358,6 +371,7 @@ See `docs/README.md` for a complete index. Key docs by task:
 | When you need to... | Read |
 |---|---|
 | Understand layer boundaries (what goes where) | `docs/architecture/separation-of-concerns.md` |
+| Build a workspace app (shell-style controller) | `docs/specs/workspace-controller-registration.md` |
 | Add a new display vendor | `docs/guides/vendor-integration.md` |
 | Understand multiview tiling / atlas layout | `docs/specs/multiview-tiling.md` |
 | Understand extension API (display_info, window bindings) | `docs/specs/XR_EXT_display_info.md` |
