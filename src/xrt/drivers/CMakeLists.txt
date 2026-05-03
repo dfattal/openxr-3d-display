@@ -140,6 +140,18 @@ if(XRT_HAVE_LEIA_SR)
 			target_link_libraries(drv_leia PRIVATE
 				${SR_PATH}/lib/SimulatedRealityVulkanBeta.lib)
 			target_compile_definitions(drv_leia PUBLIC XRT_HAVE_LEIA_SR_VULKAN)
+
+			# Install the bundled VK weaver runtime DLL alongside the runtime
+			# binaries. Single source of truth for every VK app: the runtime
+			# installer adds INSTDIR to system PATH so installed apps load it
+			# transparently; dev `_package/bin/` is added to PATH by the
+			# generated `run_*.bat` scripts. Apps no longer bundle their own
+			# copy. When the SR SDK starts shipping this DLL natively, delete
+			# this install() rule.
+			if(WIN32 AND EXISTS "${CMAKE_SOURCE_DIR}/test_apps/common/SimulatedRealityVulkanBeta.dll")
+				install(FILES "${CMAKE_SOURCE_DIR}/test_apps/common/SimulatedRealityVulkanBeta.dll"
+						DESTINATION "${CMAKE_INSTALL_BINDIR}")
+			endif()
 		endif()
 
 		# D3D11 weaver library (conditional)
