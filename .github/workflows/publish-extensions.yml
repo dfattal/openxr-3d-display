@@ -9,6 +9,8 @@ on:
     branches: [main]
     paths:
       - 'src/external/openxr_includes/openxr/XR_EXT_*.h'
+      - '.github/workflows/publish-extensions.yml'
+  workflow_dispatch: {}
 
 jobs:
   publish-headers:
@@ -46,16 +48,32 @@ jobs:
           cat > extensions-repo/README.md << 'READMEEOF'
           # DisplayXR Extensions
 
-          OpenXR extension headers for 3D display support. **Auto-published** from [`displayxr-runtime`](https://github.com/DisplayXR/displayxr-runtime).
+          OpenXR extension headers for 3D-display runtimes. **Auto-published** from [`displayxr-runtime`](https://github.com/DisplayXR/displayxr-runtime).
 
-          ## Headers
+          The headers fall into three groups: what the runtime tells apps about the display, how an app gives the runtime its native window, and the surface a swappable workspace controller uses to drive multi-app composition.
+
+          ## Display capability
 
           | Header | Extension | Description |
           |--------|-----------|-------------|
-          | [`XR_EXT_display_info.h`](include/openxr/XR_EXT_display_info.h) | `XR_EXT_display_info` | Display dimensions, eye tracking, rendering modes |
+          | [`XR_EXT_display_info.h`](include/openxr/XR_EXT_display_info.h) | `XR_EXT_display_info` | Display dimensions, eye-tracking modes, and the data needed for asymmetric (Kooima) projection |
+
+          ## App window binding
+
+          | Header | Extension | Description |
+          |--------|-----------|-------------|
           | [`XR_EXT_win32_window_binding.h`](include/openxr/XR_EXT_win32_window_binding.h) | `XR_EXT_win32_window_binding` | App-provided HWND, shared texture, canvas sub-rect |
           | [`XR_EXT_cocoa_window_binding.h`](include/openxr/XR_EXT_cocoa_window_binding.h) | `XR_EXT_cocoa_window_binding` | App-provided NSView, IOSurface sharing |
           | [`XR_EXT_macos_gl_binding.h`](include/openxr/XR_EXT_macos_gl_binding.h) | `XR_EXT_macos_gl_binding` | macOS OpenGL graphics binding |
+
+          ## Workspace controller surface
+
+          The contract that lets a workspace controller — the [DisplayXR Shell](https://github.com/DisplayXR/displayxr-shell-releases), or any third-party / OEM / vertical / AI-agent equivalent — drive the spatial-desktop layer on top of the runtime. Activation is gated by orchestrator-PID match; the runtime trusts whatever binary it was configured to spawn.
+
+          | Header | Extension | Description |
+          |--------|-----------|-------------|
+          | [`XR_EXT_spatial_workspace.h`](include/openxr/XR_EXT_spatial_workspace.h) | `XR_EXT_spatial_workspace` | Multi-app composition: window pose, hit-test, capture |
+          | [`XR_EXT_app_launcher.h`](include/openxr/XR_EXT_app_launcher.h) | `XR_EXT_app_launcher` | Launcher tile registration and lifecycle |
 
           ## Usage
 
