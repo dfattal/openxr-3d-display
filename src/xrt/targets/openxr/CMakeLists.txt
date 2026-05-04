@@ -63,17 +63,31 @@ else()
 endif()
 
 if(APPLE)
-	# macOS: export negotiate symbol + sim_display hot-reload symbol.
+	# macOS: export the OpenXR negotiate symbol — and only that one when
+	# the runtime is built as an IPC client (drivers live in the service
+	# binary in that mode, so sim_display_set_output_mode isn't in this
+	# DLL and asking the linker to export it produces an undefined-symbol
+	# error). When drivers are linked in-process, also export
+	# sim_display_set_output_mode for test-app live-mode switching via
+	# dlsym (SBS/anaglyph/blend without restart).
 	# GNU ld version scripts are not supported by the macOS linker.
-	# sim_display_set_output_mode is resolved via dlsym() by test apps
-	# for live mode switching (SBS/anaglyph/blend) without restart.
-	set_property(
-		TARGET ${RUNTIME_TARGET}
-		APPEND_STRING
-		PROPERTY
-			LINK_FLAGS
-			" -Wl,-exported_symbol,_xrNegotiateLoaderRuntimeInterface -Wl,-exported_symbol,_sim_display_set_output_mode"
-		)
+	if(XRT_FEATURE_IPC_CLIENT AND NOT XRT_FEATURE_HYBRID_MODE)
+		set_property(
+			TARGET ${RUNTIME_TARGET}
+			APPEND_STRING
+			PROPERTY
+				LINK_FLAGS
+				" -Wl,-exported_symbol,_xrNegotiateLoaderRuntimeInterface"
+			)
+	else()
+		set_property(
+			TARGET ${RUNTIME_TARGET}
+			APPEND_STRING
+			PROPERTY
+				LINK_FLAGS
+				" -Wl,-exported_symbol,_xrNegotiateLoaderRuntimeInterface -Wl,-exported_symbol,_sim_display_set_output_mode"
+			)
+	endif()
 elseif(NOT WIN32)
 	# Force the main "negotiate" symbol's inclusion
 	# and use a version script to ensure that's the only one we expose.
