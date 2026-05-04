@@ -15,8 +15,14 @@ name: lint
 
 on:
   pull_request: {}
+  # Fire on push to ANY branch (not just main) so accidental pushes of
+  # pre-extraction shell content to a feature branch get flagged
+  # immediately. Without this, a `git push origin <branch>` that
+  # silently restores the deleted `src/xrt/targets/shell/` tree would
+  # only surface when a PR was opened.
   push:
-    branches: [main]
+    branches:
+      - '**'
 
 jobs:
   shell-path-guard:
