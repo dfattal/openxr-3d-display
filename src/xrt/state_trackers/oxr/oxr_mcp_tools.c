@@ -28,6 +28,10 @@
 
 #include "util/u_logging.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "os/os_time.h"
 
 #include "xrt/xrt_compositor.h"
@@ -780,6 +784,35 @@ oxr_mcp_log_sink(const char *file,
 	(void)func;
 	(void)data;
 	mcp_log_ring_append(xlate_log_level(level), fmt, args);
+}
+
+// Reads HKLM\Software\DisplayXR\Capabilities\MCP\Enabled (DWORD) under
+// the 64-bit registry view. The MCP installer (DisplayXRMCPSetup-*.exe)
+// from displayxr-mcp writes this key. Non-Windows builds always return
+// false — there's no Capabilities key on POSIX; rely on the env var.
+bool
+oxr_mcp_capability_enabled(void)
+{
+#ifdef _WIN32
+	HKEY key = NULL;
+	LSTATUS rc = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+	                           "Software\\DisplayXR\\Capabilities\\MCP",
+	                           0,
+	                           KEY_READ | KEY_WOW64_64KEY,
+	                           &key);
+	if (rc != ERROR_SUCCESS) {
+		return false;
+	}
+	DWORD value = 0;
+	DWORD value_size = sizeof(value);
+	DWORD value_type = 0;
+	rc = RegQueryValueExA(key, "Enabled", NULL, &value_type,
+	                      (LPBYTE)&value, &value_size);
+	RegCloseKey(key);
+	return rc == ERROR_SUCCESS && value_type == REG_DWORD && value == 1;
+#else
+	return false;
+#endif
 }
 
 void

@@ -75,6 +75,24 @@ typedef bool (*oxr_mcp_capture_fn)(const char *path, void *userdata);
 void
 oxr_mcp_tools_set_capture_handler(oxr_mcp_capture_fn fn, void *userdata);
 
+/*!
+ * Read the @c HKLM\Software\DisplayXR\Capabilities\MCP\Enabled DWORD on
+ * Windows. Returns @c true iff the key exists and the value is 1. On
+ * non-Windows platforms (no installer infrastructure) returns @c false.
+ *
+ * Combine with @ref mcp_check_env_or so the @c DISPLAYXR_MCP env var
+ * still wins as an explicit override:
+ *
+ *   if (mcp_check_env_or(oxr_mcp_capability_enabled())) {
+ *       mcp_server_start();
+ *   }
+ *
+ * Caller-side helper rather than framework-side because the registry
+ * path is DisplayXR-specific; the framework stays consumer-agnostic.
+ */
+bool
+oxr_mcp_capability_enabled(void);
+
 #ifdef __cplusplus
 }
 #endif
