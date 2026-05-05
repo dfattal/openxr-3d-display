@@ -111,7 +111,8 @@ foreach ($a in $App) { Write-Host "[bench]   app:    $a" }
 # Enable per-Present timing log for this run.
 $env:DISPLAYXR_LOG_PRESENT_NS = "1"
 
-$shellArgs = @($App)
+# Quote each app path so Start-Process keeps paths-with-spaces as a single arg.
+$shellArgs = @($App | ForEach-Object { '"' + $_ + '"' })
 $proc = Start-Process -FilePath $Shell -ArgumentList $shellArgs -PassThru -WindowStyle Normal
 
 try {
