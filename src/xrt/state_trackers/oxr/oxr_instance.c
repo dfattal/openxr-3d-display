@@ -589,10 +589,16 @@ oxr_instance_create(struct oxr_logger *log,
 
 	*out_instance = inst;
 
-	// Opt-in AI introspection surface — Phase A.  No-op when the
-	// DISPLAYXR_MCP env var is unset, so normal runtime cost is zero.
+	// Opt-in AI introspection surface — Phase A. Gate is registry-first,
+	// env-var-overrides: install the MCP Tools package (writes
+	// HKLM\Software\DisplayXR\Capabilities\MCP\Enabled=1) and the MCP
+	// server starts in every handle-app process. DISPLAYXR_MCP=1/0 in
+	// the environment wins as an explicit override (CI, dev iteration,
+	// quick disable). No registry + no env var ⇒ zero runtime cost.
 	oxr_mcp_tools_register_all();
-	mcp_server_maybe_start();
+	if (mcp_check_env_or(oxr_mcp_capability_enabled())) {
+		mcp_server_start();
+	}
 
 	return XR_SUCCESS;
 }
