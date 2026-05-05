@@ -162,29 +162,27 @@ git clang-format    # Format only your changes (preferred)
 scripts/format-project.sh   # Format all
 ```
 
-### Publishing to Public Repos (Automated)
+### Releasing the Runtime
 
-Per-component tag scheme — each public repo versions independently. Tag pvt with:
-
-| Tag | Fires | When |
-|---|---|---|
-| `vX.Y.Z` | `publish-public.yml` (and historically every `publish-*`) | full-stack release |
-| `runtime/vX.Y.Z` | `publish-public.yml` only | runtime-only release |
-
-Prefix is stripped when setting the public-repo tag: `runtime/v1.2.0` → `v1.2.0` on `displayxr-runtime`.
+This repo IS the public runtime — there is no private→public mirror flow. A release is just a `vX.Y.Z` tag here, a Windows CI build, and a GitHub Release with the installer attached.
 
 ```bash
-# /release skill handles version bump, tagging, monitoring, verification.
-/release v1.0.0      # full-stack runtime release
-/release patch       # auto-bump from latest v*
-/release minor       # auto-bump minor
+# /release skill handles version bump, tagging, build monitoring, GH release create.
+/release v1.2.1   # explicit version
+/release patch    # auto-bump from latest v[0-9]+.[0-9]+.[0-9]+
+/release minor
+/release major
 ```
 
-Cross-repo pushes (extensions; shell-pvt → shell-releases) are authenticated via the `displayxr-publish-bot` GitHub App. The App's installation token is minted per-job via `actions/create-github-app-token@v1`, scoped to only the one repo that job writes to. Org secrets `DISPLAYXR_APP_ID` + `DISPLAYXR_APP_PRIVATE_KEY` hold the credentials. Local `.pem` backup at `.secrets/displayxr-publish-bot.pem` (gitignored) — see `.secrets/NOTE.md` for rotation procedure.
+The skill's auto-bump regex is intentionally strict (`^v[0-9]+\.[0-9]+\.[0-9]+$`) so non-canonical tags (`v25.x` Monado-era leftovers cleaned 2026-05-04, `*-rc*`, `demo-x/v*`, `sr-sdk-*`) don't get picked up.
 
-Extension headers auto-publish to `DisplayXR/displayxr-extensions` via `publish-extensions.yml` on every push to main.
+**Sibling release flows (NOT driven by /release):**
 
-Standalone demos live in their own repos (e.g. `DisplayXR/displayxr-demo-gaussiansplat`) and evolve independently — no source-mirror from this repo. `demos/spatial_os_handle_d3d11_win/` stays in this repo as a reference implementation (superseded by the Shell feature) and does not publish.
+| Component | Repo | How it releases |
+|---|---|---|
+| Shell | `displayxr-shell-pvt` → `displayxr-shell-releases` | The shell repo's own publish pipeline on its own tag cadence. Authenticated via the `displayxr-publish-bot` GitHub App (org secrets `DISPLAYXR_APP_ID` + `DISPLAYXR_APP_PRIVATE_KEY`; local `.pem` backup at `.secrets/displayxr-publish-bot.pem`, see `.secrets/NOTE.md` for rotation). |
+| Extension headers | `displayxr-extensions` | Auto-syncs from `src/external/openxr_includes/` on every push to main via `publish-extensions.yml`. No tag needed. |
+| Standalone demos | e.g. `displayxr-demo-gaussiansplat` | Each demo's own repo. Manual flow: bump installer's `build-installer.bat` version → tag `vX.Y.Z` → run `installer\build-installer.bat` → `gh release create` with the installer asset attached. |
 
 ### Repository Structure
 
@@ -293,14 +291,15 @@ XR_RUNTIME_JSON=./build/openxr_displayxr-dev.json ./your_openxr_app
 
 ## Claude Code Skills
 
-### /release - Tagged Release Pipeline
-Creates a tagged release, monitors CI build and publish pipeline, verifies all public repos are updated. See `.claude/skills/release/SKILL.md`.
+### /release - Tagged Runtime Release
+Creates a tagged runtime release here, monitors `build-windows.yml`, and attaches the installer to the GitHub Release. See `.claude/skills/release/SKILL.md`.
 ```
-/release v1.0.0    # explicit version
-/release patch     # auto-bump: v1.0.0 → v1.0.1
-/release minor     # auto-bump: v1.0.0 → v1.1.0
+/release v1.2.1    # explicit version
+/release patch     # auto-bump from latest v[0-9]+.[0-9]+.[0-9]+
+/release minor
+/release major
 ```
-Updates `CMakeLists.txt` version, creates tag, monitors `build-windows.yml`, attaches the installer to the GitHub Release. The official path for cutting a runtime release.
+Updates `CMakeLists.txt` `VERSION`, creates the tag, monitors the Windows CI build, downloads the `DisplayXRSetup-*.exe` artifact, creates the GitHub Release with grouped notes. Only releases this repo — shell, demos, extensions each have their own flows (see "Releasing the Runtime" above).
 
 ### /ask-gemini - Code Analysis with Gemini
 Ask Gemini to analyze code and produce a read-only report. See `~/.claude/skills/ask-gemini/SKILL.md`.
