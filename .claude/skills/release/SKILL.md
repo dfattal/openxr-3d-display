@@ -1,52 +1,50 @@
 ---
 name: release
-description: Create a tagged release and monitor the CI + publish pipeline. Supports per-component tags for decoupled release cadences. Syntax /release [component] <version-spec>, where component is one of `all` (default), `runtime`, `demo-<name>`, and version-spec is vX.Y.Z or patch/minor/major.
+description: Create a tagged release of the displayxr-runtime repo, monitor the Windows CI build, and publish the GitHub Release with the installer asset attached. Syntax /release <version-spec>, where version-spec is vX.Y.Z or patch/minor/major.
 allowed-tools: Read, Grep, Glob, Bash, Agent, Edit, Write
 ---
 
 # Release Skill
 
-Creates a tagged release of DisplayXR, monitors the CI build and publish pipeline, and verifies the affected public repo(s) are updated correctly.
+Creates a tagged release of the **displayxr-runtime** repo, monitors the Windows CI build, attaches the installer artifact to the GitHub Release, and reports.
+
+## Scope
+
+This skill releases **only** the runtime (this repo). The shell, demos, and extensions each have their own release flows:
+
+| Component | Repo | Release flow |
+|---|---|---|
+| Runtime | `DisplayXR/displayxr-runtime` (this repo) | **This skill** |
+| Shell | `DisplayXR/displayxr-shell-pvt` → `displayxr-shell-releases` | Shell repo's own publish pipeline; not driven from here |
+| Extensions | `DisplayXR/displayxr-extensions` | Auto-synced from this repo's `src/external/openxr_includes/` on every push to main (`publish-extensions.yml`); no tag needed |
+| Demos (e.g. `displayxr-demo-gaussiansplat`) | Each demo's own repo | Manual: bump installer/build-installer.bat → tag → build installer → `gh release create` in that repo |
 
 ## Syntax
 
 ```
-/release                               # ask user (component + version)
-/release <version-spec>                # component=all, full-stack release
-/release <component> <version-spec>    # per-component release
-
-component:
-  all                      full-stack  → tag `vX.Y.Z` (every publish-* fires)
-  runtime                  runtime+shell only → tag `runtime/vX.Y.Z`
-  demo-<name>              one demo only → tag `demo-<name>/vX.Y.Z`
-                           (e.g. demo-gaussiansplat)
+/release                # ask user for version
+/release <version-spec> # release runtime at this version
 
 version-spec:
-  vX.Y.Z                   explicit
-  patch|minor|major        auto-bump from latest tag in that component's lineage
+  vX.Y.Z                explicit
+  patch|minor|major     auto-bump from latest v[0-9]+.[0-9]+.[0-9]+ tag
 ```
-
-See `docs/roadmap/demo-distribution.md` for the tag scheme rationale.
 
 ## Architecture
 
 ```
-/release demo-gaussiansplat patch
-  │   (component=demo-gaussiansplat, bumps from latest demo-gaussiansplat/v*)
+/release patch
+  │   (bumps from latest v[0-9]+.[0-9]+.[0-9]+ tag)
   ├─ Pre-flight (clean tree, on main, tag not taken)
-  ├─ Create tag `demo-gaussiansplat/vX.Y.Z`, push
-  ├─ Monitor build-windows.yml        (artifact producer, always)
-  ├─ Monitor ONLY the publish workflow(s) for this component:
-  │    all   → publish-public.yml + publish-extensions.yml + every publish-demo-*.yml
-  │    runtime → publish-public.yml
-  │    demo-X → publish-demo-X.yml
-  ├─ Verify ONLY the public repo(s) for this component
+  ├─ Bump CMakeLists.txt VERSION
+  ├─ Commit "Release vX.Y.Z" → push main → tag → push tag
+  ├─ Monitor build-windows.yml run for this commit
+  ├─ Download installer artifact from the build run
+  ├─ gh release create with the installer attached + grouped notes
   └─ Report
 ```
 
-For `runtime` and `demo-<name>` components, **CMakeLists.txt is not bumped** — the tag itself is the version (demos don't embed a runtime version number; per-component runtime tags don't need a CMake bump either since the pvt `VERSION` only represents runtime lineage and should stay aligned with the last full-stack or runtime tag).
-
-For `all` (full-stack), CMakeLists.txt `VERSION` is updated to the new semver.
+CMakeLists.txt VERSION is always bumped to the new semver.
 
 ## CRITICAL: Launch Subagent
 
@@ -54,50 +52,36 @@ For `all` (full-stack), CMakeLists.txt `VERSION` is updated to the new semver.
 
 ### Argument parsing
 
-Parse `[ARGUMENTS]` as up to two whitespace-separated tokens:
+Parse `[ARGUMENTS]` as a single token:
 
-1. If zero tokens: ask the user for both component and version.
-2. If one token:
-   - If it matches `vN.N.N` or is `patch|minor|major` → component=`all`, version-spec=the token.
-   - If it matches a component keyword (`runtime` or `demo-<something>`) → ask for version-spec.
+1. Zero tokens: ask the user for the version.
+2. One token:
+   - If it matches `vN.N.N` → use verbatim.
+   - If it is `patch|minor|major` → auto-bump from latest tag.
    - Else → ask user.
-3. If two tokens: first is component, second is version-spec. Validate the component is one of `all`, `runtime`, or a known `demo-<name>` (check `.github/workflows/publish-demo-<name>.yml` exists).
-
-Resolve the component's **tag prefix** and **previous-tag pattern**:
-
-```
-component=all            → prefix=""                    previous-pattern="v[0-9]*"
-component=runtime        → prefix="runtime/"            previous-pattern="runtime/v[0-9]*"
-component=demo-<name>    → prefix="demo-<name>/"        previous-pattern="demo-<name>/v[0-9]*"
-```
+3. Multiple tokens: ignore extras; they're a leftover from the old per-component skill design (now retired).
 
 Resolve the new version:
 
-- If version-spec is `vN.N.N`, use it verbatim.
-- If `patch|minor|major`, find the latest tag matching the previous-pattern (`git tag --sort=-v:refname | grep -E '^<previous-pattern>$' | head -1`), strip any prefix, bump the appropriate component.
-- If no previous tag exists for this component, start at `v1.0.0` (or `v0.1.0` for `demo-<name>` pre-1.0 demos — ask user if ambiguous).
-
-Construct the **full tag** as `${prefix}${version}` (e.g. `runtime/v1.2.0`, `demo-gaussiansplat/v1.1.0`, or plain `v1.2.0`).
+- If version-spec is `vN.N.N`, use it verbatim. Set FULL_TAG = the same `vN.N.N`.
+- If `patch|minor|major`:
+  - Find the latest **canonical** tag: `git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1`.
+  - The strict `\.` pattern is intentional — it ignores oddballs like component-prefixed (`demo-x/v1.0.0`), pre-release (`v1.0.0-rc1`), or stale legacy lineages. The runtime carries one canonical lineage at a time.
+  - Strip the leading `v`, split on `.`, bump the requested component, re-prepend `v`. Set FULL_TAG = the bumped value.
+- If no canonical tag exists, start at `v1.0.0`.
 
 ### Subagent Prompt Template
 
-Replace `[COMPONENT]`, `[VERSION]` (the `vX.Y.Z` without prefix), and `[FULL_TAG]` (the tag with prefix):
+Replace `[VERSION]` and `[FULL_TAG]` (both equal to `vX.Y.Z`).
 
 ```
-Execute the DisplayXR release workflow for [COMPONENT] = [VERSION] (tag: [FULL_TAG]).
+Execute the DisplayXR runtime release workflow for [VERSION] (tag: [FULL_TAG]).
 
 ## Configuration
-- Source repo: DisplayXR/displayxr-runtime (public)
-- Public repos (only the ones this release affects):
-    all     → displayxr-runtime, displayxr-shell-releases, displayxr-extensions,
-              every displayxr-demo-<name>
-    runtime → displayxr-runtime, displayxr-shell-releases
-    demo-X  → displayxr-demo-X
-- Workflows to monitor:
-    all     → build-windows.yml, publish-public.yml, publish-extensions.yml,
-              every publish-demo-*.yml
-    runtime → build-windows.yml, publish-public.yml
-    demo-X  → build-windows.yml, publish-demo-X.yml
+- Source repo: DisplayXR/displayxr-runtime (this is the public repo — there is no separate "publish" mirror)
+- Workflow to monitor: .github/workflows/build-windows.yml (the artifact producer)
+- publish-extensions.yml fires automatically on every push to main; it does not need monitoring as part of a tagged release (header sync is independent of tags)
+- Shell, demos, displayxr-extensions are out of scope; each has its own flow
 
 ---
 
@@ -111,36 +95,34 @@ Run: `git status --short`
 Run: `git branch --show-current`
 - If not `main`, STOP: "Must be on main branch to release."
 
-### Step 1.3: Verify tag doesn't exist
-Run: `git tag -l "[FULL_TAG]"`
-- If non-empty, STOP: "Tag [FULL_TAG] already exists."
+### Step 1.3: Pull origin/main + verify tag doesn't exist
+- `git fetch origin && git pull --ff-only`
+- `git tag -l "[FULL_TAG]"` — if non-empty, STOP: "Tag [FULL_TAG] already exists."
+- `git ls-remote --tags origin "[FULL_TAG]"` — if non-empty, STOP (remote tag exists).
 
-### Step 1.4: Previous version for release notes
-Compute PREV_TAG from the component's previous-pattern (see Argument parsing above).
-If no previous tag in this lineage, PREV_TAG=<empty> → use "Initial release" in notes.
+### Step 1.4: Previous tag for release notes
+PREV_TAG = `git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1`.
+If empty, PREV_TAG=<empty> → use "Initial release" in notes.
 
 ---
 
 ## PHASE 2: UPDATE VERSION AND TAG
 
-### Step 2.1: Update CMakeLists.txt version (component=all OR runtime only)
-Extract X.Y.Z from [VERSION]. Read top-level CMakeLists.txt line with `VERSION X.Y.Z`, update via Edit tool.
-Skip this step for `demo-<name>` releases — demos don't carry runtime CMake version.
+### Step 2.1: Bump CMakeLists.txt VERSION
+Extract X.Y.Z from [VERSION]. Find the top-level CMakeLists.txt `VERSION X.Y.Z` line (typically line 7) and update it via Edit tool.
 
-### Step 2.2: Commit version bump (skip if no CMakeLists change)
+### Step 2.2: Commit and tag
 ```bash
 git add CMakeLists.txt
 git commit -m "Release [FULL_TAG]"
-```
-
-### Step 2.3: Create tag and push
-```bash
-# Push main only if Step 2.2 committed something.
 git tag [FULL_TAG]
-git push origin main        # no-op if nothing new
+git push origin main
 git push origin [FULL_TAG]
 ```
-Store the commit SHA: `git rev-parse HEAD`.
+Store the release commit SHA: `RELEASE_SHA=$(git rev-parse HEAD)`.
+
+### Step 2.3: Branch protection note
+The runtime repo's `main` is protected. If `git push origin main` fails with "Changes must be made through a pull request", retry with `--no-verify` is NOT acceptable — instead, surface the error to the user and ask whether to use admin override (the user has the authority; you do not). For tag pushes, branch protection does not apply.
 
 ---
 
@@ -153,64 +135,81 @@ Store the commit SHA: `git rev-parse HEAD`.
 ```bash
 gh run list --workflow build-windows.yml --limit 10 --json databaseId,status,headSha,event
 ```
-Find the run with `headSha == $(git rev-parse HEAD)` and event=push. Retry up to 6 times with 10s waits.
+Find the run with `headSha == $RELEASE_SHA` and event=push. Retry up to 6 times with 10s waits.
 
 ### Step 3.3: Watch build
-`gh run watch RUN_ID --interval 15 --exit-status` (timeout 1800000ms — Windows CI can take up to 30 min with test apps).
+`gh run watch $RUN_ID --interval 30 --exit-status` (timeout 1800000ms — Windows CI can take up to 30 min with test apps).
 
 ### Step 3.4: Check result
-- Success → Phase 4
-- Failure → Phase 6 (Rollback)
+- All required jobs succeed → Phase 4
+- Critical job (Runtime, Build) fails → Phase 6 (Rollback)
+- Pre-existing-broken jobs (e.g. demo jobs that reference paths moved to standalone repos) fail but artifact still produced → continue to Phase 4 with a flag in the final report
 
 ---
 
-## PHASE 4: MONITOR PUBLISH PIPELINE
+## PHASE 4: CREATE GITHUB RELEASE
 
-Run **only the workflows relevant to this component** (see Configuration above).
+The build run produces the runtime installer as an artifact. The `gh release create` step at the end of the workflow may or may not auto-create a Release depending on whether the workflow is wired to. Check:
 
-For each relevant workflow:
 ```bash
-gh run list --workflow <workflow>.yml --limit 5 --json databaseId,status,headSha,conclusion
+gh release view [FULL_TAG] --repo DisplayXR/displayxr-runtime 2>/dev/null
 ```
-Find run for the release commit SHA. Watch with `gh run watch ... --interval 15 --exit-status` (timeout 1800000ms).
 
-If any fails: report error with `gh run view <id> --log-failed | tail -30` but DO NOT rollback — the build succeeded, publish is recoverable.
+### Step 4.1a: If release already exists
+The workflow auto-created it. Skip to Phase 5 to verify and update notes.
+
+### Step 4.1b: If release does NOT exist
+Create it manually:
+
+```bash
+# Find the installer artifact in the build run
+gh run download $RUN_ID --repo DisplayXR/displayxr-runtime --pattern "DisplayXR*" --dir _release_assets/
+
+# The installer is typically named DisplayXRSetup-X.Y.Z[.BUILD].exe
+INSTALLER=$(find _release_assets/ -name "DisplayXRSetup-*.exe" | head -1)
+[ -z "$INSTALLER" ] && STOP: "Could not find DisplayXRSetup-*.exe in build artifacts."
+
+# Generate release notes
+NOTES=$(git log "$PREV_TAG".."[FULL_TAG]" --oneline --no-merges)
+# Group commits by prefix (Feature, Fix, CI, Docs, etc.) — see PHASE 5 notes template
+
+gh release create [FULL_TAG] \
+  --repo DisplayXR/displayxr-runtime \
+  --title "DisplayXR Runtime [FULL_TAG]" \
+  --notes "<grouped notes here>" \
+  "$INSTALLER"
+```
 
 ---
 
 ## PHASE 5: VERIFY AND REPORT
 
-For each public repo relevant to this component (see Configuration):
-
 ```bash
-gh release view [VERSION] --repo <repo> --json tagName,name,assets
+gh release view [FULL_TAG] --repo DisplayXR/displayxr-runtime --json tagName,name,assets
 ```
 
 Verify:
-- Tag exists.
-- Release was created.
-- For `displayxr-shell-releases`: installer + shell exe attached.
-- For `displayxr-demo-<name>`: source synced on main (`gh api repos/DisplayXR/displayxr-demo-<name>/commits --jq '.[0].commit.message'` should reference the sync) + binary zip attached.
+- Tag matches [FULL_TAG]
+- Asset list contains DisplayXRSetup-*.exe with non-zero size
 
-### Release notes
-```bash
-if [ -n "$PREV_TAG" ]; then
-  git log "$PREV_TAG".."[FULL_TAG]" --oneline --no-merges
-else
-  git log --oneline --no-merges | head -50
-fi
-```
-Group commits by prefix (Feature, Fix, CI, Docs, etc.). Update release bodies via `gh release edit <VERSION> --repo <repo> --notes "..."` on the affected public repos only.
+### Notes template
+Group commits from `git log $PREV_TAG..[FULL_TAG] --oneline --no-merges` by prefix:
+- **Highlights** — 1-3 line summary of the release's main change (manually written, not auto-grouped)
+- **Features** — `feat:` / `feature:` prefixed
+- **Fixes** — `fix:` prefixed
+- **CI / Build** — `ci:` / `build:` / `cmake:`
+- **Docs** — `docs:` prefixed
+- **Other** — everything else
 
 ### Final report
 ```
 Release [FULL_TAG] published successfully!
 
-Component: [COMPONENT]
-Build:     Windows CI PASSED (run #RUN_ID)
-
-Published to:
-  - <list only the repos relevant to [COMPONENT]>
+Build:     Windows CI run #RUN_ID — Runtime + cube test apps passed
+           [list any pre-existing-broken jobs here, with note that they don't affect the artifact]
+Release:   https://github.com/DisplayXR/displayxr-runtime/releases/tag/[FULL_TAG]
+Asset:     DisplayXRSetup-X.Y.Z[.BUILD].exe (size MB)
+Commits:   N commits since $PREV_TAG
 
 Notable changes:
   [grouped bullet summary]
@@ -220,66 +219,53 @@ STOP.
 
 ---
 
-## PHASE 6: ROLLBACK (on BUILD failure only)
+## PHASE 6: ROLLBACK (on critical BUILD failure only)
 
-### Step 6.1: Delete tag
+Only roll back if a CRITICAL job (Runtime, Build) failed. Pre-existing-broken jobs that produce no artifact change are NOT a rollback condition — flag in the report instead.
+
+### Step 6.1: Delete tag (local + remote)
 ```bash
 git tag -d [FULL_TAG]
 git push --delete origin [FULL_TAG]
 ```
 
-### Step 6.2: Revert version bump (if Phase 2 committed one)
+### Step 6.2: Revert the version-bump commit
 ```bash
 git revert HEAD --no-edit
 git push origin main
 ```
+If main is protected, surface to the user.
 
-### Step 6.3: Error summary
+### Step 6.3: Error summary + report
 ```bash
-gh run view RUN_ID --log-failed | tail -200
+gh run view $RUN_ID --log-failed | tail -200
 ```
-
-### Step 6.4: Report
-```
-Release [FULL_TAG] FAILED — rolled back.
-
-Error from build:
-[error summary]
-
-Tag and version bump have been reverted. Fix the issue and retry.
-```
-
-STOP.
-```
+Report the error and that the tag + commit have been reverted. STOP.
 
 ---
 
 ## Examples
 
 ```
-/release v1.2.0
-    → full-stack, explicit version
-    → tag `v1.2.0`, updates CMakeLists VERSION to 1.2.0
-    → fires every publish-* workflow
+/release v1.2.1
+    → explicit version
+    → bumps CMakeLists VERSION to 1.2.1
+    → tags v1.2.1, runs build-windows.yml
+    → creates GH release with installer
 
 /release patch
-    → full-stack, bumps from latest `v*` tag
-    → e.g. latest `v1.1.0` → tag `v1.1.1`
+    → auto-bumps from latest v[0-9]+.[0-9]+.[0-9]+ tag
+    → e.g. latest v1.2.0 → tag v1.2.1
 
-/release runtime minor
-    → runtime + shell only
-    → latest `runtime/v*` tag (or `v*` if no runtime/ yet) → bump minor
-    → tag `runtime/v1.2.0`
-    → fires publish-public.yml only
+/release minor
+    → e.g. latest v1.2.5 → tag v1.3.0
 
-/release demo-gaussiansplat v1.1.0
-    → demo only, explicit
-    → tag `demo-gaussiansplat/v1.1.0`
-    → fires publish-demo-gaussiansplat.yml only
-    → CMakeLists NOT touched
-
-/release demo-gaussiansplat patch
-    → demo only, auto-bump
-    → latest `demo-gaussiansplat/v*` tag → bump patch
-    → tag `demo-gaussiansplat/v1.1.3`
+/release major
+    → e.g. latest v1.5.2 → tag v2.0.0
 ```
+
+## Lineage / tag hygiene notes
+
+- The repo has had multiple tag lineages over its lifetime (Monado-era v25.x, pre-1.0 v0.5.0, current v1.x). Stale lineages were cleaned on 2026-05-04. The auto-bump regex `^v[0-9]+\.[0-9]+\.[0-9]+$` is intentionally strict to prevent picking up reintroduced stragglers.
+- If you need to release a candidate (`-rc1`, `-beta`, etc.), pass it explicitly — auto-bump will not pick those up by design.
+- Demo and SR SDK pin tags (`demo-gaussiansplat/*`, `sr-sdk-*`) live in their own namespaces and are never picked up by this skill.
