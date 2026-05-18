@@ -20,6 +20,7 @@
 #include "util/u_misc.h"
 #include "util/u_debug.h"
 #include "util/u_git_tag.h"
+#include "util/u_logging.h"
 #include "util/u_builders.h"
 #include <displayxr_mcp/mcp_server.h>
 #include "oxr_mcp_tools.h"
@@ -316,6 +317,28 @@ oxr_instance_create(struct oxr_logger *log,
 	XrResult ret;
 
 	OXR_ALLOCATE_HANDLE_OR_RETURN(log, inst, OXR_XR_DEBUG_INSTANCE, oxr_instance_destroy, NULL);
+
+#ifdef XRT_OS_WINDOWS
+	// Identify which DisplayXRClient.dll the loader actually mapped, and what
+	// XR_RUNTIME_JSON pointed at. Resolves the "is my dev build actually loaded
+	// or did the loader fall back to Program Files?" question without guesswork.
+	// Uses FROM_ADDRESS so we always find *this* DLL regardless of how it was
+	// loaded (LoadLibrary by full path, by name, etc.).
+	{
+		HMODULE h = NULL;
+		wchar_t path[MAX_PATH] = {0};
+		const wchar_t *env = _wgetenv(L"XR_RUNTIME_JSON");
+		GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+		                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		                   (LPCWSTR)&oxr_instance_create, &h);
+		if (h) {
+			GetModuleFileNameW(h, path, MAX_PATH);
+		}
+		U_LOG_W("DisplayXR runtime v%u.%u.%u '%s' loaded from: %ls (XR_RUNTIME_JSON=%ls)",
+		        u_version_major, u_version_minor, u_version_patch, u_git_tag,
+		        path[0] ? path : L"<unknown>", env ? env : L"<unset>");
+	}
+#endif
 
 	inst->extensions = *extensions; // Sets the enabled extensions.
 	inst->openxr_version.major_minor = major_minor;
