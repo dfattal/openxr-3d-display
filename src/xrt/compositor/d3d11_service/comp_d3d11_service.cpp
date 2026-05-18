@@ -639,6 +639,14 @@ struct d3d11_service_system
 	std::atomic<bool>    cached_3d_state{false};
 	std::atomic<bool>    cached_3d_state_valid{false};
 
+	//! Monotonic ns when the most recent acked-flip landed (FLIPPING -> IDLE).
+	//! The vendor poll suppresses counter-correction flips for
+	//! `kPostFlipCooldownNs` after this stamp — the vendor SDK's cached
+	//! `is_3d` state can lag the post-flip reality by a frame or two, and
+	//! without the gate the poll would request a flip back to the prior mode
+	//! within ~200 ms of the user's V keypress. Zero = no flip has landed yet.
+	std::atomic<int64_t> last_flip_landed_ns{0};
+
 	//! Phase 2.C spec_version 8: auto-reset Win32 event signaled whenever an
 	//! async workspace state change occurs that the controller might want to
 	//! react to (input event pushed onto the public ring, focused-slot
@@ -1638,6 +1646,20 @@ multi_compositor_apply_pending_mode_flip(struct d3d11_service_system *sys)
 				U_LOG_W("[mode_flip] FLIPPING ceiling at %u frames — lifting curtain unconditionally",
 				        mc->mode_flip.flip_frame_counter);
 			}
+			// Pre-load the vendor-poll cache and stamp the cooldown timer
+			// before going IDLE. The vendor SDK's `is_3d` reading at this
+			// point is what we just commanded; writing it into the cache so
+			// the next CAS-protected poll reads a consistent value (instead
+			// of the stale pre-flip cache) avoids a single-frame mismatch
+			// against `sys->hardware_display_3d`. The cooldown stamp gives
+			// the vendor SDK's internal state time to fully settle so a
+			// genuine vendor-initiated change (which would arrive after the
+			// 2-second window) can still take effect.
+			int64_t landed_ns = os_monotonic_get_ns();
+			sys->cached_3d_state.store(mc->mode_flip.target_is_3d, std::memory_order_relaxed);
+			sys->cached_3d_state_valid.store(true, std::memory_order_release);
+			sys->last_3d_state_poll_ns.store(landed_ns, std::memory_order_release);
+			sys->last_flip_landed_ns.store(landed_ns, std::memory_order_release);
 			mc->mode_flip.curtain_active = false;
 			mc->mode_flip.phase = MFP_IDLE;
 		}
@@ -10576,7 +10598,19 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 			// get_hardware_3d_state itself and bounds the wait.
 			bool pending_flip = sys->multi_comp != nullptr &&
 			                    sys->multi_comp->mode_flip.phase != MFP_IDLE;
-			if (vendor_is_3d != sys->hardware_display_3d && !pending_flip) {
+			// Post-flip cooldown (#234). After a flip lands the vendor SDK's
+			// `is_3d` reading can briefly disagree with sys->hardware_display_3d
+			// because the vendor's cached state lags ~1 frame behind the
+			// hardware command. Without this gate the very next 100 ms poll
+			// window observes the disagreement and requests a counter-correction
+			// flip back to the prior mode. Two seconds is generous — enough for
+			// any vendor-side settle, short enough that a genuine vendor-
+			// initiated change (e.g. user covers the eye-tracking camera) is
+			// still picked up promptly.
+			const int64_t kPostFlipCooldownNs = 2000LL * 1000000LL;
+			int64_t last_landed = sys->last_flip_landed_ns.load(std::memory_order_acquire);
+			bool in_cooldown = last_landed > 0 && (now_ns - last_landed) < kPostFlipCooldownNs;
+			if (vendor_is_3d != sys->hardware_display_3d && !pending_flip && !in_cooldown) {
 				U_LOG_W("Vendor SDK hardware 3D state changed: %s → %s",
 				        sys->hardware_display_3d ? "3D" : "2D",
 				        vendor_is_3d ? "3D" : "2D");
