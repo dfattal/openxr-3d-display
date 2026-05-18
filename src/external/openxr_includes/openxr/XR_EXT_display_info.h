@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 #define XR_EXT_display_info 1
-#define XR_EXT_display_info_SPEC_VERSION 12
+#define XR_EXT_display_info_SPEC_VERSION 13
 #define XR_EXT_DISPLAY_INFO_EXTENSION_NAME "XR_EXT_display_info"
 
 // Reuse the type value from the deleted XR_EXT_dynamic_render_resolution
@@ -239,6 +239,27 @@ typedef struct XrDisplayRenderingModeInfoEXT {
     uint32_t                    tileRows;        //!< Tile rows in atlas layout (v12)
     uint32_t                    viewWidthPixels; //!< Per-view width in pixels (v12)
     uint32_t                    viewHeightPixels;//!< Per-view height in pixels (v12)
+    /*!
+     * (v13) True for the mode that is currently active for this session.
+     *
+     * Apps can read this at startup (after xrCreateSession + first
+     * xrEnumerateDisplayRenderingModesEXT call) to learn the current mode
+     * without waiting for an XrEventDataRenderingModeChangedEXT — useful
+     * when the session begins under a workspace that already chose a mode.
+     * Re-enumerating after a mode change reflects the new active mode.
+     */
+    XrBool32                    isActive;
+    /*!
+     * (v13) True iff this session may request this mode via
+     * xrRequestDisplayRenderingModeEXT.
+     *
+     * False for non-controller sessions running under a workspace — the
+     * workspace controller is the sole mode authority and app requests are
+     * dropped by the runtime. Apps can use this to gate their UI (e.g.
+     * disable the V toggle and show "Mode locked by workspace"). Always
+     * true for standalone sessions and for workspace-controller sessions.
+     */
+    XrBool32                    isRequestable;
 } XrDisplayRenderingModeInfoEXT;
 
 /*!

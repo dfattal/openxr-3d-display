@@ -214,6 +214,11 @@ bool CreateSession(XrSessionManager& xr, ID3D11Device* d3d11Device) {
                     xr.renderingModeScaleX[i] = modes[i].viewScaleX;
                     xr.renderingModeScaleY[i] = modes[i].viewScaleY;
                     xr.renderingModeDisplay3D[i] = modes[i].hardwareDisplay3D ? true : false;
+                    xr.renderingModeIsRequestable[i] = modes[i].isRequestable ? true : false;
+                    // v13 initial-mode-sync: trust runtime-reported active mode.
+                    if (modes[i].isActive) {
+                        xr.currentModeIndex = modes[i].modeIndex;
+                    }
                     LOG_INFO("  [%u] %s (views=%u, tiles=%ux%u, scale=%.2fx%.2f, 3D=%d)",
                         modes[i].modeIndex, modes[i].modeName, modes[i].viewCount,
                         modes[i].tileColumns, modes[i].tileRows,

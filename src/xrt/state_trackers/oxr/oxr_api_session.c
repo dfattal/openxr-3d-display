@@ -1482,6 +1482,18 @@ oxr_xrEnumerateDisplayRenderingModesEXT(XrSession session,
 		return oxr_error(&log, XR_ERROR_SIZE_INSUFFICIENT, "modeCapacityInput");
 	}
 
+	// `isRequestable` per session (v13): the gate in
+	// oxr_xrRequestDisplayRenderingModeEXT drops non-controller sessions
+	// running under workspace mode. Mirror that gate here so apps can
+	// passively learn whether their request would be a no-op.
+	XrBool32 session_is_requestable = XR_TRUE;
+	if (sess->sys->xsysc != NULL && sess->sys->xsysc->info.is_service_mode &&
+	    sess->compositor != NULL &&
+	    !sess->is_active_workspace_controller) {
+		session_is_requestable = XR_FALSE;
+	}
+	uint32_t active_idx = (head->hmd != NULL) ? head->hmd->active_rendering_mode_index : 0;
+
 	for (uint32_t i = 0; i < count; i++) {
 		modes[i].type = XR_TYPE_DISPLAY_RENDERING_MODE_INFO_EXT;
 		modes[i].next = NULL;
@@ -1496,6 +1508,9 @@ oxr_xrEnumerateDisplayRenderingModesEXT(XrSession session,
 		modes[i].tileRows = head->rendering_modes[i].tile_rows;
 		modes[i].viewWidthPixels = head->rendering_modes[i].view_width_pixels;
 		modes[i].viewHeightPixels = head->rendering_modes[i].view_height_pixels;
+		// v13 fields.
+		modes[i].isActive = (head->rendering_modes[i].mode_index == active_idx) ? XR_TRUE : XR_FALSE;
+		modes[i].isRequestable = session_is_requestable;
 	}
 
 	return XR_SUCCESS;
