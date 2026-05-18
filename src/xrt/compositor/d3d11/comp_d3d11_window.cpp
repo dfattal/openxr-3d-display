@@ -595,7 +595,14 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			// Process qwerty first
 #ifdef XRT_BUILD_DRIVER_QWERTY
-			if (w->qwerty_enabled && w->xsysd != NULL && !bridge_page_attached(hWnd)) {
+			// Suppress qwerty entirely under workspace mode: the shell + apps
+			// handle their own input, and qwerty intercepting V here would
+			// fire qwerty_toggle_display_mode behind the workspace's back
+			// (bypassing the acked-flip pipeline + cooldown). Bare V should
+			// fall through to the focused app's WindowProc / qwerty stays
+			// active only in standalone monado-gui / non-workspace paths.
+			if (w->qwerty_enabled && w->xsysd != NULL && !bridge_page_attached(hWnd) &&
+			    !InterlockedCompareExchange(&w->workspace_mode_active, 0, 0)) {
 				bool handled = false;
 				qwerty_process_win32(w->xsysd->xdevs, w->xsysd->xdev_count,
 				                     message, wParam, lParam, &handled);
@@ -663,7 +670,9 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		if (bridge_page_attached(hWnd)) {
 			return 0;
 		}
-		if (w->qwerty_enabled && w->xsysd != NULL) {
+		// Suppress qwerty under workspace mode — see L596 comment.
+		if (w->qwerty_enabled && w->xsysd != NULL &&
+		    !InterlockedCompareExchange(&w->workspace_mode_active, 0, 0)) {
 			bool handled = false;
 			qwerty_process_win32(w->xsysd->xdevs, w->xsysd->xdev_count,
 			                     message, wParam, lParam, &handled);
@@ -928,9 +937,11 @@ wnd_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			}
 			return 0;
 		}
-		// Normal mode: pass to qwerty driver
+		// Normal mode: pass to qwerty driver — but not under workspace
+		// (workspace apps own input; qwerty intercepting here is a regression).
 #ifdef XRT_BUILD_DRIVER_QWERTY
-		if (w->qwerty_enabled && w->xsysd != NULL && !bridge_page_attached(hWnd)) {
+		if (w->qwerty_enabled && w->xsysd != NULL && !bridge_page_attached(hWnd) &&
+		    !InterlockedCompareExchange(&w->workspace_mode_active, 0, 0)) {
 			bool handled = false;
 			qwerty_process_win32(w->xsysd->xdevs, w->xsysd->xdev_count,
 			                     message, wParam, lParam, &handled);
