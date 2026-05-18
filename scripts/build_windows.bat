@@ -17,7 +17,7 @@ setlocal enabledelayedexpansion
 
 set REPO=%~dp0..\
 set SR_TAG=1.35.0.2011
-set OPENXR_VERSION=1.1.38
+set OPENXR_VERSION=1.1.43
 set LEIASR_SDKROOT=%REPO%LeiaSR-SDK-%SR_TAG%-win64
 set VULKAN_SDK=C:\VulkanSDK\1.4.341.1
 set OPENXR_SDK=%REPO%openxr_sdk
@@ -130,8 +130,9 @@ if not exist "%OPENXR_SDK%\x64\lib\openxr_loader.lib" (
 
 :: --- OpenXR loader short-path copy (avoids spaces-in-path linker issues) ---
 :: The in-tree webxr_bridge target and the standalone test apps both link
-:: against the OpenXR loader via a short path with no spaces.
-set OPENXR_SDK_SHORT=C:\dev\openxr_sdk
+:: against the OpenXR loader via a short path with no spaces. Versioned so
+:: bumping OPENXR_VERSION doesn't silently reuse an older cached loader.
+set OPENXR_SDK_SHORT=C:\dev\openxr_sdk_%OPENXR_VERSION%
 if not exist "%OPENXR_SDK_SHORT%\x64\lib\openxr_loader.lib" (
     xcopy /E /I /Y "%OPENXR_SDK%" "%OPENXR_SDK_SHORT%" >nul
 )
