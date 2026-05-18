@@ -120,8 +120,11 @@ struct XrSessionManager {
     XrEnvironmentBlendMode envBlendModes[4] = {};
     bool runtimeSupportsAlphaBlend = false;
 
-    // Enumerated rendering mode info
-    uint32_t currentModeIndex = 1;  // Default: mode 1 (first 3D mode, matches runtime default)
+    // Enumerated rendering mode info. `currentModeIndex` is initialized to
+    // mode 1 as a fallback for runtimes that don't expose `isActive`; on
+    // runtimes with XR_EXT_display_info v13+ the enumerate step replaces
+    // this with the runtime-reported active mode (initial-mode-sync, #234).
+    uint32_t currentModeIndex = 1;
     uint32_t renderingModeCount = 0;
     char renderingModeNames[8][XR_MAX_SYSTEM_NAME_SIZE] = {};
     uint32_t renderingModeViewCounts[8] = {};
@@ -130,6 +133,10 @@ struct XrSessionManager {
     float renderingModeScaleX[8] = {};
     float renderingModeScaleY[8] = {};
     bool renderingModeDisplay3D[8] = {};
+    // v13: per-mode isRequestable flag. False for all modes when this
+    // session is a non-controller workspace client (runtime drops requests).
+    // Apps use this to gate mode-toggle UI ("Mode locked by workspace").
+    bool renderingModeIsRequestable[8] = {};
 
     // Window handle for session target (used by ext app, ignored by non-ext app)
     HWND windowHandle = nullptr;
