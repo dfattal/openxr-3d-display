@@ -336,6 +336,39 @@ comp_ipc_client_compositor_session_request_file_picker(struct xrt_compositor *xc
 }
 
 xrt_result_t
+comp_ipc_client_compositor_workspace_get_file_picker_request(struct xrt_compositor *xc,
+                                                             uint64_t request_id,
+                                                             uint32_t *out_found,
+                                                             uint32_t *out_client_id,
+                                                             struct ipc_file_picker_info *out_info)
+{
+	if (xc == NULL || out_found == NULL || out_client_id == NULL || out_info == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	return ipc_call_workspace_get_file_picker_request(icc->ipc_c, request_id, out_found, out_client_id, out_info);
+}
+
+xrt_result_t
+comp_ipc_client_compositor_workspace_file_dialog_result(struct xrt_compositor *xc,
+                                                        uint64_t request_id,
+                                                        uint32_t result_code,
+                                                        const struct ipc_file_picker_result_path *path)
+{
+	if (xc == NULL || path == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
+	if (icc == NULL || icc->ipc_c == NULL) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	return ipc_call_workspace_file_dialog_result(icc->ipc_c, request_id, result_code, path);
+}
+
+xrt_result_t
 comp_ipc_client_compositor_workspace_get_state(struct xrt_compositor *xc, bool *out_active)
 {
 	if (xc == NULL || out_active == NULL) {
@@ -606,6 +639,10 @@ comp_ipc_client_compositor_workspace_enumerate_input_events(struct xrt_composito
 		case IPC_WORKSPACE_INPUT_EVENT_MODAL_OPEN:
 		case IPC_WORKSPACE_INPUT_EVENT_MODAL_CLOSE:
 			out->modal.clientId = (XrWorkspaceClientId)src->u.modal.client_id;
+			break;
+		case IPC_WORKSPACE_INPUT_EVENT_FILE_PICKER_REQUEST:
+			out->filePickerRequest.clientId = (XrWorkspaceClientId)src->u.file_picker_request.client_id;
+			out->filePickerRequest.requestId = src->u.file_picker_request.request_id;
 			break;
 		default:
 			break;

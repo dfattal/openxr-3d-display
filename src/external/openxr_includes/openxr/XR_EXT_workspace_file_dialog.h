@@ -217,6 +217,90 @@ typedef struct XrEventDataFilePickerCompleteEXT {
     char                        path[XR_MAX_FILE_PICKER_PATH_LENGTH_EXT]; //!< NUL-terminated UTF-8; empty on cancel/failure
 } XrEventDataFilePickerCompleteEXT;
 
+// ---- Controller-side surface ----
+//
+// Workspace controllers drain XR_WORKSPACE_INPUT_EVENT_FILE_PICKER_REQUEST_EXT
+// from xrEnumerateWorkspaceInputEventsEXT, fetch the full request via
+// xrGetFilePickerRequestEXT, spawn (or otherwise drive) their picker UI, and
+// deliver the result through xrCompleteFilePickerEXT. Both functions require
+// the calling session to hold the active workspace role
+// (xrActivateSpatialWorkspaceEXT). A non-controller caller receives
+// XR_ERROR_FEATURE_UNSUPPORTED.
+
+/*!
+ * @brief Fetch the full picker request that a workspace client posted via
+ * xrRequestFilePickerEXT.
+ *
+ * Called by the workspace controller in response to an
+ * XR_WORKSPACE_INPUT_EVENT_FILE_PICKER_REQUEST_EXT event. The runtime
+ * returns the requesting client's id and the picker info struct so the
+ * controller can spawn / drive a picker UI.
+ *
+ * @param session    Workspace-controller session.
+ * @param requestId  Value carried by the request event.
+ * @param outClientId  Output: the requesting workspace client.
+ * @param outInfo     Output: filled with the requester's
+ *                    XrFilePickerInfoEXT-equivalent. `type` and `next`
+ *                    are reset by the runtime so the caller can pass
+ *                    the buffer along to its picker without further
+ *                    re-initialisation.
+ * @return XR_SUCCESS on hit;
+ *         XR_ERROR_VALIDATION_FAILURE if requestId is 0 or no pending
+ *         entry matches (already completed, or the requester
+ *         disconnected);
+ *         XR_ERROR_FEATURE_UNSUPPORTED if the calling session is not
+ *         the active workspace controller.
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrGetFilePickerRequestEXT)(
+    XrSession              session,
+    XrAsyncRequestIdEXT    requestId,
+    uint32_t              *outClientId,    //!< XrWorkspaceClientId (header-independence: plain uint32_t)
+    XrFilePickerInfoEXT   *outInfo);
+
+#ifndef XR_NO_PROTOTYPES
+XRAPI_ATTR XrResult XRAPI_CALL xrGetFilePickerRequestEXT(
+    XrSession              session,
+    XrAsyncRequestIdEXT    requestId,
+    uint32_t              *outClientId,
+    XrFilePickerInfoEXT   *outInfo);
+#endif
+
+/*!
+ * @brief Deliver a picker result back to the requesting client.
+ *
+ * The runtime translates this into an XrEventDataFilePickerCompleteEXT
+ * pushed onto the requester's session event queue. Late results (i.e.,
+ * the requester disconnected before the controller responded) are
+ * dropped silently and logged once.
+ *
+ * @param session    Workspace-controller session.
+ * @param requestId  Value carried by the request event.
+ * @param result     XR_FILE_PICKER_RESULT_*. SUCCESS_EXT must be paired
+ *                   with a non-empty path; the runtime overrides
+ *                   `path` to an empty string for non-SUCCESS results.
+ * @param path       NUL-terminated UTF-8; ignored when @p result is not
+ *                   SUCCESS_EXT. May be NULL or empty in that case.
+ * @return XR_SUCCESS on a successful deliver-or-late-result-drop;
+ *         XR_ERROR_VALIDATION_FAILURE if requestId is 0;
+ *         XR_ERROR_FEATURE_UNSUPPORTED if the calling session is not
+ *         the active workspace controller;
+ *         XR_ERROR_PATH_FORMAT_INVALID if @p path exceeds the runtime's
+ *         wire budget (see XR_MAX_FILE_PICKER_PATH_LENGTH_EXT).
+ */
+typedef XrResult (XRAPI_PTR *PFN_xrCompleteFilePickerEXT)(
+    XrSession                  session,
+    XrAsyncRequestIdEXT        requestId,
+    XrFilePickerResultEXT      result,
+    const char                *path);
+
+#ifndef XR_NO_PROTOTYPES
+XRAPI_ATTR XrResult XRAPI_CALL xrCompleteFilePickerEXT(
+    XrSession              session,
+    XrAsyncRequestIdEXT    requestId,
+    XrFilePickerResultEXT  result,
+    const char            *path);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

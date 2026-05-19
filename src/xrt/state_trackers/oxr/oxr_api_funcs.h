@@ -925,6 +925,18 @@ XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrRequestFilePickerEXT(XrSession session,
                            const XrFilePickerInfoEXT *info,
                            XrAsyncRequestIdEXT *requestId);
+//! OpenXR API function @ep{xrGetFilePickerRequestEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetFilePickerRequestEXT(XrSession session,
+                              XrAsyncRequestIdEXT requestId,
+                              uint32_t *outClientId,
+                              XrFilePickerInfoEXT *outInfo);
+//! OpenXR API function @ep{xrCompleteFilePickerEXT}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCompleteFilePickerEXT(XrSession session,
+                            XrAsyncRequestIdEXT requestId,
+                            XrFilePickerResultEXT result,
+                            const char *path);
 #endif
 
 // xrSetSharedTextureOutputRectEXT — canvas sub-rect, part of window binding extensions
