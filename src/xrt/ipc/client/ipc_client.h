@@ -208,10 +208,31 @@ comp_ipc_client_compositor_session_set_modal_state(struct xrt_compositor *xc, bo
  * @ref XRT_SESSION_EVENT_FILE_PICKER_COMPLETE.
  */
 struct ipc_file_picker_info;
+struct ipc_file_picker_result_path;
 xrt_result_t
 comp_ipc_client_compositor_session_request_file_picker(struct xrt_compositor *xc,
                                                        const struct ipc_file_picker_info *info,
                                                        uint64_t *out_request_id);
+
+/*!
+ * Controller-only: read the picker info for a pending request by id.
+ * Backs xrGetFilePickerRequestEXT.
+ */
+xrt_result_t
+comp_ipc_client_compositor_workspace_get_file_picker_request(struct xrt_compositor *xc,
+                                                             uint64_t request_id,
+                                                             uint32_t *out_found,
+                                                             uint32_t *out_client_id,
+                                                             struct ipc_file_picker_info *out_info);
+
+/*!
+ * Controller-only: deliver a picker result. Backs xrCompleteFilePickerEXT.
+ */
+xrt_result_t
+comp_ipc_client_compositor_workspace_file_dialog_result(struct xrt_compositor *xc,
+                                                        uint64_t request_id,
+                                                        uint32_t result_code,
+                                                        const struct ipc_file_picker_result_path *path);
 
 xrt_result_t
 comp_ipc_client_compositor_workspace_get_state(struct xrt_compositor *xc, bool *out_active);
